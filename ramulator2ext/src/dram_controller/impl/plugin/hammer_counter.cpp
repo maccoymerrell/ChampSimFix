@@ -99,6 +99,10 @@ class HammerCounter
 
   static uint64_t target_row;
   static uint64_t target_cycle;
+  uint64_t cycles_per_heartbeat;
+
+  uint64_t blast_radius;
+  uint64_t mit_radius;
 
   uint64_t phase;
 
@@ -135,27 +139,29 @@ class HammerCounter
   void flush();
   void InsertIntoMap(Address A, Count C);
 
+  void perform_disturbance(Address addr, int type, bool prefetch,uint64_t cycle, bool write_back);
+  void perform_refresh(Address addr, int type);
+  void perform_mem_dump(Address addr,uint64_t p_addr, uint64_t v_addr, int type, bool prefetch, uint64_t cycle, bool write_back);
+  void perform_histogram(Address addr,uint64_t p_addr, uint64_t v_addr, int type, bool prefetch, uint64_t cycle, bool write_back);
+
 public:
   static uint64_t processed_packets;
   // calculated values
   uint64_t cycles_per_bin;
-uint64_t cycles_per_heartbeat;
-uint64_t channel_num;
+  uint64_t channel_num;
   uint64_t total_cycles;
   HammerCounter();
-  //~HammerCounter();
   static void set_output_file(std::string f);
   static std::string get_output_file();
   void log_charge(Address addr,uint64_t p_addr, uint64_t v_addr, int type, bool prefetch,uint64_t cycle, bool write_back);
-  void log_refresh(Address addr, bool is_targeted);
-  void log_write(Address addr);
+  void log_refresh(Address addr, uint64_t cycle);
+  void log_targeted_refresh(Address addr, uint64_t cycle);
+  
   void log_cycle();
-  //void log_refresh(uint64_t row, uint64_t cycle);
   static void set_target_row(uint64_t row);
   bool is_start_cycle(uint64_t cycle);
-
+  void set_cycles_per_heartbeat(uint64_t c_p_h) {cycles_per_heartbeat = c_p_h;};
   void set_cycles_per_bin(uint64_t c_p_b)   {cycles_per_bin = c_p_b;}; // 500us heartbeat
-  void set_heartbeat_rate(uint64_t hbr)     {cycles_per_heartbeat = hbr;};
   void set_rows_per_refresh(uint64_t rpr)   {rows_per_refresh = rpr;};
   void set_dram_rows(uint64_t row_count)    {dram_rows = row_count;};
   void set_dram_ranks(uint64_t rank_count)  {dram_ranks = rank_count;};
@@ -163,6 +169,10 @@ uint64_t channel_num;
   void set_dram_columns(uint64_t column_count) {dram_columns = column_count;};
   void set_dram_channels(uint64_t channel_count) {dram_channels = channel_count;};
   void set_dram_cap(uint64_t dram_count) {dram_cap = dram_count;};
+
+  void set_blast_radius(uint64_t b_r) {blast_radius = b_r;};
+  void set_mit_radius(uint64_t m_r) {mit_radius = m_r;};
+
   static uint64_t get_target_row();
   static void set_target_cycle(uint64_t cycle);
   void print_file();
@@ -175,6 +185,7 @@ class HammerCounterPlugin : public IControllerPlugin, public Implementation {
   RAMULATOR_REGISTER_IMPLEMENTATION(IControllerPlugin, HammerCounterPlugin, "HammerCounter", "Counts Hammer Activity for Research.")
 
   uint64_t last_bank_util = 0;
+  uint64_t total_cycles = 0;
   double rb_miss = 0;
   double rb_hits = 0;
   double last_rb_miss = 0;
@@ -187,6 +198,9 @@ class HammerCounterPlugin : public IControllerPlugin, public Implementation {
 
   uint64_t channel_num = 0;
 
+  uint64_t mit_radius = 0;
+  uint64_t blast_radius = 0;
+
   private:
     IDRAM* m_dram = nullptr;
     IDRAMController* m_controller = nullptr;
@@ -198,18 +212,17 @@ class HammerCounterPlugin : public IControllerPlugin, public Implementation {
     void init() override
     {
         std::string output_file = param<std::string>("output_file").desc("Name of output file").required();
-        uint64_t cycles_per_heartbeat = param<uint64_t>("cycles_per_heartbeat").desc("Rate at which DRAM heartbeat is printed").required();
+        cycles_per_heartbeat = param<uint64_t>("cycles_per_heartbeat").desc("Rate at which DRAM heartbeat is printed").required();
         histogram_period = param<double>("histogram_period").desc("Bin size for histograms").required();
-
+        mit_radius = param<uint64_t>("vrr_radius").desc("Radius of VRR impact").default_val(2);
+        blast_radius = param<uint64_t>("blast_radius").desc("Radius of Rowhammer effect").default_val(2);
         uint64_t target_row = param<uint64_t>("target_row").desc("Row that will be memory dumped");
         uint64_t target_cycle = param<uint64_t>("target_cycle").desc("Time at which hammer logs will start").required();
         refresh_period      = param<double>("refresh_period").desc("Refresh rate of DRAM").required();
         HC.set_output_file(output_file);
-        HC.set_heartbeat_rate(cycles_per_heartbeat);
         HC.set_target_row(target_row);
         HC.set_target_cycle(target_cycle);
-
-        
+        HC.set_cycles_per_heartbeat(cycles_per_heartbeat);
 
     };
 
@@ -224,7 +237,6 @@ class HammerCounterPlugin : public IControllerPlugin, public Implementation {
       HC.set_dram_banks(m_dram->get_level_size("bank") * m_dram->get_level_size("bankgroup"));
       HC.set_dram_columns(m_dram->get_level_size("column"));
       HC.set_dram_rows(m_dram->get_level_size("row"));
-
       tCK = m_dram->m_timing_vals("tCK_ps") * 1e-12;
 
       HC.set_cycles_per_bin(uint64_t(histogram_period/tCK));
@@ -238,6 +250,12 @@ class HammerCounterPlugin : public IControllerPlugin, public Implementation {
       register_stat(rb_hits).name("total_rowbuffer_hits");
       register_stat(last_bank_util).name("total_bytes_processed");
     };
+
+    Address convert_address(ReqBuffer::iterator& req)
+    {
+      uint64_t bank_count = m_dram->get_level_size("bank");
+      return(Address(req->addr_vec[m_dram->m_levels("channel")], req->addr_vec[m_dram->m_levels("bank")] + bank_count*req->addr_vec[m_dram->m_levels("bankgroup")], req->addr_vec[m_dram->m_levels("rank")],req->addr_vec[m_dram->m_levels("row")]));
+    }
 
     void update(bool request_found, ReqBuffer::iterator& req_it) override {
       if (request_found) {
@@ -255,34 +273,35 @@ class HammerCounterPlugin : public IControllerPlugin, public Implementation {
           rb_miss++;
           uint64_t bank_count = m_dram->get_level_size("bank");
           int type = req_it->type_id == Ramulator::Request::Type::Write ? RH_WRITE : RH_READ;
-          HC.log_charge(Address(req_it->addr_vec[m_dram->m_levels("channel")], req_it->addr_vec[m_dram->m_levels("bank")] + bank_count*req_it->addr_vec[m_dram->m_levels("bankgroup")], req_it->addr_vec[m_dram->m_levels("rank")],req_it->addr_vec[m_dram->m_levels("row")]),req_it->addr,0,type,req_it->source_id == 1,HC.total_cycles,req_it->type_id == Ramulator::Request::Type::Write);
+          HC.log_charge(convert_address(req_it),req_it->addr,0,type,req_it->source_id == 1,HC.total_cycles,req_it->type_id == Ramulator::Request::Type::Write);
         }
         else if(m_dram->m_command_meta(req_it->command).is_refreshing) //refreshed
         {
           uint64_t bank_count = m_dram->get_level_size("bank");
-
+          //is targeted refresh
           if(m_dram->m_command_scopes(req_it->command) == m_dram->m_levels("bank"))
-            HC.log_refresh(Address(req_it->addr_vec[m_dram->m_levels("channel")], req_it->addr_vec[m_dram->m_levels("bank")] + bank_count*req_it->addr_vec[m_dram->m_levels("bankgroup")], req_it->addr_vec[m_dram->m_levels("rank")],req_it->addr_vec[m_dram->m_levels("row")]),true);
+            HC.log_targeted_refresh(convert_address(req_it),total_cycles);
+          //is standard cycling refresh
           else if(m_dram->m_command_scopes(req_it->command) == m_dram->m_levels("rank"))
-            HC.log_refresh(Address(req_it->addr_vec[m_dram->m_levels("channel")], req_it->addr_vec[m_dram->m_levels("bank")] + bank_count*req_it->addr_vec[m_dram->m_levels("bankgroup")], req_it->addr_vec[m_dram->m_levels("rank")],req_it->addr_vec[m_dram->m_levels("row")]),false);
+            HC.log_refresh(convert_address(req_it),total_cycles);
         }
       }
+      total_cycles++;
       HC.log_cycle();
-      HC.is_start_cycle(HC.total_cycles);
 
-    if (HC.total_cycles % HC.cycles_per_heartbeat == 0) {
-    // print heartbeat
-    uint64_t bank_util = processed_packets * m_dram->m_internal_prefetch_size * 8;
-    double cum_hit_rate = ((rb_hits) / double(rb_hits + rb_miss));
-    double hit_rate = ((rb_hits - last_rb_hits) / double((rb_hits-last_rb_hits + rb_miss - last_rb_miss)));
+      if (total_cycles % cycles_per_heartbeat == 0) {
+        // print heartbeat
+        uint64_t bank_util = processed_packets * m_dram->m_internal_prefetch_size * 8;
+        double cum_hit_rate = ((rb_hits) / double(rb_hits + rb_miss));
+        double hit_rate = ((rb_hits - last_rb_hits) / double((rb_hits-last_rb_hits + rb_miss - last_rb_miss)));
 
-    double throughput = (((bank_util - last_bank_util)/double(HC.cycles_per_heartbeat)) * (1.0/tCK)) / double(1<<30);
-    double cum_throughput = ((bank_util/double(HC.total_cycles)) * (1.0/tCK)) / double(1<<30);
-    printf("Heartbeat DRAM %lu : Throughput: %.3fGiB/s Cumulative Throughput: %.3fGiB/s Row Buffer Hit Rate: %.3f Cumulative Row Buffer Hit Rate: %.3f\n",channel_num, throughput,cum_throughput,hit_rate,cum_hit_rate);
-    last_bank_util = bank_util;
-    last_rb_hits = rb_hits;
-    last_rb_miss = rb_miss;
-    }
+        double throughput = (((bank_util - last_bank_util)/double(cycles_per_heartbeat)) * (1.0/tCK)) / double(1<<30);
+        double cum_throughput = ((bank_util/double(HC.total_cycles)) * (1.0/tCK)) / double(1<<30);
+        printf("Heartbeat DRAM %lu : Throughput: %.3fGiB/s Cumulative Throughput: %.3fGiB/s Row Buffer Hit Rate: %.3f Cumulative Row Buffer Hit Rate: %.3f\n",channel_num, throughput,cum_throughput,hit_rate,cum_hit_rate);
+        last_bank_util = bank_util;
+        last_rb_hits = rb_hits;
+        last_rb_miss = rb_miss;
+      }
     };
 
     void finalize() override {
@@ -401,10 +420,12 @@ HammerCounter::HammerCounter()
 
   channel_num = 0;
   phase = 0;
+  cycles_per_heartbeat = 0;
+
+  mit_radius = 2;
+  blast_radius = 2;
 
   cycles_per_bin = 100e6; // 100 us bins
-
-  cycles_per_heartbeat = 100e4;
 }
 
 uint64_t previous_row = 0;
@@ -416,48 +437,96 @@ int previous_type = 0;
 bool previous_pref = false;
 bool previous_wb = false;
 
-void HammerCounter::log_refresh(Address addr, bool is_targeted)
-{
-  //do refresh based off of first rank
-  if(!is_targeted)
-  {
-    if(addr.get_rank() == 0)
-    {
-      for(int k = 0; k < (dram_ranks); k++)
-      {
-        for(int i = 0; i < rows_per_refresh; i++)
-        {
-          for(int j = 0; j < dram_banks; j++)
-          {
-            Address addr2(addr.get_channel(),j,k,refresh_row+i);
-            log_charge(addr2,0,0,RH_REFRESH,false,0,false);
-          }
-        }
-      }
-      refreshes+=dram_banks;
-      refresh_row += rows_per_refresh;
-      if(refresh_row >= dram_rows)
-      {
-        refresh_cycles++;
-        refresh_row = 0;
-      }
-    }
-  }
-  else
-  {
-    log_charge(addr,0,0,RH_REFRESH,false,0,false);
-    refreshes++;
-  }
-    
-}
-void HammerCounter::log_charge(Address addr,uint64_t p_addr, uint64_t v_addr, int type, bool prefetch, uint64_t cycle, bool write_back)
+void HammerCounter::perform_disturbance(Address addr, int type, bool prefetch, uint64_t cycle, bool write_back)
 {
   channel_num = addr.get_channel();
-  // log hit on both adjacent rows
-  //std::cout << addr.get_row() << "\n";
+
+  //update disturb on row
+  if (row_open_counter.find(addr) == row_open_counter.end())
+  {
+    row_open_counter[addr] = Count();
+    row_open_counter[addr].highest.start_cycle = cycle;
+  }
+  row_open_counter[addr].highest.hammer_count++;
+
+  if(type != RH_REFRESH)
+  row_open_counter[addr].highest.hammered_besides_refresh = true;
+
+  //writeback, prefetch, or normal
+  if (prefetch)
+    row_open_counter[addr].highest.prefetch_hammer_count++;
+  else if(write_back)
+    row_open_counter[addr].highest.write_back_count++;
+  else
+    row_open_counter[addr].highest.normal_hammer_count++;
+
+  if (row_open_counter[addr].highest.hammer_count > highest_hammers_per_cycle) {
+    highest_hammers_per_cycle = row_open_counter[addr].highest.hammer_count;
+    highest_hammers_per_cycle_p = row_open_counter[addr].highest.prefetch_hammer_count;
+    highest_hammers_per_cycle_wb = row_open_counter[addr].highest.write_back_count;
+    highest_hammer_row = addr.get_row();
+  }
+
+}
+
+void HammerCounter::perform_histogram(Address addr,uint64_t p_addr, uint64_t v_addr, int type, bool prefetch, uint64_t cycle, bool write_back)
+{
+  // for output histogram
+  if (type == RH_READ && !prefetch) {
+    if (read_access_histogram.find(total_cycles / cycles_per_bin) == read_access_histogram.end())
+      read_access_histogram[total_cycles / cycles_per_bin] = 1;
+    else
+      read_access_histogram[total_cycles / cycles_per_bin]++;
+  }
+  if (type == RH_READ && prefetch)
+  {
+    if (pref_access_histogram.find(total_cycles / cycles_per_bin) == pref_access_histogram.end())
+      pref_access_histogram[total_cycles / cycles_per_bin] = 1;
+    else
+      pref_access_histogram[total_cycles / cycles_per_bin]++;
+  } 
+  if (type == RH_WRITE && write_back){
+    if (wb_access_histogram.find(total_cycles / cycles_per_bin) == wb_access_histogram.end())
+      wb_access_histogram[total_cycles / cycles_per_bin] = 1;
+    else
+      wb_access_histogram[total_cycles / cycles_per_bin]++;
+  }
+  if (type == RH_WRITE && !write_back)
+  {
+    if (write_access_histogram.find(total_cycles / cycles_per_bin) == write_access_histogram.end())
+      write_access_histogram[total_cycles / cycles_per_bin] = 1;
+    else
+      write_access_histogram[total_cycles / cycles_per_bin]++;
+  }
+}
+
+void HammerCounter::perform_refresh(Address addr, int type)
+{
+  if (row_open_counter.find(addr) != row_open_counter.end()) {
+    row_open_counter[addr].highest.truncated_by_refresh = (type == RH_REFRESH);
+    InsertIntoMap(addr, row_open_counter[addr]);
+
+    // increment lost hammers
+    lost_hammers += row_open_counter[addr].highest.hammer_count;
+    if(type == RH_REFRESH)
+      lost_hammers_to_refresh += row_open_counter[addr].highest.hammer_count;
+    else
+      lost_hammers_to_access += row_open_counter[addr].highest.hammer_count;
+    row_open_counter.erase(addr);
+
+    // did we read from a victim or write to a victim?
+    if (type == RH_READ)
+      victim_reads++;
+    else if(type == RH_WRITE)
+      victim_writes++;
+  }
+}
+
+void HammerCounter::perform_mem_dump(Address addr,uint64_t p_addr, uint64_t v_addr, int type, bool prefetch, uint64_t cycle, bool write_back)
+{
   Address addr_high = Address(addr.get_channel(), addr.get_bank(), addr.get_rank(), (addr.get_row() + 1) % dram_rows);
   Address addr_low = Address(addr.get_channel(), addr.get_bank(), addr.get_rank(), (addr.get_row() == 0) ? dram_rows - 1 : addr.get_row() - 1);
-
+  //mem dump on target row
   if(addr.get_row() == target_row || addr_high.get_row() == target_row || addr_low.get_row() == target_row)
   {
     //print to mem file
@@ -485,7 +554,6 @@ void HammerCounter::log_charge(Address addr,uint64_t p_addr, uint64_t v_addr, in
                              " PBANK: " << addr.get_bank() << 
                              " CYCLE: " << std::dec << total_cycles << std::endl;
     memory_log_dump.close();
-
   }
   previous_row = addr.get_row();
   previous_addr = p_addr;
@@ -495,189 +563,121 @@ void HammerCounter::log_charge(Address addr,uint64_t p_addr, uint64_t v_addr, in
   previous_type = type;
   previous_pref = prefetch;
   previous_wb = write_back;
-
-
-  // low row
-  if (addr.get_row() != 0) {
-    if (row_open_counter.find(addr_low) == row_open_counter.end())
-    {
-      row_open_counter[addr_low] = Count();
-      row_open_counter[addr_low].highest.start_cycle = cycle;
-    }
-    row_open_counter[addr_low].highest.hammer_count++;
-
-    if(type != RH_REFRESH)
-    row_open_counter[addr_low].highest.hammered_besides_refresh = true;
-
-    //writeback, prefetch, or normal
-    if (prefetch)
-      row_open_counter[addr_low].highest.prefetch_hammer_count++;
-    else if(write_back)
-      row_open_counter[addr_low].highest.write_back_count++;
-    else
-      row_open_counter[addr_low].highest.normal_hammer_count++;
-
-    if (row_open_counter[addr_low].highest.hammer_count > highest_hammers_per_cycle) {
-      highest_hammers_per_cycle = row_open_counter[addr_low].highest.hammer_count;
-      highest_hammers_per_cycle_p = row_open_counter[addr_low].highest.prefetch_hammer_count;
-      highest_hammers_per_cycle_wb = row_open_counter[addr_low].highest.write_back_count;
-      highest_hammer_row = addr_low.get_row();
-    }
-
-    if (type == RH_READ) {
-      row_charges_r++;
-      if (prefetch)
-        row_charges_rp++;
-      else
-        row_charges_rn++;
-    } else if(type == RH_WRITE) {
-      row_charges_w++;
-      if (prefetch)
-        row_charges_wp++;
-      else if(write_back)
-        row_charges_wb++;
-      else
-        row_charges_wn++;
-    }
-    else
-    {
-      row_charges_ref++;
-    }
-
-    // for output histogram
-    if (type == RH_READ && !prefetch) {
-      if (read_access_histogram.find(total_cycles / cycles_per_bin) == read_access_histogram.end())
-        read_access_histogram[total_cycles / cycles_per_bin] = 1;
-      else
-        read_access_histogram[total_cycles / cycles_per_bin]++;
-    }
-    if (type == RH_READ && prefetch)
-    {
-      if (pref_access_histogram.find(total_cycles / cycles_per_bin) == pref_access_histogram.end())
-        pref_access_histogram[total_cycles / cycles_per_bin] = 1;
-      else
-        pref_access_histogram[total_cycles / cycles_per_bin]++;
-    } 
-    if (type == RH_WRITE && write_back){
-      if (wb_access_histogram.find(total_cycles / cycles_per_bin) == wb_access_histogram.end())
-        wb_access_histogram[total_cycles / cycles_per_bin] = 1;
-      else
-        wb_access_histogram[total_cycles / cycles_per_bin]++;
-    }
-    if (type == RH_WRITE && !write_back)
-    {
-      if (write_access_histogram.find(total_cycles / cycles_per_bin) == write_access_histogram.end())
-        write_access_histogram[total_cycles / cycles_per_bin] = 1;
-      else
-        write_access_histogram[total_cycles / cycles_per_bin]++;
-    }
-  }
-
-  // high row
-  if (addr.get_row() != (dram_rows - 1)) {
-    if (row_open_counter.find(addr_high) == row_open_counter.end())
-    {
-      row_open_counter[addr_high] = Count();
-      row_open_counter[addr_high].highest.start_cycle = cycle;
-    }
-    row_open_counter[addr_high].highest.hammer_count++;
-
-    if(type != RH_REFRESH)
-    row_open_counter[addr_high].highest.hammered_besides_refresh = true;
-
-    if (prefetch)
-      row_open_counter[addr_high].highest.prefetch_hammer_count++;
-    else if (write_back)
-      row_open_counter[addr_high].highest.write_back_count++;
-    else
-      row_open_counter[addr_high].highest.normal_hammer_count++;
-
-    if (row_open_counter[addr_high].highest.hammer_count > highest_hammers_per_cycle) {
-      highest_hammers_per_cycle = row_open_counter[addr_high].highest.hammer_count;
-      highest_hammers_per_cycle_p = row_open_counter[addr_high].highest.prefetch_hammer_count;
-      highest_hammers_per_cycle_wb = row_open_counter[addr_high].highest.write_back_count;
-      highest_hammer_row = addr_high.get_row();
-    }
-
-    if (type == RH_READ) {
-      row_charges_r++;
-      if (prefetch)
-        row_charges_rp++;
-      else
-        row_charges_rn++;
-    } else if(type == RH_WRITE){
-      row_charges_w++;
-      if (prefetch)
-        row_charges_wp++;
-      else if(write_back)
-        row_charges_wb++;
-      else
-        row_charges_wn++;
-    }
-    else
-    {
-      row_charges_ref++;
-    }
-
-    // for output histogram
-    if (type == RH_READ && !prefetch) {
-      if (read_access_histogram.find(total_cycles / cycles_per_bin) == read_access_histogram.end())
-        read_access_histogram[total_cycles / cycles_per_bin] = 1;
-      else
-        read_access_histogram[total_cycles / cycles_per_bin]++;
-    }
-    if (type == RH_READ && prefetch)
-    {
-      if (pref_access_histogram.find(total_cycles / cycles_per_bin) == pref_access_histogram.end())
-        pref_access_histogram[total_cycles / cycles_per_bin] = 1;
-      else
-        pref_access_histogram[total_cycles / cycles_per_bin]++;
-    } 
-    if (type == RH_WRITE && write_back){
-      if (wb_access_histogram.find(total_cycles / cycles_per_bin) == wb_access_histogram.end())
-        wb_access_histogram[total_cycles / cycles_per_bin] = 1;
-      else
-        wb_access_histogram[total_cycles / cycles_per_bin]++;
-    }
-    if (type == RH_WRITE && !write_back)
-    {
-      if (write_access_histogram.find(total_cycles / cycles_per_bin) == write_access_histogram.end())
-        write_access_histogram[total_cycles / cycles_per_bin] = 1;
-      else
-        write_access_histogram[total_cycles / cycles_per_bin]++;
-    }
-  }
-
-  // the secondary impact of this access is that the current hammers on the row_addr are truncated here
-  if (row_open_counter.find(addr) != row_open_counter.end()) {
-    row_open_counter[addr].highest.truncated_by_refresh = (type == RH_REFRESH);
-    InsertIntoMap(addr, row_open_counter[addr]);
-
-    // increment lost hammers
-    lost_hammers += row_open_counter[addr].highest.hammer_count;
-    if(type == RH_REFRESH)
-      lost_hammers_to_refresh += row_open_counter[addr].highest.hammer_count;
-    else
-      lost_hammers_to_access += row_open_counter[addr].highest.hammer_count;
-    row_open_counter.erase(addr);
-
-    // did we read from a victim or write to a victim?
-    if (type == RH_READ)
-      victim_reads++;
-    else if(type == RH_WRITE)
-      victim_writes++;
-  }
 }
 
-bool HammerCounter::is_start_cycle(uint64_t cycle)
+void HammerCounter::log_refresh(Address addr, uint64_t cycle)
 {
-  bool start = (cycle == target_cycle);
-  if(start)
+  //do refresh based off of first rank
+  if(addr.get_rank() == 0)
   {
-    row_open_master.clear();
-    row_open_counter.clear();
+    for(int k = 0; k < (dram_ranks); k++)
+    {
+      for(int i = 0; i < rows_per_refresh; i++)
+      {
+        for(int j = 0; j < dram_banks; j++)
+        {
+          Address addr2(addr.get_channel(),j,k,refresh_row+i);
+          log_charge(addr2,0,0,RH_REFRESH,false,cycle,false);
+        }
+      }
+    }
+    refreshes+=dram_banks;
+    refresh_row += rows_per_refresh;
+    if(refresh_row >= dram_rows)
+    {
+      refresh_cycles++;
+      refresh_row = 0;
+    }
   }
-  return(start);
+    
+}
+
+void HammerCounter::log_targeted_refresh(Address addr, uint64_t cycle)
+{
+  uint64_t dram_row = addr.get_row();
+
+  uint64_t refresh_start;
+  uint64_t refresh_end;
+
+  //calculate range of rows to be refreshes
+  if(mit_radius > dram_row)
+    refresh_start = 0;
+  else
+    refresh_start = dram_row - mit_radius;
+  
+  if(mit_radius + dram_row >= dram_rows)
+    refresh_end = dram_rows;
+  else
+    refresh_end = mit_radius + dram_row + 1;
+  
+  for(uint64_t refresh_row = refresh_start; refresh_row < refresh_end; refresh_row++)
+  {
+    Address refresh_address = Address(addr.get_channel(), addr.get_bank(), addr.get_rank(), refresh_row);
+    log_charge(refresh_address,0,0,RH_REFRESH,false,cycle,false);
+  }
+
+}
+
+void HammerCounter::log_charge(Address addr,uint64_t p_addr, uint64_t v_addr, int type, bool prefetch, uint64_t cycle, bool write_back)
+{
+  channel_num = addr.get_channel();
+  uint64_t dram_row = addr.get_row();
+  Address addr_high = Address(addr.get_channel(), addr.get_bank(), addr.get_rank(), (addr.get_row() + 1) % dram_rows);
+  Address addr_low = Address(addr.get_channel(), addr.get_bank(), addr.get_rank(), (addr.get_row() == 0) ? dram_rows - 1 : addr.get_row() - 1);
+
+  //log charge
+  if (type == RH_READ) {
+      row_charges_r++;
+      if (prefetch)
+        row_charges_rp++;
+      else
+        row_charges_rn++;
+  } else if(type == RH_WRITE) {
+    row_charges_w++;
+    if (prefetch)
+      row_charges_wp++;
+    else if(write_back)
+      row_charges_wb++;
+    else
+      row_charges_wn++;
+  }
+  else
+  {
+    row_charges_ref++;
+  }
+  //update histogram
+  perform_histogram(addr,p_addr,v_addr,type,prefetch,cycle,write_back);
+  //mem dump on target row
+  perform_mem_dump(addr,p_addr,v_addr,type,prefetch,cycle,write_back);
+
+  //simulate disturbance on each row (at blast radius)
+  uint64_t blast_start;
+  uint64_t blast_end;
+
+  //calculate range of rows to be disturbed
+  if(blast_radius > dram_row)
+    blast_start = 0;
+  else
+    blast_start = dram_row - mit_radius;
+  
+  if(mit_radius + dram_row >= dram_rows)
+    blast_end = dram_rows;
+  else
+    blast_end = mit_radius + dram_row + 1;
+
+  //now do them
+  for(uint64_t blast_row = blast_start; blast_row < blast_end; blast_row++)
+  {
+    //skip row being activated
+    if(dram_row == blast_row)
+      continue;
+    Address blast_address = Address(addr.get_channel(), addr.get_bank(), addr.get_rank(), blast_row);
+    perform_disturbance(blast_address,type,prefetch,cycle,write_back);
+  }
+
+  //act like we just got a refresh on the activated row
+  perform_refresh(addr,type);
+ 
 }
 
 void HammerCounter::log_cycle()

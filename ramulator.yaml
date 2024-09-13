@@ -13,7 +13,7 @@ MemorySystem:
   clock_ratio: 1
 
   DRAM:
-    impl: DDR4
+    impl: DDR4-VRR
     org:
       preset: DDR4_4Gb_x8
       channel: 1
@@ -27,7 +27,14 @@ MemorySystem:
       impl: FRFCFS
     RefreshManager:
       impl: AllBank
-    plugins: 
+    plugins:
+      - ControllerPlugin: {
+          impl: HammerCounter,
+          output_file: hammer_test,
+          cycles_per_heartbeat: 1000000,
+          histogram_period: 100e-6,
+          refresh_period: 64e-3,
+          target_cycle: 0 } 
 
   AddrMapper:
     impl: RoRaCoBaBgCh
