@@ -147,7 +147,7 @@ uint64_t channel_num;
   static void set_output_file(std::string f);
   static std::string get_output_file();
   void log_charge(Address addr,uint64_t p_addr, uint64_t v_addr, int type, bool prefetch,uint64_t cycle, bool write_back);
-  void log_refresh(Address addr);
+  void log_refresh(Address addr, bool is_targeted);
   void log_write(Address addr);
   void log_cycle();
   //void log_refresh(uint64_t row, uint64_t cycle);
@@ -260,7 +260,11 @@ class HammerCounterPlugin : public IControllerPlugin, public Implementation {
         else if(m_dram->m_command_meta(req_it->command).is_refreshing) //refreshed
         {
           uint64_t bank_count = m_dram->get_level_size("bank");
-          HC.log_refresh(Address(req_it->addr_vec[m_dram->m_levels("channel")], req_it->addr_vec[m_dram->m_levels("bank")] + bank_count*req_it->addr_vec[m_dram->m_levels("bankgroup")], req_it->addr_vec[m_dram->m_levels("rank")],req_it->addr_vec[m_dram->m_levels("row")]));
+
+          if(m_dram->m_command_scopes(req_it->command) == m_dram->m_levels("bank"))
+            HC.log_refresh(Address(req_it->addr_vec[m_dram->m_levels("channel")], req_it->addr_vec[m_dram->m_levels("bank")] + bank_count*req_it->addr_vec[m_dram->m_levels("bankgroup")], req_it->addr_vec[m_dram->m_levels("rank")],req_it->addr_vec[m_dram->m_levels("row")]),true);
+          else if(m_dram->m_command_scopes(req_it->command) == m_dram->m_levels("rank"))
+            HC.log_refresh(Address(req_it->addr_vec[m_dram->m_levels("channel")], req_it->addr_vec[m_dram->m_levels("bank")] + bank_count*req_it->addr_vec[m_dram->m_levels("bankgroup")], req_it->addr_vec[m_dram->m_levels("rank")],req_it->addr_vec[m_dram->m_levels("row")]),false);
         }
       }
       HC.log_cycle();
@@ -412,30 +416,38 @@ int previous_type = 0;
 bool previous_pref = false;
 bool previous_wb = false;
 
-void HammerCounter::log_refresh(Address addr)
+void HammerCounter::log_refresh(Address addr, bool is_targeted)
 {
   //do refresh based off of first rank
-  if(addr.get_rank() == 0)
+  if(!is_targeted)
   {
-    for(int k = 0; k < (dram_ranks); k++)
+    if(addr.get_rank() == 0)
     {
-      for(int i = 0; i < rows_per_refresh; i++)
+      for(int k = 0; k < (dram_ranks); k++)
       {
-        for(int j = 0; j < dram_banks; j++)
+        for(int i = 0; i < rows_per_refresh; i++)
         {
-          Address addr2(addr.get_channel(),j,k,refresh_row+i);
-          log_charge(addr2,0,0,RH_REFRESH,false,0,false);
+          for(int j = 0; j < dram_banks; j++)
+          {
+            Address addr2(addr.get_channel(),j,k,refresh_row+i);
+            log_charge(addr2,0,0,RH_REFRESH,false,0,false);
+          }
         }
       }
-    }
-    refresh_row += rows_per_refresh;
-    if(refresh_row >= dram_rows)
-    {
-      refresh_cycles++;
-      refresh_row = 0;
+      refreshes+=dram_banks;
+      refresh_row += rows_per_refresh;
+      if(refresh_row >= dram_rows)
+      {
+        refresh_cycles++;
+        refresh_row = 0;
+      }
     }
   }
-  refreshes++;
+  else
+  {
+    log_charge(addr,0,0,RH_REFRESH,false,0,false);
+    refreshes++;
+  }
     
 }
 void HammerCounter::log_charge(Address addr,uint64_t p_addr, uint64_t v_addr, int type, bool prefetch, uint64_t cycle, bool write_back)
@@ -737,7 +749,7 @@ void HammerCounter::print_file()
   file << "Columns: " << dram_columns << "\n";
   file << "Address Space Used: " << address_space_usage * 100.0 << "%\n";
   file << "####################################################################################################\n";
-  file << "Refreshes: " << refreshes << '\n';
+  file << "Rows Refreshed: " << refreshes << '\n';
   file << "Rows Per Refresh: " << rows_per_refresh << "\n";
   file << "Refresh Cycles: " << refresh_cycles/dram_banks << '\n';
   file << "####################################################################################################\n";
