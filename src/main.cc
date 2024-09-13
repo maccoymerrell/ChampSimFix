@@ -61,6 +61,10 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   bool knob_cloudsuite{false};
   long long warmup_instructions = 0;
   long long simulation_instructions = std::numeric_limits<long long>::max();
+  long long virtual_seed = 0;
+  long long target_row = 0;
+  long long target_cycle = 0;
+  std::string hammer_file = "hammer";
   std::string json_file_name;
   std::vector<std::string> trace_names;
 
@@ -79,6 +83,8 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
                                           "The number of instructions in the detailed phase. If not specified, run to the end of the trace.");
   auto* deprec_sim_instr_option =
       app.add_option("--simulation_instructions", simulation_instructions, "[deprecated] use --simulation-instructions instead")->excludes(sim_instr_option);
+
+  auto* virtual_seed_option = app.add_option("-v,--virtual-seed",virtual_seed,"The seed used to generate the page table mappings. 0 disables randomization");
 
   auto* json_option =
       app.add_option("--json", json_file_name, "The name of the file to receive JSON output. If no name is specified, stdout will be used")->expected(0, 1);
@@ -103,6 +109,11 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
     warmup_instructions = simulation_instructions / 5;
   }
+    
+  if(virtual_seed_option->count() > 0)
+  {
+    VirtualMemory::set_virtual_seed(virtual_seed);
+  }
 
   std::vector<champsim::tracereader> traces;
   std::transform(
@@ -117,8 +128,8 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     std::iota(std::begin(p.trace_index), std::end(p.trace_index), 0);
   }
 
-  fmt::print("\n*** ChampSim Multicore Out-of-Order Simulator ***\nWarmup Instructions: {}\nSimulation Instructions: {}\nNumber of CPUs: {}\nPage size: {}\n\n",
-             phases.at(0).length, phases.at(1).length, std::size(gen_environment.cpu_view()), PAGE_SIZE);
+  fmt::print("\n*** ChampSim Multicore Out-of-Order Simulator ***\nWarmup Instructions: {}\nSimulation Instructions: {}\nNumber of CPUs: {}\nPage size: {}\nVirtual seed: {}\nTarget row: {}\nTarget cycle: {}\nOutput file: {}\n\n",
+             phases.at(0).length, phases.at(1).length, std::size(gen_environment.cpu_view()), PAGE_SIZE,virtual_seed,target_row,target_cycle,hammer_file);
 
   auto phase_stats = champsim::main(gen_environment, phases, traces);
 

@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #include "vmem.h"
 
 #include <cassert>
@@ -24,6 +23,8 @@
 #include "util/bits.h"
 
 using namespace champsim::data::data_literals;
+
+uint64_t VirtualMemory::virtual_seed = 0;
 
 VirtualMemory::VirtualMemory(champsim::data::bytes page_table_page_size, std::size_t page_table_levels, champsim::chrono::clock::duration minor_penalty,
                              MEMORY_CONTROLLER& dram)
@@ -43,10 +44,41 @@ VirtualMemory::VirtualMemory(champsim::data::bytes page_table_page_size, std::si
   if (required_bits > champsim::address::bits) {
     fmt::print("WARNING: virtual memory configuration would require {} bits of addressing.\n", required_bits); // LCOV_EXCL_LINE
   }
+
   if (required_bits > champsim::data::bits{champsim::lg2(dram.size().count())}) {
     fmt::print("WARNING: physical memory size is smaller than virtual memory size.\n"); // LCOV_EXCL_LINE
   }
+
+  pmem_size = dram.size();
+
+  populate_pages();
 }
+
+void VirtualMemory::set_virtual_seed(uint64_t v_seed)
+{
+  virtual_seed = v_seed;
+}
+
+void VirtualMemory::shuffle_pages()
+{
+  std::shuffle(ppage_free_list.begin(),ppage_free_list.end(),std::mt19937_64{virtual_seed});
+  fmt::print("Shuffled {} physical pages with seed {}\n",ppage_free_list.size(),virtual_seed);
+  shuffled = true;
+}
+void VirtualMemory::populate_pages()
+{
+  ppage_free_list.resize(((pmem_size - 1_MiB)/PAGE_SIZE).count());
+  champsim::page_number base_address = champsim::page_number{champsim::lowest_address_for_size(std::max<champsim::data::mebibytes>(champsim::data::bytes{PAGE_SIZE}, 1_MiB))};
+  for(auto it = ppage_free_list.begin(); it != ppage_free_list.end(); it++)
+  {
+    *(it) = base_address;
+    base_address += 1;
+  }
+  fmt::print("Created {} new physical pages\n",ppage_free_list.size());
+  shuffled = false;
+}
+
+
 
 champsim::dynamic_extent VirtualMemory::extent(std::size_t level) const
 {
@@ -64,16 +96,19 @@ uint64_t VirtualMemory::get_offset(champsim::page_number vaddr, std::size_t leve
 champsim::page_number VirtualMemory::ppage_front() const
 {
   assert(available_ppages() > 0);
-  return next_ppage;
+  return ppage_free_list.front();
 }
 
-void VirtualMemory::ppage_pop() { ++next_ppage; }
-
-std::size_t VirtualMemory::available_ppages() const
-{
-  assert(next_ppage <= last_ppage);
-  return static_cast<std::size_t>(champsim::offset(next_ppage, last_ppage)); // Cast protected by prior assert
+void VirtualMemory::ppage_pop()
+{ 
+  ppage_free_list.pop_front();
+  if(available_ppages() == 0)
+    populate_pages();
+  if(!shuffled && virtual_seed != 0)
+    shuffle_pages();
 }
+
+std::size_t VirtualMemory::available_ppages() const { return ppage_free_list.size(); }
 
 std::pair<champsim::page_number, champsim::chrono::clock::duration> VirtualMemory::va_to_pa(uint32_t cpu_num, champsim::page_number vaddr)
 {

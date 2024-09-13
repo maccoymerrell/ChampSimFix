@@ -71,7 +71,7 @@
     },
 
     "L2C": {
-        "sets": 1024,
+        "sets": 2048,
         "ways": 8,
         "rq_size": 32,
         "wq_size": 32,
@@ -81,10 +81,10 @@
         "max_tag_check": 1,
         "max_fill": 1,
         "prefetch_as_load": false,
-        "virtual_prefetch": false,
+        "virtual_prefetch": true,
         "prefetch_activate": "LOAD,PREFETCH",
-        "prefetcher": "no"
-    },
+        "prefetcher": "va_ampm_lite"
+	},
 
     "ITLB": {
         "sets": 16,
@@ -162,7 +162,7 @@
     	"model": "integrated",
         "frequency": 3200,
         "channels": 1,
-        "ranks": 1,
+        "ranks": 2,
         "banks": 8,
         "rows": 65536,
         "columns": 128,

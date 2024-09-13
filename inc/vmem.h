@@ -19,10 +19,12 @@
 
 #include <cstdint>
 #include <map>
+#include <deque>
 
 #include "address.h"
 #include "champsim.h"
 #include "chrono.h"
+#include<bits/stdc++.h>
 
 class MEMORY_CONTROLLER;
 
@@ -33,13 +35,19 @@ class VirtualMemory
 private:
   std::map<std::pair<uint32_t, champsim::page_number>, champsim::page_number> vpage_to_ppage_map;
   std::map<std::tuple<uint32_t, uint32_t, champsim::address_slice<champsim::dynamic_extent>>, champsim::address> page_table;
-
+  static uint64_t virtual_seed;
+  champsim::data::bytes pmem_size;
+  bool shuffled;
 public:
   const champsim::chrono::clock::duration minor_fault_penalty;
   const std::size_t pt_levels;
   const pte_entry pte_page_size; // Size of a PTE page
 
+
+
 private:
+  //for randomization
+  std::deque<champsim::page_number> ppage_free_list;
   champsim::page_number active_pte_page{};
   champsim::address_slice<champsim::dynamic_extent> next_pte_page;
 
@@ -49,7 +57,13 @@ private:
   [[nodiscard]] champsim::page_number ppage_front() const;
   void ppage_pop();
 
+
 public:
+  static void set_virtual_seed(uint64_t v_seed);
+
+  void shuffle_pages();
+  void populate_pages();
+
   /**
    * Initialize the virtual memory.
    * The size of the virtual memory space is determined from the size of a page table page and the number of levels in the hierarchy.
