@@ -7,7 +7,6 @@
 #include "modules.h"
 #include "cache.h"
 
-
 struct spp_dev : public champsim::modules::prefetcher {
 
   //SPP functional knobs
