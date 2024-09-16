@@ -3,6 +3,10 @@
 #include <cassert>
 #include <iostream>
 
+
+namespace spp{
+  
+}
 void spp_dev::prefetcher_initialize()
 {
   std::cout << "Initialize SIGNATURE TABLE" << std::endl;
@@ -20,17 +24,19 @@ void spp_dev::prefetcher_initialize()
   std::cout << std::endl << "Initialize PREFETCH FILTER" << std::endl;
   std::cout << "FILTER_SET: " << FILTER_SET << std::endl;
 
-  // pass pointers
+
+  //pass pointers
   ST._parent = this;
   PT._parent = this;
   FILTER._parent = this;
   GHR._parent = this;
+
 }
 
 void spp_dev::prefetcher_cycle_operate() {}
 
-uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
-                                           uint32_t metadata_in)
+
+uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type, uint32_t metadata_in)
 {
   champsim::page_number page{addr};
   uint32_t last_sig = 0, curr_sig = 0, depth = 0;
@@ -121,9 +127,8 @@ uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::add
       // int sig_delta = (PT.delta[set][lookahead_way] < 0) ? ((((-1) *
       // PT.delta[set][lookahead_way]) & 0x3F) + 0x40) :
       // PT.delta[set][lookahead_way];
-
-      auto sig_delta = (PT.delta[set][lookahead_way] < 0) ? (((-1) * PT.delta[set][lookahead_way]) + (1 << (SIG_DELTA_BIT - 1))) : PT.delta[set][lookahead_way];
-
+      auto sig_delta =
+          (PT.delta[set][lookahead_way] < 0) ? (((-1) * PT.delta[set][lookahead_way]) + (1 << (SIG_DELTA_BIT - 1))) : PT.delta[set][lookahead_way];
       curr_sig = ((curr_sig << SIG_SHIFT) ^ sig_delta) & SIG_MASK;
     }
 
@@ -149,6 +154,7 @@ uint32_t spp_dev::prefetcher_cache_fill(champsim::address addr, long set, long w
 }
 
 void spp_dev::prefetcher_final_stats() {}
+
 
 // TODO: Find a good 64-bit hash function
 uint64_t spp_dev::get_hash(uint64_t key)
@@ -351,7 +357,7 @@ void spp_dev::PATTERN_TABLE::update_pattern(uint32_t last_sig, typename offset_t
 }
 
 void spp_dev::PATTERN_TABLE::read_pattern(uint32_t curr_sig, std::vector<typename offset_type::difference_type>& delta_q, std::vector<uint32_t>& confidence_q,
-                                          uint32_t& lookahead_way, uint32_t& lookahead_conf, uint32_t& pf_q_tail, uint32_t& depth)
+                                      uint32_t& lookahead_way, uint32_t& lookahead_conf, uint32_t& pf_q_tail, uint32_t& depth)
 {
   // Update (sig, delta) correlation
   uint32_t set = get_hash(curr_sig) % PT_SET, local_conf = 0, pf_conf = 0, max_conf = 0;
@@ -493,6 +499,7 @@ bool spp_dev::PREFETCH_FILTER::check(champsim::address check_addr, FILTER_REQUES
 
 void spp_dev::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confidence, offset_type pf_offset, typename offset_type::difference_type pf_delta)
 {
+  bool min_conf_set = false; 
   // NOTE: GHR implementation is slightly different from the original paper
   // Instead of matching (last_offset + delta), GHR simply stores and matches the pf_offset
   uint32_t min_conf = 100, victim_way = MAX_GHR_ENTRY;
@@ -521,17 +528,18 @@ void spp_dev::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confide
 
     // GHR replacement policy is based on the stored confidence value
     // An entry with the lowest confidence is selected as a victim
-    if (confidence[i] < min_conf) {
+    if (confidence[i] < min_conf|| !min_conf_set) {
       min_conf = confidence[i];
       victim_way = i;
+      min_conf_set = true;
     }
   }
 
   // Assertion
   if (victim_way >= MAX_GHR_ENTRY) {
     std::cout << "[GHR] Cannot find a replacement victim!" << std::endl;
-    assert(0);
-  }
+    return;
+    }
 
   if constexpr (SPP_DEBUG_PRINT) {
     std::cout << "[GHR] Replace index: " << victim_way << " pf_sig: " << std::hex << sig[victim_way] << std::dec;
