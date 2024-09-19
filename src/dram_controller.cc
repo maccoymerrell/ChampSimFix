@@ -611,7 +611,7 @@ bool MEMORY_CONTROLLER::add_rq(const request_type& packet, champsim::channel* ul
 
 bool MEMORY_CONTROLLER::add_pq(const request_type& packet, champsim::channel* ul)
 {
-  auto& channel = channels[dram_get_channel(packet.address)];
+  auto& channel = channels[address_mapping.get_channel(packet.address)];
 
   // Find empty slot
   if (auto pq_it = std::find_if_not(std::begin(channel.PQ), std::end(channel.PQ), [](const auto& pkt) { return pkt.has_value(); });
