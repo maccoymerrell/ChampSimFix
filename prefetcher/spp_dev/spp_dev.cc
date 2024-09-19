@@ -494,6 +494,7 @@ void spp_dev::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confide
   // NOTE: GHR implementation is slightly different from the original paper
   // Instead of matching (last_offset + delta), GHR simply stores and matches the pf_offset
   uint32_t min_conf = 100, victim_way = MAX_GHR_ENTRY;
+  bool min_conf_set = false;
 
   if constexpr (SPP_DEBUG_PRINT) {
     std::cout << "[GHR] Crossing the page boundary pf_sig: " << std::hex << pf_sig << std::dec;
@@ -519,16 +520,16 @@ void spp_dev::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confide
 
     // GHR replacement policy is based on the stored confidence value
     // An entry with the lowest confidence is selected as a victim
-    if (confidence[i] < min_conf) {
+    if (confidence[i] < min_conf || !min_conf_set) {
       min_conf = confidence[i];
       victim_way = i;
+      min_conf_set = true;
     }
   }
 
   // Assertion
-  if (victim_way >= MAX_GHR_ENTRY) {
+  if (!min_conf_set) {
     std::cout << "[GHR] Cannot find a replacement victim!" << std::endl;
-    assert(0);
   }
 
   if constexpr (SPP_DEBUG_PRINT) {
