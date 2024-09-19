@@ -41,7 +41,7 @@ MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::chrono::picoseconds dbus_period, 
 DRAM_CHANNEL::DRAM_CHANNEL(champsim::chrono::picoseconds dbus_period, champsim::chrono::picoseconds mc_period, std::size_t t_rp, std::size_t t_rcd,
                            std::size_t t_cas, std::size_t t_ras, champsim::chrono::microseconds refresh_period, std::size_t refreshes_per_period, champsim::data::bytes width, std::size_t rq_size,
                            std::size_t wq_size, DRAM_ADDRESS_MAPPING addr_mapper)
-    : champsim::operable(mc_period), address_mapping(addr_mapper), WQ{wq_size}, RQ{rq_size}, channel_width(width), 
+    : champsim::operable(mc_period), address_mapping(addr_mapper), WQ{wq_size}, RQ{rq_size}, PQ{rq_size}, channel_width(width), 
       DRAM_ROWS_PER_REFRESH(address_mapping.rows() / refreshes_per_period), tRP(t_rp * mc_period), tRCD(t_rcd * mc_period),
       tCAS(t_cas * mc_period), tRAS(t_ras * mc_period), tREF(refresh_period / refreshes_per_period), 
       DRAM_DBUS_TURN_AROUND_TIME(t_ras * mc_period),
