@@ -511,8 +511,8 @@ void DRAM_CHANNEL::check_prefetch_collision()
 {
   for (auto pq_it = std::begin(PQ); pq_it != std::end(PQ); ++pq_it) {
     if (pq_it->has_value() && !pq_it->value().forward_checked) {
-      auto checker = [check_val = champsim::block_number{pq_it->value().address}](const auto& x) {
-        return x.has_value() && champsim::block_number{x->address} == check_val;
+      auto checker = [chan = this, check_val = pq_it->value().address](const auto& x) {
+        return x.has_value() && chan->address_mapping.is_collision(x.value().address, check_val);
       };
       if (auto wq_it = std::find_if(std::begin(WQ), std::end(WQ), checker); wq_it != std::end(WQ)) {
         response_type response{pq_it->value().address, pq_it->value().v_address, wq_it->value().data, pq_it->value().pf_metadata,
@@ -586,7 +586,7 @@ bool MEMORY_CONTROLLER::add_rq(const request_type& packet, champsim::channel* ul
     //PROMOTION Find if prefetch matches and drop it
     if(packet.promotion)
     {
-      auto pq_it = std::find_if(std::begin(channel.PQ), std::end(channel.PQ), [packet](const auto& pkt) {return pkt.has_value() && pkt.value().address == packet.address;});
+      auto pq_it = std::find_if(std::begin(channel.PQ), std::end(channel.PQ), [this,packet](const auto& pkt) {return pkt.has_value() && address_mapping.is_collision(pkt.value().address,packet.address);});
       if(pq_it != std::end(channel.PQ) && pq_it->has_value() && !pq_it->value().scheduled){
         ready_time = pq_it->value().ready_time;
         pq_it->reset();

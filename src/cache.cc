@@ -337,8 +337,6 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
       mshr_pkt.second.promotion = true;
       mshr_pkt.second.response_requested = false;
       bool success = lower_level->add_rq(mshr_pkt.second);
-      if(success)
-        fmt::print("Enqueued promotion for packet {} out of CACHE {}\n",handle_pkt.address, NAME);
       //return false if we can't enqueue the promotion
       if(!success) {
         return false;
