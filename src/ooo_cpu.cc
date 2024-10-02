@@ -294,7 +294,9 @@ long O3_CPU::promote_to_decode()
     return x.fetch_completed && x.ready_time <= time;
   };
 
-  champsim::bandwidth available_fetch_bandwidth{FETCH_WIDTH};
+  champsim::bandwidth available_fetch_bandwidth{
+      std::min(FETCH_WIDTH, std::min(champsim::bandwidth::maximum_type{static_cast<long>(DIB_HIT_BUFFER_SIZE - std::size(DIB_HIT_BUFFER))},
+                                     champsim::bandwidth::maximum_type{static_cast<long>(DECODE_BUFFER_SIZE - std::size(DECODE_BUFFER))}))};
 
   auto fetched_check_end = std::find_if(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), [](const ooo_model_instr& x) { return !x.fetch_completed; });
   // find the first not fetch completed
