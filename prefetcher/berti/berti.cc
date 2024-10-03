@@ -795,7 +795,7 @@ bool berti::compare_greater_delta(delta_t a, delta_t b)
 /******************************************************************************/
 void berti::prefetcher_initialize() 
 {
-  uint64_t latency_table_size = intern_->get_mshr_size();
+  uint64_t latency_table_size = intern_->get_mshr_size() + intern_->get_pq_size().back() + intern_->get_rq_size().back() + intern_->get_wq_size().back();
   latencyt.push_back(new LatencyTable(latency_table_size));
   scache.push_back(new ShadowCache(intern_->NUM_SET, intern_->NUM_WAY));
   historyt.push_back(new HistoryTable());

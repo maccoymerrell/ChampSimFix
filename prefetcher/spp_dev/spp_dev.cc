@@ -39,12 +39,12 @@ uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::add
 {
   champsim::page_number page{addr};
   uint32_t last_sig = 0, curr_sig = 0, depth = 0;
-  std::vector<uint32_t> confidence_q(intern_->MSHR_SIZE);
+  std::vector<uint32_t> confidence_q(intern_->get_mshr_size());
 
   typename spp_dev::offset_type::difference_type delta = 0;
-  std::vector<typename spp_dev::offset_type::difference_type> delta_q(intern_->MSHR_SIZE);
+  std::vector<typename spp_dev::offset_type::difference_type> delta_q(intern_->get_mshr_size());
 
-  for (uint32_t i = 0; i < intern_->MSHR_SIZE; i++) {
+  for (uint32_t i = 0; i < intern_->get_mshr_size(); i++) {
     confidence_q[i] = 0;
     delta_q[i] = 0;
   }
