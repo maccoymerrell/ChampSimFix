@@ -27,7 +27,8 @@ MemorySystem:
       impl: FRFCFS
     RefreshManager:
       impl: AllBank
-    plugins: 
+    plugins:
+      - ControllerPlugin: {impl: "ChampSimStats"}
 
   AddrMapper:
-    impl: RoRaCoBaBgCh
+    impl: RASL
