@@ -27,11 +27,11 @@
 #include "util/span.h"
 #include "util/units.h"
 
-MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::chrono::picoseconds clock_period_, champsim::chrono::picoseconds t_rp, champsim::chrono::picoseconds t_rcd,
-                                     champsim::chrono::picoseconds t_cas, champsim::chrono::microseconds refresh_period, champsim::chrono::picoseconds turnaround, std::vector<channel_type*>&& ul,
+MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::chrono::picoseconds dbus_period, champsim::chrono::picoseconds mc_period, std::size_t t_rp, std::size_t t_rcd,
+                                     std::size_t t_cas, std::size_t t_ras, champsim::chrono::microseconds refresh_period, std::vector<channel_type*>&& ul,
                                      std::size_t rq_size, std::size_t wq_size, std::size_t chans, champsim::data::bytes chan_width, std::size_t rows,
-                                     std::size_t columns, std::size_t ranks, std::size_t banks, std::size_t rows_per_refresh, std::string model_config_file)
-    : champsim::operable(clock_period_), queues(std::move(ul))
+                                     std::size_t columns, std::size_t ranks, std::size_t bankgroups, std::size_t banks, std::size_t refreshes_per_period, std::string model_config_file)
+    : champsim::operable(mc_period), queues(std::move(ul)), channel_width(chan_width)
 {
   //this is used as a form of default config, similar to how champsim provides defaults.
   //this may be bad and need to change.
@@ -84,28 +84,16 @@ MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::chrono::picoseconds clock_period_
   channel_width = champsim::data::bytes(Ramulator::get_ramulator_channel_width(ramulator2_frontend));
 
   //this will help report stats
-  const auto slicer = DRAM_CHANNEL::make_slicer(LOG2_BLOCK_SIZE + champsim::lg2(chans), rows, columns, ranks, banks);
-  for (std::size_t i{0}; i < Ramulator::get_ramulator_field_size(ramulator2_frontend,"channel"); ++i) {
-    channels.emplace_back(clock_period_, t_rp, t_rcd, t_cas, refresh_period, turnaround, rows_per_refresh, channel_width, rq_size, wq_size, slicer);
-    channels[i].ramulator2_frontend = ramulator2_frontend;
+  for (std::size_t i{0}; i < chans; ++i) {
+    channels.emplace_back(dbus_period, mc_period, t_rp, t_rcd, t_cas, t_ras, refresh_period, refreshes_per_period, chan_width, rq_size, wq_size, ramulator2_frontend);
   }
 }
 
-DRAM_CHANNEL::DRAM_CHANNEL(champsim::chrono::picoseconds clock_period_, champsim::chrono::picoseconds t_rp, champsim::chrono::picoseconds t_rcd,
-                           champsim::chrono::picoseconds t_cas, champsim::chrono::microseconds refresh_period, champsim::chrono::picoseconds turnaround, std::size_t rows_per_refresh, 
-                           champsim::data::bytes width, std::size_t rq_size, std::size_t wq_size, slicer_type slice)
-    : champsim::operable(clock_period_), address_slicer(slice)
+  DRAM_CHANNEL::DRAM_CHANNEL(champsim::chrono::picoseconds dbus_period, champsim::chrono::picoseconds mc_period, std::size_t t_rp, std::size_t t_rcd, std::size_t t_cas,
+               std::size_t t_ras, champsim::chrono::microseconds refresh_period, std::size_t refreshes_per_period, champsim::data::bytes width,
+               std::size_t rq_size, std::size_t wq_size, Ramulator::IFrontEnd* ramulator2_frontend_)
+    : champsim::operable(mc_period), ramulator2_frontend(ramulator2_frontend_)
 {}
-
-auto DRAM_CHANNEL::make_slicer(std::size_t start_pos, std::size_t rows, std::size_t columns, std::size_t ranks, std::size_t banks) -> slicer_type
-{
-  std::array<std::size_t, slicer_type::size()> params{};
-  params.at(SLICER_ROW_IDX) = rows;
-  params.at(SLICER_COLUMN_IDX) = columns;
-  params.at(SLICER_RANK_IDX) = ranks;
-  params.at(SLICER_BANK_IDX) = banks;
-  return std::apply([start = start_pos](auto... p) { return champsim::make_contiguous_extent_set(start, champsim::lg2(p)...); }, params);
-}
 
 long MEMORY_CONTROLLER::operate()
 {

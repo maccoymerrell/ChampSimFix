@@ -37,7 +37,6 @@ constexpr long long STAT_PRINTING_PERIOD = 10000000;
 long O3_CPU::operate()
 {
   long progress{0};
-
   progress += retire_rob();                    // retire
   progress += complete_inflight_instruction(); // finalize execution
   progress += execute_instruction();           // execute instructions
@@ -321,7 +320,6 @@ long O3_CPU::promote_to_decode()
   IFETCH_BUFFER.erase(window_begin, window_end);
   return progress;
 }
-
 long O3_CPU::decode_instruction()
 {
   auto is_ready = [time = current_time](const auto& x) {
@@ -725,6 +723,7 @@ long O3_CPU::retire_rob()
       fmt::print("[ROB] retire_rob instr_id: {} is retired cycle: {}\n", x.instr_id, cycle);
     });
   }
+
   auto retire_count = std::distance(retire_begin, retire_end);
   num_retired += retire_count;
   ROB.erase(retire_begin, retire_end);

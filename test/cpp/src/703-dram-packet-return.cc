@@ -50,18 +50,21 @@ SCENARIO("A dram controller returns reads") {
         const uint64_t trcd_cycles = 4;
         const uint64_t tcas_cycles = 80;
         const std::size_t DRAM_CHANNELS = 2;
-        const std::size_t DRAM_BANKS = 8;
+        const std::size_t DRAM_BANKS = 4;
+        const std::size_t DRAM_BANKGROUPS = 8;
         const std::size_t DRAM_RANKS = 8;
         const std::size_t DRAM_COLUMNS = 128;
         const std::size_t DRAM_ROWS = 65536;
-        const std::size_t DRAM_ROWS_P_REF = 8;
+        const std::size_t REFRESHES_PER_PERIOD = 8192;
+
+        champsim::chrono::microseconds refresh_period{64000};
 
         const uint64_t packets_issued = 64;
 
         std::vector<uint64_t> expected_returns;
         std::vector<uint64_t> actual_returns;
 
-        MEMORY_CONTROLLER uut{clock_period, trp_cycles*clock_period, trcd_cycles*clock_period, tcas_cycles*clock_period, champsim::chrono::microseconds(64000), 2*clock_period, {&channel_uut}, 64, 64, DRAM_CHANNELS, champsim::data::bytes{8}, DRAM_ROWS, DRAM_COLUMNS, DRAM_RANKS, DRAM_BANKS, DRAM_ROWS_P_REF};
+        MEMORY_CONTROLLER uut{champsim::chrono::picoseconds{312}, champsim::chrono::picoseconds{624}, std::size_t{24}, std::size_t{24}, std::size_t{24},std::size_t{52}, refresh_period, {&channel_uut}, 64, 64, DRAM_CHANNELS, champsim::data::bytes{8}, DRAM_ROWS, DRAM_COLUMNS, DRAM_RANKS, DRAM_BANKGROUPS, DRAM_BANKS, REFRESHES_PER_PERIOD};
         WHEN("The reads are issued") {
             return_test(uut,channel_uut,packets_issued,champsim::data::bytes(BLOCK_SIZE), expected_returns);
             std::transform(channel_uut.returned.begin(), channel_uut.returned.end(), std::back_inserter(actual_returns), [](champsim::channel::response_type r){return(r.address.to<uint64_t>());});

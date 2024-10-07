@@ -106,12 +106,6 @@ struct DRAM_CHANNEL final : public champsim::operable {
   using stats_type = dram_stats;
   stats_type roi_stats, sim_stats;
 
-  constexpr static std::size_t SLICER_ROW_IDX = 3;
-  constexpr static std::size_t SLICER_COLUMN_IDX = 1;
-  constexpr static std::size_t SLICER_RANK_IDX = 2;
-  constexpr static std::size_t SLICER_BANK_IDX = 0;
-  using slicer_type = champsim::extent_set<champsim::dynamic_extent, champsim::dynamic_extent, champsim::dynamic_extent, champsim::dynamic_extent>;
-  const slicer_type address_slicer;
 
   unsigned long get_rank(champsim::address address) const;
   unsigned long get_bank(champsim::address address) const;
@@ -125,12 +119,10 @@ struct DRAM_CHANNEL final : public champsim::operable {
   std::size_t ranks() const;
   std::size_t banks() const;
   std::size_t bank_request_capacity() const;
-  static slicer_type make_slicer(std::size_t start_pos, std::size_t rows, std::size_t columns, std::size_t ranks, std::size_t banks);
 
-
-  DRAM_CHANNEL(champsim::chrono::picoseconds clock_period_, champsim::chrono::picoseconds t_rp, champsim::chrono::picoseconds t_rcd,
-               champsim::chrono::picoseconds t_cas, champsim::chrono::microseconds refresh_period, champsim::chrono::picoseconds turnaround, std::size_t rows_per_refresh, 
-               champsim::data::bytes width, std::size_t rq_size, std::size_t wq_size, slicer_type slice);
+  DRAM_CHANNEL(champsim::chrono::picoseconds dbus_period, champsim::chrono::picoseconds mc_period, std::size_t t_rp, std::size_t t_rcd, std::size_t t_cas,
+               std::size_t t_ras, champsim::chrono::microseconds refresh_period, std::size_t refreshes_per_period, champsim::data::bytes width,
+               std::size_t rq_size, std::size_t wq_size, Ramulator::IFrontEnd* ramulator2_frontend_);
 
   void initialize() final;
   long operate() final;
@@ -163,10 +155,10 @@ class MEMORY_CONTROLLER : public champsim::operable
 public:
   std::vector<DRAM_CHANNEL> channels;
   
-  MEMORY_CONTROLLER(champsim::chrono::picoseconds clock_period_, champsim::chrono::picoseconds t_rp, champsim::chrono::picoseconds t_rcd,
-                    champsim::chrono::picoseconds t_cas, champsim::chrono::microseconds refresh_period, champsim::chrono::picoseconds turnaround, std::vector<channel_type*>&& ul, std::size_t rq_size,
-                    std::size_t wq_size, std::size_t chans, champsim::data::bytes chan_width, std::size_t rows, std::size_t columns, std::size_t ranks,
-                    std::size_t banks, std::size_t rows_per_refresh, std::string model_config_file = "");
+  MEMORY_CONTROLLER(champsim::chrono::picoseconds dbus_period, champsim::chrono::picoseconds mc_period, std::size_t t_rp, std::size_t t_rcd, std::size_t t_cas,
+                    std::size_t t_ras, champsim::chrono::microseconds refresh_period, std::vector<channel_type*>&& ul, std::size_t rq_size, std::size_t wq_size,
+                    std::size_t chans, champsim::data::bytes chan_width, std::size_t rows, std::size_t columns, std::size_t ranks, std::size_t bankgroups,
+                    std::size_t banks, std::size_t refreshes_per_period, std::string model_config_file = "");
 
 
   void initialize() final;

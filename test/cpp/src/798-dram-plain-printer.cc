@@ -135,3 +135,22 @@ TEST_CASE("The DRAM dbus congestion counters increment the printed stats")
 
   REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
 }
+
+TEST_CASE("The DRAM refresh counters increment the printed stats")
+{
+  dram_stats given{};
+  given.name = "test_channel";
+  given.refresh_cycles = 100;
+
+  std::vector<std::string> expected{
+    "test_channel RQ ROW_BUFFER_HIT:          0",
+    "  ROW_BUFFER_MISS:          0",
+    "  AVG DBUS CONGESTED CYCLE: -",
+    "test_channel WQ ROW_BUFFER_HIT:          0",
+    "  ROW_BUFFER_MISS:          0",
+    "  FULL:          0",
+    "test_channel REFRESHES ISSUED:        100"
+  };
+
+  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+}
