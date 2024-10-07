@@ -27,6 +27,8 @@ MemorySystem:
       impl: FRFCFS
     RefreshManager:
       impl: AllBank
+    RowPolicy:
+      impl: OpenRowPolicy
     plugins:
   AddrMapper:
     impl: RoRaCoBaBgCh
