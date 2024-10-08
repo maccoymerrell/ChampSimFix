@@ -109,6 +109,25 @@ namespace Ramulator{
 
       // Assume column is always the last level
       m_col_bits_idx = m_num_levels - 1;
+
+
+      //sanity check
+      Request R(268435456,0,0,nullptr);
+      bool bitmap[64];
+      for(int i = 0; i < 64; i++)
+        bitmap[i] = false;
+      for(int i = 0; i < 64; i++)
+      {
+        R.addr = 268435456 + i;
+        apply(R);
+        int rank_num = R.addr_vec[m_dram->m_levels("rank")];
+        int bg_num = R.addr_vec[m_dram->m_levels("bankgroup")];
+        int bank_num = R.addr_vec[m_dram->m_levels("bank")];
+
+        int index = (rank_num * 32) + (bg_num * 4) + bank_num;
+        assert(!bitmap[index]);
+        bitmap[index] = true;
+      }
     }
 
     bool gitBit(unsigned long BitIndex, Addr_t address){
@@ -119,15 +138,16 @@ namespace Ramulator{
       req.addr_vec.resize(m_num_levels, -1);
       Addr_t addr = req.addr >> m_tx_offset;
       Addr_t saved = addr; //save given adress with offsett
-       //channel
+      //channel
       req.addr_vec[m_dram->m_levels("channel")] = slice_lower_bits(addr, m_addr_bits[m_dram->m_levels("channel")]);
       //column
       req.addr_vec[m_dram->m_levels("column")] = slice_lower_bits(addr, m_addr_bits[m_dram->m_levels("column")]);
-       //bank group
-      if(m_dram->m_organization.count.size() > 5)
-      req.addr_vec[m_dram->m_levels("bankgroup")] = slice_lower_bits(addr, m_addr_bits[m_dram->m_levels("bankgroup")]);
       //bank
       req.addr_vec[m_dram->m_levels("bank")] = slice_lower_bits(addr, m_addr_bits[m_dram->m_levels("bank")]);
+      //bank group
+      if(m_dram->m_organization.count.size() > 5)
+      req.addr_vec[m_dram->m_levels("bankgroup")] = slice_lower_bits(addr, m_addr_bits[m_dram->m_levels("bankgroup")]);
+
       //rank
       req.addr_vec[m_dram->m_levels("rank")] = slice_lower_bits(addr, m_addr_bits[m_dram->m_levels("rank")]);
       //row
@@ -135,11 +155,11 @@ namespace Ramulator{
 
       req.addr_vec[m_dram->m_levels("rank")] = req.addr_vec[m_dram->m_levels("rank")] ^ (gitBit(27, saved) ^ gitBit(31,saved));
 
-      req.addr_vec[m_dram->m_levels("bank")] = req.addr_vec[m_dram->m_levels("bank")] ^ ((gitBit(24, saved) ^ gitBit(28, saved) ^ gitBit(32, saved)) |
-                                                ((gitBit(25, saved) ^ gitBit(29, saved) ^ gitBit(33, saved))<<1));// |
-                                                //((gitBit(26, saved) ^ gitBit(30, saved) ^ gitBit(34, saved))<<2);
+      req.addr_vec[m_dram->m_levels("bankgroup")] = req.addr_vec[m_dram->m_levels("bank")] ^ ((gitBit(24, saved) ^ gitBit(28, saved) ^ gitBit(32, saved)) |
+                                                ((gitBit(25, saved) ^ gitBit(29, saved) ^ gitBit(33, saved))<<1)) |
+                                                ((gitBit(26, saved) ^ gitBit(30, saved) ^ gitBit(34, saved))<<2);
       
-       req.addr_vec[m_dram->m_levels("bankgroup")] = req.addr_vec[m_dram->m_levels("bankgroup")] ^  ((gitBit(10, saved) ^ gitBit(19, saved)) |
+       req.addr_vec[m_dram->m_levels("bank")] = req.addr_vec[m_dram->m_levels("bankgroup")] ^  ((gitBit(10, saved) ^ gitBit(19, saved)) |
                                                 ((gitBit(9, saved) ^ gitBit(20, saved))<<1));
     }
     
