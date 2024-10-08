@@ -273,7 +273,7 @@ class HammerCounterPlugin : public IControllerPlugin, public Implementation {
           rb_miss++;
           uint64_t bank_count = m_dram->get_level_size("bank");
           int type = req_it->type_id == Ramulator::Request::Type::Write ? RH_WRITE : RH_READ;
-          HC.log_charge(convert_address(req_it),req_it->addr,0,type,req_it->source_id == 1,HC.total_cycles,req_it->type_id == Ramulator::Request::Type::Write);
+          HC.log_charge(convert_address(req_it),req_it->addr,0,type,false,HC.total_cycles,req_it->type_id == Ramulator::Request::Type::Write);
         }
         else if(m_dram->m_command_meta(req_it->command).is_refreshing) //refreshed
         {

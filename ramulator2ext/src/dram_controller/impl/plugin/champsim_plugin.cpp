@@ -12,6 +12,7 @@
 #include "dram_controller/plugin.h"
 #include "addr_mapper/addr_mapper.h"
 #include "memory_system/memory_system.h"
+#include "dram_controller/bh_controller.h"
 
 namespace Ramulator
 {
@@ -22,7 +23,7 @@ class ChampSimPlugin : public IControllerPlugin, public Implementation {
   long   progress = 0;
   private:
     IDRAM* m_dram = nullptr;
-    IDRAMController* m_controller = nullptr;
+    IBHDRAMController* m_controller = nullptr;
     IMemorySystem*   m_system = nullptr;
     IAddrMapper*     m_mapper = nullptr;
     IFrontEnd*       m_frontend = nullptr;
@@ -48,9 +49,9 @@ class ChampSimPlugin : public IControllerPlugin, public Implementation {
     };
 
     void setup(IFrontEnd* frontend, IMemorySystem* memory_system) override {
-      m_ctrl = cast_parent<IDRAMController>();
-      m_dram = m_ctrl->m_dram;
-      m_controller = m_ctrl;
+      //m_ctrl = cast_parent<IBHDRAMController>();
+      m_controller = cast_parent<IBHDRAMController>();
+      m_dram = m_controller->m_dram;
       m_system = memory_system;
       m_mapper = m_system->get_ifce<IAddrMapper>();
       m_frontend = frontend;

@@ -11,6 +11,7 @@ target_sources(
   rowpolicy.h
 
   impl/bh_dram_controller.cpp
+  impl/bliss_dram_controller.cpp
   impl/dummy_controller.cpp
   impl/generic_dram_controller.cpp
   impl/prac_dram_controller.cpp
