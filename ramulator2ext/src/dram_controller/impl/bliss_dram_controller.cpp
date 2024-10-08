@@ -8,7 +8,7 @@ class BLISSDRAMController final : public IBHDRAMController, public Implementatio
   RAMULATOR_REGISTER_IMPLEMENTATION(IBHDRAMController, BLISSDRAMController, "BLISSDRAMController", "BLISS DRAM controller.");
   
   private:
-    Logger_t m_logger;
+    //Logger_t m_logger;
     std::deque<Request> pending;          // A queue for read requests that are about to finish (callback after RL)
 
     ReqBuffer m_active_buffer;            // Buffer for requests being served. This has the highest priority 
@@ -45,7 +45,7 @@ class BLISSDRAMController final : public IBHDRAMController, public Implementatio
       m_scheduler = create_child_ifce<IBHScheduler>();
       m_refresh = create_child_ifce<IRefreshManager>();
       m_rowpolicy = create_child_ifce<IRowPolicy>();
-      m_logger = Logging::create_logger("DBHCTRL");
+      //m_logger = Logging::create_logger("DBHCTRL");
 
       if (m_config["plugins"]) {
         YAML::Node plugin_configs = m_config["plugins"];

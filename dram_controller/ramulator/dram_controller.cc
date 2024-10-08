@@ -82,7 +82,7 @@ MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::chrono::picoseconds dbus_period, 
 
   //grab channel width from Ramulator
   channel_width = champsim::data::bytes(Ramulator::get_ramulator_channel_width(ramulator2_frontend));
-
+  chans = Ramulator::get_ramulator_field_size(ramulator2_frontend,"channel");
   //this will help report stats
   for (std::size_t i{0}; i < chans; ++i) {
     channels.emplace_back(dbus_period, mc_period, t_rp, t_rcd, t_cas, t_ras, refresh_period, refreshes_per_period, chan_width, rq_size, wq_size, ramulator2_frontend);

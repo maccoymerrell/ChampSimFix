@@ -158,7 +158,7 @@ class ActivateCounterPlugin : public IControllerPlugin, public Implementation {
 
       if (total_cycles % cycles_per_heartbeat == 0) {
         // print heartbeat
-        uint64_t bank_util = processed_packets * m_dram->m_internal_prefetch_size * 8;
+        uint64_t bank_util = processed_packets * m_dram->m_internal_prefetch_size * (m_dram->m_channel_width/8);
         double cum_hit_rate = ((rb_hits) / double(rb_hits + rb_miss));
         double hit_rate = ((rb_hits - last_rb_hits) / double((rb_hits-last_rb_hits + rb_miss - last_rb_miss)));
 
@@ -264,7 +264,7 @@ void ActivateCounter::log_charge(Address addr, bool prefetch, bool write_back)
     activate_master[addr].read_activations++;
 
   activate_master[addr].total_activations++;
-  if(activate_master[addr].total_activations > highest_activates_per_cycle_read)
+  if(activate_master[addr].total_activations > highest_activates_per_cycle_read + highest_activates_per_cycle_writeback + highest_activates_per_cycle_prefetch)
   {
     highest_activates_per_cycle_read = activate_master[addr].read_activations;
     highest_activates_per_cycle_prefetch = activate_master[addr].prefetch_activations;
@@ -297,11 +297,12 @@ void ActivateCounter::log_cycle()
   if (total_cycles % cycles_per_heartbeat == 0) {
     // print heartbeat
     std::cout << "Heartbeat ACTIVATE COUNTER " << channel_num << " : " << (unsigned long)(total_cycles) << " Highest ACT Row: " << std::hex
-              << highest_activates_row << std::dec << " ACT Count: " << highest_activates_per_cycle_read << " (" << highest_activates_per_cycle_prefetch
-              << ")" << std::dec << " Heartbeat ACTs: " << ((row_activates_r + row_activates_wb) - last_activate_cycles)
+              << highest_activates_row << std::dec << " ACT Count: " << highest_activates_per_cycle_read << ":" << highest_activates_per_cycle_writeback << ":" << highest_activates_per_cycle_prefetch
+              << std::dec << " Heartbeat ACTs: " << ((row_activates_r + row_activates_wb) - last_activate_cycles)
               << "\n";
     highest_activates_per_cycle_read = 0;
     highest_activates_per_cycle_prefetch = 0;
+    highest_activates_per_cycle_writeback = 0;
     last_activate_cycles = row_activates_r + row_activates_wb;
   }
 }
@@ -367,20 +368,35 @@ void ActivateCounter::print_file()
   // print histograms now
   std::ofstream file_hr;
   file_hr.open(file_name + ".hr");
-  for (auto it = read_activate_histogram.begin(); it != read_activate_histogram.end(); it++) {
-    file_hr << (it->first * 100) << " " << it->second << "\n";
+  for (uint64_t i = 0; i < total_cycles / cycles_per_bin; i++)
+  {
+    auto entry = read_activate_histogram.find(i);
+    if(entry != std::end(read_activate_histogram))
+      file_hr << (i*100) << " " << entry->second << "\n";
+    else
+      file_hr << (i*100) << " " << 0 << "\n";
   }
   file_hr.close();
   std::ofstream file_hp;
   file_hp.open(file_name + ".hp");
-  for (auto it = pref_activate_histogram.begin(); it != pref_activate_histogram.end(); it++) {
-    file_hp << (it->first * 100) << " " << it->second << "\n";
+  for (uint64_t i = 0; i < total_cycles / cycles_per_bin; i++)
+  {
+    auto entry = pref_activate_histogram.find(i);
+    if(entry != std::end(pref_activate_histogram))
+      file_hp << (i*100) << " " << entry->second << "\n";
+    else
+      file_hp << (i*100) << " " << 0 << "\n";
   }
   file_hp.close();
   std::ofstream file_hwb;
   file_hwb.open(file_name + ".hwb");
-  for (auto it = wb_activate_histogram.begin(); it != wb_activate_histogram.end(); it++) {
-    file_hwb << (it->first * 100) << " " << it->second << "\n";
+  for (uint64_t i = 0; i < total_cycles / cycles_per_bin; i++)
+  {
+    auto entry = wb_activate_histogram.find(i);
+    if(entry != std::end(wb_activate_histogram))
+      file_hwb << (i*100) << " " << entry->second << "\n";
+    else
+      file_hwb << (i*100) << " " << 0 << "\n";
   }
   file_hwb.close();
 

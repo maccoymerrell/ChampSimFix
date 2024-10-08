@@ -3,7 +3,7 @@
     "block_size": 64,
     "page_size": 4096,
     "heartbeat_frequency": 10000000,
-    "num_cores": 1,
+    "num_cores": 4,
 
     "ooo_cpu": [
         {
@@ -71,8 +71,8 @@
     },
 
     "L2C": {
-        "sets": 1024,
-        "ways": 20,
+        "sets": 2048,
+        "ways": 10,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -143,7 +143,7 @@
     "LLC": {
         "frequency": 4000,
         "sets": 16384,
-        "ways": 25,
+        "ways": 10,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
