@@ -38,6 +38,7 @@ target_sources(
   impl/plugin/rfm_manager.cpp
   impl/plugin/champsim_plugin.cpp
   impl/plugin/hammer_counter.cpp
+  impl/plugin/activate_counter.cpp
 
   impl/plugin/blockhammer/blockhammer_throttler.h 
   impl/plugin/blockhammer/blockhammer_util.h 

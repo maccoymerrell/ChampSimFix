@@ -62,8 +62,14 @@ public:
     void tick() override { };
 
     bool receive_external_requests(int req_type_id, Addr_t addr, int source_id, std::function<void(Request&)> callback) override {
-    return m_memory_system->send({addr, req_type_id, source_id, callback});
+      if(req_type_id == (int)access_type::PREFETCH)
+        return m_memory_system->send({addr,Ramulator::Request::Type::Read,source_id,true,callback});
+      else if(req_type_id == (int)access_type::WRITE)
+        return m_memory_system->send({addr,Ramulator::Request::Type::Write,source_id,false,callback});
+      else
+        return m_memory_system->send({addr,Ramulator::Request::Type::Read,source_id,false,callback});
     }
+
     int get_num_cores() { return (int)NUM_CPUS; };
 
 private:

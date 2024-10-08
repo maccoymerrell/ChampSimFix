@@ -9,34 +9,38 @@ Frontend:
               
 
 MemorySystem:
-  impl: GenericDRAM
+  impl: BHDRAMSystem
   clock_ratio: 1
 
   DRAM:
-    impl: DDR4-VRR
+    impl: DDR5-VRR
+    RFM:
     org:
-      preset: DDR4_4Gb_x8
+      preset: DDR5_16Gb_x8
       channel: 1
-      rank: 1
+      rank: 2
     timing:
-      preset: DDR4_3200W
+      preset: DDR5_3200AN
 
-  Controller:
-    impl: Generic
-    Scheduler:
-      impl: FRFCFS
+  BHDRAMController:
+    impl: BLISSDRAMController
+    BHScheduler:
+      impl: BLISS
     RefreshManager:
       impl: AllBank
     RowPolicy:
       impl: OpenRowPolicy
     plugins:
       - ControllerPlugin: {
-          impl: HammerCounter,
+          impl: ActivateCounter,
           output_file: hammer_test,
           cycles_per_heartbeat: 1000000,
-          histogram_period: 100e-6,
-          refresh_period: 64e-3,
-          target_cycle: 0 } 
+          histogram_period: 100e-6 } 
+      - ControllerPlugin: {
+          impl: BLISS }
+      - ControllerPlugin: {
+          impl: PARA,
+          threshold: 0.0137}
 
   AddrMapper:
-    impl: RoRaCoBaBgCh
+    impl: AldrLake
