@@ -27,7 +27,7 @@
             "dispatch_latency": 2,
             "schedule_latency": 1,
             "execute_latency": 3,
-            "branch_predictor": "hashed_perceptron",
+            "branch_predictor": "bimodal",
             "btb": "basic_btb"
         }
     ],
