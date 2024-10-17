@@ -56,6 +56,11 @@ public:
   uint64_t cycles_per_bin;
   uint64_t channel_num;
   uint64_t total_cycles;
+
+  bool started = false;
+  uint64_t duration_cycles = 0;
+  uint64_t end_cycle;
+
   ActivateCounter();
   static void set_output_file(std::string f);
   static std::string get_output_file();
@@ -70,6 +75,7 @@ public:
   void set_dram_columns(uint64_t column_count) {dram_columns = column_count;};
   void set_dram_channels(uint64_t channel_count) {dram_channels = channel_count;};
   void set_dram_cap(uint64_t dram_count) {dram_cap = dram_count;};
+  void set_cycle_duration(uint64_t cycles) {end_cycle = cycles;};
   void print_file();
 };
 
@@ -106,6 +112,7 @@ class ActivateCounterPlugin : public IControllerPlugin, public Implementation {
         std::string output_file = param<std::string>("output_file").desc("Name of output file").required();
         cycles_per_heartbeat = param<uint64_t>("cycles_per_heartbeat").desc("Rate at which DRAM heartbeat is printed").required();
         histogram_period = param<double>("histogram_period").desc("Bin size for histograms").required();
+        HC.set_cycle_duration(param<double>("duration").desc("cycles to collect data for after first access").required());
         HC.set_output_file(output_file);
         HC.set_cycles_per_heartbeat(cycles_per_heartbeat);
     };
@@ -249,6 +256,10 @@ void ActivateCounter::perform_histogram(Address addr, bool prefetch, bool write_
 
 void ActivateCounter::log_charge(Address addr, bool prefetch, bool write_back)
 {
+  if(duration_cycles > end_cycle)
+    return;
+    
+  started = true;
   channel_num = addr.get_channel();
   uint64_t dram_row = addr.get_row();
 
@@ -293,6 +304,8 @@ void ActivateCounter::log_charge(Address addr, bool prefetch, bool write_back)
 void ActivateCounter::log_cycle()
 {
   total_cycles++;
+  if(started)
+    duration_cycles++;
 
   if (total_cycles % cycles_per_heartbeat == 0) {
     // print heartbeat

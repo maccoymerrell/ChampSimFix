@@ -3,7 +3,7 @@
     "block_size": 64,
     "page_size": 4096,
     "heartbeat_frequency": 10000000,
-    "num_cores": 4,
+    "num_cores": 8,
 
     "ooo_cpu": [
         {
@@ -67,7 +67,7 @@
         "prefetch_as_load": false,
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
-        "prefetcher": "berti"
+        "prefetcher": "no"
     },
 
     "L2C": {
@@ -83,7 +83,7 @@
         "prefetch_as_load": false,
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
-        "prefetcher": "no"
+        "prefetcher": "spp_dev"
 	},
 
     "ITLB": {
@@ -142,7 +142,7 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 16384,
+        "sets": 32768,
         "ways": 10,
         "rq_size": 192,
         "wq_size": 192,

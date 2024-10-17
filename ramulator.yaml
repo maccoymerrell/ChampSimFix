@@ -35,8 +35,9 @@ MemorySystem:
       - ControllerPlugin: {
           impl: ActivateCounter,
           output_file: hammer_test,
-          cycles_per_heartbeat: 1000000,
-          histogram_period: 100e-6 } 
+          cycles_per_heartbeat: 51200000,
+          duration: 51200000,
+          histogram_period: 500e-6 } 
       - ControllerPlugin: {
           impl: BLISS }
 
