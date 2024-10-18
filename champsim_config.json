@@ -3,7 +3,7 @@
     "block_size": 64,
     "page_size": 4096,
     "heartbeat_frequency": 10000000,
-    "num_cores": 8,
+    "num_cores": 1,
 
     "ooo_cpu": [
         {
@@ -27,7 +27,7 @@
             "dispatch_latency": 2,
             "schedule_latency": 1,
             "execute_latency": 3,
-            "branch_predictor": "bimodal",
+            "branch_predictor": "hp_new",
             "btb": "basic_btb"
         }
     ],
@@ -67,7 +67,7 @@
         "prefetch_as_load": false,
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
-        "prefetcher": "bouquet_l1d"
+        "prefetcher": "no"
     },
 
     "L2C": {
@@ -83,7 +83,7 @@
         "prefetch_as_load": false,
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
-        "prefetcher": "bouquet_l2c"
+        "prefetcher": "no"
 	},
 
     "ITLB": {
@@ -142,15 +142,15 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
+        "sets": 4096,
         "ways": 10,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
         "mshr_size": 192,
         "latency": 45,
-        "max_tag_check": 8,
-        "max_fill": 8,
+        "max_tag_check": 1,
+        "max_fill": 1,
         "prefetch_as_load": false,
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
