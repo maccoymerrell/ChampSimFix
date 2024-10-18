@@ -67,7 +67,7 @@
         "prefetch_as_load": false,
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
-        "prefetcher": "no"
+        "prefetcher": "bouquet_l1d"
     },
 
     "L2C": {
@@ -83,7 +83,7 @@
         "prefetch_as_load": false,
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
-        "prefetcher": "spp_dev"
+        "prefetcher": "bouquet_l2c"
 	},
 
     "ITLB": {
@@ -149,8 +149,8 @@
         "pq_size": 64,
         "mshr_size": 192,
         "latency": 45,
-        "max_tag_check": 1,
-        "max_fill": 1,
+        "max_tag_check": 8,
+        "max_fill": 8,
         "prefetch_as_load": false,
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
