@@ -74,6 +74,11 @@ phase_stats do_phase(const phase_info& phase, environment& env, std::vector<trac
   const auto time_quantum = std::accumulate(std::cbegin(operables), std::cend(operables), champsim::chrono::clock::duration::max(),
                                             [](const auto acc, const operable& y) { return std::min(acc, y.clock_period); });
 
+  bool livelock{false};
+  uint64_t livelock_period{1000000};
+  uint64_t livelock_progress{10000};
+  std::vector<uint64_t> livelock_timer(std::size(env.cpu_view()),0);
+  std::vector<uint64_t> livelock_instr(std::size(env.cpu_view()),0);
   // Perform phase
   int stalled_cycle{0};
   std::vector<bool> phase_complete(std::size(env.cpu_view()), false);
@@ -89,7 +94,8 @@ phase_stats do_phase(const phase_info& phase, environment& env, std::vector<trac
       stalled_cycle = 0;
     }
 
-    if (stalled_cycle >= DEADLOCK_CYCLE) {
+
+    if (stalled_cycle >= DEADLOCK_CYCLE || livelock) {
       std::for_each(std::begin(operables), std::end(operables), [](champsim::operable& c) { c.print_deadlock(); });
       abort();
     }
@@ -103,6 +109,15 @@ phase_stats do_phase(const phase_info& phase, environment& env, std::vector<trac
     for (O3_CPU& cpu : env.cpu_view()) {
       // Phase complete
       next_phase_complete[cpu.cpu] = next_phase_complete[cpu.cpu] || (cpu.sim_instr() >= length);
+      if(cpu.sim_instr() <= livelock_instr[cpu.cpu] + livelock_progress){
+        livelock_timer[cpu.cpu]++;
+        if(livelock_timer[cpu.cpu] > livelock_period)
+          livelock = true;
+      }
+      else {
+        livelock_timer[cpu.cpu] = 0;
+        livelock_instr[cpu.cpu] = cpu.sim_instr();
+      }
     }
 
     for (O3_CPU& cpu : env.cpu_view()) {
@@ -115,7 +130,6 @@ phase_stats do_phase(const phase_info& phase, environment& env, std::vector<trac
                    cpu.sim_instr(), cpu.sim_cycle(), std::ceil(cpu.sim_instr()) / std::ceil(cpu.sim_cycle()), elapsed_time());
       }
     }
-
     phase_complete = next_phase_complete;
   }
 
