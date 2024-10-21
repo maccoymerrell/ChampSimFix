@@ -341,7 +341,7 @@ void ActivateCounter::print_file(bool is_end)
 {
   if(phase > 0)
   return;
-  
+
   std::string file_name;
   file_name = output_f + "_" + std::to_string(channel_num) + "c_" + std::to_string(phase) + "p";
   if(is_end)
@@ -402,9 +402,9 @@ void ActivateCounter::print_file(bool is_end)
   {
     auto entry = read_activate_histogram.find(i);
     if(entry != std::end(read_activate_histogram))
-      file_hr << (i*100) << " " << entry->second << "\n";
+      file_hr << (i) << " " << entry->second << "\n";
     else
-      file_hr << (i*100) << " " << 0 << "\n";
+      file_hr << (i) << " " << 0 << "\n";
   }
   file_hr.close();
   std::ofstream file_hp;
@@ -413,9 +413,9 @@ void ActivateCounter::print_file(bool is_end)
   {
     auto entry = pref_activate_histogram.find(i);
     if(entry != std::end(pref_activate_histogram))
-      file_hp << (i*100) << " " << entry->second << "\n";
+      file_hp << (i) << " " << entry->second << "\n";
     else
-      file_hp << (i*100) << " " << 0 << "\n";
+      file_hp << (i) << " " << 0 << "\n";
   }
   file_hp.close();
   std::ofstream file_hwb;
@@ -424,9 +424,9 @@ void ActivateCounter::print_file(bool is_end)
   {
     auto entry = wb_activate_histogram.find(i);
     if(entry != std::end(wb_activate_histogram))
-      file_hwb << (i*100) << " " << entry->second << "\n";
+      file_hwb << (i) << " " << entry->second << "\n";
     else
-      file_hwb << (i*100) << " " << 0 << "\n";
+      file_hwb << (i) << " " << 0 << "\n";
   }
   file_hwb.close();
 
