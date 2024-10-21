@@ -20,6 +20,9 @@ class ActivateCounter
   uint64_t dram_channels;
   uint64_t dram_cap;
 
+  uint64_t refresh_cycle = 0;
+  uint64_t cycles_since_refresh = 0;
+
 
   std::map<Address, ActivateLifetimeCount> activate_master;
   std::map<uint64_t, uint64_t> read_activate_histogram;
@@ -29,6 +32,7 @@ class ActivateCounter
   static std::string output_f;
 
   uint64_t cycles_per_heartbeat;
+  uint64_t cycles_per_refresh;
 
   uint64_t phase;
 
@@ -58,7 +62,6 @@ public:
   uint64_t total_cycles;
 
   bool started = false;
-  uint64_t duration_cycles = 0;
   uint64_t end_cycle;
 
   ActivateCounter();
@@ -67,6 +70,7 @@ public:
   void log_charge(Address addr, bool prefetch, bool write_back);
   
   void log_cycle();
+  void set_cycles_per_refresh(uint64_t c_p_r) {cycles_per_refresh = c_p_r;};
   void set_cycles_per_heartbeat(uint64_t c_p_h) {cycles_per_heartbeat = c_p_h;};
   void set_cycles_per_bin(uint64_t c_p_b)   {cycles_per_bin = c_p_b;}; // 500us heartbeat
   void set_dram_rows(uint64_t row_count)    {dram_rows = row_count;};
@@ -75,8 +79,7 @@ public:
   void set_dram_columns(uint64_t column_count) {dram_columns = column_count;};
   void set_dram_channels(uint64_t channel_count) {dram_channels = channel_count;};
   void set_dram_cap(uint64_t dram_count) {dram_cap = dram_count;};
-  void set_cycle_duration(uint64_t cycles) {end_cycle = cycles;};
-  void print_file();
+  void print_file(bool is_end);
 };
 
 
@@ -112,7 +115,7 @@ class ActivateCounterPlugin : public IControllerPlugin, public Implementation {
         std::string output_file = param<std::string>("output_file").desc("Name of output file").required();
         cycles_per_heartbeat = param<uint64_t>("cycles_per_heartbeat").desc("Rate at which DRAM heartbeat is printed").required();
         histogram_period = param<double>("histogram_period").desc("Bin size for histograms").required();
-        HC.set_cycle_duration(param<double>("duration").desc("cycles to collect data for after first access").required());
+        refresh_period = param<double>("refresh_period").desc("refresh period of dram").required();
         HC.set_output_file(output_file);
         HC.set_cycles_per_heartbeat(cycles_per_heartbeat);
     };
@@ -130,6 +133,7 @@ class ActivateCounterPlugin : public IControllerPlugin, public Implementation {
       tCK = m_dram->m_timing_vals("tCK_ps") * 1e-12;
 
       HC.set_cycles_per_bin(uint64_t(histogram_period/tCK));
+      HC.set_cycles_per_refresh(uint64_t(refresh_period/tCK));
 
       register_stat(rb_miss).name("total_rowbuffer_misses");
       register_stat(rb_hits).name("total_rowbuffer_hits");
@@ -179,7 +183,7 @@ class ActivateCounterPlugin : public IControllerPlugin, public Implementation {
     };
 
     void finalize() override {
-      HC.print_file();
+      HC.print_file(true);
     }
 
 };
@@ -256,8 +260,6 @@ void ActivateCounter::perform_histogram(Address addr, bool prefetch, bool write_
 
 void ActivateCounter::log_charge(Address addr, bool prefetch, bool write_back)
 {
-  if(duration_cycles > end_cycle)
-    return;
     
   started = true;
   channel_num = addr.get_channel();
@@ -304,8 +306,6 @@ void ActivateCounter::log_charge(Address addr, bool prefetch, bool write_back)
 void ActivateCounter::log_cycle()
 {
   total_cycles++;
-  if(started)
-    duration_cycles++;
 
   if (total_cycles % cycles_per_heartbeat == 0) {
     // print heartbeat
@@ -318,6 +318,16 @@ void ActivateCounter::log_cycle()
     highest_activates_per_cycle_writeback = 0;
     last_activate_cycles = row_activates_r + row_activates_wb;
   }
+
+  if(started)
+    cycles_since_refresh++;
+
+  if((cycles_since_refresh >= cycles_per_refresh))
+  {
+    print_file(false);
+    refresh_cycle++;
+    cycles_since_refresh = 0;
+  }
 }
 
 bool sortbysec(const std::pair<Address, ActivateLifetimeCount>& a, const std::pair<Address, ActivateLifetimeCount>& b)
@@ -327,10 +337,17 @@ bool sortbysec(const std::pair<Address, ActivateLifetimeCount>& a, const std::pa
 
 void ActivateCounter::set_output_file(std::string f) { output_f = f; }
 
-void ActivateCounter::print_file()
+void ActivateCounter::print_file(bool is_end)
 {
+  if(phase > 0)
+  return;
+  
   std::string file_name;
-  file_name = output_f + "_" + std::to_string(channel_num) + "_" + std::to_string(phase);
+  file_name = output_f + "_" + std::to_string(channel_num) + "c_" + std::to_string(phase) + "p";
+  if(is_end)
+  file_name += "_end"; 
+  else
+  file_name += "_" + std::to_string(refresh_cycle) + "r";
 
   // calculate what percentage of each address space was used
   uint64_t unique_rows_visited = 0;
@@ -413,7 +430,11 @@ void ActivateCounter::print_file()
   }
   file_hwb.close();
 
+  if(is_end)
   phase++;
 
   activate_master.clear();
+  row_activates_r = 0;
+  row_activates_rp = 0;
+  row_activates_wb = 0;
 }
