@@ -27,7 +27,14 @@ MemorySystem:
       impl: FRFCFS
     RefreshManager:
       impl: AllBank
-    plugins: 
+    plugins:
+      - ControllerPlugin: {impl: ChampSimStats}
+      - ControllerPlugin: {impl: HammerCounter,
+                           output_file: hammer_test,
+                           cycles_per_heartbeat: 1000000,
+                           histogram_period: 100e-6,
+                           refresh_period: 64e-3,
+                           target_cycle: 0}
 
   AddrMapper:
-    impl: RoRaCoBaBgCh
+    impl: RASL

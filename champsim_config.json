@@ -159,7 +159,8 @@
     },
 
     "physical_memory": {
-    	"model": "integrated",
+    	"model": "ramulator",
+        "config": "ramulator.yaml",
         "frequency": 3200,
         "channels": 1,
         "ranks": 2,

@@ -1,0 +1,4 @@
+Rate for instruction 0: 34.6154%
+Rate for instruction 1: 25%
+Rate for instruction 2: 19.2308%
+Rate for instruction 3: 19.2308%
