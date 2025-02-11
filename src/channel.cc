@@ -51,6 +51,12 @@ bool do_collision_for_merge(Iter begin, Iter end, champsim::channel::request_typ
 {
   return do_collision_for(begin, end, packet, shamt, [](champsim::channel::request_type& source, champsim::channel::request_type& destination) {
     destination.response_requested |= source.response_requested;
+    if(destination.type == access_type::PROMOTION && source.type == access_type::PREFETCH) {
+      destination.type = access_type::LOAD;
+    }
+    if(source.type == access_type::PROMOTION && destination.type == access_type::PREFETCH) {
+      source.type = access_type::LOAD;
+    }
     auto instr_copy = std::move(destination.instr_depend_on_me);
 
     std::set_union(std::begin(instr_copy), std::end(instr_copy), std::begin(source.instr_depend_on_me), std::end(source.instr_depend_on_me),
@@ -96,6 +102,7 @@ void champsim::channel::check_collision()
     } else {
 
       //now that we have one, check PQ for matches
+      
       for (auto pq_it = std::begin(PQ); pq_it != std::end(PQ);) {
         if((rq_it->address.slice_upper(read_shamt) == pq_it->address.slice_upper(read_shamt)) && (rq_it->is_translated == pq_it->is_translated)) {
           //merge returns for PQ into RQ
@@ -104,7 +111,8 @@ void champsim::channel::check_collision()
           std::set_union(std::begin(instr_copy), std::end(instr_copy), std::begin(pq_it->instr_depend_on_me), std::end(pq_it->instr_depend_on_me),
                 std::back_inserter(rq_it->instr_depend_on_me));
           //drop PQ
-          rq_it->type = access_type::PROMOTION;
+          if(rq_it->type == access_type::PROMOTION)
+            rq_it->type = access_type::LOAD;
           pq_it = PQ.erase(pq_it);
         }
         else

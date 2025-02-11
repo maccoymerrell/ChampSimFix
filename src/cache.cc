@@ -122,10 +122,14 @@ CACHE::mshr_type CACHE::mshr_type::merge(mshr_type predecessor, mshr_type succes
                  std::back_inserter(merged_return));
 
   mshr_type retval{successor.type == access_type::PREFETCH ? predecessor : successor};
+
+  retval.was_promoted = predecessor.was_promoted || successor.was_promoted;
   if(successor.type == access_type::PREFETCH) {
-    retval.type = predecessor.type;// == access_type::PREFETCH && !successor.prefetch_from_this ? access_type::PROMOTION : predecessor.type; 
+    retval.type = predecessor.type;
   }
   else {
+    if(predecessor.type == access_type::PREFETCH && successor.type != access_type::PREFETCH)
+      retval.was_promoted = true;
     retval.type = successor.type;
   }
 
@@ -269,7 +273,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
     // COLLECT STATS
     sim_stats.total_miss_latency_cycles += (current_time - (fill_mshr.time_enqueued + clock_period)) / clock_period;
 
-    response_type response{fill_mshr.back_off, fill_mshr.row_act, fill_mshr.type, fill_mshr.address, fill_mshr.v_address, fill_mshr.data_promise->data, metadata_thru, fill_mshr.instr_depend_on_me};
+    response_type response{fill_mshr.back_off, fill_mshr.row_act, fill_mshr.type == access_type::PROMOTION ? access_type::LOAD : fill_mshr.type, fill_mshr.address, fill_mshr.v_address, fill_mshr.data_promise->data, metadata_thru, fill_mshr.instr_depend_on_me};
     for (auto* ret : fill_mshr.to_return) {
       ret->push_back(response);
     }
@@ -325,9 +329,11 @@ bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
   if (hit) {
     sim_stats.hits.increment(std::pair{handle_pkt.type, handle_pkt.cpu});
 
-    response_type response{handle_pkt.back_off, handle_pkt.row_act, handle_pkt.type, handle_pkt.address, handle_pkt.v_address, way->data, metadata_thru, handle_pkt.instr_depend_on_me};
-    for (auto* ret : handle_pkt.to_return) {
-      ret->push_back(response);
+    if(handle_pkt.type != access_type::PROMOTION) {
+      response_type response{handle_pkt.back_off, handle_pkt.row_act, handle_pkt.type, handle_pkt.address, handle_pkt.v_address, way->data, metadata_thru, handle_pkt.instr_depend_on_me};
+      for (auto* ret : handle_pkt.to_return) {
+        ret->push_back(response);
+      }
     }
 
     way->dirty |= (handle_pkt.type == access_type::WRITE);
@@ -388,16 +394,18 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
 
   if (mshr_entry != MSHR.end()) // miss already inflight
   {
-    if (mshr_entry->type == access_type::PREFETCH && ((handle_pkt.type != access_type::PREFETCH /*|| !handle_pkt.prefetch_from_this*/) && handle_pkt.type != access_type::WRITE)) {
-      mshr_pkt.second.response_requested = true;
+    if (mshr_entry->type == access_type::PREFETCH && ((handle_pkt.type != access_type::PREFETCH) && handle_pkt.type != access_type::WRITE)) {
+      
+      
+      mshr_pkt.second.response_requested = false;
       mshr_pkt.second.type = access_type::PROMOTION;
       bool success = lower_level->add_rq(mshr_pkt.second);
       if(!success)
         return false;
 
       sim_stats.downstream_packets.increment(std::pair{access_type::PROMOTION, handle_pkt.cpu});
+      
       //fmt::print("[{}] Issued promotion packet for {}\n",NAME,mshr_pkt.second.address);
-
     }
     if(mshr_entry->type == access_type::PREFETCH && handle_pkt.type != access_type::PREFETCH) {
       // Mark the prefetch as useful
@@ -413,11 +421,11 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
     }
 
     //I think this is fine. Will need to check
-    //if(handle_pkt.type == access_type::PROMOTION && handle_pkt.prefetch_from_this) {
+    if(handle_pkt.type == access_type::PROMOTION /*&& handle_pkt.prefetch_from_this*/) {
       //fmt::print("[{}] Promotion dropped for {}\n",NAME,mshr_pkt.second.address);
-    //  sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.cpu});
-    //  return true;
-    //}
+      sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.cpu});
+      return true;
+    }
 
     const bool send_to_rq = (prefetch_as_load || handle_pkt.type != access_type::PREFETCH);
     bool success = send_to_rq ? lower_level->add_rq(mshr_pkt.second) : lower_level->add_pq(mshr_pkt.second);
@@ -524,9 +532,13 @@ long CACHE::operate()
   manage_pq();
 
   // Finish returns
-  std::for_each(std::cbegin(lower_level->returned), std::cend(lower_level->returned), [this](const auto& pkt) { this->finish_packet(pkt); });
-  progress += std::distance(std::cbegin(lower_level->returned), std::cend(lower_level->returned));
-  lower_level->returned.clear();
+  auto do_finish_packet = [this](const auto& pkt) {
+    return this->finish_packet(pkt);
+  };
+  auto finish_packet_end = std::stable_partition(std::begin(lower_level->returned),std::end(lower_level->returned), do_finish_packet);
+  //std::for_each(std::cbegin(lower_level->returned), std::cend(lower_level->returned), [this](const auto& pkt) { this->finish_packet(pkt); });
+  progress += std::distance(std::begin(lower_level->returned), finish_packet_end);
+  lower_level->returned.erase(std::begin(lower_level->returned), finish_packet_end);
 
   // Finish translations
   if (lower_translate != nullptr) {
@@ -738,49 +750,62 @@ bool CACHE::prefetch_line(uint64_t /*deprecated*/, uint64_t /*deprecated*/, uint
 }
 // LCOV_EXCL_STOP
 
-void CACHE::finish_packet(const response_type& packet)
+bool CACHE::finish_packet(const response_type& packet)
 {
   // check MSHR information
   auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(packet.address));
   auto first_unreturned = std::find_if(MSHR.begin(), MSHR.end(), [](auto x) { return x.data_promise.has_unknown_readiness(); });
 
-  bool expect_empty = packet.type == access_type::DROPPED || packet.type == access_type::PROMOTION || packet.type == access_type::PREFETCH;
+  bool expect_empty = packet.type == access_type::DROPPED;
+  assert(packet.type != access_type::PROMOTION);
   // sanity check
-  if (mshr_entry == MSHR.end() && !expect_empty) {
+  if ((mshr_entry == MSHR.end() || !mshr_entry->data_promise.has_unknown_readiness()) && !expect_empty) {
     fmt::print(stderr, "[{}_MSHR] {} cannot find a matching entry! address: {} v_address: {}\n", NAME, __func__, packet.address, packet.v_address);
     assert(0);
   }
   else if (mshr_entry == MSHR.end() || !mshr_entry->data_promise.has_unknown_readiness()) {
-    //packet returned to no open MSHR, go ahead and drop it.
-    /*
-    if(packet.type == access_type::DROPPED)
-      fmt::print("{} DROP arrived {} , but prefetch was promoted and filled already\n", NAME, packet.address);
-    else if(packet.type == access_type::PROMOTION)
-      fmt::print("{} PROMOTION returned {} (without success), but prefetch was filled already\n", NAME, packet.address);
-    else if(packet.type == access_type::PREFETCH)
-      fmt::print("{} PREFETCH returned {}, but PREFETCH was filled already by DEMAND\n", NAME, packet.address);
-    else
-      fmt::print("{} OTHER returned {}, but entry was already filled\n",NAME,packet.address);
-    */
     sim_stats.returned_packets.increment(std::pair{packet.type, 0});
-    sim_stats.pr_missed++;
-    return;
+    return true;
   }
   //Ignore drops if the prefetch was promoted
-  if(mshr_entry->type != access_type::PREFETCH && packet.type == access_type::DROPPED) {
-    sim_stats.returned_packets.increment(std::pair{packet.type, 0});
+  //if(mshr_entry->type != access_type::PREFETCH && packet.type == access_type::DROPPED) {
+  //  sim_stats.returned_packets.increment(std::pair{packet.type, 0});
     //fmt::print("{} Ignoring drop for {}, but promotion packet should be in-flight\n",NAME,packet.address);
-    return;
+  //  return;
+  //}
+  if(packet.type == access_type::LOAD && mshr_entry->was_promoted)
+    sim_stats.returned_packets.increment(std::pair{access_type::PROMOTION, mshr_entry->cpu});
+  else if(mshr_entry->was_promoted && packet.type == access_type::PREFETCH) {
+    sim_stats.pr_missed++;
   }
+  else
+    sim_stats.returned_packets.increment(std::pair{packet.type, mshr_entry->cpu});
 
-  sim_stats.returned_packets.increment(std::pair{packet.type, mshr_entry->cpu});
+  if(packet.type == access_type::DROPPED && mshr_entry->type != access_type::PREFETCH) {
+    request_type refetch_request;
+    refetch_request.cpu = mshr_entry->cpu;
+    refetch_request.address = mshr_entry->address;
+    refetch_request.data = mshr_entry->data_promise->data;
+    refetch_request.instr_id = mshr_entry->instr_id;
+    refetch_request.ip = mshr_entry->ip;
+    refetch_request.type = access_type::REFETCH;
+    refetch_request.pf_metadata = mshr_entry->data_promise->pf_metadata;
+    refetch_request.response_requested = true;
+    auto success = lower_level->add_rq(refetch_request);
+
+    if (!success) {
+      return false;
+    }
+    sim_stats.downstream_packets.increment(std::pair{refetch_request.type, refetch_request.cpu});
+    return true;
+  }
 
   // MSHR holds the most updated information about this request
   mshr_type::returned_value finished_value{packet.data, packet.pf_metadata};
   mshr_entry->data_promise = champsim::waitable{finished_value, current_time + (warmup ? champsim::chrono::clock::duration{} : FILL_LATENCY)};
   mshr_entry->back_off |= packet.back_off;
   mshr_entry->row_act |= packet.row_act;
-  if(packet.type == access_type::DROPPED)
+  if(packet.type == access_type::DROPPED && mshr_entry->type == access_type::PREFETCH)
     mshr_entry->type = access_type::DROPPED;
 
   if constexpr (champsim::debug_print) {
@@ -791,6 +816,7 @@ void CACHE::finish_packet(const response_type& packet)
   // Order this entry after previously-returned entries, but before non-returned
   // entries
   std::iter_swap(mshr_entry, first_unreturned);
+  return true;
 }
 
 void CACHE::finish_translation(const response_type& packet)
@@ -1029,7 +1055,7 @@ void CACHE::end_phase(unsigned finished_cpu)
 {
   roi_stats.total_miss_latency_cycles = sim_stats.total_miss_latency_cycles;
 
-  for (auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION, access_type::PROMOTION, access_type::DROPPED}) {
+  for (auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION, access_type::PROMOTION, access_type::DROPPED, access_type::REFETCH}) {
     std::pair key{type, finished_cpu};
     roi_stats.hits.set(key, sim_stats.hits.value_or(key, 0));
     roi_stats.misses.set(key, sim_stats.misses.value_or(key, 0));

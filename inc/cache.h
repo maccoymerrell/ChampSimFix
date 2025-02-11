@@ -188,6 +188,7 @@ public:
     bool prefetch_from_this;
     bool back_off = false;
     bool row_act = false;
+    bool was_promoted = false;
 
     uint8_t asid[2] = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
 
@@ -205,7 +206,7 @@ private:
   bool handle_fill(const mshr_type& fill_mshr);
   bool handle_miss(const tag_lookup_type& handle_pkt);
   bool handle_write(const tag_lookup_type& handle_pkt);
-  void finish_packet(const response_type& packet);
+  bool finish_packet(const response_type& packet);
   void finish_translation(const response_type& packet);
 
   void issue_translation(tag_lookup_type& q_entry) const;

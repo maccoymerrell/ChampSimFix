@@ -28,10 +28,11 @@ enum class access_type : unsigned {
   TRANSLATION,
   PROMOTION,
   DROPPED,
+  REFETCH,
   NUM_TYPES,
 };
 
 using namespace std::literals::string_view_literals;
 inline constexpr std::array<std::string_view, static_cast<std::size_t>(access_type::NUM_TYPES)> access_type_names{"LOAD"sv, "RFO"sv, "PREFETCH"sv, "WRITE"sv,
-                                                                                                                  "TRANSLATION"sv, "PROMOTION"sv, "DROPPED"};
+                                                                                                                  "TRANSLATION"sv, "PROMOTION"sv, "DROPPED"sv, "REFETCH"};
 #endif

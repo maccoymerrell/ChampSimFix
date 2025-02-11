@@ -58,6 +58,9 @@ class PRADRAMController final : public IBHDRAMController, public Implementation 
       m_scheduler = create_child_ifce<IBHScheduler>();
       m_refresh = create_child_ifce<IRefreshManager>();
       m_rowpolicy = create_child_ifce<IRowPolicy>();
+
+      m_read_buffer.max_size = 128;
+      m_write_buffer.max_size = 128;
       //m_logger = Logging::create_logger("DBHCTRL");
 
       if (m_config["plugins"]) {
@@ -125,27 +128,13 @@ class PRADRAMController final : public IBHDRAMController, public Implementation 
           //fmt::print("Promotion of packet {0:x} to DEMAND READ\n",in_rq->addr);
           in_rq->is_prefetch = false;
           in_rq->was_promoted = true;
-          return true;
         }
-        //fmt::print("\tCouldn't find one\n");
-      }
-
-      //Drop prefetches that have reads already in the queue
-      if ((req.type_id == Request::Type::Read) && req.is_prefetch) {
-        //fmt::print("Received prefetch for {0:x}, looking for promotions...\n",req.addr);
-        auto compare_prefetch = [req](const Request& rreq) {
-          return ((rreq.addr >> 6) == (req.addr >> 6)) && rreq.is_promotion;
-        };
-        auto in_rq = std::find_if(m_read_buffer.begin(), m_read_buffer.end(), compare_prefetch);
-        if(in_rq != m_read_buffer.end()) {
-          //fmt::print("Promotion of packet {0:x} to DEMAND READ\n",in_rq->addr);
-          return true;
-        }
+        return true;
         //fmt::print("\tCouldn't find one\n");
       }
 
       //if is a prefetch, go ahead and drop half according to their arrival cycle
-      /*
+      
       if(req.is_prefetch) {
         if (m_clk % 2) {
           req.was_dropped = true;
@@ -153,7 +142,7 @@ class PRADRAMController final : public IBHDRAMController, public Implementation 
           return true;
         }
       }
-      */
+      
 
       // Else, enqueue them to corresponding buffer based on request type id
       bool is_success = false;
