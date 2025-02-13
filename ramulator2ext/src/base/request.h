@@ -32,6 +32,7 @@ struct Request {
 
   bool back_off = false;
   bool row_act = false;
+  bool is_critical = false;
 
   int command = -1;          // The command that need to be issued to progress the request
   int final_command = -1;    // The final command that is needed to finish the request

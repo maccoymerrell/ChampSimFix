@@ -104,7 +104,7 @@ class ActivateCounterPlugin : public IControllerPlugin, public Implementation {
 
   private:
     IDRAM* m_dram = nullptr;
-    IBHDRAMController* m_controller = nullptr;
+    IDRAMController* m_controller = nullptr;
     IMemorySystem* m_system = nullptr;
     ActivateCounter HC;
 
@@ -121,7 +121,7 @@ class ActivateCounterPlugin : public IControllerPlugin, public Implementation {
     };
 
     void setup(IFrontEnd* frontend, IMemorySystem* memory_system) override {
-      m_controller = cast_parent<IBHDRAMController>();
+      m_controller = cast_parent<IDRAMController>();
       m_dram = m_controller->m_dram;
       m_system = memory_system;
 

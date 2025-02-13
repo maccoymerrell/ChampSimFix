@@ -3,6 +3,7 @@ add_library(ramulator-controller OBJECT)
 target_sources(
   ramulator-controller PRIVATE
   bh_controller.h 
+  drac_controller.h
   bh_scheduler.h 
   controller.h 
   scheduler.h 
@@ -16,6 +17,7 @@ target_sources(
   impl/generic_dram_controller.cpp
   impl/prac_dram_controller.cpp
   impl/pra_dram_controller.cpp
+  impl/drac_controller.cpp
   
   impl/scheduler/bh_scheduler.cpp
   impl/scheduler/blocking_scheduler.cpp
@@ -23,6 +25,7 @@ target_sources(
   impl/scheduler/bliss_scheduler.cpp
   impl/scheduler/prac_scheduler.cpp
   impl/scheduler/pra_scheduler.cpp
+  impl/scheduler/drac_scheduler.cpp
 
   impl/refresh/all_bank_refresh.cpp
   

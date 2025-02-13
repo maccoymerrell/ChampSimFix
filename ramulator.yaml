@@ -9,7 +9,7 @@ Frontend:
               
 
 MemorySystem:
-  impl: BHDRAMSystem
+  impl: DRACSystem
   clock_ratio: 1
 
   DRAM:
@@ -23,22 +23,24 @@ MemorySystem:
     timing:
       preset: DDR5_3200AN
 
-  BHDRAMController:
-    impl: PRADRAMController
+  DRACController:
+    impl: DRACController
     prefetch_starve_cycles: 0
     BHScheduler:
-      impl: BHScheduler
+      impl: DRACScheduler
     RefreshManager:
       impl: AllBank
     RowPolicy:
       impl: OpenRowPolicy
     plugins:
       - ControllerPlugin: {
+          impl: ChampSimPlugin }
+      - ControllerPlugin: {
           impl: ActivateCounter,
           output_file: hammer_test,
           cycles_per_heartbeat: 1000000,
           refresh_period: 32e-3,
-          histogram_period: 500e-6 } 
+          histogram_period: 500e-6 }
       - ControllerPlugin: {
           impl: RFMManager,
           rfm_thresh: 16}

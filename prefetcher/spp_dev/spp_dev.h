@@ -6,6 +6,7 @@
 #include "msl/lru_table.h"
 #include "modules.h"
 #include "cache.h"
+#include "dram_controller.h"
 
 struct spp_dev : public champsim::modules::prefetcher {
 
@@ -45,6 +46,9 @@ struct spp_dev : public champsim::modules::prefetcher {
   constexpr static unsigned GLOBAL_COUNTER_BIT = 10;
   constexpr static uint32_t GLOBAL_COUNTER_MAX = ((1 << GLOBAL_COUNTER_BIT) - 1);
   constexpr static std::size_t MAX_GHR_ENTRY = 8;
+
+  constexpr static uint64_t usefulness_update_period = 1e4;
+
 
   using prefetcher::prefetcher;
   uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
@@ -175,6 +179,8 @@ struct spp_dev : public champsim::modules::prefetcher {
   PREFETCH_FILTER FILTER;
   GLOBAL_REGISTER GHR;
 
+  uint64_t useful = 0;
+  uint64_t filled = 0;
 };
 
 

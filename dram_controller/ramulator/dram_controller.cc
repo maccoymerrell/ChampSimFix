@@ -54,6 +54,7 @@ MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::chrono::picoseconds dbus_period, 
   config["Frontend"]["Translation"]["max_addr"] = 0;
 
   //force ChampSimPlugin to be an active plugin in the dram controller
+  /*
   YAML::Node active_plugins = config["MemorySystem"]["BHDRAMController"]["plugins"];
   bool found_champsim_plugin = false;
   for(auto plugin : active_plugins)
@@ -67,7 +68,7 @@ MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::chrono::picoseconds dbus_period, 
     champsim_plugin["impl"] = "ChampSimPlugin";
     controller_plugin["ControllerPlugin"] = champsim_plugin;
     config["MemorySystem"]["BHDRAMController"]["plugins"].push_back(controller_plugin);
-  }
+  }*/
 
   //create our frontend (us) and the memory system (ramulator)
   ramulator2_frontend = Ramulator::Factory::create_frontend(config);

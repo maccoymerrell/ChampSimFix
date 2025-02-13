@@ -34,11 +34,20 @@ void spp_dev::prefetcher_initialize()
 
 }
 
-void spp_dev::prefetcher_cycle_operate() {}
+void spp_dev::prefetcher_cycle_operate() {
+  if((intern_->current_cycle() + 1) % usefulness_update_period == 0) {
+    Ramulator::set_core_prefetch_usefulness(intern_->cpu, useful / (double)(filled));
+    useful = 0;
+    filled = 0;
+  }
+}
 
 
 uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type, uint32_t metadata_in)
 {
+  if(useful_prefetch)
+    useful++;
+
   champsim::page_number page{addr};
   uint32_t last_sig = 0, curr_sig = 0, depth = 0;
   std::vector<uint32_t> confidence_q(intern_->get_mshr_size());
@@ -144,6 +153,9 @@ uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::add
 
 uint32_t spp_dev::prefetcher_cache_fill(champsim::address addr, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
+  if(prefetch)
+    filled++;
+
   if constexpr (FILTER_ON) {
     if constexpr (SPP_DEBUG_PRINT) {
       std::cout << std::endl;

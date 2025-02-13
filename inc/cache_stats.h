@@ -26,6 +26,7 @@ struct cache_stats {
   champsim::stats::event_counter<std::pair<access_type, std::remove_cv_t<decltype(NUM_CPUS)>>> returned_packets = {};
 
   long total_miss_latency_cycles{};
+  uint64_t total_returned_packets{};
 };
 
 cache_stats operator-(cache_stats lhs, cache_stats rhs);

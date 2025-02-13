@@ -132,7 +132,7 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
                       stats.returned_packets.value_or(std::pair{access_type::DROPPED,cpu},returned_value_type{}),
                       stats.returned_packets.value_or(std::pair{access_type::REFETCH,cpu},returned_value_type{})));
       
-    lines.push_back(fmt::format("{} AVERAGE MISS LATENCY: {} cycles", stats.name, ::print_ratio(stats.total_miss_latency_cycles, stats.downstream_packets.total() - stats.downstream_packets.value_or(std::pair{access_type::WRITE,cpu},downstream_value_type{}))));
+    lines.push_back(fmt::format("{} AVERAGE MISS LATENCY: {} cycles", stats.name, ::print_ratio(stats.total_miss_latency_cycles, stats.total_returned_packets)));
   }
 
   return lines;

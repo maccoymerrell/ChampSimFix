@@ -84,6 +84,7 @@ size_t get_ramulator_field_size(Ramulator::IFrontEnd*, std::string field);
 long get_ramulator_progress(Ramulator::IFrontEnd*);
 uint64_t get_ramulator_size(Ramulator::IFrontEnd*, size_t channel_no);
 uint64_t get_ramulator_channel_width(Ramulator::IFrontEnd*);
+void set_core_prefetch_usefulness(int core, double usefulness);
 
 }
 

@@ -23,7 +23,7 @@ class ChampSimPlugin : public IControllerPlugin, public Implementation {
   long   progress = 0;
   private:
     IDRAM* m_dram = nullptr;
-    IBHDRAMController* m_controller = nullptr;
+    IDRAMController* m_controller = nullptr;
     IMemorySystem*   m_system = nullptr;
     IAddrMapper*     m_mapper = nullptr;
     IFrontEnd*       m_frontend = nullptr;
@@ -50,7 +50,7 @@ class ChampSimPlugin : public IControllerPlugin, public Implementation {
 
     void setup(IFrontEnd* frontend, IMemorySystem* memory_system) override {
       //m_ctrl = cast_parent<IBHDRAMController>();
-      m_controller = cast_parent<IBHDRAMController>();
+      m_controller = cast_parent<IDRAMController>();
       m_dram = m_controller->m_dram;
       m_system = memory_system;
       m_mapper = m_system->get_ifce<IAddrMapper>();
