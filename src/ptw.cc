@@ -36,6 +36,7 @@ PageTableWalker::PageTableWalker(champsim::ptw_builder b)
       MAX_FILL(b.m_max_fill.value_or(champsim::bandwidth::maximum_type{b.scaled_by_ul_size(b.m_bandwidth_factor)})),
       HIT_LATENCY(b.m_clock_period * b.m_latency), vmem(b.m_vmem), CR3_addr(b.m_vmem->get_pte_pa(b.m_cpu, champsim::page_number{}, b.m_vmem->pt_levels).first)
 {
+  fmt::print("PTW CPU: {}\n",b.m_cpu);
   std::vector<decltype(b.m_pscl)::value_type> local_pscl_dims{};
   std::remove_copy_if(std::begin(b.m_pscl), std::end(b.m_pscl), std::back_inserter(local_pscl_dims), [](auto x) { return std::get<0>(x) == 0; });
   std::sort(std::begin(local_pscl_dims), std::end(local_pscl_dims), std::greater{});
@@ -73,8 +74,8 @@ auto PageTableWalker::handle_read(const request_type& handle_pkt, channel_type* 
   }
 
   if constexpr (champsim::debug_print) {
-    fmt::print("[{}] {} address: {} v_address: {} pt_page_offset: {} translation_level: {} cycle: {}\n", NAME, __func__, fwd_mshr.address, handle_pkt.v_address,
-               walk_offset.to<int>(), walk_init.level, current_time.time_since_epoch() / clock_period);
+    fmt::print("[{}] {} address: {} v_address: {} pt_page_offset: {} translation_level: {} cpu: {} cycle: {}\n", NAME, __func__, fwd_mshr.address, handle_pkt.v_address,
+               walk_offset.to<int>(), walk_init.level, fwd_mshr.cpu, current_time.time_since_epoch() / clock_period);
   }
 
   return step_translation(fwd_mshr);
@@ -84,9 +85,9 @@ auto PageTableWalker::handle_fill(const mshr_type& fill_mshr) -> std::optional<m
 {
   if constexpr (champsim::debug_print) {
     champsim::dynamic_extent pte_offset_extent{champsim::data::bits{LOG2_PAGE_SIZE}, champsim::data::bits{champsim::lg2(pte_entry::byte_multiple)}};
-    fmt::print("[{}] {} address: {} v_address: {} data: {} pt_page_offset: {} translation_level: {} cycle: {}\n", NAME, __func__, fill_mshr.address,
+    fmt::print("[{}] {} address: {} v_address: {} data: {} pt_page_offset: {} translation_level: {} cpu: {} cycle: {}\n", NAME, __func__, fill_mshr.address,
                fill_mshr.v_address, *fill_mshr.data, champsim::address_slice{pte_offset_extent, fill_mshr.data.value()}.to<int>(), fill_mshr.translation_level,
-               current_time.time_since_epoch() / clock_period);
+               fill_mshr.cpu, current_time.time_since_epoch() / clock_period);
   }
 
   const auto pscl_idx = std::size(pscl) - fill_mshr.translation_level;

@@ -34,12 +34,16 @@
 #include "../prefetcher/tcp_stride/tcp_stride.h"
 #include "../prefetcher/spp_raf_l2c/spp_raf_l2c.h"
 
+
+std::map<std::pair<CACHE*,uint32_t>,double> CACHE::prefetch_usefulness;
+
 CACHE::CACHE(CACHE&& other)
     : operable(other),
       internal_PQ(other.PQ_SIZE),
       upper_levels(std::move(other.upper_levels)), lower_level(std::move(other.lower_level)), lower_translate(std::move(other.lower_translate)),
 
-      cpu(other.cpu), NAME(std::move(other.NAME)), NUM_SET(other.NUM_SET), NUM_WAY(other.NUM_WAY), MSHR_SIZE(other.MSHR_SIZE), PQ_SIZE(other.PQ_SIZE),
+      cpu(other.cpu), NAME(std::move(other.NAME)), NUM_SET(other.NUM_SET), NUM_WAY(other.NUM_WAY), MSHR_SIZE(other.MSHR_SIZE), PQ_SIZE(other.PQ_SIZE), MQ_SIZE(other.MQ_SIZE),
+      PQM_SIZE(other.PQM_SIZE),
       HIT_LATENCY(other.HIT_LATENCY), FILL_LATENCY(other.FILL_LATENCY), OFFSET_BITS(other.OFFSET_BITS), block(std::move(other.block)), MAX_TAG(other.MAX_TAG),
       MAX_FILL(other.MAX_FILL), prefetch_as_load(other.prefetch_as_load), match_offset_bits(other.match_offset_bits), virtual_prefetch(other.virtual_prefetch),
       pref_activate_mask(std::move(other.pref_activate_mask)),
@@ -50,6 +54,7 @@ CACHE::CACHE(CACHE&& other)
 {
   pref_module_pimpl->bind(this);
   repl_module_pimpl->bind(this);
+  prefetch_usefulness.clear();
 }
 
 auto CACHE::operator=(CACHE&& other) -> CACHE&
@@ -70,6 +75,8 @@ auto CACHE::operator=(CACHE&& other) -> CACHE&
   this->MSHR_SIZE = other.MSHR_SIZE;
   ;
   this->PQ_SIZE = other.PQ_SIZE;
+  this->MQ_SIZE = other.MQ_SIZE;
+  this->PQM_SIZE = other.PQM_SIZE;
   this->HIT_LATENCY = other.HIT_LATENCY;
   this->FILL_LATENCY = other.FILL_LATENCY;
   this->OFFSET_BITS = other.OFFSET_BITS;
@@ -84,7 +91,11 @@ auto CACHE::operator=(CACHE&& other) -> CACHE&
 
   this->sim_stats = std::move(other.sim_stats);
   this->roi_stats = std::move(other.roi_stats);
-
+  this->MQ = std::move(other.MQ);
+  this->PREFETCH_MISS_STORAGE = std::move(other.PREFETCH_MISS_STORAGE);
+  this->PREFETCH_BANK_QUEUES = std::move(other.PREFETCH_BANK_QUEUES);
+  this->PREFETCH_FREE_LIST = std::move(other.PREFETCH_FREE_LIST);
+  this->OUTGOING_BANK_REQUESTS = std::move(other.OUTGOING_BANK_REQUESTS);
   this->pref_module_pimpl = std::move(other.pref_module_pimpl);
   this->repl_module_pimpl = std::move(other.repl_module_pimpl);
 
@@ -92,18 +103,19 @@ auto CACHE::operator=(CACHE&& other) -> CACHE&
   repl_module_pimpl->bind(this);
 
   this->internal_PQ = other.internal_PQ;
+  prefetch_usefulness.clear();
 
   return *this;
 }
 
-CACHE::tag_lookup_type::tag_lookup_type(const request_type& req, bool local_pref, bool skip)
+CACHE::tag_lookup_type::tag_lookup_type(const request_type& req, bool local_pref, bool skip, CACHE* source_ptr_)
     : address(req.address), v_address(req.v_address), data(req.data), ip(req.ip), instr_id(req.instr_id), pf_metadata(req.pf_metadata), cpu(req.cpu),
       back_off(req.back_off), row_act(req.row_act),
-      type(req.type), prefetch_from_this(local_pref), skip_fill(skip), is_translated(req.is_translated), instr_depend_on_me(req.instr_depend_on_me)
+      type(req.type), prefetch_from_this(local_pref), skip_fill(skip), source_ptr(source_ptr_), is_translated(req.is_translated), instr_depend_on_me(req.instr_depend_on_me)
 {
 }
 
-CACHE::tag_lookup_type::tag_lookup_type() : tag_lookup_type(request_type{},false,false) {};
+CACHE::tag_lookup_type::tag_lookup_type() : tag_lookup_type(request_type{},false,false,nullptr) {};
 
 CACHE::mshr_type::mshr_type(const tag_lookup_type& req, champsim::chrono::clock::time_point _time_enqueued)
     : address(req.address), v_address(req.v_address), ip(req.ip), instr_id(req.instr_id), cpu(req.cpu), type(req.type), back_off(req.back_off), row_act(req.row_act),
@@ -218,7 +230,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
       writeback_packet.response_requested = false;
 
       if constexpr (champsim::debug_print) {
-        fmt::print("[{}] {} evict address: {:#x} v_address: {:#x} prefetch_metadata: {}\n", NAME, __func__, writeback_packet.address, writeback_packet.v_address,
+        fmt::print("[{}] {} evict address: {} v_address: {} prefetch_metadata: {}\n", NAME, __func__, writeback_packet.address, writeback_packet.v_address,
                   fill_mshr.data_promise->pf_metadata);
       }
 
@@ -252,7 +264,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
     }
   }
 
-  auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill_mshr), get_set_index(fill_mshr.address), way_idx,
+  auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill_mshr), fill_mshr.cpu >= NUM_CPUS ? 0 : fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx,
                                                   (fill_mshr.type == access_type::PREFETCH), evicting_address, fill_mshr.data_promise->pf_metadata);
   
     impl_replacement_cache_fill(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, module_address(fill_mshr), fill_mshr.ip, evicting_address,
@@ -285,7 +297,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
     //fmt::print("[{}] Dropped PREFETCH for {} from MSHR\n", NAME, fill_mshr.address);
     auto [set_begin, set_end] = get_set_span(fill_mshr.address);
     auto way_idx = std::distance(set_begin, set_end);
-    auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill_mshr), get_set_index(fill_mshr.address), way_idx,
+    auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill_mshr), fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx,
                                                   (fill_mshr.type == access_type::PREFETCH), champsim::address{}, fill_mshr.data_promise->pf_metadata);
     response_type response{fill_mshr.back_off, fill_mshr.row_act, fill_mshr.type, fill_mshr.address, fill_mshr.v_address, fill_mshr.data_promise->data, metadata_thru, fill_mshr.instr_depend_on_me};
     for (auto* ret : fill_mshr.to_return) {
@@ -303,7 +315,7 @@ bool CACHE::check_hit(champsim::address address) {
   return (way != set_end);
 }
 
-bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
+bool CACHE::try_hit(tag_lookup_type& handle_pkt)
 {
   cpu = handle_pkt.cpu;
 
@@ -314,14 +326,15 @@ bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
   const auto useful_prefetch = (hit && way->prefetch && !handle_pkt.prefetch_from_this);
 
   if constexpr (champsim::debug_print) {
-    fmt::print("[{}] {} instr_id: {} address: {} v_address: {} data: {} set: {} way: {} ({}) type: {} cycle: {}\n", NAME, __func__, handle_pkt.instr_id,
+    fmt::print("[{}] {} instr_id: {} address: {} v_address: {} data: {} set: {} way: {} ({}) type: {} cpu: {} cycle: {}\n", NAME, __func__, handle_pkt.instr_id,
                handle_pkt.address, handle_pkt.v_address, handle_pkt.data, get_set_index(handle_pkt.address), std::distance(set_begin, way),
-               hit ? "HIT" : "MISS", access_type_names.at(champsim::to_underlying(handle_pkt.type)), current_time.time_since_epoch() / clock_period);
+               hit ? "HIT" : "MISS", access_type_names.at(champsim::to_underlying(handle_pkt.type)), handle_pkt.cpu, current_time.time_since_epoch() / clock_period);
   }
 
   auto metadata_thru = handle_pkt.pf_metadata;
   if (should_activate_prefetcher(handle_pkt)) {
-    metadata_thru = impl_prefetcher_cache_operate(module_address(handle_pkt), handle_pkt.ip, hit, useful_prefetch, handle_pkt.type, metadata_thru);
+    metadata_thru = impl_prefetcher_cache_operate(module_address(handle_pkt), handle_pkt.ip, handle_pkt.cpu >= NUM_CPUS ? 0 : handle_pkt.cpu, hit, useful_prefetch, handle_pkt.type, metadata_thru);
+    handle_pkt.invoked_prefetcher = true;
   }
 
   // update replacement policy
@@ -362,6 +375,7 @@ auto CACHE::mshr_and_forward_packet(const tag_lookup_type& handle_pkt) -> std::p
   fwd_pkt.type = (handle_pkt.type == access_type::WRITE) ? access_type::RFO : handle_pkt.type;
   fwd_pkt.pf_metadata = handle_pkt.pf_metadata;
   fwd_pkt.cpu = handle_pkt.cpu;
+  fwd_pkt.source_ptr = handle_pkt.source_ptr;
   fwd_pkt.back_off = handle_pkt.back_off;
   fwd_pkt.row_act = handle_pkt.row_act;
 
@@ -377,23 +391,13 @@ auto CACHE::mshr_and_forward_packet(const tag_lookup_type& handle_pkt) -> std::p
   return std::pair{std::move(to_allocate), std::move(fwd_pkt)};
 }
 
-bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
-{
-  if constexpr (champsim::debug_print) {
-    fmt::print("[{}] {} instr_id: {} address: {} v_address: {} type: {} local_prefetch: {} cycle: {}\n", NAME, __func__, handle_pkt.instr_id,
-               handle_pkt.address, handle_pkt.v_address, access_type_names.at(champsim::to_underlying(handle_pkt.type)), handle_pkt.prefetch_from_this,
-               current_time.time_since_epoch() / clock_period);
-  }
-
+bool CACHE::allocate_mshr(const tag_lookup_type& handle_pkt) {
   mshr_type to_allocate{handle_pkt, current_time};
-
+  //fmt::print("Allocating MSHR for address: {} cpu: {}\n",handle_pkt.address,handle_pkt.cpu);
   cpu = handle_pkt.cpu;
-
-  auto mshr_pkt = mshr_and_forward_packet(handle_pkt);
-
-  // check mshr
-  auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(handle_pkt.address));
   bool mshr_full = (MSHR.size() == MSHR_SIZE);
+  auto mshr_pkt = mshr_and_forward_packet(handle_pkt);
+  auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(handle_pkt.address));
 
   if (mshr_entry != MSHR.end()) // miss already inflight
   {
@@ -403,8 +407,9 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
       mshr_pkt.second.response_requested = false;
       mshr_pkt.second.type = access_type::PROMOTION;
       bool success = lower_level->add_rq(mshr_pkt.second);
-      if(!success)
-        return false;
+      //best effort. If we don't have the available bandwidth, thats okay
+      //if(!success)
+      //  return std::pair{false,false};
 
       sim_stats.downstream_packets.increment(std::pair{access_type::PROMOTION, handle_pkt.cpu});
       
@@ -418,16 +423,10 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
     }
 
     *mshr_entry = mshr_type::merge(*mshr_entry, to_allocate);
-  } else {
+  }  else {
+    //if mshr_full
     if (mshr_full) { // not enough MSHR resource
-      return false;  // TODO should we allow prefetches anyway if they will not be filled to this level?
-    }
-
-    //I think this is fine. Will need to check
-    if(handle_pkt.type == access_type::PROMOTION /*&& handle_pkt.prefetch_from_this*/) {
-      //fmt::print("[{}] Promotion dropped for {}\n",NAME,mshr_pkt.second.address);
-      sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.cpu});
-      return true;
+      return false;
     }
 
     const bool send_to_rq = (prefetch_as_load || handle_pkt.type != access_type::PREFETCH);
@@ -440,13 +439,200 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
 
     // Allocate an MSHR
     if (mshr_pkt.second.response_requested) {
-      MSHR.emplace_back(std::move(mshr_pkt.first));
+     //fmt::print("[{}] Increasing outgoing bank request counter for prefetch: {} address: {} bank: {}, now: {}\n",NAME, mshr_pkt.second.type == access_type::PREFETCH, mshr_pkt.second.address, MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(mshr_pkt.second.address),OUTGOING_BANK_REQUESTS.at(MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(mshr_pkt.second.address))+1);
+     OUTGOING_BANK_REQUESTS.at(MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(mshr_pkt.first.address))++;
+     MSHR.emplace_back(std::move(mshr_pkt.first));
+    }
+  }
+  return true;
+}
+bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
+{
+  mshr_type to_allocate{handle_pkt, current_time};
+  auto mshr_pkt = mshr_and_forward_packet(handle_pkt);
+  //check for matching entry in MSHR and merge
+  auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(handle_pkt.address));
+  if (mshr_entry != MSHR.end()) {
+    if (mshr_entry->type == access_type::PREFETCH && ((handle_pkt.type != access_type::PREFETCH) && handle_pkt.type != access_type::WRITE)) {
+      
+      
+      mshr_pkt.second.response_requested = false;
+      mshr_pkt.second.type = access_type::PROMOTION;
+
+      //best effort. If we don't have the available bandwidth, thats okay.
+      bool success = lower_level->add_rq(mshr_pkt.second);
+      //if(!success)
+      //  return false;
+
+      sim_stats.downstream_packets.increment(std::pair{access_type::PROMOTION, handle_pkt.cpu});
+      
+      //fmt::print("[{}] Issued promotion packet for {}\n",NAME,mshr_pkt.second.address);
+    }
+    if(mshr_entry->type == access_type::PREFETCH && handle_pkt.type != access_type::PREFETCH) {
+      // Mark the prefetch as useful
+      if (mshr_entry->prefetch_from_this) {
+        ++sim_stats.pf_useful;
+      }
+    }
+
+    *mshr_entry = mshr_type::merge(*mshr_entry, to_allocate);
+    return true;
+  }
+
+  //I think this is fine. Will need to check
+  if(handle_pkt.type == access_type::PROMOTION /*&& handle_pkt.prefetch_from_this*/) {
+    //fmt::print("[{}] Promotion dropped for {}\n",NAME,mshr_pkt.second.address);
+    sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.cpu});
+    return true;
+  }
+
+  
+  //add miss queue to handle_miss
+  if constexpr (champsim::debug_print) {
+    fmt::print("[{}] {} instr_id: {} address: {} v_address: {} type: {} local_prefetch: {} cpu: {} cycle: {}\n", NAME, __func__, handle_pkt.instr_id,
+               handle_pkt.address, handle_pkt.v_address, access_type_names.at(champsim::to_underlying(handle_pkt.type)), handle_pkt.prefetch_from_this,
+               handle_pkt.cpu, current_time.time_since_epoch() / clock_period);
+  }
+  uint32_t used_cpu = handle_pkt.cpu;
+  if(used_cpu >= NUM_CPUS) {
+    fmt::print("[{}] Got invalid CPU: {}\n",NAME,used_cpu);
+    used_cpu = 0;
+  }
+  //if MQC is disabled, put all misses into same queue
+  if(!MQC_ENABLED)
+    used_cpu = 0;
+  bool mq_full = (MQ.at(used_cpu).size() >= MQ_SIZE);
+  //add to per-core MQ if demand or prefetch queue if prefetch
+  if(handle_pkt.type != access_type::PREFETCH || !PQM_ENABLED) {
+    if(mq_full) {
+      //fmt::print("[{}] MQ FULL size: {} cpu: {}\n",NAME, MQ.at(used_cpu).size(), used_cpu);
+      return false;
+    }
+    //fmt::print("[{}] Trying to enqueue {} in MQ...\n", NAME, handle_pkt.address);
+    MQ.at(used_cpu).emplace_back(std::move(handle_pkt));
+  }
+  else {
+    //monolithic PMQ
+    //search PQM for matching entry, and merge
+    auto pqm_match = [addr = handle_pkt.address, skip_level = handle_pkt.skip_fill] (auto& entry) {
+      return (entry.address == addr && skip_level == entry.skip_fill);
+    };
+    auto match = std::find_if(std::begin(PREFETCH_MISS_STORAGE),std::end(PREFETCH_MISS_STORAGE),pqm_match);
+
+    //PQM is full
+    if(match == std::end(PREFETCH_MISS_STORAGE) && PREFETCH_FREE_LIST.size() == 0) {
+      //fmt::print("[{}] PQM FULL\n",NAME);
+      return false;
+    }
+    //PQM is not full, and we aren't dropping this prefetch due to merge
+    if(match == std::end(PREFETCH_MISS_STORAGE)) {
+      std::size_t ind = PREFETCH_FREE_LIST.front();
+      PREFETCH_FREE_LIST.pop_front();
+      PREFETCH_MISS_STORAGE.at(ind) = std::move(handle_pkt);
+      std::size_t bank_ind = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(handle_pkt.address);
+      PREFETCH_BANK_QUEUES.at(bank_ind).push_back(ind);
+    } else {
+      //merge into matching entry
+      std::vector<uint64_t> merged_instr{};
+      std::vector<std::deque<response_type>*> merged_return{};
+    
+      std::set_union(std::begin(match->instr_depend_on_me), std::end(match->instr_depend_on_me), std::begin(handle_pkt.instr_depend_on_me),
+                     std::end(handle_pkt.instr_depend_on_me), std::back_inserter(merged_instr));
+      std::set_union(std::begin(match->to_return), std::end(match->to_return), std::begin(handle_pkt.to_return), std::end(handle_pkt.to_return),
+                     std::back_inserter(merged_return));
+      match->instr_depend_on_me = merged_instr;
+      match->to_return = merged_return;
     }
   }
 
-  sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.cpu});
+  sim_stats.misses.increment(std::pair{handle_pkt.type,used_cpu});
 
   return true;
+}
+
+//schedule MSHR
+void CACHE::schedule_mshr() {
+  //need to first see if MSHR is empty
+  //if so, we need to schedule the next request
+  if(MSHR.size() >= MSHR_SIZE)
+    return;
+  //check if current core can issue request
+
+  //fmt::print("[{}] scheduling for MSHR...\n",NAME);
+  auto valid_demand = [cache = this](auto& entry) {
+    std::size_t bank_id = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(entry.address);
+    //fmt::print("\t[{}] Outgoing requests to bank {}: {}\n", cache->NAME, bank_id,cache->OUTGOING_BANK_REQUESTS.at(bank_id));
+    //disable check if MQC is disabled, always be true
+    return cache->OUTGOING_BANK_REQUESTS.at(bank_id) <= cache->BANK_DEMAND_THRESHOLD || !cache->MQC_ENABLED;
+  };
+  auto search = std::find_if(std::begin(MQ.at(MQ_CORE)),std::end(MQ.at(MQ_CORE)),valid_demand);
+  //don't limit starvation if MQC is disabled
+  if(search != std::end(MQ.at(MQ_CORE)) && (MQ_COUNTER < MQ_STARVE || !MQC_ENABLED)) {
+    //found a packet to issue
+    //fmt::print("[{}] Trying scheduling from demand queue...\n",NAME);
+    if(allocate_mshr(*search)) {
+      MQ.at(MQ_CORE).erase(search);
+      MQ_COUNTER++;
+      //fmt::print("\tSuccess!\n");
+    }
+    return;
+  }
+  else {
+    //prefetch if we couldn't demand anything
+
+    //don't call if PQM is disabled
+    if(MQ.at(MQ_CORE).size() == 0 && PQM_ENABLED) {
+      std::size_t smallest_valid_bank = PREFETCH_BANK_QUEUES.size();
+      std::size_t smallest_outstanding_pf = PQM_SIZE + 1;
+      for(std::size_t bank_occu = 0; bank_occu < PREFETCH_BANK_QUEUES.size(); bank_occu++) {
+        if(PREFETCH_BANK_QUEUES.at(bank_occu).size() > 0) {
+          //fmt::print("[{}] Prefetch queue at bank {} being checked...\n", NAME, bank_occu);
+          uint32_t cpu = PREFETCH_MISS_STORAGE.at(PREFETCH_BANK_QUEUES.at(bank_occu).front()).cpu;
+          CACHE* device = PREFETCH_MISS_STORAGE.at(PREFETCH_BANK_QUEUES.at(bank_occu).front()).source_ptr;
+          double usefulness = prefetch_usefulness[{device,cpu}];
+          std::size_t thresh = 0;
+          if(usefulness > 0.4)
+            thresh++;
+          if(usefulness > 0.85)
+            thresh++;
+          //fmt::print("[{}]\tUsing threshold {}...\n", NAME, BANK_PREFETCH_THRESHOLD[thresh]);
+          //fmt::print("[{}]\tBank occupancy is {}...\n",NAME,OUTGOING_BANK_REQUESTS.at(bank_occu));
+          if (OUTGOING_BANK_REQUESTS.at(bank_occu) < BANK_PREFETCH_THRESHOLD[thresh] && PREFETCH_BANK_QUEUES.at(bank_occu).size() < smallest_outstanding_pf) {
+            smallest_valid_bank = bank_occu;
+            smallest_outstanding_pf = PREFETCH_BANK_QUEUES.at(bank_occu).size();
+            //fmt::print("[{}]\tTrying to schedule from bank {}...\n",NAME,bank_occu);
+          }
+        }
+      }
+      if(smallest_valid_bank != PREFETCH_BANK_QUEUES.size()) {
+        std::size_t ind = PREFETCH_BANK_QUEUES.at(smallest_valid_bank).front();
+        //issue
+        //fmt::print("[{}]\tScheduling from PQ...\n", NAME);
+        if(allocate_mshr(PREFETCH_MISS_STORAGE.at(ind))) {
+          PREFETCH_MISS_STORAGE.at(ind).address = champsim::address{};
+          PREFETCH_BANK_QUEUES.at(smallest_valid_bank).pop_front();
+          PREFETCH_FREE_LIST.push_back(ind);
+          //fmt::print("[{}]\tSuccess!\n",NAME);
+        }
+      }
+    }
+    //reset MQ_COUNTER and set new core
+    if(MQC_ENABLED) {
+      MQ_COUNTER = 0;
+      std::size_t lowest_size = MQ_SIZE + 1;
+      for(std::size_t new_mq = 0; new_mq < MQ.size(); new_mq++) {
+        if(MQ.at(new_mq).size() > 0 && MQ.at(new_mq).size() < lowest_size) {
+          MQ_CORE = new_mq;
+          lowest_size = MQ.at(new_mq).size();
+        }
+      }
+    }
+    //fmt::print("[{}] Swapped core to {} size: {}\n",NAME, MQ_CORE, MQ.at(MQ_CORE).size());
+    //no valid packet, so lets try to issue a prefetch instead
+    //get lowest bank_occupancy_counter
+    
+  }
+
 }
 
 bool CACHE::handle_write(const tag_lookup_type& handle_pkt)
@@ -482,8 +668,8 @@ auto CACHE::initiate_tag_check(champsim::channel* ul)
     }
 
     if constexpr (champsim::debug_print) {
-      fmt::print("[TAG] initiate_tag_check instr_id: {} address: {} v_address: {} type: {} response_requested: {}\n", retval.instr_id, retval.address,
-                 retval.v_address, access_type_names.at(champsim::to_underlying(retval.type)), !std::empty(retval.to_return));
+      fmt::print("[TAG] initiate_tag_check instr_id: {} address: {} v_address: {} type: {} response_requested: {} cpu: {}\n", retval.instr_id, retval.address,
+                 retval.v_address, access_type_names.at(champsim::to_underlying(retval.type)), !std::empty(retval.to_return), retval.cpu);
     }
 
     return retval;
@@ -492,6 +678,7 @@ auto CACHE::initiate_tag_check(champsim::channel* ul)
 
 void CACHE::manage_pq() {
   // Check for PQ duplicates
+
   for (auto pq_it = std::begin(internal_PQ); pq_it != std::end(internal_PQ);) {
     if(pq_it->forward_checked) {
       pq_it++;
@@ -503,6 +690,16 @@ void CACHE::manage_pq() {
       if(champsim::block_number{pq_it->address} == champsim::block_number{pq_m->address}) {
         if(pq_it->skip_fill == pq_m->skip_fill && pq_it->is_translated == pq_m->is_translated) {
           dupe = true;
+          //merge
+          std::vector<uint64_t> merged_instr{};
+          std::vector<std::deque<response_type>*> merged_return{};
+        
+          std::set_union(std::begin(pq_it->instr_depend_on_me), std::end(pq_it->instr_depend_on_me), std::begin(pq_m->instr_depend_on_me),
+                         std::end(pq_m->instr_depend_on_me), std::back_inserter(merged_instr));
+          std::set_union(std::begin(pq_it->to_return), std::end(pq_it->to_return), std::begin(pq_m->to_return), std::end(pq_m->to_return),
+                         std::back_inserter(merged_return));
+          pq_m->to_return = merged_return;
+          pq_m->instr_depend_on_me = merged_instr;
           break;
         }
       }
@@ -619,10 +816,14 @@ long CACHE::operate()
   auto [tag_check_ready_begin, tag_check_ready_end] =
       champsim::get_span_p(std::begin(inflight_tag_check), std::end(inflight_tag_check), tag_check_bw,
                            [is_ready, is_translated](const auto& pkt) { return is_ready(pkt) && is_translated(pkt); });
-  auto hits_end = std::stable_partition(tag_check_ready_begin, tag_check_ready_end, [this](const auto& pkt) { return this->try_hit(pkt); });
+  
+  auto hits_end = std::stable_partition(tag_check_ready_begin, tag_check_ready_end, [this](auto& pkt) { return this->try_hit(pkt); });
+
   auto finish_tag_check_end = std::stable_partition(hits_end, tag_check_ready_end, do_handle_miss);
   tag_check_bw.consume(std::distance(tag_check_ready_begin, finish_tag_check_end));
   inflight_tag_check.erase(tag_check_ready_begin, finish_tag_check_end);
+
+  schedule_mshr();
 
   impl_prefetcher_cycle_operate();
 
@@ -632,6 +833,13 @@ long CACHE::operate()
                NAME, __func__, current_time.time_since_epoch() / clock_period, tag_check_bw.amount_consumed(), std::size(inflight_tag_check),
                stash_bandwidth_consumed, std::size(translation_stash), channels_bandwidth_consumed, pq_bandwidth_consumed, initiate_tag_bw.amount_remaining());
   }
+
+  //if ((current_cycle() + 1) % 1000000 == 0 && PQM_ENABLED) {
+  //  fmt::print("[{}] Prefetcher Usefulnesses:\n",NAME);
+  //  for(auto& record : prefetch_usefulness) {
+  //      fmt::print("\tCore: {} Usefulness: {}\n",record.first.second,record.second);
+  //  }
+  //}
 
   return progress + fill_bw.amount_consumed() + initiate_tag_bw.amount_consumed() + tag_check_bw.amount_consumed();
 }
@@ -704,7 +912,7 @@ std::pair<bool, long> CACHE::early_writeback(champsim::address wb_addr, uint32_t
       writeback_packet.response_requested = false;
 
       if constexpr (champsim::debug_print) {
-        fmt::print("[{}] {} writeback address: {:#x} v_address: {:#x} prefetch_metadata: {}\n", NAME, __func__, writeback_packet.address, writeback_packet.v_address,
+        fmt::print("[{}] {} writeback address: {} v_address: {} prefetch_metadata: {}\n", NAME, __func__, writeback_packet.address, writeback_packet.v_address,
                   writeback_packet.pf_metadata);
       }
 
@@ -732,10 +940,34 @@ bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint3
   pf_packet.pf_metadata = prefetch_metadata;
   pf_packet.cpu = cpu;
   pf_packet.address = pf_addr;
+  pf_packet.source_ptr = this;
   pf_packet.v_address = virtual_prefetch ? pf_addr : champsim::address{};
   pf_packet.is_translated = !virtual_prefetch;
 
-  internal_PQ.emplace_back(pf_packet, true, !fill_this_level);
+  internal_PQ.emplace_back(pf_packet, true, !fill_this_level,this);
+  ++sim_stats.pf_issued;
+
+  return true;
+}
+
+bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t pf_cpu, uint32_t prefetch_metadata)
+{
+  ++sim_stats.pf_requested;
+
+  if (std::size(internal_PQ) >= PQ_SIZE) {
+    return false;
+  }
+
+  request_type pf_packet;
+  pf_packet.type = access_type::PREFETCH;
+  pf_packet.pf_metadata = prefetch_metadata;
+  pf_packet.cpu = pf_cpu;
+  pf_packet.address = pf_addr;
+  pf_packet.source_ptr = this;
+  pf_packet.v_address = virtual_prefetch ? pf_addr : champsim::address{};
+  pf_packet.is_translated = !virtual_prefetch;
+
+  internal_PQ.emplace_back(pf_packet, true, !fill_this_level,this);
   ++sim_stats.pf_issued;
 
   return true;
@@ -770,12 +1002,6 @@ bool CACHE::finish_packet(const response_type& packet)
     sim_stats.returned_packets.increment(std::pair{packet.type, 0});
     return true;
   }
-  //Ignore drops if the prefetch was promoted
-  //if(mshr_entry->type != access_type::PREFETCH && packet.type == access_type::DROPPED) {
-  //  sim_stats.returned_packets.increment(std::pair{packet.type, 0});
-    //fmt::print("{} Ignoring drop for {}, but promotion packet should be in-flight\n",NAME,packet.address);
-  //  return;
-  //}
   if(packet.type == access_type::LOAD && mshr_entry->was_promoted)
     sim_stats.returned_packets.increment(std::pair{access_type::PROMOTION, mshr_entry->cpu});
   else if(mshr_entry->was_promoted && packet.type == access_type::PREFETCH) {
@@ -805,6 +1031,11 @@ bool CACHE::finish_packet(const response_type& packet)
 
   // MSHR holds the most updated information about this request
   mshr_type::returned_value finished_value{packet.data, packet.pf_metadata};
+
+  //fmt::print("[{}] Decreasing outgoing bank request counter for prefetch: {} address: {} bank: {}, now: {}\n",NAME,fill_mshr.type == access_type::PREFETCH, fill_mshr.address,MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(fill_mshr.address),OUTGOING_BANK_REQUESTS.at(MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(fill_mshr.address))-1);
+  if(mshr_entry->data_promise.has_unknown_readiness()) {
+    OUTGOING_BANK_REQUESTS.at(MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(mshr_entry->address))--;
+  }
   mshr_entry->data_promise = champsim::waitable{finished_value, current_time + (warmup ? champsim::chrono::clock::duration{} : FILL_LATENCY)};
   mshr_entry->back_off |= packet.back_off;
   mshr_entry->row_act |= packet.row_act;
@@ -819,6 +1050,7 @@ bool CACHE::finish_packet(const response_type& packet)
   // Order this entry after previously-returned entries, but before non-returned
   // entries
   std::iter_swap(mshr_entry, first_unreturned);
+
   return true;
 }
 
@@ -986,16 +1218,16 @@ std::vector<double> CACHE::get_pq_occupancy_ratio() const { return ::occupancy_r
 
 void CACHE::impl_prefetcher_initialize() const { pref_module_pimpl->impl_prefetcher_initialize(); }
 
-uint32_t CACHE::impl_prefetcher_cache_operate(champsim::address addr, champsim::address ip, bool cache_hit, bool useful_prefetch, access_type type,
+uint32_t CACHE::impl_prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, bool cache_hit, bool useful_prefetch, access_type type,
                                               uint32_t metadata_in) const
 {
-  return pref_module_pimpl->impl_prefetcher_cache_operate(addr, ip, cache_hit, useful_prefetch, type, metadata_in);
+  return pref_module_pimpl->impl_prefetcher_cache_operate(addr, ip, cpu, cache_hit, useful_prefetch, type, metadata_in);
 }
 
-uint32_t CACHE::impl_prefetcher_cache_fill(champsim::address addr, long set, long way, bool prefetch, champsim::address evicted_addr,
+uint32_t CACHE::impl_prefetcher_cache_fill(champsim::address addr, uint32_t cpu, long set, long way, bool prefetch, champsim::address evicted_addr,
                                            uint32_t metadata_in) const
 {
-  return pref_module_pimpl->impl_prefetcher_cache_fill(addr, set, way, prefetch, evicted_addr, metadata_in);
+  return pref_module_pimpl->impl_prefetcher_cache_fill(addr, cpu, set, way, prefetch, evicted_addr, metadata_in);
 }
 
 void CACHE::impl_prefetcher_cycle_operate() const { pref_module_pimpl->impl_prefetcher_cycle_operate(); }
@@ -1096,7 +1328,7 @@ void CACHE::end_phase(unsigned finished_cpu)
 template <typename T>
 bool CACHE::should_activate_prefetcher(const T& pkt) const
 {
-  return !pkt.prefetch_from_this && std::count(std::begin(pref_activate_mask), std::end(pref_activate_mask), pkt.type) > 0;
+  return !pkt.prefetch_from_this && !pkt.invoked_prefetcher && std::count(std::begin(pref_activate_mask), std::end(pref_activate_mask), pkt.type) > 0;
 }
 
 // LCOV_EXCL_START Exclude the following function from LCOV
@@ -1130,3 +1362,9 @@ void CACHE::print_deadlock()
   }
 }
 // LCOV_EXCL_STOP
+
+void CACHE::report_prefetch_usefulness(uint32_t pf_cpu, double usefulness) {
+  //fmt::print("[{}] CPU: {} Usefulness: {} MSHR_OCCUPANCY: {} MQ_OCCUPANCY: {} MQ_MAX: {}\n",NAME,pf_cpu,usefulness, get_mshr_occupancy_ratio(), MQ.at(MQ_CORE).size(), MQ_SIZE);
+  prefetch_usefulness[std::pair{this,pf_cpu}] = usefulness;
+  Ramulator::set_core_prefetch_usefulness(this,pf_cpu, usefulness);
+}

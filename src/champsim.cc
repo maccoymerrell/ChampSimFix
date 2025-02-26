@@ -75,7 +75,7 @@ phase_stats do_phase(const phase_info& phase, environment& env, std::vector<trac
                                             [](const auto acc, const operable& y) { return std::min(acc, y.clock_period); });
 
   bool livelock{false};
-  uint64_t livelock_period{1000000};
+  uint64_t livelock_period{10000000};
   uint64_t livelock_progress{1000};
   std::vector<uint64_t> livelock_timer(std::size(env.cpu_view()),0);
   std::vector<uint64_t> livelock_instr(std::size(env.cpu_view()),0);

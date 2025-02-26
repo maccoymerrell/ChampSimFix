@@ -61,15 +61,15 @@ public:
     void init() override { m_translation = create_child_ifce<ITranslation>(); };
     void tick() override { };
 
-    bool receive_external_requests(int req_type_id, Addr_t addr, int source_id, std::function<void(Request&)> callback) override {
+    bool receive_external_requests(int req_type_id, Addr_t addr, int source_id, void* source_ptr, std::function<void(Request&)> callback) override {
       if(req_type_id == (int)access_type::PREFETCH)
-        return m_memory_system->send({addr,Ramulator::Request::Type::Read,source_id,true,false,callback});
+        return m_memory_system->send({addr,Ramulator::Request::Type::Read,source_id,source_ptr,true,false,callback});
       else if(req_type_id == (int)access_type::WRITE)
-        return m_memory_system->send({addr,Ramulator::Request::Type::Write,source_id,false,false,callback});
+        return m_memory_system->send({addr,Ramulator::Request::Type::Write,source_id,source_ptr,false,false,callback});
       else if(req_type_id == (int)access_type::PROMOTION)
-        return m_memory_system->send({addr,Ramulator::Request::Type::Read,source_id,false,true,callback});
+        return m_memory_system->send({addr,Ramulator::Request::Type::Read,source_id,source_ptr,false,true,callback});
       else
-        return m_memory_system->send({addr,Ramulator::Request::Type::Read,source_id,false,false,callback});
+        return m_memory_system->send({addr,Ramulator::Request::Type::Read,source_id,source_ptr,false,false,callback});
     }
 
     int get_num_cores() { return (int)NUM_CPUS; };
@@ -84,7 +84,7 @@ size_t get_ramulator_field_size(Ramulator::IFrontEnd*, std::string field);
 long get_ramulator_progress(Ramulator::IFrontEnd*);
 uint64_t get_ramulator_size(Ramulator::IFrontEnd*, size_t channel_no);
 uint64_t get_ramulator_channel_width(Ramulator::IFrontEnd*);
-void set_core_prefetch_usefulness(int core, double usefulness);
+void set_core_prefetch_usefulness(void* source_ptr, int core, double usefulness);
 
 }
 
@@ -187,6 +187,10 @@ public:
   unsigned long dram_get_bank(champsim::address address) const;
   unsigned long dram_get_row(champsim::address address) const;
   unsigned long dram_get_column(champsim::address address) const;
+
+  unsigned long dram_get_rowbuffer(champsim::address address) const;
+
+  unsigned long rowbuffers() const;
 
 };
 

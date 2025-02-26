@@ -61,6 +61,7 @@ class channel
 
     uint32_t pf_metadata = 0;
     uint32_t cpu = std::numeric_limits<uint32_t>::max();
+    void* source_ptr = nullptr;
 
     champsim::address address{};
     champsim::address v_address{};

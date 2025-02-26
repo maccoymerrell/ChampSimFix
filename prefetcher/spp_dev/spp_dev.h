@@ -47,13 +47,13 @@ struct spp_dev : public champsim::modules::prefetcher {
   constexpr static uint32_t GLOBAL_COUNTER_MAX = ((1 << GLOBAL_COUNTER_BIT) - 1);
   constexpr static std::size_t MAX_GHR_ENTRY = 8;
 
-  constexpr static uint64_t usefulness_update_period = 1e4;
+  constexpr static uint64_t usefulness_update_period = 1e5;
 
 
   using prefetcher::prefetcher;
-  uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
+  uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                     uint32_t metadata_in);
-  uint32_t prefetcher_cache_fill(champsim::address addr, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in);
+  uint32_t prefetcher_cache_fill(champsim::address addr, uint32_t cpu, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in);
 
   void prefetcher_initialize();
   void prefetcher_cycle_operate();
@@ -179,8 +179,8 @@ struct spp_dev : public champsim::modules::prefetcher {
   PREFETCH_FILTER FILTER;
   GLOBAL_REGISTER GHR;
 
-  uint64_t useful = 0;
-  uint64_t filled = 0;
+  std::map<uint32_t,uint64_t> useful;
+  std::map<uint32_t,uint64_t> filled;
 };
 
 

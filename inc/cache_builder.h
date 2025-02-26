@@ -58,6 +58,9 @@ struct cache_builder_base {
   bool m_wq_full_addr{};
   bool m_va_pref{};
 
+  bool m_pqm_enabled{};
+  bool m_mqc_enabled{};
+
   std::vector<access_type> m_pref_act_mask{access_type::LOAD, access_type::PREFETCH};
   std::vector<champsim::channel*> m_uls{};
   champsim::channel* m_ll{};
@@ -207,6 +210,17 @@ public:
    */
   self_type& set_virtual_prefetch();
 
+  /**
+  * Specify that MQ should be split per-core to balance bank requests.
+  */
+  self_type& set_mqc_enable();
+  self_type& reset_mqc_enable();
+
+  /** 
+  * Specify that a prefetch-miss-queue should be created, and try to balance bank requests 
+  */
+  self_type& set_pqm_enable();
+  self_type& reset_pqm_enable();
   /**
    * Specify that prefetchers should operate in the physical address space.
    */
@@ -480,6 +494,34 @@ template <typename P, typename R>
 auto champsim::cache_builder<P, R>::set_virtual_prefetch() -> self_type&
 {
   m_va_pref = true;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::set_mqc_enable() -> self_type&
+{
+  m_mqc_enabled = true;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::reset_mqc_enable() -> self_type&
+{
+  m_mqc_enabled = false;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::set_pqm_enable() -> self_type&
+{
+  m_pqm_enabled = true;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::reset_pqm_enable() -> self_type&
+{
+  m_pqm_enabled = false;
   return *this;
 }
 

@@ -146,7 +146,11 @@ def get_cache_builder(elem, ul_pairs):
         ('wq_check_full_addr', True): '.set_wq_checks_full_addr()',
         ('wq_check_full_addr', False): '.reset_wq_checks_full_addr()',
         ('virtual_prefetch', True): '.set_virtual_prefetch()',
-        ('virtual_prefetch', False): '.reset_virtual_prefetch()'
+        ('virtual_prefetch', False): '.reset_virtual_prefetch()',
+        ('mqc', True): '.set_mqc_enable()',
+        ('mqc', False): '.reset_mqc_enable()',
+        ('pqm', True): '.set_pqm_enable()',
+        ('pqm', False): '.reset_pqm_enable()'
     }
 
     uppers = (v for v in ul_pairs if v[0] == elem.get('name'))

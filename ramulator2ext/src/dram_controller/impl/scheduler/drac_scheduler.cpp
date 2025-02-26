@@ -56,14 +56,14 @@ class DRACScheduler : public IBHScheduler, public Implementation {
       bool ready1 = m_dram->check_ready(req1->command, req1->addr_vec);
       bool ready2 = m_dram->check_ready(req2->command, req2->addr_vec);
 
-      bool crit1 = m_controller->is_core_critical(req1->source_id) || !req1->is_prefetch;
-      bool crit2 = m_controller->is_core_critical(req2->source_id) || !req2->is_prefetch;
+      bool crit1 = (m_controller->is_core_critical(req1->source_ptr, req1->source_id) && req1->is_prefetch) || (!req1->is_prefetch && req1->type_id == Request::Type::Read);
+      bool crit2 = (m_controller->is_core_critical(req2->source_ptr, req2->source_id) && req2->is_prefetch) || (!req2->is_prefetch && req2->type_id == Request::Type::Read);
 
       bool rowh1 = m_dram->check_rowbuffer_hit(req1->command,req1->addr_vec);
       bool rowh2 = m_dram->check_rowbuffer_hit(req2->command,req2->addr_vec);
 
-      bool urg1 = !req1->is_prefetch && !m_controller->is_core_critical(req1->source_id);
-      bool urg2 = !req2->is_prefetch && !m_controller->is_core_critical(req2->source_id);
+      bool urg1 = !req1->is_prefetch && !m_controller->is_core_critical(req1->source_ptr, req1->source_id);
+      bool urg2 = !req2->is_prefetch && !m_controller->is_core_critical(req2->source_ptr, req2->source_id);
 
       int core1 = m_controller->get_core_occupancy(req1->source_id,req1->type_id == Request::Type::Write);
       int core2 = m_controller->get_core_occupancy(req2->source_id,req2->type_id == Request::Type::Write);
@@ -126,6 +126,7 @@ class DRACScheduler : public IBHScheduler, public Implementation {
           return req2;
       }
       //we tied in everything, choose req1
+      m_tied_scheduled++;
       return req1;
     }
 

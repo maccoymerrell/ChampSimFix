@@ -36,17 +36,22 @@ void spp_dev::prefetcher_initialize()
 
 void spp_dev::prefetcher_cycle_operate() {
   if((intern_->current_cycle() + 1) % usefulness_update_period == 0) {
-    Ramulator::set_core_prefetch_usefulness(intern_->cpu, useful / (double)(filled));
-    useful = 0;
-    filled = 0;
+    for (auto& cp : useful) {
+      uint64_t usfl = cp.second;
+      uint64_t fill = filled[cp.first];
+      intern_->report_prefetch_usefulness(cp.first, (usfl+1)/(double)(fill+1));
+      useful[cp.first] = 0;
+      filled[cp.first] = 0;
+    }
   }
 }
 
 
-uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type, uint32_t metadata_in)
+uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type, uint32_t metadata_in)
 {
-  if(useful_prefetch)
-    useful++;
+  if(useful_prefetch) {
+    useful[cpu]++;
+  }
 
   champsim::page_number page{addr};
   uint32_t last_sig = 0, curr_sig = 0, depth = 0;
@@ -95,7 +100,7 @@ uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::add
 
         if (champsim::page_number{pf_addr} == page) { // Prefetch request is in the same physical page
           if (FILTER.check(pf_addr, ((confidence_q[i] >= FILL_THRESHOLD) ? spp_dev::SPP_L2C_PREFETCH : spp_dev::SPP_LLC_PREFETCH))) {
-            prefetch_line(pf_addr, (confidence_q[i] >= FILL_THRESHOLD), 0); // Use addr (not base_addr) to obey the same physical page boundary
+            prefetch_line(pf_addr, (confidence_q[i] >= FILL_THRESHOLD), cpu,0); // Use addr (not base_addr) to obey the same physical page boundary
 
             if (confidence_q[i] >= FILL_THRESHOLD) {
               GHR.pf_issued++;
@@ -151,10 +156,10 @@ uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::add
   return metadata_in;
 }
 
-uint32_t spp_dev::prefetcher_cache_fill(champsim::address addr, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
+uint32_t spp_dev::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
   if(prefetch)
-    filled++;
+    filled[cpu]++;
 
   if constexpr (FILTER_ON) {
     if constexpr (SPP_DEBUG_PRINT) {

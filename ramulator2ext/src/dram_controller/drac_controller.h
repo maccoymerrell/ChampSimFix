@@ -34,7 +34,7 @@ class IDRACController : public IDRAMController {
       return nullptr;
     }
 
-    virtual bool is_core_critical(int source_id) {return true;}
+    virtual bool is_core_critical(void* source_ptr, int source_id) {return true;}
     virtual int get_core_occupancy(int source_id, bool write) {return 0;}
 
 

@@ -2,6 +2,7 @@
 #include "memory_system/memory_system.h"
 #include "frontend/frontend.h"
 
+#include <map>
 
 
 
@@ -37,7 +38,7 @@ class DRACController final : public IDRACController, public Implementation {
     std::vector<int> s_core_row_misses;
     std::vector<int> s_core_row_conflicts;
 
-    std::vector<double> m_core_usefulness;
+    std::map<std::pair<void*,int>,double> m_core_usefulness;
     std::vector<int> m_read_core_count;
     std::vector<int> m_write_core_count;
 
@@ -110,11 +111,9 @@ class DRACController final : public IDRACController, public Implementation {
       s_core_row_hits.resize(num_cores);
       s_core_row_misses.resize(num_cores);
       s_core_row_conflicts.resize(num_cores);
-      m_core_usefulness.resize(num_cores);
       m_read_core_count.resize(num_cores);
       m_write_core_count.resize(num_cores);
       for(int i = 0; i < num_cores; i++) {
-        m_core_usefulness[i] = 1.0;
         m_read_core_count[i] = 0;
         m_write_core_count[i] = 0;
       }
@@ -174,7 +173,7 @@ class DRACController final : public IDRACController, public Implementation {
       // Else, enqueue them to corresponding buffer based on request type id
       bool is_success = false;
       req.arrive = m_clk;
-      req.is_critical = !req.is_prefetch ? true : m_core_usefulness[req.source_id] >= m_prom_threshold;
+      req.is_critical = !req.is_prefetch ? true : m_core_usefulness[std::pair{req.source_ptr,req.source_id}] >= m_prom_threshold;
       if (req.type_id == Request::Type::Read) {
         is_success = m_read_buffer.enqueue(req);
       } else if (req.type_id == Request::Type::Write) {
@@ -313,7 +312,7 @@ class DRACController final : public IDRACController, public Implementation {
         if(it->is_prefetch) {
           uint64_t age = m_clk - it->arrive;
           bool drop = false;
-          double usefulness = m_core_usefulness[it->source_id];
+          double usefulness = m_core_usefulness[std::pair{it->source_ptr,it->source_id}];
           for(int i = 0; i < 4; i++) {
             if(usefulness < m_drop_thresholds[i] && age > m_drop_cycles[i]) {
               drop = true;
@@ -423,11 +422,14 @@ class DRACController final : public IDRACController, public Implementation {
     }
 
     public:
-      void set_prefetch_usefulness(int core, double usefulness) {
-        m_core_usefulness[core] = usefulness;
+      void set_prefetch_usefulness(void* source_ptr, int core, double usefulness) {
+        m_core_usefulness[std::pair{source_ptr,core}] = usefulness;
       }
-      bool is_core_critical(int source_id) override {
-        return m_core_usefulness[source_id] >= m_prom_threshold;
+      bool is_core_critical(void* source_ptr, int source_id) override {
+        auto entry = m_core_usefulness.find(std::pair{source_ptr,source_id});
+        if(entry == std::end(m_core_usefulness))
+          return true;
+        return entry->second >= m_prom_threshold;
       }
       int get_core_occupancy(int source_id, bool write) override {
         return write ? m_write_core_count[source_id] : m_read_core_count[source_id];
@@ -437,9 +439,9 @@ class DRACController final : public IDRACController, public Implementation {
 
 std::vector<DRACController*> DRACController::drac_controllers;
 
-void set_core_prefetch_usefulness(int core, double usefulness) {
+void set_core_prefetch_usefulness(void* source_ptr, int core, double usefulness) {
   for(auto& it : Ramulator::DRACController::drac_controllers)
-    it->set_prefetch_usefulness(core, usefulness);
+    it->set_prefetch_usefulness(source_ptr, core, usefulness);
 }
 }   // namespace Ramulator
 
