@@ -219,13 +219,19 @@ void MEMORY_CONTROLLER::return_packet_rq_rr(Ramulator::Request& req, DRAM_CHANNE
   response_type response{req.back_off, req.row_act, pkt.type, pkt.address, pkt.v_address, pkt.data,
                         pkt.pf_metadata, pkt.instr_depend_on_me};
 
+  if constexpr (champsim::debug_print)
+    fmt::print("[DRAM] Returned packet {} type: {} cycle: {}\n",pkt.address, access_type_names.at(champsim::to_underlying(pkt.type)), current_cycle());
   if(req.was_dropped) {
     response.type = access_type::DROPPED;
-    //fmt::print("[DRAM] Dropped PREFETCH packet {0:x}\n",req.addr);
+    if constexpr (champsim::debug_print)
+      fmt::print("[DRAM] Dropped PREFETCH packet {} cycle: {}\n",pkt.address, current_cycle());
+
     channels[dram_get_channel(pkt.address)].sim_stats.PF_DROPPED += 1;
     assert(pkt.type == access_type::PREFETCH);
   }
   if(req.was_promoted) {
+    if constexpr (champsim::debug_print)
+      fmt::print("[DRAM] Promoted PREFETCH packet {} cycle: {}\n",pkt.address, current_cycle());
     response.type = access_type::LOAD;
     channels[dram_get_channel(pkt.address)].sim_stats.PF_PROMOTED += 1;
     assert(pkt.type == access_type::PREFETCH);
@@ -240,6 +246,11 @@ void MEMORY_CONTROLLER::return_packet_rq_rr(Ramulator::Request& req, DRAM_CHANNE
 
 bool MEMORY_CONTROLLER::add_rq(const request_type& packet, champsim::channel* ul)
 {
+    int source_id = packet.cpu;
+    if(packet.cpu > NUM_CPUS) {
+      fmt::print("[DRAM] Got invalid CPU: {}\n",packet.cpu);
+      source_id = 0;
+    }
     //if packet needs response, we need to track its data to return later
     if(!warmup)
     {
@@ -249,13 +260,14 @@ bool MEMORY_CONTROLLER::add_rq(const request_type& packet, champsim::channel* ul
       {
         DRAM_CHANNEL::request_type pkt = DRAM_CHANNEL::request_type{packet};
         pkt.to_return = {&ul->returned};
-        //fmt::print("[DRAM] Adding access type: {} for {} to queue\n", champsim::to_underlying(packet.type), packet.address);
-        success = ramulator2_frontend->receive_external_requests((int)packet.type, packet.address.to<int64_t>(), packet.cpu, packet.source_ptr, [=](Ramulator::Request& req) {return_packet_rq_rr(req,pkt);});
+        if constexpr (champsim::debug_print)
+          fmt::print("[DRAM] Adding access type: {} for {} to read queue\n", champsim::to_underlying(packet.type), packet.address);
+        success = ramulator2_frontend->receive_external_requests((int)packet.type, packet.address.to<int64_t>(), source_id, packet.source_ptr, [=](Ramulator::Request& req) {return_packet_rq_rr(req,pkt);});
       }
       else
       {
         //otherwise feed to ramulator directly with no response requested
-        success = ramulator2_frontend->receive_external_requests((int)packet.type, packet.address.to<int64_t>(), packet.cpu, packet.source_ptr, [](Ramulator::Request& req){});
+        success = ramulator2_frontend->receive_external_requests((int)packet.type, packet.address.to<int64_t>(), source_id, packet.source_ptr, [](Ramulator::Request& req){});
       }
       return(success);
     }
@@ -276,10 +288,18 @@ bool MEMORY_CONTROLLER::add_rq(const request_type& packet, champsim::channel* ul
 
 bool MEMORY_CONTROLLER::add_wq(const request_type& packet)
 {
+    int source_id = packet.cpu;
+    if(packet.cpu > NUM_CPUS) {
+      fmt::print("[DRAM] Got invalid CPU: {}\n",packet.cpu);
+      source_id = 0;
+    }
     //if ramulator, feed directly. Since its a write, no response is needed
     if(!warmup)
     {
-      bool success = ramulator2_frontend->receive_external_requests((int)access_type::WRITE, packet.address.to<int64_t>(), packet.cpu, packet.source_ptr, [](Ramulator::Request& req){});
+      if constexpr (champsim::debug_print)
+        fmt::print("[DRAM] Adding access type: {} for {} to write queue\n", champsim::to_underlying(packet.type), packet.address);
+
+      bool success = ramulator2_frontend->receive_external_requests((int)access_type::WRITE, packet.address.to<int64_t>(), source_id, packet.source_ptr, [](Ramulator::Request& req){});
       if(!success)
         ++channels[dram_get_channel(packet.address)].sim_stats.WQ_FULL;
       return(success);

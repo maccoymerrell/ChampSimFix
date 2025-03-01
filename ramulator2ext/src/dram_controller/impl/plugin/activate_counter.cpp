@@ -161,6 +161,7 @@ class ActivateCounterPlugin : public IControllerPlugin, public Implementation {
           rb_hits--;
           rb_miss++;
           uint64_t bank_count = m_dram->get_level_size("bank");
+          //fmt::print("[ACTDATA] Cycle:{} Core:{}\n",total_cycles, req_it->source_id);
           HC.log_charge(convert_address(req_it),req_it->is_prefetch,req_it->type_id == Ramulator::Request::Type::Write);
         }
       }
@@ -264,6 +265,8 @@ void ActivateCounter::log_charge(Address addr, bool prefetch, bool write_back)
   started = true;
   channel_num = addr.get_channel();
   uint64_t dram_row = addr.get_row();
+
+  //fmt::print("[ACTDATA] Row:{} Channel:{} Bank:{} Prefetch:{} Write:{}\n",addr.get_row(), addr.get_channel(), addr.get_bank(), prefetch, write_back);
 
   //log charge in table
   if(activate_master.find(addr) == std::end(activate_master))

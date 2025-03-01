@@ -20,7 +20,7 @@ class DRACController final : public IDRACController, public Implementation {
     ReqBuffer m_read_buffer;              // Read request buffer
     ReqBuffer m_write_buffer;             // Write request buffer
 
-
+    bool debug = false;
     int m_rank_addr_idx = -1;
     int m_bankgroup_addr_idx = -1;
     int m_bank_addr_idx = -1;
@@ -41,6 +41,9 @@ class DRACController final : public IDRACController, public Implementation {
     std::map<std::pair<void*,int>,double> m_core_usefulness;
     std::vector<int> m_read_core_count;
     std::vector<int> m_write_core_count;
+
+    std::vector<int> m_read_core_total;
+    std::vector<int> m_write_core_total;
 
     int s_num_row_hits = 0;
     int s_num_row_misses = 0;
@@ -97,6 +100,8 @@ class DRACController final : public IDRACController, public Implementation {
         }
       }
       drac_controllers.push_back(this);
+      if(debug)
+      fmt::print("[MEMORY CONTROLLER] RQ size: {} WQ size: {}\n",m_read_buffer.max_size,m_write_buffer.max_size);
     };
 
     void setup(IFrontEnd* frontend, IMemorySystem* memory_system) override {
@@ -113,9 +118,13 @@ class DRACController final : public IDRACController, public Implementation {
       s_core_row_conflicts.resize(num_cores);
       m_read_core_count.resize(num_cores);
       m_write_core_count.resize(num_cores);
+      m_read_core_total.resize(num_cores);
+      m_write_core_total.resize(num_cores);
       for(int i = 0; i < num_cores; i++) {
         m_read_core_count[i] = 0;
         m_write_core_count[i] = 0;
+        m_read_core_total[i] = 0;
+        m_write_core_total[i] = 0;
       }
 
       for (int i = 0; i < num_cores; i++) {
@@ -125,6 +134,7 @@ class DRACController final : public IDRACController, public Implementation {
       }
 
       m_priority_buffer.max_size = INT_MAX;
+      m_active_buffer.max_size = INT_MAX;
 
       register_stat(s_num_row_hits).name("controller_num_row_hits");
       register_stat(s_num_row_misses).name("controller_num_row_misses");
@@ -136,7 +146,8 @@ class DRACController final : public IDRACController, public Implementation {
 
     bool send(Request& req) override {
       req.final_command = m_dram->m_request_translations(req.type_id);
-      
+      if(debug)
+      fmt::print(fmt::runtime("[MEMORY CONTROLLER] Processing packet {:#x} promotion: {} prefetch: {} cycle: {}\n"),req.addr, req.is_promotion, req.is_prefetch,m_clk);
       // Forward existing write requests to incoming read requests
       if (req.type_id == Request::Type::Read) {
         auto compare_addr = [req](const Request& wreq) {
@@ -144,13 +155,14 @@ class DRACController final : public IDRACController, public Implementation {
         };
         if (std::find_if(m_write_buffer.begin(), m_write_buffer.end(), compare_addr) != m_write_buffer.end()) {
           // The request will depart at the next cycle
-          //fmt::print("[DRAM] Forwarding write for {0:x}\n",req.addr);
+          if(debug)
+          fmt::print(fmt::runtime("[MEMORY CONTROLLER] Forwarding write for {:#x} cycle: {}\n"),req.addr, m_clk);
           req.depart = m_clk + 1;
           pending.push_back(req);
           return true;
         }
       }
-      //fmt::print("Processing packet {0:x} promotion: {} prefetch: {}\n",req.addr, req.is_promotion, req.is_prefetch);
+      
       //Drop prefetches that are promoted via read
       if ((req.type_id == Request::Type::Read) && req.is_promotion) {
         //fmt::print("Received promotion for {0:x}, looking for candidate...\n",req.addr);
@@ -168,8 +180,8 @@ class DRACController final : public IDRACController, public Implementation {
       }
 
       //if is a prefetch, go ahead and drop half according to their arrival cycle
-      
-
+      if(debug)
+      fmt::print(fmt::runtime("[MEMORY CONTROLLER] Adding packet: {:#x} promotion: {} prefetch: {} cycle: {} to queue\n"),req.addr, req.is_promotion, req.is_prefetch, m_clk);
       // Else, enqueue them to corresponding buffer based on request type id
       bool is_success = false;
       req.arrive = m_clk;
@@ -184,13 +196,10 @@ class DRACController final : public IDRACController, public Implementation {
       if (!is_success) {
         // We could not enqueue the request
         req.arrive = -1;
+        if(debug)
+        fmt::print(fmt::runtime("[MEMORY CONTROLLER] Failed to add packet: {:#x} promotion: {} prefetch: {} cycle: {} to queue\n"),req.addr, req.is_promotion, req.is_prefetch, m_clk);
         return false;
-      }
-      if(req.is_critical) {
-        if(req.type_id == Request::Type::Read)
-          m_read_core_count[req.source_id]++;
-        if(req.type_id == Request::Type::Write)
-          m_write_core_count[req.source_id]++;
+        
       }
 
       return true;
@@ -204,12 +213,36 @@ class DRACController final : public IDRACController, public Implementation {
       return is_success;
     }
 
+    void tally_critical_requests() {
+      for(int i = 0; i < m_read_core_count.size(); i++) {
+        m_read_core_count[i] = 0;
+        m_read_core_total[i] = 0;
+      }
+      for(int i = 0; i < m_write_core_count.size(); i++) {
+        m_write_core_count[i] = 0;
+        m_write_core_total[i] = 0;
+      }
+
+      for(auto& rbe : m_read_buffer) {
+        m_read_core_total[rbe.source_id]++;
+        if(is_core_critical(rbe.source_ptr,rbe.source_id) || !rbe.is_prefetch) 
+        m_read_core_count[rbe.source_id]++;
+      }
+      for(auto& wbe : m_write_buffer) {
+        m_write_core_total[wbe.source_id]++;
+        if(is_core_critical(wbe.source_ptr,wbe.source_id) || !wbe.is_prefetch)
+        m_write_core_count[wbe.source_id]++;
+      }
+    }
+
     void tick() override {
       m_clk++;
       // 1. Serve completed reads
       serve_completed_reads();
       m_refresh->tick();
       m_scheduler->tick();
+
+      tally_critical_requests();
 
       // 2. Try to find a request to serve.
       ReqBuffer::iterator req_it;
@@ -227,31 +260,48 @@ class DRACController final : public IDRACController, public Implementation {
       if (request_found) {
         // If we find a real request to serve
         m_dram->issue_command(req_it->command, req_it->addr_vec);
+        if(debug)
+          fmt::print("[MEMORY CONTROLLER] Serving request: {:#x} promotion: {} prefetch: {} dropped: {} cycle: {}\n",req_it->addr, req_it->was_promoted, req_it->is_prefetch, req_it->was_dropped, m_clk);
 
         // If we are issuing the last command, set depart clock cycle and move the request to the pending queue
         if (req_it->command == req_it->final_command) {
           if (req_it->type_id == Request::Type::Read) {
+            if(debug)
+              fmt::print("[MEMORY CONTROLLER] Finishing read request: {:#x} promotion: {} prefetch: {} dropped: {} cycle: {}\n",req_it->addr, req_it->was_promoted, req_it->is_prefetch, req_it->was_dropped, m_clk);
             req_it->depart = m_clk + m_dram->m_read_latency;
             pending.push_back(*req_it);
-            if(req_it->is_critical) {
-              m_read_core_count[req_it->source_id]--;
-              assert(m_read_core_count[req_it->source_id] >= 0);
-            }
           } else if (req_it->type_id == Request::Type::Write) {
             // TODO: Add code to update statistics
-            if(req_it->is_critical) {
-              m_write_core_count[req_it->source_id]--;
-              assert(m_write_core_count[req_it->source_id] >= 0);
-            }
+            if(debug)
+              fmt::print("[MEMORY CONTROLLER] Finishing write request: {:#x} promotion: {} prefetch: {} dropped: {} cycle: {}\n",req_it->addr, req_it->was_promoted, req_it->is_prefetch, req_it->was_dropped, m_clk);
           }
           buffer->remove(req_it);
         } else {
+          if(debug)
+            fmt::print("[MEMORY CONTROLLER] Issuing command for request: {:#x} promotion: {} prefetch: {} dropped: {} cycle: {}\n",req_it->addr, req_it->was_promoted, req_it->is_prefetch, req_it->was_dropped, m_clk);
           if (m_dram->m_command_meta(req_it->command).is_opening) {
-            m_active_buffer.enqueue(*req_it);
+            if(debug)
+              fmt::print("[MEMORY CONTROLLER] Opening row for request: {:#x} promotion: {} prefetch: {} dropped: {} cycle: {}\n",req_it->addr, req_it->was_promoted, req_it->is_prefetch, req_it->was_dropped, m_clk);
+              bool success = m_active_buffer.enqueue(*req_it);
+              if(debug)
+                fmt::print("[MEMORY CONTROLLER] Opening row for request: {:#x} promotion: {} prefetch: {} dropped: {} cycle: {} success: {}\n",req_it->addr, req_it->was_promoted, req_it->is_prefetch, req_it->was_dropped, m_clk,success);
+
             buffer->remove(req_it);
           }
         }
       }
+
+      //heartbeat
+      /*
+      if((m_clk + 1) % 1000000 == 0) {
+        fmt::print("[MEMORY CONTROLLER] RQ occu: {} WQ occu: {}\n",m_read_buffer.size(),m_write_buffer.size());
+        for(int i = 0; i < m_read_core_count.size(); i++) {
+          fmt::print("\t{} Critical Reads Enqueued: {} Total: {}\n",i,m_read_core_count[i],m_read_core_total[i]);
+        }
+        for(int i = 0; i < m_write_core_count.size(); i++) {
+          fmt::print("\t{} Critical Writes Enqueued: {} Total: {}\n",i,m_write_core_count[i],m_write_core_total[i]);
+        }
+      }*/
 
     };
 
@@ -278,6 +328,8 @@ class DRACController final : public IDRACController, public Implementation {
             req.callback(req);
           }
           // Finally, remove this request from the pending queue
+          if(debug)
+          fmt::print("[MEMORY CONTROLLER] Returning packet {:#x} prefetch: {} promotion: {} dropped: {} cycle: {}\n",req.addr,req.is_prefetch,req.was_promoted,req.was_dropped,m_clk);
           pending.pop_front();
         }
       };
@@ -320,17 +372,10 @@ class DRACController final : public IDRACController, public Implementation {
             }
           }
           if(drop) {
+            if(debug)
+              fmt::print("[MEMORY CONTROLLER] Dropping packet {:#x} prefetch: {} promotion: {} dropped: {} cycle: {}\n",it->addr,it->is_prefetch,it->was_promoted,it->was_dropped,m_clk);
             it->was_dropped = true;
-            if(it->is_critical) {
-              if(it->type_id == Request::Type::Read) {
-                m_read_core_count[it->source_id]--;
-                assert(m_read_core_count[it->source_id] >= 0);
-              }
-              else {
-                m_write_core_count[it->source_id]--;
-                assert(m_write_core_count[it->source_id] >= 0);
-              }
-            }
+            it->depart = m_clk + 1;
             pending.push_back(*it);
             m_read_buffer.remove(it);
             s_prefetches_dropped++;

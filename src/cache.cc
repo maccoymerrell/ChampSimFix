@@ -294,7 +294,9 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
     }
   }
   else if(fill_mshr.type == access_type::DROPPED) {
-    //fmt::print("[{}] Dropped PREFETCH for {} from MSHR\n", NAME, fill_mshr.address);
+    if constexpr (champsim::debug_print) {
+      fmt::print("[{}] Dropped PREFETCH for {} from MSHR\n", NAME, fill_mshr.address);
+    }
     auto [set_begin, set_end] = get_set_span(fill_mshr.address);
     auto way_idx = std::distance(set_begin, set_end);
     auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill_mshr), fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx,
@@ -412,8 +414,9 @@ bool CACHE::allocate_mshr(const tag_lookup_type& handle_pkt) {
       //  return std::pair{false,false};
 
       sim_stats.downstream_packets.increment(std::pair{access_type::PROMOTION, handle_pkt.cpu});
-      
-      //fmt::print("[{}] Issued promotion packet for {}\n",NAME,mshr_pkt.second.address);
+      if constexpr (champsim::debug_print) {
+        fmt::print("[{}] Issued promotion packet for {}\n",NAME,mshr_pkt.second.address);
+      }
     }
     if(mshr_entry->type == access_type::PREFETCH && handle_pkt.type != access_type::PREFETCH) {
       // Mark the prefetch as useful
@@ -444,6 +447,9 @@ bool CACHE::allocate_mshr(const tag_lookup_type& handle_pkt) {
      MSHR.emplace_back(std::move(mshr_pkt.first));
     }
   }
+  if(PQM_ENABLED) {
+    //fmt::print("[MSHRDATA] Cycle:{} Occupancy:{}\n",current_cycle(),get_mshr_occupancy());
+  }
   return true;
 }
 bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
@@ -465,8 +471,9 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
       //  return false;
 
       sim_stats.downstream_packets.increment(std::pair{access_type::PROMOTION, handle_pkt.cpu});
-      
-      //fmt::print("[{}] Issued promotion packet for {}\n",NAME,mshr_pkt.second.address);
+      if constexpr (champsim::debug_print) {
+        fmt::print("[{}] Issued promotion packet for {}\n",NAME,mshr_pkt.second.address);
+      }
     }
     if(mshr_entry->type == access_type::PREFETCH && handle_pkt.type != access_type::PREFETCH) {
       // Mark the prefetch as useful
@@ -481,7 +488,10 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
 
   //I think this is fine. Will need to check
   if(handle_pkt.type == access_type::PROMOTION /*&& handle_pkt.prefetch_from_this*/) {
-    //fmt::print("[{}] Promotion dropped for {}\n",NAME,mshr_pkt.second.address);
+    if constexpr (champsim::debug_print) {
+      fmt::print("[{}] Promotion dropped for {}\n",NAME,mshr_pkt.second.address);
+    }
+    
     sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.cpu});
     return true;
   }
@@ -751,7 +761,7 @@ long CACHE::operate()
   champsim::bandwidth fill_bw{MAX_FILL};
   for (auto q : {std::ref(MSHR), std::ref(inflight_writes)}) {
     auto [fill_begin, fill_end] = champsim::get_span_p(std::cbegin(q.get()), std::cend(q.get()), fill_bw,
-                                                       [time = current_time](const auto& x) { return x.data_promise.is_ready_at(time); });
+                                                       [time = current_time](const auto& x) { return x.data_promise.is_ready_at(time) || x.type == access_type::DROPPED;  });
     auto complete_end = std::find_if_not(fill_begin, fill_end, [this](const auto& x) { return this->handle_fill(x); });
     fill_bw.consume(std::distance(fill_begin, complete_end));
     q.get().erase(fill_begin, complete_end);
@@ -988,6 +998,9 @@ bool CACHE::prefetch_line(uint64_t /*deprecated*/, uint64_t /*deprecated*/, uint
 bool CACHE::finish_packet(const response_type& packet)
 {
   // check MSHR information
+  if constexpr (champsim::debug_print)
+    fmt::print("[{}_MSHR] Packet returned, type: {} address: {} cycle: {}\n",NAME, access_type_names.at(champsim::to_underlying(packet.type)), packet.address, current_cycle());
+
   auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(packet.address));
   auto first_unreturned = std::find_if(MSHR.begin(), MSHR.end(), [](auto x) { return x.data_promise.has_unknown_readiness(); });
 
@@ -999,13 +1012,22 @@ bool CACHE::finish_packet(const response_type& packet)
     assert(0);
   }
   else if (mshr_entry == MSHR.end() || !mshr_entry->data_promise.has_unknown_readiness()) {
+    if constexpr (champsim::debug_print)
+      fmt::print("[{}_MSHR] Excess packet arrived, type: {} address: {} cycle: {}\n",NAME, access_type_names.at(champsim::to_underlying(packet.type)), packet.address, current_cycle());
     sim_stats.returned_packets.increment(std::pair{packet.type, 0});
     return true;
   }
-  if(packet.type == access_type::LOAD && mshr_entry->was_promoted)
+  if constexpr (champsim::debug_print)
+    fmt::print("[{}_MSHR] Packet closing MSHR, type: {} address: {} cycle: {}\n",NAME, access_type_names.at(champsim::to_underlying(mshr_entry->type)), mshr_entry->address, current_cycle());
+  if(packet.type == access_type::LOAD && mshr_entry->was_promoted) {
     sim_stats.returned_packets.increment(std::pair{access_type::PROMOTION, mshr_entry->cpu});
+    if constexpr (champsim::debug_print)
+      fmt::print("[{}_MSHR] Promotion returned, type: {} address: {} cycle: {}\n",NAME, access_type_names.at(champsim::to_underlying(packet.type)), packet.address, current_cycle());
+  }
   else if(mshr_entry->was_promoted && packet.type == access_type::PREFETCH) {
     sim_stats.pr_missed++;
+    if constexpr (champsim::debug_print)
+      fmt::print("[{}_MSHR] Promotion missed, type: {} address: {} cycle: {}\n",NAME, access_type_names.at(champsim::to_underlying(packet.type)), packet.address, current_cycle());
   }
   else
     sim_stats.returned_packets.increment(std::pair{packet.type, mshr_entry->cpu});
@@ -1026,6 +1048,9 @@ bool CACHE::finish_packet(const response_type& packet)
       return false;
     }
     sim_stats.downstream_packets.increment(std::pair{refetch_request.type, refetch_request.cpu});
+    if constexpr (champsim::debug_print) {
+      fmt::print("[{}_MSHR] Retransmitting dropped packet: {}, was updated from PREFETCH to {}\n",this->NAME,mshr_entry->address,access_type_names.at(champsim::to_underlying(mshr_entry->type)));
+    }
     return true;
   }
 
@@ -1039,8 +1064,12 @@ bool CACHE::finish_packet(const response_type& packet)
   mshr_entry->data_promise = champsim::waitable{finished_value, current_time + (warmup ? champsim::chrono::clock::duration{} : FILL_LATENCY)};
   mshr_entry->back_off |= packet.back_off;
   mshr_entry->row_act |= packet.row_act;
-  if(packet.type == access_type::DROPPED && mshr_entry->type == access_type::PREFETCH)
+
+  //if dropped, update to dropped type and set it to finish now
+  if(packet.type == access_type::DROPPED && mshr_entry->type == access_type::PREFETCH) {
     mshr_entry->type = access_type::DROPPED;
+    mshr_entry->data_promise = champsim::waitable{finished_value, current_time};
+  }
 
   if constexpr (champsim::debug_print) {
     fmt::print("[{}_MSHR] finish_packet instr_id: {} address: {} data: {} type: {} current: {}\n", this->NAME, mshr_entry->instr_id, mshr_entry->address,

@@ -102,6 +102,9 @@ champsim::page_number VirtualMemory::ppage_front() const
 void VirtualMemory::ppage_pop()
 { 
   ppage_free_list.pop_front();
+  if(ppage_free_list.size() % 1024 == 0) {
+    fmt::print("[VMEM] Remaining Memory: {}\n",champsim::data::mebibytes{ppage_free_list.size() * champsim::data::bytes{PAGE_SIZE}});
+  }
   if(available_ppages() == 0)
     populate_pages();
   if(!shuffled && virtual_seed != 0)

@@ -570,10 +570,19 @@ long O3_CPU::operate_lsq()
   for (auto& lq_entry : LQ) {
     if (load_bw.has_remaining() && lq_entry.has_value() && lq_entry->producer_id == std::numeric_limits<uint64_t>::max() && !lq_entry->fetch_issued
         && lq_entry->ready_time < current_time) {
-      auto success = execute_load(*lq_entry);
-      if (success) {
-        load_bw.consume();
-        lq_entry->fetch_issued = true;
+      //check to see if this load was already issued.
+      for(auto& lq_entry_check : LQ) {
+        if(lq_entry_check.has_value() && lq_entry_check->fetch_issued && champsim::block_number{lq_entry_check->virtual_address} == champsim::block_number{lq_entry->virtual_address}) {
+          lq_entry->fetch_issued = true;
+          break;
+        }
+      }
+      if(!lq_entry->fetch_issued) {
+        auto success = execute_load(*lq_entry);
+        if (success) {
+          load_bw.consume();
+          lq_entry->fetch_issued = true;
+        }
       }
     }
   }
@@ -699,12 +708,28 @@ long O3_CPU::handle_memory_return()
 
   auto l1d_it = std::begin(L1D_bus.lower_level->returned);
   for (champsim::bandwidth l1d_bw{L1D_BANDWIDTH}; l1d_bw.has_remaining() && l1d_it != std::end(L1D_bus.lower_level->returned); l1d_bw.consume(), ++l1d_it) {
+    bool closed = false;
     for (auto& lq_entry : LQ) {
       if (lq_entry.has_value() && lq_entry->fetch_issued && champsim::block_number{lq_entry->virtual_address} == champsim::block_number{l1d_it->v_address}) {
         lq_entry->finish(std::begin(ROB), std::end(ROB));
         lq_entry.reset();
         ++progress;
+        closed = true;
       }
+    }
+    if(!closed) {
+      fmt::print("[LSQ] {} Request arrived and didn't close LSQ, Address: {} VAddress: {} Cycle: {} Type: {}\n",cpu,l1d_it->address,l1d_it->v_address,current_cycle(),champsim::to_underlying(l1d_it->type));
+        // print LQ entry
+      auto lq_pack = [period = clock_period](const auto& entry) {
+        std::string depend_id{"-"};
+        if (entry->producer_id != std::numeric_limits<uint64_t>::max()) {
+          depend_id = std::to_string(entry->producer_id);
+        }
+        return std::tuple{entry->instr_id, entry->virtual_address, entry->fetch_issued, entry->ready_time.time_since_epoch() / period, depend_id};
+      };
+      std::string_view lq_fmt{"instr_id: {} address: {} fetch_issued: {} event_cycle: {} waits on {}"};
+
+      champsim::range_print_deadlock(LQ, "cpu" + std::to_string(cpu) + "_LQ", lq_fmt, lq_pack);
     }
     ++progress;
   }

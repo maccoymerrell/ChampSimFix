@@ -36,7 +36,7 @@ PageTableWalker::PageTableWalker(champsim::ptw_builder b)
       MAX_FILL(b.m_max_fill.value_or(champsim::bandwidth::maximum_type{b.scaled_by_ul_size(b.m_bandwidth_factor)})),
       HIT_LATENCY(b.m_clock_period * b.m_latency), vmem(b.m_vmem), CR3_addr(b.m_vmem->get_pte_pa(b.m_cpu, champsim::page_number{}, b.m_vmem->pt_levels).first)
 {
-  fmt::print("PTW CPU: {}\n",b.m_cpu);
+  //fmt::print("PTW CPU: {}\n",b.m_cpu);
   std::vector<decltype(b.m_pscl)::value_type> local_pscl_dims{};
   std::remove_copy_if(std::begin(b.m_pscl), std::end(b.m_pscl), std::back_inserter(local_pscl_dims), [](auto x) { return std::get<0>(x) == 0; });
   std::sort(std::begin(local_pscl_dims), std::end(local_pscl_dims), std::greater{});
