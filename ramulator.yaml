@@ -26,8 +26,11 @@ MemorySystem:
   DRACController:
     impl: DRACController
     prefetch_starve_cycles: 0
+    drop_enabled: false
+    read_queue_size: 160
+    write_queue_size: 160
     BHScheduler:
-      impl: DRACScheduler
+      impl: BHScheduler
     RefreshManager:
       impl: AllBank
     RowPolicy:

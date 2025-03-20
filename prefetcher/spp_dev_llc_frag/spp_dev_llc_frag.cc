@@ -1,7 +1,7 @@
 #include "spp_dev_llc_frag.h"
 #include "dram_controller.h"
 
-uint32_t spp_dev_llc_frag::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
+uint32_t spp_dev_llc_frag::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                              uint32_t metadata_in)
 {
   //fmt::print("SPP_DEV_LLC_FRAG: OPERATING CACHE\n");
@@ -40,7 +40,7 @@ void spp_dev_llc_frag::remove_from_bank_queue(champsim::address addr) {
 std::size_t spp_dev_llc_frag::get_bank_queue_size(champsim::address addr) {
   return bank_util[get_dram_group(addr)].size();
 }
-uint32_t spp_dev_llc_frag::prefetcher_cache_fill(champsim::address addr, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
+uint32_t spp_dev_llc_frag::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
 
   //look at fills, grab next columns from fills

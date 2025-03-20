@@ -153,6 +153,7 @@ class CACHE : public champsim::operable
     bool invoked_prefetcher = false;
     bool skip_fill;
     bool is_translated;
+    bool return_hit_status = false;
     bool translate_issued = false;
     bool back_off = false;
     bool row_act = false;
@@ -165,8 +166,8 @@ class CACHE : public champsim::operable
     std::vector<uint64_t> instr_depend_on_me{};
     std::vector<std::deque<response_type>*> to_return{};
 
-    explicit tag_lookup_type(request_type req) : tag_lookup_type(req, false, false, nullptr) {}
-    tag_lookup_type(const request_type& req, bool local_pref, bool skip, CACHE* source_ptr_);
+    explicit tag_lookup_type(request_type req) : tag_lookup_type(req, false, false, nullptr,false) {}
+    tag_lookup_type(const request_type& req, bool local_pref, bool skip, CACHE* source_ptr_, bool return_hit_status_);
     tag_lookup_type();
 
     inline bool operator==(const tag_lookup_type& rhs) {
@@ -267,6 +268,7 @@ public:
   bool prefetch_as_load;
   bool match_offset_bits;
   bool virtual_prefetch;
+  std::optional<champsim::address> marked_for_drop;
   std::vector<access_type> pref_activate_mask;
 
   using stats_type = cache_stats;
@@ -334,9 +336,11 @@ public:
 
   void report_prefetch_usefulness(uint32_t pf_cpu, double usefulness);
 
+  void drop_prefetch_access(champsim::address pf_addr);
+
   bool prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t prefetch_metadata);
 
-  bool prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t pf_cpu, uint32_t prefetch_metadata);
+  bool prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t pf_cpu, uint32_t prefetch_metadata, bool skip_tag_check, bool return_hit_status);
 
   [[deprecated]] bool prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata);
 

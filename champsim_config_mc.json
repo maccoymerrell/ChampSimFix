@@ -159,7 +159,7 @@
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
         "prefetcher": "no",
-        "replacement": "lru"
+        "replacement": "ship"
     },
 
     "physical_memory": {
@@ -350,7 +350,7 @@
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
         "prefetcher": "no",
-        "replacement": "lru"
+        "replacement": "ship"
     },
 
     "physical_memory": {
@@ -541,7 +541,7 @@
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
         "prefetcher": "no",
-        "replacement": "lru"
+        "replacement": "ship"
     },
 
     "physical_memory": {
@@ -732,7 +732,7 @@
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
         "prefetcher": "no",
-        "replacement": "lru"
+        "replacement": "ship"
     },
 
     "physical_memory": {
@@ -923,7 +923,7 @@
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
         "prefetcher": "no",
-        "replacement": "lru"
+        "replacement": "ship"
     },
 
     "physical_memory": {
@@ -1114,7 +1114,7 @@
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
         "prefetcher": "next_line_n",
-        "replacement": "lru"
+        "replacement": "ship"
     },
 
     "physical_memory": {
@@ -1305,7 +1305,7 @@
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
         "prefetcher": "next_line_n",
-        "replacement": "lru",
+        "replacement": "ship",
         "pqm": true,
         "mqc": true
     },
@@ -1498,7 +1498,7 @@
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
         "prefetcher": "no",
-        "replacement": "lru"
+        "replacement": "ship"
     },
 
     "physical_memory": {
@@ -1689,7 +1689,7 @@
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
         "prefetcher": "no",
-        "replacement": "lru"
+        "replacement": "ship"
     },
 
     "physical_memory": {

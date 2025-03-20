@@ -61,6 +61,8 @@ class DRACController final : public IDRACController, public Implementation {
     uint64_t s_prefetch_row_misses = 0;
     uint64_t s_prefetches_dropped = 0;
 
+    bool m_drop_enabled;
+
 
   public:
     static std::vector<DRACController*> drac_controllers;
@@ -75,6 +77,8 @@ class DRACController final : public IDRACController, public Implementation {
       m_scheduler = create_child_ifce<IBHScheduler>();
       m_refresh = create_child_ifce<IRefreshManager>();
       m_rowpolicy = create_child_ifce<IRowPolicy>();
+
+      m_drop_enabled = param<bool>("drop_enabled").desc("Enable dropping prefetches").default_val(true);
       
       m_prom_threshold =  param<float>("promotion_threshold").desc("Threshold for treating prefetch as demand").default_val(0.85f);
       m_drop_cycles.resize(4);
@@ -360,6 +364,7 @@ class DRACController final : public IDRACController, public Implementation {
       bool request_found = false;
 
       // 2.05   Search for prefetches to drop.
+      if(m_drop_enabled)
       for (auto it = m_read_buffer.begin(); it != m_read_buffer.end(); it++) {
         if(it->is_prefetch) {
           uint64_t age = m_clk - it->arrive;

@@ -108,14 +108,14 @@ auto CACHE::operator=(CACHE&& other) -> CACHE&
   return *this;
 }
 
-CACHE::tag_lookup_type::tag_lookup_type(const request_type& req, bool local_pref, bool skip, CACHE* source_ptr_)
+CACHE::tag_lookup_type::tag_lookup_type(const request_type& req, bool local_pref, bool skip, CACHE* source_ptr_, bool return_hit_status_)
     : address(req.address), v_address(req.v_address), data(req.data), ip(req.ip), instr_id(req.instr_id), pf_metadata(req.pf_metadata), cpu(req.cpu),
       back_off(req.back_off), row_act(req.row_act),
-      type(req.type), prefetch_from_this(local_pref), skip_fill(skip), source_ptr(source_ptr_), is_translated(req.is_translated), instr_depend_on_me(req.instr_depend_on_me)
+      type(req.type), prefetch_from_this(local_pref), skip_fill(skip), return_hit_status(return_hit_status_), source_ptr(source_ptr_), is_translated(req.is_translated), instr_depend_on_me(req.instr_depend_on_me)
 {
 }
 
-CACHE::tag_lookup_type::tag_lookup_type() : tag_lookup_type(request_type{},false,false,nullptr) {};
+CACHE::tag_lookup_type::tag_lookup_type() : tag_lookup_type(request_type{},false,false,nullptr,false) {};
 
 CACHE::mshr_type::mshr_type(const tag_lookup_type& req, champsim::chrono::clock::time_point _time_enqueued)
     : address(req.address), v_address(req.v_address), ip(req.ip), instr_id(req.instr_id), cpu(req.cpu), type(req.type), back_off(req.back_off), row_act(req.row_act),
@@ -200,9 +200,9 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
   if(fill_mshr.type != access_type::DROPPED) {
     // find victim
     auto [set_begin, set_end] = get_set_span(fill_mshr.address);
-    auto way = std::find_if_not(set_begin, set_end, [](auto x) { return x.valid; });
+    auto way = std::find_if_not(set_begin, set_end, [address = fill_mshr.address](auto x) { return x.valid && champsim::block_number{x.address} != champsim::block_number{address}; });
     if (way == set_end) {
-      way = std::next(set_begin, impl_find_victim(fill_mshr.cpu, fill_mshr.instr_id, get_set_index(fill_mshr.address), &*set_begin, fill_mshr.ip,
+      way = std::next(set_begin, impl_find_victim(fill_mshr.cpu >= NUM_CPUS ? 0 : fill_mshr.cpu, fill_mshr.instr_id, get_set_index(fill_mshr.address), &*set_begin, fill_mshr.ip,
                                                   fill_mshr.address, fill_mshr.type));
     }
     assert(set_begin <= way);
@@ -242,7 +242,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
     }
 
   champsim::address evicting_address{};
-  if (way != set_end && way->valid) {
+  if (way != set_end && way->valid && champsim::block_number{way->address} != champsim::block_number{fill_mshr.address}) {
     evicting_address = module_address(*way);
   }
   if(NAME == "LLC") {
@@ -267,7 +267,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
   auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill_mshr), fill_mshr.cpu >= NUM_CPUS ? 0 : fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx,
                                                   (fill_mshr.type == access_type::PREFETCH), evicting_address, fill_mshr.data_promise->pf_metadata);
   
-    impl_replacement_cache_fill(fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, module_address(fill_mshr), fill_mshr.ip, evicting_address,
+    impl_replacement_cache_fill(fill_mshr.cpu >= NUM_CPUS ? 0 : fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, module_address(fill_mshr), fill_mshr.ip, evicting_address,
                                 fill_mshr.type);
 
     if (way != set_end) {
@@ -297,11 +297,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
     if constexpr (champsim::debug_print) {
       fmt::print("[{}] Dropped PREFETCH for {} from MSHR\n", NAME, fill_mshr.address);
     }
-    auto [set_begin, set_end] = get_set_span(fill_mshr.address);
-    auto way_idx = std::distance(set_begin, set_end);
-    auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill_mshr), fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx,
-                                                  (fill_mshr.type == access_type::PREFETCH), champsim::address{}, fill_mshr.data_promise->pf_metadata);
-    response_type response{fill_mshr.back_off, fill_mshr.row_act, fill_mshr.type, fill_mshr.address, fill_mshr.v_address, fill_mshr.data_promise->data, metadata_thru, fill_mshr.instr_depend_on_me};
+    response_type response{fill_mshr.back_off, fill_mshr.row_act, fill_mshr.type, fill_mshr.address, fill_mshr.v_address, fill_mshr.data_promise->data, 0, fill_mshr.instr_depend_on_me};
     for (auto* ret : fill_mshr.to_return) {
       //fmt::print("\tSending response...\n");
       ret->push_back(response);
@@ -334,14 +330,28 @@ bool CACHE::try_hit(tag_lookup_type& handle_pkt)
   }
 
   auto metadata_thru = handle_pkt.pf_metadata;
+  bool should_drop = false;
   if (should_activate_prefetcher(handle_pkt)) {
     metadata_thru = impl_prefetcher_cache_operate(module_address(handle_pkt), handle_pkt.ip, handle_pkt.cpu >= NUM_CPUS ? 0 : handle_pkt.cpu, hit, useful_prefetch, handle_pkt.type, metadata_thru);
     handle_pkt.invoked_prefetcher = true;
+    if(marked_for_drop.has_value() && champsim::block_number{marked_for_drop.value()} == champsim::block_number{handle_pkt.address}) {
+      should_drop = true;
+      marked_for_drop.reset();
+    }
   }
 
+  if (should_drop) {
+    assert(handle_pkt.type == access_type::PREFETCH);
+    response_type response{handle_pkt.back_off, handle_pkt.row_act, access_type::DROPPED, handle_pkt.address, handle_pkt.v_address, champsim::address{}, metadata_thru, handle_pkt.instr_depend_on_me};
+    for (auto* ret : handle_pkt.to_return) {
+      ret->push_back(response);
+    }
+
+    return true;
+  }
   // update replacement policy
   const auto way_idx = std::distance(set_begin, way);
-  impl_update_replacement_state(handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, module_address(handle_pkt), handle_pkt.ip, {}, handle_pkt.type,
+  impl_update_replacement_state(handle_pkt.cpu >= NUM_CPUS ? 0 : handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, module_address(handle_pkt), handle_pkt.ip, {}, handle_pkt.type,
                                 hit);
 
   if (hit) {
@@ -447,7 +457,7 @@ bool CACHE::allocate_mshr(const tag_lookup_type& handle_pkt) {
      MSHR.emplace_back(std::move(mshr_pkt.first));
     }
   }
-  if(PQM_ENABLED) {
+  if((NAME.compare("LLC") == 0) && !warmup) {
     //fmt::print("[MSHRDATA] Cycle:{} Occupancy:{}\n",current_cycle(),get_mshr_occupancy());
   }
   return true;
@@ -954,20 +964,19 @@ bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint3
   pf_packet.v_address = virtual_prefetch ? pf_addr : champsim::address{};
   pf_packet.is_translated = !virtual_prefetch;
 
-  internal_PQ.emplace_back(pf_packet, true, !fill_this_level,this);
+  internal_PQ.emplace_back(pf_packet, true, !fill_this_level, this, false);
   ++sim_stats.pf_issued;
 
   return true;
 }
 
-bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t pf_cpu, uint32_t prefetch_metadata)
+void CACHE::drop_prefetch_access(champsim::address pf_addr) {
+  marked_for_drop = pf_addr;
+}
+
+bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t pf_cpu, uint32_t prefetch_metadata, bool skip_tag_check, bool return_hit_status)
 {
   ++sim_stats.pf_requested;
-
-  if (std::size(internal_PQ) >= PQ_SIZE) {
-    return false;
-  }
-
   request_type pf_packet;
   pf_packet.type = access_type::PREFETCH;
   pf_packet.pf_metadata = prefetch_metadata;
@@ -977,10 +986,17 @@ bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint3
   pf_packet.v_address = virtual_prefetch ? pf_addr : champsim::address{};
   pf_packet.is_translated = !virtual_prefetch;
 
-  internal_PQ.emplace_back(pf_packet, true, !fill_this_level,this);
-  ++sim_stats.pf_issued;
+  if(skip_tag_check) {
+    return handle_miss(tag_lookup_type{pf_packet, true, !fill_this_level, this, return_hit_status});
+  } else {
+    if (std::size(internal_PQ) >= PQ_SIZE) {
+      return false;
+    }
+    internal_PQ.emplace_back(pf_packet, true, !fill_this_level, this, return_hit_status);
+    ++sim_stats.pf_issued;
 
-  return true;
+    return true;
+  }
 }
 
 // LCOV_EXCL_START exclude deprecated function
@@ -1357,7 +1373,7 @@ void CACHE::end_phase(unsigned finished_cpu)
 template <typename T>
 bool CACHE::should_activate_prefetcher(const T& pkt) const
 {
-  return !pkt.prefetch_from_this && !pkt.invoked_prefetcher && std::count(std::begin(pref_activate_mask), std::end(pref_activate_mask), pkt.type) > 0;
+  return (!pkt.prefetch_from_this && !pkt.invoked_prefetcher && std::count(std::begin(pref_activate_mask), std::end(pref_activate_mask), pkt.type) > 0) || (pkt.return_hit_status && !pkt.invoked_prefetcher);
 }
 
 // LCOV_EXCL_START Exclude the following function from LCOV

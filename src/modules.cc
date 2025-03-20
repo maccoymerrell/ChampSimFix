@@ -18,14 +18,17 @@
 
 #include "cache.h"
 
+void champsim::modules::prefetcher::drop_prefetch_access(champsim::address pf_addr) const {
+  return intern_->drop_prefetch_access(pf_addr);
+}
 bool champsim::modules::prefetcher::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t prefetch_metadata) const
 {
   return intern_->prefetch_line(pf_addr, fill_this_level, prefetch_metadata);
 }
 
-bool champsim::modules::prefetcher::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t pf_cpu, uint32_t prefetch_metadata) const
+bool champsim::modules::prefetcher::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t pf_cpu, uint32_t prefetch_metadata, bool skip_tag_check, bool return_hit_status) const
 {
-  return intern_->prefetch_line(pf_addr, fill_this_level, pf_cpu, prefetch_metadata);
+  return intern_->prefetch_line(pf_addr, fill_this_level, pf_cpu, prefetch_metadata, skip_tag_check, return_hit_status);
 }
 
 // LCOV_EXCL_START Exclude deprecated function

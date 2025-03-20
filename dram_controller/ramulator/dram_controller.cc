@@ -262,6 +262,9 @@ bool MEMORY_CONTROLLER::add_rq(const request_type& packet, champsim::channel* ul
         pkt.to_return = {&ul->returned};
         if constexpr (champsim::debug_print)
           fmt::print("[DRAM] Adding access type: {} for {} to read queue\n", champsim::to_underlying(packet.type), packet.address);
+
+        //if(!warmup)
+          //fmt::print("[DRAM] Type:{} Address:{} Row:{} Column:{} Rowbuffer:{} Cycle:{}\n", access_type_names[champsim::to_underlying(packet.type)], packet.address, dram_get_row(packet.address),dram_get_column(packet.address),dram_get_rowbuffer(packet.address),current_cycle());
         success = ramulator2_frontend->receive_external_requests((int)packet.type, packet.address.to<int64_t>(), source_id, packet.source_ptr, [=](Ramulator::Request& req) {return_packet_rq_rr(req,pkt);});
       }
       else
