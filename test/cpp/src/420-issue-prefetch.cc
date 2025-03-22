@@ -15,13 +15,13 @@ struct hit_collector : champsim::modules::prefetcher
 {
   using prefetcher::prefetcher;
 
-  uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type, uint32_t metadata_in)
+  uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t, uint8_t cache_hit, bool useful_prefetch, access_type type, uint32_t metadata_in)
   {
     ::prefetch_hit_collector[intern_].push_back({addr, ip, cache_hit, useful_prefetch, type, metadata_in});
     return metadata_in;
   }
 
-  uint32_t prefetcher_cache_fill(uint64_t, long, long, uint8_t, uint64_t, uint32_t metadata_in)
+  uint32_t prefetcher_cache_fill(uint64_t, uint32_t, bool, long, long, uint8_t, uint64_t, uint32_t metadata_in)
   {
     return metadata_in;
   }

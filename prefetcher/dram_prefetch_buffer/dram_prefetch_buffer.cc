@@ -7,10 +7,13 @@ uint32_t dram_prefetch_buffer::prefetcher_cache_operate(champsim::address addr, 
     return metadata_in;
 
   if(useful_prefetch) {
-    useful[cpu]++;
+    //useful[cpu]++;
     //fmt::print("Increasing confidence via useful prefetch\n");
-    if(metadata_in != 1)
-      increase_confidence(addr,2,false);
+    if(metadata_in != NEXT_LINE_ID) {
+      increase_confidence(addr,USEFUL_CONF,false);
+      if(!intern_->warmup)
+        useful_tallied += 1;
+    }
   }
 
   //if(cache_hit == 0) {
@@ -24,19 +27,19 @@ uint32_t dram_prefetch_buffer::prefetcher_cache_operate(champsim::address addr, 
   //}
 
   if(cache_hit == 0) {
-    if(metadata_in == 1) {
+    if(metadata_in == NEXT_LINE_ID) {
       //fmt::print("Triggering walk based on next_line prefetch\n");
     }
     if(type != access_type::PREFETCH) {
       //fmt::print("Increasing confidence via demand miss\n");
-      increase_confidence(addr,1,true);
+      increase_confidence(addr,DEMAND_CONF,true);
     }
     update_walker(addr,cpu);
 
   }
 
   //next line x4 if we have the MSHR capacity
-  if(metadata_in != 1) {
+  if(metadata_in != NEXT_LINE_ID) {
     champsim::block_number pf_addr{addr};
     //fmt::print("[{}] Invoked prefetch for address: {}, hit: {}\n", intern_->NAME, addr, cache_hit);
     for(std::size_t offset = 1; offset <= 4; offset++) {
@@ -44,9 +47,11 @@ uint32_t dram_prefetch_buffer::prefetcher_cache_operate(champsim::address addr, 
       //we should do a confidence lookup here
         //fmt::print("[{}] \tIssued prefetch for address: {}, bank: {}, cpu: {}\n",intern_->NAME, champsim::address{pf_addr + offset}, MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(champsim::address{pf_addr + offset}),cpu);
         if(!filter.check(champsim::address{pf_addr + offset},intern_->current_cycle(),false))
-          success = prefetch_line(champsim::address{pf_addr + offset}, true, cpu, 1, false, true);
+          success = prefetch_line(champsim::address{pf_addr + offset}, true, cpu, NEXT_LINE_ID, false, true);
         if(!success)
           filter.check(champsim::address{pf_addr + offset},intern_->current_cycle(),true);
+        else if(!intern_->warmup)
+          next_line_issued += 1;
     }
   }
   
@@ -77,13 +82,15 @@ void dram_prefetch_buffer::update_row_open_table(champsim::address addr) {
 
   //row act, update last_closed time for closing rowbuffer
   if(row_open_table[rb].row != row) {
+    if(!intern_->warmup)
+      opened_rows += 1;
     //try to find row
     auto entry = row_history_table.check_hit(row_history{row_open_table[rb].row});
 
-    auto rb_entry = row_walker_table[rb].check_hit(row_walker{row,0,0});
-    if(rb_entry.has_value()) {
-      fmt::print("Opened row: {} rb: {} with confidence: {}\n",row,rb,rb_entry->confidence);
-    }
+    //auto rb_entry = row_walker_table[rb].check_hit(row_walker{row,0,0});
+    //if(rb_entry.has_value()) {
+    //  fmt::print("Opened row: {} rb: {} with confidence: {}\n",row,rb,rb_entry->confidence);
+    //}
 
     //found row (check to see if we are the sampler)
     /*
@@ -163,8 +170,8 @@ void dram_prefetch_buffer::update_row_confidence(champsim::address addr) {
 
 uint8_t dram_prefetch_buffer::modify_confidence(uint8_t conf, uint8_t amnt, bool increment) {
   if(increment) {
-    if(conf + amnt >= 99)
-      conf = 99;
+    if(conf + amnt >= CONF_MAX)
+      conf = CONF_MAX;
     else
       conf += amnt;
   }
@@ -187,9 +194,11 @@ void dram_prefetch_buffer::increase_confidence(champsim::address addr, uint8_t a
 
   auto entry = row_walker_table[rb].check_hit(rw);
   if(entry.has_value()) {
-    if(!cond || (col > entry->position))
+    if(!cond || (col > entry->position && col <= entry->position + 8))
       entry->confidence = modify_confidence(entry->confidence,amnt,true);
-      row_walker_table[rb].fill(entry.value());
+    else if(cond)
+      entry->confidence = modify_confidence(entry->confidence,DEMAND_NCONF,false);
+    row_walker_table[rb].fill(entry.value());
   }
 }
 
@@ -236,19 +245,21 @@ void dram_prefetch_buffer::update_walker(champsim::address addr, uint32_t cpu) {
     std::size_t depth = get_depth(rw.confidence);
 
     //issue prefetches backwards
-    if(rw.confidence >= 50) {
-      if(col > prev_col + 1 /*&& (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()) < intern_->get_mshr_size()*0.7*/) {
+    //if(rw.confidence >= 50) {
+      if(col > prev_col + 1 && (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()) < intern_->get_mshr_size()*0.7) {
         //fmt::print("Filling backwards gap at row: {} rb: {} between columns:{} - {}\n",row,rb,prev_col + 1,col - 1);
-        int amount_to_prefetch = /*std::min(*/depth/*,intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()))*/;
+        int amount_to_prefetch = std::min(depth,intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()));
         int prefetched_so_far = 0;
         bool all_success = true;
         for(int i = (int)col - 1; i > prev_col && i > (int)col - amount_to_prefetch; i--) {
           bool success = true;
           if(!filter.check(compose_base_and_column(addr,i),intern_->current_cycle(),false)) {
-            success = prefetch_line(compose_base_and_column(addr,i),true,cpu,0,false,false);
+            success = prefetch_line(compose_base_and_column(addr,i),true,cpu,i%2 == 0 ? BUFFER_ID : NEXT_LINE_ID,false,false);
             if(success) {
               filter.check(compose_base_and_column(addr,i),intern_->current_cycle(),true);
               //rw.confidence = modify_confidence(rw.confidence,1,false);
+              if(!intern_->warmup)
+                backward_buffer_issued += 1;
             }
           }
           if(success)
@@ -262,17 +273,19 @@ void dram_prefetch_buffer::update_walker(champsim::address addr, uint32_t cpu) {
         rw.position = all_success ? col : prev_col + prefetched_so_far;
       }
       //issue prefetches forwards
-      if(col >= rw.opened_at /*&& (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()) < intern_->get_mshr_size()*0.7*/) {
-        int amount_to_prefetch = /*std::min(*/depth/*,intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()))*/;
+      if(col >= rw.opened_at && (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()) < intern_->get_mshr_size()*0.7) {
+        int amount_to_prefetch = std::min(depth,intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()));
         int prefetched_so_far = 0;
         //fmt::print("Prefetching forwards at row: {} rb: {} between columns:{} - {}\n",row,rb,col + 1,col + amount_to_prefetch > 63 ? 63 : col + amount_to_prefetch);
         for(int i = col + 1; i < 64 && i <= col + amount_to_prefetch; i++) {
           bool success = true;
           if(!filter.check(compose_base_and_column(addr,i),intern_->current_cycle(),false)) {
-            success = prefetch_line(compose_base_and_column(addr,i),true,cpu,0,false,false);
+            success = prefetch_line(compose_base_and_column(addr,i),true,cpu,i%2 == 0 ? BUFFER_ID : NEXT_LINE_ID,false,false);
             if(success) {
               filter.check(compose_base_and_column(addr,i),intern_->current_cycle(),true);
               //rw.confidence = modify_confidence(rw.confidence,1,false);
+              if(!intern_->warmup)
+                forward_buffer_issued += 1;
             }
           }
           if(success)
@@ -282,7 +295,7 @@ void dram_prefetch_buffer::update_walker(champsim::address addr, uint32_t cpu) {
         }
         rw.position = col + prefetched_so_far;
       }
-    }
+    //}
     
     row_walker_table[rb].fill(rw);
   }
@@ -367,14 +380,17 @@ void dram_prefetch_buffer::prefetcher_initialize() {
   row_interval_table.resize(MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->rowbuffers());
 }
 
-uint32_t dram_prefetch_buffer::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
+uint32_t dram_prefetch_buffer::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
   accesses_so_far += 1;
-  if(prefetch)
-    filled[cpu]++;
+  //if(prefetch)
+  //  filled[cpu]++;
   
-  if(evicted_addr != champsim::address{})
-    decrease_confidence(evicted_addr,1);
+  if(evicted_addr != champsim::address{} && useless) {
+    decrease_confidence(evicted_addr,USELESS_NCONF);
+    if(!intern_->warmup)
+      useless_tallied += 1;
+  }
 
   return metadata_in;
 }
@@ -382,15 +398,53 @@ uint32_t dram_prefetch_buffer::prefetcher_cache_fill(champsim::address addr, uin
 void dram_prefetch_buffer::prefetcher_cycle_operate() {
   if((intern_->current_cycle() + 1) % usefulness_update_period == 0) {
     for (auto& cp : useful) {
-      uint64_t usfl = cp.second;
-      uint64_t fill = filled[cp.first];
-      intern_->report_prefetch_usefulness(cp.first, (usfl+1)/(double)(fill+1));
-      useful[cp.first] = 0;
-      filled[cp.first] = 0;
+      //uint64_t usfl = cp.second;
+      //uint64_t fill = filled[cp.first];
+      //intern_->report_prefetch_usefulness(cp.first, (usfl+1)/(double)(fill+1));
+      //useful[cp.first] = 0;
+      //filled[cp.first] = 0;
     }
   }
 }
 
 void dram_prefetch_buffer::prefetcher_final_stats() {
-  fmt::print("Prefetches Buffered: {} Triggering Demands: {} Prefetches Issued: {} Prefetch Merges: {} Prefetches Dropped: {} Prefetches Filtered: {}\n",prefetches_arrived, demands_triggered, prefetches_issued, prefetch_matches, prefetches_arrived - prefetch_matches - prefetches_issued, prefetches_filtered);
+  fmt::print("Prefetches Forward: {} Prefetches Backwards: {} Useful: {} Useless: {} Next Line: {} Opened Rows: {}\n",forward_buffer_issued, backward_buffer_issued, useful_tallied, useless_tallied, next_line_issued, opened_rows);
+
+  uint64_t confidence_total = 0;
+  uint64_t tracked_rows = 0;
+
+  std::vector<uint64_t> tracked_rows_per_rb(row_walker_table.size(),0);
+  std::vector<uint64_t> confidence_total_per_rb(row_walker_table.size(),0);
+
+  std::vector<uint64_t> tracked_per_bin(DEPTHS.size(),0);
+
+  int current_rb = 0;
+  for(auto rb: row_walker_table) {
+    for(auto block: rb.get_contents()) {
+      if(block.last_used != 0) {
+        tracked_rows += 1;
+        tracked_rows_per_rb[current_rb] += 1;
+        confidence_total += block.data.confidence;
+        confidence_total_per_rb[current_rb] += block.data.confidence;
+        uint8_t threshold = 0;
+        for (auto thres : THRESH) {
+          threshold++;
+          if(block.data.confidence < thres)
+            break;
+        }
+        tracked_per_bin[threshold-1] += 1;
+      }
+    }
+    current_rb += 1;
+  }
+
+  fmt::print("GLOBAL CONFIDENCE: {} TRACKED ROWS: {}\n",confidence_total / (double)tracked_rows,tracked_rows);
+  fmt::print("TRACKED PER BIN:\n");
+  for (int i = 0; i < DEPTHS.size(); i++) {
+    fmt::print("\t{}: {}\n",THRESH[i],tracked_per_bin[i]);
+  }
+  fmt::print("PER ROWBUFFER:(RB, CONF, TRACKED)\n");
+  for (int i = 0; i < row_walker_table.size(); i++) {
+    fmt::print("\t{}: {} {}\n",i,confidence_total_per_rb[i] / (double)tracked_rows_per_rb[i], tracked_rows_per_rb[i]);
+  }
 }

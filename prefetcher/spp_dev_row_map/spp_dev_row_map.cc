@@ -1,7 +1,7 @@
 #include "spp_dev_row_map.h"
 #include "dram_controller.h"
 
-uint32_t spp_dev_row_map::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
+uint32_t spp_dev_row_map::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                              uint32_t metadata_in)
 {
   //fmt::print("spp_dev_row_map: OPERATING CACHE\n");
@@ -27,7 +27,7 @@ uint32_t spp_dev_row_map::prefetcher_cache_operate(champsim::address addr, champ
 
   return metadata_in;
 }
-uint32_t spp_dev_row_map::prefetcher_cache_fill(champsim::address addr, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
+uint32_t spp_dev_row_map::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
   if(evicted_addr != champsim::address{}) {
     add_column_evicted(evicted_addr);

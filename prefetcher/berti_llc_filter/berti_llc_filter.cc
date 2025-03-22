@@ -980,7 +980,7 @@ void berti_llc_filter::prefetcher_initialize()
 void berti_llc_filter::prefetcher_cycle_operate()
 {}
 
-uint32_t berti_llc_filter::prefetcher_cache_operate(champsim::address addr, champsim::address ip, 
+uint32_t berti_llc_filter::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu,
                                         uint8_t cache_hit, bool useful_prefetch, access_type type,
                                         uint32_t metadata_in)
 {
@@ -1098,7 +1098,7 @@ uint32_t berti_llc_filter::prefetcher_cache_operate(champsim::address addr, cham
   return metadata_in;
 }
 
-uint32_t berti_llc_filter::prefetcher_cache_fill(champsim::address addr, long set, long way, uint8_t prefetch, 
+uint32_t berti_llc_filter::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, 
                                       champsim::address evicted_addr, uint32_t metadata_in)
 {
   // We select the structures for every cpu

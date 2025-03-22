@@ -263,8 +263,8 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
       }
     }
   }
-
-  auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill_mshr), fill_mshr.cpu >= NUM_CPUS ? 0 : fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx,
+  bool useless = (way != set_end && way->valid && way->prefetch);
+  auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill_mshr), fill_mshr.cpu >= NUM_CPUS ? 0 : fill_mshr.cpu, useless, get_set_index(fill_mshr.address), way_idx,
                                                   (fill_mshr.type == access_type::PREFETCH), evicting_address, fill_mshr.data_promise->pf_metadata);
   
     impl_replacement_cache_fill(fill_mshr.cpu >= NUM_CPUS ? 0 : fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, module_address(fill_mshr), fill_mshr.ip, evicting_address,
@@ -275,8 +275,9 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
         ++sim_stats.pf_useless;
       }
 
-      if (fill_mshr.type == access_type::PREFETCH) {
+      if (fill_mshr.type == access_type::PREFETCH && fill_mshr.prefetch_from_this) {
         ++sim_stats.pf_fill;
+        sim_stats.pf_fill_core.increment(fill_mshr.cpu >= NUM_CPUS ? 0 : fill_mshr.cpu);
       }
 
       *way = fill_block(fill_mshr, metadata_thru);
@@ -369,6 +370,7 @@ bool CACHE::try_hit(tag_lookup_type& handle_pkt)
     // update prefetch stats and reset prefetch bit
     if (useful_prefetch) {
       ++sim_stats.pf_useful;
+      sim_stats.pf_useful_core.increment(handle_pkt.cpu > NUM_CPUS ? 0 : handle_pkt.cpu);
       way->prefetch = false;
     }
   }
@@ -432,6 +434,8 @@ bool CACHE::allocate_mshr(const tag_lookup_type& handle_pkt) {
       // Mark the prefetch as useful
       if (mshr_entry->prefetch_from_this) {
         ++sim_stats.pf_useful;
+        sim_stats.pf_useful_core.increment(handle_pkt.cpu > NUM_CPUS ? 0 : handle_pkt.cpu);
+        sim_stats.pf_fill_core.increment(handle_pkt.cpu > NUM_CPUS ? 0 : handle_pkt.cpu);
       }
     }
 
@@ -489,6 +493,8 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
       // Mark the prefetch as useful
       if (mshr_entry->prefetch_from_this) {
         ++sim_stats.pf_useful;
+        sim_stats.pf_useful_core.increment(handle_pkt.cpu > NUM_CPUS ? 0 : handle_pkt.cpu);
+        sim_stats.pf_fill_core.increment(handle_pkt.cpu > NUM_CPUS ? 0 : handle_pkt.cpu);
       }
     }
 
@@ -854,12 +860,23 @@ long CACHE::operate()
                stash_bandwidth_consumed, std::size(translation_stash), channels_bandwidth_consumed, pq_bandwidth_consumed, initiate_tag_bw.amount_remaining());
   }
 
-  //if ((current_cycle() + 1) % 1000000 == 0 && PQM_ENABLED) {
-  //  fmt::print("[{}] Prefetcher Usefulnesses:\n",NAME);
-  //  for(auto& record : prefetch_usefulness) {
-  //      fmt::print("\tCore: {} Usefulness: {}\n",record.first.second,record.second);
-  //  }
-  //}
+  if ((current_cycle() + 1) % pf_report_interval == 0) {
+    for(int core = 0; core < NUM_CPUS; core++) {
+      double pf_filled = sim_stats.pf_fill_core.value_or(core,0) - sim_stats.last_pf_fill_core.value_or(core,0);
+      double pf_useful = sim_stats.pf_useful_core.value_or(core,0) - sim_stats.last_pf_useful_core.value_or(core,0);
+      if(pf_filled != 0) {
+        Ramulator::set_core_prefetch_usefulness(this,core, pf_useful / pf_filled);
+        prefetch_usefulness[std::pair{this,core}] = pf_useful / pf_filled;
+        fmt::print("[{}] Core: {} Prefetch Usefulness: {}\n",NAME,core,pf_useful / pf_filled);
+      }
+      else {
+        prefetch_usefulness[std::pair{this,core}] = 1.0;
+        Ramulator::set_core_prefetch_usefulness(this,core,1.0);
+      }
+      sim_stats.last_pf_useful_core.set(core,sim_stats.pf_useful_core.value_or(core,0));
+      sim_stats.last_pf_fill_core.set(core,sim_stats.pf_fill_core.value_or(core,0));
+    }
+  }
 
   return progress + fill_bw.amount_consumed() + initiate_tag_bw.amount_consumed() + tag_check_bw.amount_consumed();
 }
@@ -1269,10 +1286,10 @@ uint32_t CACHE::impl_prefetcher_cache_operate(champsim::address addr, champsim::
   return pref_module_pimpl->impl_prefetcher_cache_operate(addr, ip, cpu, cache_hit, useful_prefetch, type, metadata_in);
 }
 
-uint32_t CACHE::impl_prefetcher_cache_fill(champsim::address addr, uint32_t cpu, long set, long way, bool prefetch, champsim::address evicted_addr,
+uint32_t CACHE::impl_prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, bool prefetch, champsim::address evicted_addr,
                                            uint32_t metadata_in) const
 {
-  return pref_module_pimpl->impl_prefetcher_cache_fill(addr, cpu, set, way, prefetch, evicted_addr, metadata_in);
+  return pref_module_pimpl->impl_prefetcher_cache_fill(addr, cpu, useless, set, way, prefetch, evicted_addr, metadata_in);
 }
 
 void CACHE::impl_prefetcher_cycle_operate() const { pref_module_pimpl->impl_prefetcher_cycle_operate(); }
@@ -1343,7 +1360,10 @@ void CACHE::end_phase(unsigned finished_cpu)
     roi_stats.downstream_packets.set(key,sim_stats.downstream_packets.value_or(key,0));
     roi_stats.returned_packets.set(key,sim_stats.returned_packets.value_or(key,0));
   }
-
+  roi_stats.pf_useful_core.set(finished_cpu,sim_stats.pf_useful_core.value_or(finished_cpu,0));
+  roi_stats.pf_fill_core.set(finished_cpu,sim_stats.pf_fill_core.value_or(finished_cpu,0));
+  roi_stats.last_pf_useful_core.set(finished_cpu,sim_stats.last_pf_useful_core.value_or(finished_cpu,0));
+  roi_stats.last_pf_fill_core.set(finished_cpu,sim_stats.last_pf_fill_core.value_or(finished_cpu,0));
   roi_stats.pf_requested = sim_stats.pf_requested;
   roi_stats.pf_issued = sim_stats.pf_issued;
   roi_stats.pf_useful = sim_stats.pf_useful;
@@ -1408,8 +1428,8 @@ void CACHE::print_deadlock()
 }
 // LCOV_EXCL_STOP
 
-void CACHE::report_prefetch_usefulness(uint32_t pf_cpu, double usefulness) {
+//void CACHE::report_prefetch_usefulness(uint32_t pf_cpu, double usefulness) {
   //fmt::print("[{}] CPU: {} Usefulness: {} MSHR_OCCUPANCY: {} MQ_OCCUPANCY: {} MQ_MAX: {}\n",NAME,pf_cpu,usefulness, get_mshr_occupancy_ratio(), MQ.at(MQ_CORE).size(), MQ_SIZE);
-  prefetch_usefulness[std::pair{this,pf_cpu}] = usefulness;
-  Ramulator::set_core_prefetch_usefulness(this,pf_cpu, usefulness);
-}
+  //prefetch_usefulness[std::pair{this,pf_cpu}] = usefulness;
+  //Ramulator::set_core_prefetch_usefulness(this,pf_cpu, usefulness);
+//}

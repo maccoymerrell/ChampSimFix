@@ -35,7 +35,7 @@ void bouquet_l2c::prefetcher_initialize()
     //intern_->internal_PQ.set_timeout(1500);
 }
 
-uint32_t bouquet_l2c::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
+uint32_t bouquet_l2c::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                       uint32_t metadata_in)
 {
   champsim::block_number cl_addr{addr};
@@ -109,7 +109,7 @@ uint32_t bouquet_l2c::prefetcher_cache_operate(champsim::address addr, champsim:
   return metadata_in;
 }
 
-uint32_t bouquet_l2c::prefetcher_cache_fill(champsim::address addr, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
+uint32_t bouquet_l2c::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
   return metadata_in;
 }

@@ -19,16 +19,29 @@ struct dram_prefetch_buffer : public champsim::modules::prefetcher {
   constexpr static std::size_t RW_WAYS = 32;
   constexpr static std::size_t RW_SETS = 128;
 
-  constexpr static std::array<uint8_t,6> DEPTHS = {0,1,2,4,8,16};
-  constexpr static std::array<uint8_t,6> THRESH = {25,50,60,70,80,90}; 
+  constexpr static std::size_t CONF_MAX = 255;
+
+  constexpr static uint32_t NEXT_LINE_ID = 1;
+  constexpr static uint32_t BUFFER_ID = 2;
+
+  constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,0,0,0,0,0,0,1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31};
+  constexpr static std::array<uint8_t,25> THRESH = {10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200,210,220,230,240,250};
+
+  constexpr static int USEFUL_CONF = 5;
+  constexpr static int USELESS_NCONF = 20;
+  constexpr static int DEMAND_CONF = 1;
+  constexpr static int DEMAND_NCONF = 2;
 
   constexpr static bool FORWARD = true;
   constexpr static bool BACKWARD = false;
 
-  double prefetches_arrived = 0;
-  double prefetches_issued = 0;
-  double demands_triggered = 0;
-  double prefetch_matches = 0;
+  double opened_rows = 0;
+  double next_line_issued = 0;
+  double forward_buffer_issued = 0;
+  double backward_buffer_issued = 0;
+  double useful_tallied = 0;
+  double useless_tallied = 0;
+
 
   uint64_t accesses_so_far = 0;
 
@@ -56,7 +69,7 @@ struct dram_prefetch_buffer : public champsim::modules::prefetcher {
   struct row_walker {
     uint8_t position = 0;
     uint8_t opened_at = 0;
-    uint8_t confidence = 50;
+    uint8_t confidence = 110;
     uint64_t row = 0;
     row_walker() : row_walker(0,0,0) {}
     explicit row_walker(uint64_t row, uint8_t position, uint8_t opened_at) : row(row), position(position), opened_at(opened_at) {}
@@ -143,7 +156,7 @@ struct dram_prefetch_buffer : public champsim::modules::prefetcher {
   using prefetcher::prefetcher;
   uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                     uint32_t metadata_in);
-  uint32_t prefetcher_cache_fill(champsim::address addr, uint32_t cpu, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in);
+  uint32_t prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in);
   void prefetcher_initialize();
   // void prefetcher_branch_operate(champsim::address ip, uint8_t branch_type, champsim::address branch_target) {}
   void prefetcher_cycle_operate();

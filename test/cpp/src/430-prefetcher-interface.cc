@@ -15,31 +15,31 @@ namespace
   {
     using prefetcher::prefetcher;
 
-    uint32_t prefetcher_cache_operate(uint64_t, uint64_t, uint8_t, uint32_t, uint32_t metadata_in)
+    uint32_t prefetcher_cache_operate(uint64_t, uint64_t, uint32_t, uint8_t, uint32_t, uint32_t metadata_in)
     {
       ::operate_interface_discerner[intern_] = 1;
       return metadata_in;
     }
 
-    uint32_t prefetcher_cache_operate(champsim::address, champsim::address, uint8_t, bool, uint32_t, uint32_t metadata_in)
+    uint32_t prefetcher_cache_operate(champsim::address, champsim::address, uint32_t, uint8_t, bool, uint32_t, uint32_t metadata_in)
     {
       ::operate_interface_discerner[intern_] = 2;
       return metadata_in;
     }
 
-    uint32_t prefetcher_cache_operate(champsim::address, champsim::address, uint8_t, bool, access_type, uint32_t metadata_in)
+    uint32_t prefetcher_cache_operate(champsim::address, champsim::address, uint32_t, uint8_t, bool, access_type, uint32_t metadata_in)
     {
       ::operate_interface_discerner[intern_] = 3;
       return metadata_in;
     }
 
-    uint32_t prefetcher_cache_fill(uint64_t, long, long, uint8_t, uint64_t, uint32_t metadata_in)
+    uint32_t prefetcher_cache_fill(uint64_t, uint32_t, bool, long, long, uint8_t, uint64_t, uint32_t metadata_in)
     {
       ::fill_interface_discerner[intern_] = 1;
       return metadata_in;
     }
 
-    uint32_t prefetcher_cache_fill(champsim::address, long, long, uint8_t, champsim::address, uint32_t metadata_in)
+    uint32_t prefetcher_cache_fill(champsim::address, uint32_t, bool, long, long, uint8_t, champsim::address, uint32_t metadata_in)
     {
       ::fill_interface_discerner[intern_] = 2;
       return metadata_in;

@@ -879,7 +879,7 @@ void bingo::prefetcher_initialize() {
                 << ", debug_level=" << DEBUG_LEVEL << ")" << std::endl;
 }
 
-uint32_t bingo::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
+uint32_t bingo::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                         uint32_t metadata_in)
 {
     if (DEBUG_LEVEL >= 2) {
@@ -908,7 +908,7 @@ uint32_t bingo::prefetcher_cache_operate(champsim::address addr, champsim::addre
     return metadata_in;
 }
 
-uint32_t bingo::prefetcher_cache_fill(champsim::address addr, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in) {
+uint32_t bingo::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in) {
     champsim::block_number evicted_block_number{evicted_addr};
 
     //if (this->block[set][way].valid == 0)

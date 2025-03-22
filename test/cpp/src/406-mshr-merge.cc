@@ -15,13 +15,13 @@ struct address_collector : champsim::modules::prefetcher
 {
   using prefetcher::prefetcher;
 
-  uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address, bool, bool, access_type, uint32_t metadata_in)
+  uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address, uint32_t, bool, bool, access_type, uint32_t metadata_in)
   {
     ::address_operate_collector[intern_].push_back(addr);
     return metadata_in;
   }
 
-  uint32_t prefetcher_cache_fill(champsim::address, long, long, uint8_t, champsim::address, uint32_t metadata_in)
+  uint32_t prefetcher_cache_fill(champsim::address, uint32_t, bool, long, long, uint8_t, champsim::address, uint32_t metadata_in)
   {
     return metadata_in;
   }

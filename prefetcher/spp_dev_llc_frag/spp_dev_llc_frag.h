@@ -86,7 +86,7 @@ struct spp_dev_llc_frag : public champsim::modules::prefetcher {
   using prefetcher::prefetcher;
   uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                     uint32_t metadata_in);
-  uint32_t prefetcher_cache_fill(champsim::address addr, uint32_t cpu, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in);
+  uint32_t prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in);
 
   void prefetcher_initialize() {
     bank_util = std::vector<std::vector<champsim::address>>(DRAM_GROUPS);

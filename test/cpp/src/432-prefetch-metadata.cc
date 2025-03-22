@@ -17,13 +17,13 @@ struct metadata_collector : champsim::modules::prefetcher
 {
   using prefetcher::prefetcher;
 
-  uint32_t prefetcher_cache_operate(champsim::address, champsim::address, uint8_t, bool, access_type, uint32_t metadata_in) {
+  uint32_t prefetcher_cache_operate(champsim::address, champsim::address, uint32_t, uint8_t, bool, access_type, uint32_t metadata_in) {
     auto it = test::metadata_operate_collector.try_emplace(intern_);
     it.first->second.push_back(metadata_in);
     return metadata_in;
   }
 
-  uint32_t prefetcher_cache_fill(champsim::address, long, long, uint8_t, champsim::address, uint32_t metadata_in)
+  uint32_t prefetcher_cache_fill(champsim::address, uint32_t, bool, long, long, uint8_t, champsim::address, uint32_t metadata_in)
   {
     auto it = test::metadata_fill_collector.try_emplace(intern_);
     it.first->second.push_back(metadata_in);
@@ -36,8 +36,8 @@ struct metadata_fill_emitter : champsim::modules::prefetcher
 {
   using prefetcher::prefetcher;
 
-  uint32_t prefetcher_cache_operate(champsim::address, champsim::address, uint8_t, bool, access_type, uint32_t metadata_in) { return metadata_in; }
-  uint32_t prefetcher_cache_fill(champsim::address, long, long, uint8_t, champsim::address, uint32_t) { return to_emit; }
+  uint32_t prefetcher_cache_operate(champsim::address, champsim::address, uint32_t, uint8_t, bool, access_type, uint32_t metadata_in) { return metadata_in; }
+  uint32_t prefetcher_cache_fill(champsim::address, uint32_t, bool, long, long, uint8_t, champsim::address, uint32_t) { return to_emit; }
 };
 
 SCENARIO("Prefetch metadata from an issued prefetch is seen in the lower level") {

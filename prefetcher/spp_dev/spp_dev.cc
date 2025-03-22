@@ -37,11 +37,11 @@ void spp_dev::prefetcher_initialize()
 void spp_dev::prefetcher_cycle_operate() {
   if((intern_->current_cycle() + 1) % usefulness_update_period == 0) {
     for (auto& cp : useful) {
-      uint64_t usfl = cp.second;
-      uint64_t fill = filled[cp.first];
-      intern_->report_prefetch_usefulness(cp.first, (usfl+1)/(double)(fill+1));
-      useful[cp.first] = 0;
-      filled[cp.first] = 0;
+      //uint64_t usfl = cp.second;
+      //uint64_t fill = filled[cp.first];
+      //intern_->report_prefetch_usefulness(cp.first, (usfl+1)/(double)(fill+1));
+      //useful[cp.first] = 0;
+      //filled[cp.first] = 0;
     }
   }
 }
@@ -156,7 +156,7 @@ uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::add
   return metadata_in;
 }
 
-uint32_t spp_dev::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
+uint32_t spp_dev::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
 
   if(prefetch)
