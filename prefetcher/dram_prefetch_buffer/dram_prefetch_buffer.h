@@ -28,7 +28,7 @@ struct dram_prefetch_buffer : public champsim::modules::prefetcher {
   constexpr static std::array<uint8_t,25> THRESH = {10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200,210,220,230,240,250};
 
   constexpr static int USEFUL_CONF = 5;
-  constexpr static int USELESS_NCONF = 20;
+  constexpr static int USELESS_NCONF = 25;
   constexpr static int DEMAND_CONF = 1;
   constexpr static int DEMAND_NCONF = 2;
 
