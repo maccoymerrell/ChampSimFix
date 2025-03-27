@@ -194,7 +194,7 @@ void dram_prefetch_buffer::increase_confidence(champsim::address addr, uint8_t a
 
   auto entry = row_walker_table[rb].check_hit(rw);
   if(entry.has_value()) {
-    if(!cond || (col > entry->position && col <= entry->position + 8))
+    if(!cond || (col > entry->position && col <= entry->position + 2))
       entry->confidence = modify_confidence(entry->confidence,amnt,true);
     else if(cond)
       entry->confidence = modify_confidence(entry->confidence,DEMAND_NCONF,false);
@@ -227,6 +227,35 @@ std::size_t dram_prefetch_buffer::get_depth(uint8_t conf) {
   return DEPTHS.at(threshold - 1);
 }
 
+bool dram_prefetch_buffer::add_to_pf_issuer(champsim::address addr, std::size_t depth, uint32_t cpu) {
+  if(prefetch_issuer.size() >= PFI_ENTRIES)
+    return false;
+  prefetch_issuer.push_back(prefetch_issuer_entry{addr,depth,cpu});
+  return true;
+}
+
+void dram_prefetch_buffer::do_pf_issue() {
+  std::size_t search_distance = std::min(PFI_FORWARD,prefetch_issuer.size());
+  std::size_t search_candidate = pf_issue_pos % search_distance;
+  pf_issue_pos = (pf_issue_pos + 1) % PFI_FORWARD;
+  
+  prefetch_issuer_entry to_pf = prefetch_issuer.at(search_candidate);
+  std::size_t col = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_column(to_pf.base);
+
+  if(!filter.check(to_pf.base,intern_->current_cycle(),false)) {
+    bool success = prefetch_line(to_pf.base,true,to_pf.cpu,col%2 == 0 ? BUFFER_ID : NEXT_LINE_ID, false, false);
+    if(success) {
+      filter.check(to_pf.base,intern_->current_cycle(),true);
+      prefetch_issuer.at(search_candidate).base = compose_base_and_column(to_pf.base,col + 1);
+      prefetch_issuer.at(search_candidate).steps -= 1;
+      if(prefetch_issuer.at(search_candidate).steps == 0) {
+        prefetch_issuer.erase(prefetch_issuer.begin() + search_candidate);
+      }
+    }
+  }
+}
+
+
 void dram_prefetch_buffer::update_walker(champsim::address addr, uint32_t cpu) {
   std::size_t rb = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(addr);
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
@@ -241,12 +270,14 @@ void dram_prefetch_buffer::update_walker(champsim::address addr, uint32_t cpu) {
   if(entry.has_value()) {
     uint8_t prev_col = entry->position;
     rw.opened_at = !is_open ? entry->position + 1 : entry->opened_at;
-    rw.confidence = entry->confidence;
+    rw.confidence = intern_->get_mshr_size() <= intern_->get_mshr_occupancy() ? entry->confidence * 0.9 : entry->confidence;
+    //rw.confidence = intern_->get_pq_occupancy().back() >= 16 ? entry->confidence * 0.9 : entry->confidence;
+    //rw.confidence = entry->confidence;
     std::size_t depth = get_depth(rw.confidence);
 
     //issue prefetches backwards
     //if(rw.confidence >= 50) {
-      if(col > prev_col + 1 && (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()) < intern_->get_mshr_size()*0.7) {
+      if(col > prev_col + 1 /*&& (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()) < intern_->get_mshr_size()*0.7*/) {
         //fmt::print("Filling backwards gap at row: {} rb: {} between columns:{} - {}\n",row,rb,prev_col + 1,col - 1);
         int amount_to_prefetch = std::min(depth,intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()));
         int prefetched_so_far = 0;
@@ -266,6 +297,7 @@ void dram_prefetch_buffer::update_walker(champsim::address addr, uint32_t cpu) {
             prefetched_so_far++;
           else {
             all_success = false;
+            //rw.confidence *= 0.9;
             break;
           }
             
@@ -273,7 +305,7 @@ void dram_prefetch_buffer::update_walker(champsim::address addr, uint32_t cpu) {
         rw.position = all_success ? col : prev_col + prefetched_so_far;
       }
       //issue prefetches forwards
-      if(col >= rw.opened_at && (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()) < intern_->get_mshr_size()*0.7) {
+      if(col >= rw.opened_at /*&& (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()) < intern_->get_mshr_size()*0.7*/) {
         int amount_to_prefetch = std::min(depth,intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()));
         int prefetched_so_far = 0;
         //fmt::print("Prefetching forwards at row: {} rb: {} between columns:{} - {}\n",row,rb,col + 1,col + amount_to_prefetch > 63 ? 63 : col + amount_to_prefetch);
@@ -290,8 +322,10 @@ void dram_prefetch_buffer::update_walker(champsim::address addr, uint32_t cpu) {
           }
           if(success)
             prefetched_so_far++;
-          else
+          else {
+            //rw.confidence *= 0.9;
             break;
+          }
         }
         rw.position = col + prefetched_so_far;
       }

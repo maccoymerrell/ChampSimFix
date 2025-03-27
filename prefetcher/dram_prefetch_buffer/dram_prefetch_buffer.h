@@ -19,6 +19,9 @@ struct dram_prefetch_buffer : public champsim::modules::prefetcher {
   constexpr static std::size_t RW_WAYS = 32;
   constexpr static std::size_t RW_SETS = 128;
 
+  constexpr static std::size_t PFI_ENTRIES = 64;
+  constexpr static std::size_t PFI_FORWARD = 16;
+
   constexpr static std::size_t CONF_MAX = 255;
 
   constexpr static uint32_t NEXT_LINE_ID = 1;
@@ -41,6 +44,8 @@ struct dram_prefetch_buffer : public champsim::modules::prefetcher {
   double backward_buffer_issued = 0;
   double useful_tallied = 0;
   double useless_tallied = 0;
+
+  std::size_t pf_issue_pos = 0;
 
 
   uint64_t accesses_so_far = 0;
@@ -83,6 +88,20 @@ struct dram_prefetch_buffer : public champsim::modules::prefetcher {
 
   std::vector<champsim::msl::lru_table<row_walker,row_walker_set,row_walker_way>> row_walker_table;
 
+  struct prefetch_issuer_entry {
+    bool valid = false;
+    uint32_t cpu = 0;
+    champsim::address base;
+    std::size_t steps;
+    prefetch_issuer_entry(champsim::address base_, std::size_t steps_, uint32_t cpu_) : base(base_), steps(steps_), valid(true), cpu(cpu_) {}
+    prefetch_issuer_entry() : base(champsim::address{}), steps(std::size_t{}), valid(false) {}
+  };
+
+  std::deque<prefetch_issuer_entry> prefetch_issuer;
+
+  bool add_to_pf_issuer(champsim::address addr, std::size_t depth, uint32_t cpu);
+  void do_pf_issue();
+
   void update_walker(champsim::address addr, uint32_t cpu);
   void increase_confidence(champsim::address addr, uint8_t amnt, bool cond);
   void decrease_confidence(champsim::address addr, uint8_t amnt);
@@ -91,7 +110,7 @@ struct dram_prefetch_buffer : public champsim::modules::prefetcher {
   std::size_t get_depth(uint8_t conf);
 
   struct RAF {
-    constexpr static std::size_t RAF_FILTER_SETS = 16;
+    constexpr static std::size_t RAF_FILTER_SETS = 32;
     constexpr static std::size_t RAF_FILTER_WAYS = 16;
     constexpr static std::size_t RAF_TIMEOUT = 300;
     struct raf_entry {
