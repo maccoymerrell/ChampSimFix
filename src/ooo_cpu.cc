@@ -582,6 +582,9 @@ long O3_CPU::operate_lsq()
         if (success) {
           load_bw.consume();
           lq_entry->fetch_issued = true;
+          lsq_counter += 1;
+          //if(!warmup)
+            //fmt::print("CPU: {} CYCLE: {} LSQ-COUNTER: {}\n",cpu,current_cycle(),lsq_counter);
         }
       }
     }
@@ -628,6 +631,7 @@ bool O3_CPU::execute_load(const LSQ_ENTRY& lq_entry)
   data_packet.v_address = lq_entry.virtual_address;
   data_packet.instr_id = lq_entry.instr_id;
   data_packet.ip = lq_entry.ip;
+  data_packet.lsq_rating = lsq_counter;
 
   if constexpr (champsim::debug_print) {
     fmt::print("[LQ] {} instr_id: {} vaddr: {}\n", __func__, data_packet.instr_id, data_packet.v_address);
@@ -715,6 +719,7 @@ long O3_CPU::handle_memory_return()
         lq_entry.reset();
         ++progress;
         closed = true;
+        
       }
     }
     if(!closed) {
@@ -730,6 +735,9 @@ long O3_CPU::handle_memory_return()
       std::string_view lq_fmt{"instr_id: {} address: {} fetch_issued: {} event_cycle: {} waits on {}"};
 
       champsim::range_print_deadlock(LQ, "cpu" + std::to_string(cpu) + "_LQ", lq_fmt, lq_pack);
+    }
+    else {
+      lsq_counter -= 1;
     }
     ++progress;
   }

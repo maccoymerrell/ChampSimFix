@@ -148,6 +148,8 @@ class CACHE : public champsim::operable
     uint32_t cpu;
     CACHE* source_ptr;
 
+    uint8_t lsq_score = 0;
+
     access_type type;
     bool prefetch_from_this;
     bool invoked_prefetcher = false;
@@ -188,6 +190,8 @@ public:
     };
     champsim::waitable<returned_value> data_promise{};
     uint32_t cpu;
+
+    uint8_t lsq_score;
 
     access_type type;
     bool prefetch_from_this;
@@ -265,6 +269,7 @@ public:
   champsim::data::bits OFFSET_BITS;
   set_type block{static_cast<typename set_type::size_type>(NUM_SET * NUM_WAY)};
   champsim::bandwidth::maximum_type MAX_TAG, MAX_FILL;
+  uint8_t lsq_score = 0;
   bool prefetch_as_load;
   bool match_offset_bits;
   bool virtual_prefetch;

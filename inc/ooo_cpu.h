@@ -97,6 +97,8 @@ public:
 
   bool show_heartbeat = true;
 
+  int64_t lsq_counter = 0;
+
   using stats_type = cpu_stats;
 
   stats_type roi_stats{}, sim_stats{};

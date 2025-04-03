@@ -110,7 +110,7 @@ auto CACHE::operator=(CACHE&& other) -> CACHE&
 
 CACHE::tag_lookup_type::tag_lookup_type(const request_type& req, bool local_pref, bool skip, CACHE* source_ptr_, bool return_hit_status_)
     : address(req.address), v_address(req.v_address), data(req.data), ip(req.ip), instr_id(req.instr_id), pf_metadata(req.pf_metadata), cpu(req.cpu),
-      back_off(req.back_off), row_act(req.row_act),
+      back_off(req.back_off), row_act(req.row_act), lsq_score(req.lsq_rating),
       type(req.type), prefetch_from_this(local_pref), skip_fill(skip), return_hit_status(return_hit_status_), source_ptr(source_ptr_), is_translated(req.is_translated), instr_depend_on_me(req.instr_depend_on_me)
 {
 }
@@ -119,7 +119,7 @@ CACHE::tag_lookup_type::tag_lookup_type() : tag_lookup_type(request_type{},false
 
 CACHE::mshr_type::mshr_type(const tag_lookup_type& req, champsim::chrono::clock::time_point _time_enqueued)
     : address(req.address), v_address(req.v_address), ip(req.ip), instr_id(req.instr_id), cpu(req.cpu), type(req.type), back_off(req.back_off), row_act(req.row_act),
-      prefetch_from_this(req.prefetch_from_this), time_enqueued(_time_enqueued), instr_depend_on_me(req.instr_depend_on_me), to_return(req.to_return)
+      prefetch_from_this(req.prefetch_from_this), time_enqueued(_time_enqueued), instr_depend_on_me(req.instr_depend_on_me), to_return(req.to_return), lsq_score(req.lsq_score)
 {
 }
 
@@ -196,6 +196,7 @@ champsim::address CACHE::module_address(const T& element) const
 bool CACHE::handle_fill(const mshr_type& fill_mshr)
 {
   cpu = fill_mshr.cpu;
+  lsq_score = fill_mshr.lsq_score;
 
   if(fill_mshr.type != access_type::DROPPED) {
     // find victim
@@ -352,6 +353,7 @@ bool CACHE::try_hit(tag_lookup_type& handle_pkt)
   }
   // update replacement policy
   const auto way_idx = std::distance(set_begin, way);
+  lsq_score = handle_pkt.lsq_score;
   impl_update_replacement_state(handle_pkt.cpu >= NUM_CPUS ? 0 : handle_pkt.cpu, get_set_index(handle_pkt.address), way_idx, module_address(handle_pkt), handle_pkt.ip, {}, handle_pkt.type,
                                 hit);
 
@@ -1399,10 +1401,10 @@ bool CACHE::should_activate_prefetcher(const T& pkt) const
 // LCOV_EXCL_START Exclude the following function from LCOV
 void CACHE::print_deadlock()
 {
-  std::string_view mshr_write{"instr_id: {} address: {} v_addr: {} type: {} ready: {}"};
+  std::string_view mshr_write{"instr_id: {} address: {} v_addr: {} type: {} ready: {} promoted: {}"};
   auto mshr_pack = [time = current_time](const auto& entry) {
     return std::tuple{entry.instr_id, entry.address, entry.v_address, access_type_names.at(champsim::to_underlying(entry.type)),
-                      entry.data_promise.is_ready_at(time)};
+                      entry.data_promise.is_ready_at(time),entry.was_promoted};
   };
 
   std::string_view tag_check_write{"instr_id: {} address: {} v_addr: {} is_translated: {} translate_issued: {} event_cycle: {}"};

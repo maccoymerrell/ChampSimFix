@@ -36,9 +36,11 @@ bool do_collision_for(Iter begin, Iter end, champsim::channel::request_type& pac
   // not this can happen: package with address virtual and physical X
   // (not translated) is inserted, package with physical address
   // (already translated) X.
+
+  //can't merge drop and non-drop
   if (auto found =
           std::find_if(begin, end, [match = packet.address.slice_upper(shamt), shamt](const auto& x) { return x.address.slice_upper(shamt) == match; });
-      found != end && packet.is_translated == found->is_translated) {
+      found != end && packet.is_translated == found->is_translated && !((packet.type == access_type::DROPPED) ^ (found->type == access_type::DROPPED))) {
     func(packet, *found);
     return true;
   }
@@ -51,12 +53,16 @@ bool do_collision_for_merge(Iter begin, Iter end, champsim::channel::request_typ
 {
   return do_collision_for(begin, end, packet, shamt, [](champsim::channel::request_type& source, champsim::channel::request_type& destination) {
     destination.response_requested |= source.response_requested;
+    //if we merge promotion and prefetch, become load
     if(destination.type == access_type::PROMOTION && source.type == access_type::PREFETCH) {
       destination.type = access_type::LOAD;
     }
-    if(source.type == access_type::PROMOTION && destination.type == access_type::PREFETCH) {
-      source.type = access_type::LOAD;
+    else if(source.type == access_type::PROMOTION && destination.type == access_type::PREFETCH) {
+      destination.type = access_type::LOAD;
     }
+    //if destination is promotion, but not prefetch, set to that type (promotions can be dropped without NAK, so this is necessary)
+    else if(destination.type == access_type::PROMOTION)
+      destination.type = source.type;
     auto instr_copy = std::move(destination.instr_depend_on_me);
 
     std::set_union(std::begin(instr_copy), std::end(instr_copy), std::begin(source.instr_depend_on_me), std::end(source.instr_depend_on_me),
@@ -129,7 +135,7 @@ void champsim::channel::check_collision()
     if (do_collision_for_return(std::begin(WQ), std::end(WQ), *pq_it, write_shamt, returned)) {
       sim_stats.WQ_FORWARD++;
       pq_it = PQ.erase(pq_it);
-    } else if (do_collision_for_return(std::begin(RQ), std::end(RQ), *pq_it, read_shamt, returned)) {
+    } else if (do_collision_for_merge(std::begin(RQ), std::end(RQ), *pq_it, read_shamt)) {
       sim_stats.RQ_MERGED++;
       pq_it = PQ.erase(pq_it);
     } else if (do_collision_for_merge(std::begin(PQ), pq_it, *pq_it, read_shamt)) {

@@ -56,6 +56,8 @@ class channel
     bool back_off = false;
     bool row_act = false;
 
+    uint8_t lsq_rating = 0;
+
     uint8_t asid[2] = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
     access_type type{access_type::LOAD};
 

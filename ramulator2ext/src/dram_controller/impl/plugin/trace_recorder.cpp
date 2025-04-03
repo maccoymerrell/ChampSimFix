@@ -72,7 +72,7 @@ class TraceRecorder : public IControllerPlugin, public Implementation {
           m_dram->m_commands(req_it->command) == "REFab" ? "REFA" : m_dram->m_commands(req_it->command),
           addr_vec[m_dram->m_levels("rank")],
           addr_vec[m_dram->m_levels("bankgroup")],
-          addr_vec[m_dram->m_levels("bank")],
+          addr_vec[m_dram->m_levels("bank")] + (addr_vec[m_dram->m_levels("bankgroup")] * m_dram->get_level_size("bank")),
           addr_vec[m_dram->m_levels("row")],
           addr_vec[m_dram->m_levels("column")]
         );
