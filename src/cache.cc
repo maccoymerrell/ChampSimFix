@@ -538,6 +538,8 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
     }
     //fmt::print("[{}] Trying to enqueue {} in MQ...\n", NAME, handle_pkt.address);
     MQ.at(used_cpu).emplace_back(std::move(handle_pkt));
+    if(!handle_pkt.prefetch_from_this)
+      MQ_MISS_COUNTER.at(used_cpu)++;
   }
   else {
     //monolithic PMQ
@@ -593,13 +595,13 @@ void CACHE::schedule_mshr() {
     //disable check if MQC is disabled, always be true
     return cache->OUTGOING_BANK_REQUESTS.at(bank_id) <= cache->BANK_DEMAND_THRESHOLD || !cache->MQC_ENABLED;
   };
-  auto search = std::find_if(std::begin(MQ.at(MQ_CORE)),std::end(MQ.at(MQ_CORE)),valid_demand);
+  auto search = std::find_if(std::begin(MQ.at(ACTIVE_CORE)),std::end(MQ.at(ACTIVE_CORE)),valid_demand);
   //don't limit starvation if MQC is disabled
-  if(search != std::end(MQ.at(MQ_CORE)) && (MQ_COUNTER < MQ_STARVE || !MQC_ENABLED)) {
+  if(search != std::end(MQ.at(ACTIVE_CORE)) && (MQ_COUNTER < MQ_STARVE || !MQC_ENABLED)) {
     //found a packet to issue
     //fmt::print("[{}] Trying scheduling from demand queue...\n",NAME);
     if(allocate_mshr(*search)) {
-      MQ.at(MQ_CORE).erase(search);
+      MQ.at(ACTIVE_CORE).erase(search);
       MQ_COUNTER++;
       //fmt::print("\tSuccess!\n");
     }
@@ -609,7 +611,7 @@ void CACHE::schedule_mshr() {
     //prefetch if we couldn't demand anything
 
     //don't call if PQM is disabled
-    if(MQ.at(MQ_CORE).size() == 0 && PQM_ENABLED) {
+    if(search == std::end(MQ.at(ACTIVE_CORE)) && PQM_ENABLED) {
       std::size_t smallest_valid_bank = PREFETCH_BANK_QUEUES.size();
       std::size_t smallest_outstanding_pf = PQM_SIZE + 1;
       for(std::size_t bank_occu = 0; bank_occu < PREFETCH_BANK_QUEUES.size(); bank_occu++) {
@@ -647,12 +649,15 @@ void CACHE::schedule_mshr() {
     //reset MQ_COUNTER and set new core
     if(MQC_ENABLED) {
       MQ_COUNTER = 0;
-      std::size_t lowest_size = MQ_SIZE + 1;
-      for(std::size_t new_mq = 0; new_mq < MQ.size(); new_mq++) {
-        if(MQ.at(new_mq).size() > 0 && MQ.at(new_mq).size() < lowest_size) {
-          MQ_CORE = new_mq;
-          lowest_size = MQ.at(new_mq).size();
-        }
+
+      
+      std::size_t MQ_CORE_SEL = 0;
+      ACTIVE_CORE = MQ_CORE[MQ_CORE_SEL];
+      bool has_valid_request = std::find_if(std::begin(MQ.at(ACTIVE_CORE)),std::end(MQ.at(ACTIVE_CORE)),valid_demand) != std::end(MQ.at(ACTIVE_CORE));
+      while(!has_valid_request && MQ_CORE_SEL < MQ_CORE.size()){
+        MQ_CORE_SEL++;
+        ACTIVE_CORE = MQ_CORE[MQ_CORE_SEL];
+        has_valid_request = std::find_if(std::begin(MQ.at(ACTIVE_CORE)),std::end(MQ.at(ACTIVE_CORE)),valid_demand) != std::end(MQ.at(ACTIVE_CORE));
       }
     }
     //fmt::print("[{}] Swapped core to {} size: {}\n",NAME, MQ_CORE, MQ.at(MQ_CORE).size());
@@ -851,7 +856,8 @@ long CACHE::operate()
   tag_check_bw.consume(std::distance(tag_check_ready_begin, finish_tag_check_end));
   inflight_tag_check.erase(tag_check_ready_begin, finish_tag_check_end);
 
-  schedule_mshr();
+  for(int i = 0; i < (warmup ? NUM_CPUS : std::max(1l,champsim::to_underlying(MAX_TAG))); i++)
+    schedule_mshr();
 
   impl_prefetcher_cycle_operate();
 
@@ -863,12 +869,34 @@ long CACHE::operate()
   }
 
   if ((current_cycle() + 1) % pf_report_interval == 0) {
+    //redo core scheduling
+    std::iota(MQ_CORE.begin(),MQ_CORE.end(),0);
+    std::sort(MQ_CORE.begin(),MQ_CORE.end(), [&miss_counter = MQ_MISS_COUNTER](std::size_t i1, std::size_t i2) {
+      return miss_counter[i1] < miss_counter[i2];
+    });
+    //clear miss counter
+    MQ_MISS_COUNTER = std::vector<std::size_t>(NUM_CPUS,0);
+    bool do_print_status = (current_cycle() + 1) % (pf_report_interval*10) == 0;
+
+    //if(do_print_status)
+    //fmt::print("[{}] Bank Request Counts, MSHR OCCUPANCY: {}\n",NAME,MSHR.size());
+    for(int i = 0; i < OUTGOING_BANK_REQUESTS.size(); i++) {
+      //if(do_print_status)
+      //fmt::print("\t {}: {}\n",i,OUTGOING_BANK_REQUESTS.at(i));
+    }
+    //if(do_print_status)
+    //fmt::print("[{}] MQ Occupancies\n",NAME);
+    for(int i = 0; i < NUM_CPUS; i++) {
+      //if(do_print_status)
+      //fmt::print("\t {}: {}\n", i, MQ.at(i).size());
+    }
     for(int core = 0; core < NUM_CPUS; core++) {
       double pf_filled = sim_stats.pf_fill_core.value_or(core,0) - sim_stats.last_pf_fill_core.value_or(core,0);
       double pf_useful = sim_stats.pf_useful_core.value_or(core,0) - sim_stats.last_pf_useful_core.value_or(core,0);
       if(pf_filled != 0) {
         Ramulator::set_core_prefetch_usefulness(this,core, pf_useful / pf_filled);
         prefetch_usefulness[std::pair{this,core}] = pf_useful / pf_filled;
+        if(do_print_status)
         fmt::print("[{}] Core: {} Prefetch Usefulness: {}\n",NAME,core,pf_useful / pf_filled);
       }
       else {
@@ -940,7 +968,6 @@ std::pair<bool, long> CACHE::early_writeback(champsim::address wb_addr, uint32_t
     if(wb_way->dirty) {
       wb_way->dirty = false;
       request_type writeback_packet;
-
       writeback_packet.cpu = wb_cpu;
       writeback_packet.address = wb_way->address;
       writeback_packet.data = wb_way->data;

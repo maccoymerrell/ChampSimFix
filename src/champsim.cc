@@ -37,9 +37,10 @@ std::chrono::seconds elapsed_time() { return std::chrono::duration_cast<std::chr
 
 namespace champsim
 {
-long do_cycle(environment& env, std::vector<tracereader>& traces, std::vector<std::size_t> trace_index, champsim::chrono::clock& global_clock)
+long do_cycle(environment& env, std::vector<tracereader>& traces, std::vector<std::size_t> trace_index, champsim::chrono::clock& global_clock, uint64_t cycles_ticked)
 {
   auto operables = env.operable_view();
+  std::rotate(operables.begin(),operables.begin() + (cycles_ticked % operables.size()), operables.end());
   std::sort(std::begin(operables), std::end(operables),
             [](const champsim::operable& lhs, const champsim::operable& rhs) { return lhs.current_time < rhs.current_time; });
 
@@ -48,6 +49,7 @@ long do_cycle(environment& env, std::vector<tracereader>& traces, std::vector<st
   for (champsim::operable& op : operables) {
     progress += op.operate_on(global_clock);
   }
+  
 
   // Read from trace
   for (O3_CPU& cpu : env.cpu_view()) {
@@ -82,11 +84,12 @@ phase_stats do_phase(const phase_info& phase, environment& env, std::vector<trac
   // Perform phase
   int stalled_cycle{0};
   std::vector<bool> phase_complete(std::size(env.cpu_view()), false);
+  uint64_t cycles_ticked = 0;
   while (!std::accumulate(std::begin(phase_complete), std::end(phase_complete), true, std::logical_and{})) {
     auto next_phase_complete = phase_complete;
     global_clock.tick(time_quantum);
-
-    auto progress = do_cycle(env, traces, trace_index, global_clock);
+    cycles_ticked++;
+    auto progress = do_cycle(env, traces, trace_index, global_clock,cycles_ticked);
 
     if (progress == 0) {
       ++stalled_cycle;

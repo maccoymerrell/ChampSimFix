@@ -265,12 +265,12 @@ bool MEMORY_CONTROLLER::add_rq(const request_type& packet, champsim::channel* ul
 
         //if(!warmup)
           //fmt::print("[DRAM] Type:{} Address:{} Row:{} Column:{} Rowbuffer:{} Cycle:{}\n", access_type_names[champsim::to_underlying(packet.type)], packet.address, dram_get_row(packet.address),dram_get_column(packet.address),dram_get_rowbuffer(packet.address),current_cycle());
-        success = ramulator2_frontend->receive_external_requests((int)packet.type, packet.address.to<int64_t>(), source_id, packet.source_ptr, [=](Ramulator::Request& req) {return_packet_rq_rr(req,pkt);});
+        success = ramulator2_frontend->receive_external_requests((int)packet.type, packet.address.to<uint64_t>(), source_id, packet.source_ptr, [=](Ramulator::Request& req) {return_packet_rq_rr(req,pkt);});
       }
       else
       {
         //otherwise feed to ramulator directly with no response requested
-        success = ramulator2_frontend->receive_external_requests((int)packet.type, packet.address.to<int64_t>(), source_id, packet.source_ptr, [](Ramulator::Request& req){});
+        success = ramulator2_frontend->receive_external_requests((int)packet.type, packet.address.to<uint64_t>(), source_id, packet.source_ptr, [](Ramulator::Request& req){});
       }
       return(success);
     }
@@ -302,7 +302,7 @@ bool MEMORY_CONTROLLER::add_wq(const request_type& packet)
       if constexpr (champsim::debug_print)
         fmt::print("[DRAM] Adding access type: {} for {} to write queue\n", champsim::to_underlying(packet.type), packet.address);
 
-      bool success = ramulator2_frontend->receive_external_requests((int)access_type::WRITE, packet.address.to<int64_t>(), source_id, packet.source_ptr, [](Ramulator::Request& req){});
+      bool success = ramulator2_frontend->receive_external_requests((int)access_type::WRITE, packet.address.to<uint64_t>(), source_id, packet.source_ptr, [](Ramulator::Request& req){});
       if(!success)
         ++channels[dram_get_channel(packet.address)].sim_stats.WQ_FULL;
       return(success);
@@ -312,7 +312,7 @@ bool MEMORY_CONTROLLER::add_wq(const request_type& packet)
 
 //grab address mapping data from ramulator
 unsigned long MEMORY_CONTROLLER::dram_get_channel(champsim::address address) const {
-  return(Ramulator::translate_to_ramulator_addr_field(ramulator2_frontend,"channel",address.to<int64_t>()));
+  return(Ramulator::translate_to_ramulator_addr_field(ramulator2_frontend,"channel",address.to<uint64_t>()));
 }
 
 unsigned long MEMORY_CONTROLLER::dram_get_bank(champsim::address address) const { return channels.at(dram_get_channel(address)).get_bank(address); }
@@ -340,13 +340,13 @@ unsigned long MEMORY_CONTROLLER::rowbuffers() const {
   return rowbuffers;
 }
 
-unsigned long DRAM_CHANNEL::get_bank(champsim::address address) const { return(Ramulator::translate_to_ramulator_addr_field(ramulator2_frontend,"bank",address.to<int64_t>())); }
+unsigned long DRAM_CHANNEL::get_bank(champsim::address address) const { return(Ramulator::translate_to_ramulator_addr_field(ramulator2_frontend,"bank",address.to<uint64_t>())); }
 
-unsigned long DRAM_CHANNEL::get_column(champsim::address address) const { return(Ramulator::translate_to_ramulator_addr_field(ramulator2_frontend,"column",address.to<int64_t>())); }
+unsigned long DRAM_CHANNEL::get_column(champsim::address address) const { return(Ramulator::translate_to_ramulator_addr_field(ramulator2_frontend,"column",address.to<uint64_t>())); }
 
-unsigned long DRAM_CHANNEL::get_rank(champsim::address address) const { return(Ramulator::translate_to_ramulator_addr_field(ramulator2_frontend,"rank",address.to<int64_t>())); }
+unsigned long DRAM_CHANNEL::get_rank(champsim::address address) const { return(Ramulator::translate_to_ramulator_addr_field(ramulator2_frontend,"rank",address.to<uint64_t>())); }
 
-unsigned long DRAM_CHANNEL::get_row(champsim::address address) const { return(Ramulator::translate_to_ramulator_addr_field(ramulator2_frontend,"row",address.to<int64_t>())); }
+unsigned long DRAM_CHANNEL::get_row(champsim::address address) const { return(Ramulator::translate_to_ramulator_addr_field(ramulator2_frontend,"row",address.to<uint64_t>())); }
 
 champsim::data::bytes MEMORY_CONTROLLER::size() const
 {

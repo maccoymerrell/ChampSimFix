@@ -25,8 +25,9 @@ long champsim::operable::operate_on(const champsim::chrono::clock& clock)
   long progress{0};
   while (current_time < clock.now()) {
     progress += _operate();
+    ticks_received++;
   }
-
+  
   return progress;
 }
 

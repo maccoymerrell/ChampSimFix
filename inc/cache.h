@@ -283,13 +283,15 @@ public:
   std::deque<mshr_type> MSHR;
   std::deque<mshr_type> inflight_writes;
   std::vector<std::deque<tag_lookup_type>> MQ;
-  std::size_t MQ_CORE = 0;
+  std::vector<uint64_t> MQ_MISS_COUNTER;
+  std::vector<std::size_t> MQ_CORE;
+  std::size_t ACTIVE_CORE = 0;
   std::size_t MQ_COUNTER = 0;
   int BANK_DEMAND_THRESHOLD;
   std::vector<int> BANK_PREFETCH_THRESHOLD;
   std::size_t MQ_STARVE = 10;
 
-  uint64_t pf_report_interval = 1000000;
+  uint64_t pf_report_interval = 100000;
 
   std::vector<tag_lookup_type> PREFETCH_MISS_STORAGE;
   std::deque<std::size_t> PREFETCH_FREE_LIST;
@@ -461,8 +463,13 @@ public:
   {
     if(MQC_ENABLED)
       MQ_SIZE /= NUM_CPUS;
+
+    for(std::size_t core = 0; core < NUM_CPUS; core++) {
+      MQ_CORE.push_back(core);
+    }
       
     MQ = std::vector<std::deque<tag_lookup_type>>(NUM_CPUS);
+    MQ_MISS_COUNTER = std::vector<uint64_t>(NUM_CPUS,0);
     PREFETCH_MISS_STORAGE.resize(PQM_SIZE);
     for(std::size_t loc = 0; loc < PQM_SIZE; loc++)
       PREFETCH_FREE_LIST.push_back(loc);

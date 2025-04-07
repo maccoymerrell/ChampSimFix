@@ -179,7 +179,11 @@ class ZEN4 final : public IAddrMapper, public Implementation {
     int m_col_bits_idx = -1;
     int m_row_bits_idx = -1;
 
-    void init() override { };
+    bool debug = false;
+
+    void init() override {
+      debug = param<bool>("debug").desc("Enable debug printouts").default_val(false);
+     };
     void setup(IFrontEnd* frontend, IMemorySystem* memory_system) {
       m_dram = memory_system->get_ifce<IDRAM>();
 
@@ -236,7 +240,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
       }
     }
 
-    bool gitBit(unsigned long BitIndex, Addr_t address){
+    int64_t gitBit(unsigned long BitIndex, Addr_t address){
       return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
     }
 
@@ -272,8 +276,9 @@ class ZEN4 final : public IAddrMapper, public Implementation {
       //XOR time
 
       //channel xors with all row bits
+      for(int c = 0; c < m_addr_bits[m_dram->m_levels("channel")]; c++)
       for(int i = 0; i < m_addr_bits[m_dram->m_levels("row")]; i++)
-        channel_bits ^= gitBit(row_bits,i);
+        channel_bits ^= gitBit(row_bits,i) << c;
 
       //bankgroup gets specific bits
       int bg_key = 0x1084;
@@ -293,6 +298,17 @@ class ZEN4 final : public IAddrMapper, public Implementation {
       req.addr_vec[m_dram->m_levels("bankgroup")] = bg_bits;
       req.addr_vec[m_dram->m_levels("rank")] = rank_bits;
       req.addr_vec[m_dram->m_levels("row")] = row_bits;
+      if(debug) {
+        fmt::print("Mapped address: {:X} to Channel: {} Column: {} Bank: {} Bankgroup: {} Rank: {} Row: {}\n",
+          req.addr,
+          req.addr_vec[m_dram->m_levels("channel")],
+          req.addr_vec[m_dram->m_levels("column")],
+          req.addr_vec[m_dram->m_levels("bank")],
+          req.addr_vec[m_dram->m_levels("bankgroup")],
+          req.addr_vec[m_dram->m_levels("rank")],
+          req.addr_vec[m_dram->m_levels("row")]
+        );
+      }
     }
   };
 

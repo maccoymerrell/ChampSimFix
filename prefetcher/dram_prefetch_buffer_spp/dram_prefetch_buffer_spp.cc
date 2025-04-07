@@ -9,7 +9,7 @@ uint32_t dram_prefetch_buffer_spp::prefetcher_cache_operate(champsim::address ad
   if(useful_prefetch) {
     //useful[cpu]++;
     //fmt::print("Increasing confidence via useful prefetch\n");
-    if(metadata_in != NEXT_LINE_ID) {
+    if(metadata_in == BUFFER_ID) {
       increase_confidence(addr,USEFUL_CONF,false);
       if(!intern_->warmup)
         useful_tallied += 1;
@@ -408,11 +408,13 @@ champsim::address dram_prefetch_buffer_spp::compose_base_and_column(champsim::ad
   //1. iterate through all column bits in the base
   //2. set each bit to the matching bits in the column
   uint64_t base_temp = base.to<uint64_t>();
-  
+  std::vector<uint64_t> column_bits;
   //8GB
-  std::vector<uint64_t> column_bits = {7,12,13,14,15,16};
+  if(NUM_CPUS == 1)
+    column_bits = {7,12,13,14,15,16};
   //32GB
-  //std::vector<uint64_t> column_bits = {7,13,14,15,16,17};
+  else //multicore, 32GB of RAM
+    column_bits = {7,13,14,15,16,17};
 
   for(std::size_t i = 0; i < column_bits.size(); i++) {
     if(column & (1ull << i))

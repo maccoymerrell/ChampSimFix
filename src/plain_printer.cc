@@ -72,10 +72,23 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
   using downstream_value_type = typename decltype(stats.downstream_packets)::value_type;
   using returned_value_type = typename decltype(stats.returned_packets)::value_type;
 
+  std::vector<std::size_t> cpus;
+
+  // build a vector of all existing cpus
+  auto stat_keys = {stats.hits.get_keys(), stats.misses.get_keys(), stats.downstream_packets.get_keys(), stats.returned_packets.get_keys()};
+  for (auto keys : stat_keys) {
+    std::transform(std::begin(keys), std::end(keys), std::back_inserter(cpus), [](auto val) { return val.second; });
+  }
+  std::sort(std::begin(cpus), std::end(cpus));
+  auto uniq_end = std::unique(std::begin(cpus), std::end(cpus));
+  cpus.erase(uniq_end, std::end(cpus));
+
   for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION, access_type::PROMOTION, access_type::DROPPED, access_type::REFETCH}) {
-    for (std::size_t cpu = 0; cpu < NUM_CPUS; ++cpu) {
+    for (auto cpu : cpus) {
       stats.hits.allocate(std::pair{type, cpu});
       stats.misses.allocate(std::pair{type, cpu});
+      stats.returned_packets.allocate(std::pair{type, cpu});
+      stats.downstream_packets.allocate(std::pair{type,cpu});
     }
   }
 
@@ -85,54 +98,34 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
   }
 
   std::vector<std::string> lines{};
-  for (std::size_t cpu = 0; cpu < NUM_CPUS; ++cpu) {
+  for (auto cpu : cpus) {
     hits_value_type total_hits = 0;
     misses_value_type total_misses = 0;
+    downstream_value_type total_downstream = 0;
+    returned_value_type total_returned = 0;
     for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION, access_type::PROMOTION, access_type::DROPPED, access_type::REFETCH}) {
       total_hits += stats.hits.value_or(std::pair{type, cpu}, hits_value_type{});
       total_misses += stats.misses.value_or(std::pair{type, cpu}, misses_value_type{});
+      total_returned += stats.returned_packets.value_or(std::pair{type, cpu}, returned_value_type{});
+      total_downstream += stats.downstream_packets.value_or(std::pair{type, cpu}, downstream_value_type{});
     }
 
-    fmt::format_string<std::string_view, std::string_view, int, int, int> hitmiss_fmtstr{"{} {:<12s} ACCESS: {:10d} HIT: {:10d} MISS: {:10d}"};
-    lines.push_back(fmt::format(hitmiss_fmtstr, stats.name, "TOTAL", total_hits + total_misses, total_hits, total_misses));
+    fmt::format_string<std::string_view, std::string_view, int, int, int> hitmiss_fmtstr{"cpu{}->{} {:<12s} ACCESS: {:10d} HIT: {:10d} MISS: {:10d} DOWNSTREAM: {:10d} RETURNED: {:10d}"};
+    lines.push_back(fmt::format(hitmiss_fmtstr, cpu, stats.name, "TOTAL", total_hits + total_misses, total_hits, total_misses, total_downstream, total_returned));
     for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION, access_type::PROMOTION, access_type::DROPPED, access_type::REFETCH}) {
       lines.push_back(
-          fmt::format(hitmiss_fmtstr, stats.name, access_type_names.at(champsim::to_underlying(type)),
+          fmt::format(hitmiss_fmtstr, cpu, stats.name, access_type_names.at(champsim::to_underlying(type)),
                       stats.hits.value_or(std::pair{type, cpu}, hits_value_type{}) + stats.misses.value_or(std::pair{type, cpu}, misses_value_type{}),
-                      stats.hits.value_or(std::pair{type, cpu}, hits_value_type{}), stats.misses.value_or(std::pair{type, cpu}, misses_value_type{})));
+                      stats.hits.value_or(std::pair{type, cpu}, hits_value_type{}), stats.misses.value_or(std::pair{type, cpu}, misses_value_type{}),
+                      stats.downstream_packets.value_or(std::pair{type, cpu}, downstream_value_type{}), stats.returned_packets.value_or(std::pair{type,cpu},returned_value_type{})));
     }
 
-    lines.push_back(fmt::format("{} PREFETCH REQUESTED: {:10} ISSUED: {:10} USEFUL: {:10} USELESS: {:10}", stats.name, stats.pf_requested, stats.pf_issued,
+    lines.push_back(fmt::format("cpu{}->{} PREFETCH REQUESTED: {:10} ISSUED: {:10} USEFUL: {:10} USELESS: {:10}", cpu, stats.name, stats.pf_requested, stats.pf_issued,
                                 stats.pf_useful, stats.pf_useless));
     
-    lines.push_back(fmt::format("{} PROMOTIONS RETURNED: {:10} MISSED: {:10}", stats.name, returned_promotions, stats.pr_missed));                         
-
-    lines.push_back(
-          fmt::format("{} DOWNSTREAM PACKETS: {:10} LOAD: {:10} RFO: {:10} PREFETCH: {:10} WRITE: {:10} TRANSLATION: {:10} PROMOTION: {:10} DROPPED: {:10} REFETCHED: {:10}",
-                      stats.name,
-                      stats.downstream_packets.total(),
-                      stats.downstream_packets.value_or(std::pair{access_type::LOAD,cpu},downstream_value_type{}),
-                      stats.downstream_packets.value_or(std::pair{access_type::RFO,cpu},downstream_value_type{}),
-                      stats.downstream_packets.value_or(std::pair{access_type::PREFETCH,cpu},downstream_value_type{}),
-                      stats.downstream_packets.value_or(std::pair{access_type::WRITE,cpu},downstream_value_type{}),
-                      stats.downstream_packets.value_or(std::pair{access_type::TRANSLATION,cpu},downstream_value_type{}),
-                      stats.downstream_packets.value_or(std::pair{access_type::PROMOTION,cpu},downstream_value_type{}),
-                      stats.downstream_packets.value_or(std::pair{access_type::DROPPED,cpu},downstream_value_type{}),
-                      stats.downstream_packets.value_or(std::pair{access_type::REFETCH,cpu},downstream_value_type{})));
-    lines.push_back(
-          fmt::format("{} RETURNED PACKETS: {:10} LOAD: {:10} RFO: {:10} PREFETCH: {:10} WRITE: {:10} TRANSLATION: {:10} PROMOTION: {:10} DROPPED: {:10} REFETCHED: {:10}",
-                      stats.name,
-                      stats.returned_packets.total(),
-                      stats.returned_packets.value_or(std::pair{access_type::LOAD,cpu},returned_value_type{}),
-                      stats.returned_packets.value_or(std::pair{access_type::RFO,cpu},returned_value_type{}),
-                      stats.returned_packets.value_or(std::pair{access_type::PREFETCH,cpu},returned_value_type{}),
-                      stats.returned_packets.value_or(std::pair{access_type::WRITE,cpu},returned_value_type{}),
-                      stats.returned_packets.value_or(std::pair{access_type::TRANSLATION,cpu},returned_value_type{}),
-                      stats.returned_packets.value_or(std::pair{access_type::PROMOTION,cpu},returned_value_type{}),
-                      stats.returned_packets.value_or(std::pair{access_type::DROPPED,cpu},returned_value_type{}),
-                      stats.returned_packets.value_or(std::pair{access_type::REFETCH,cpu},returned_value_type{})));
+    lines.push_back(fmt::format("cpu{}->{} PROMOTIONS SUCCESSFUL: {:10} FAILED: {:10}", cpu, stats.name, returned_promotions, stats.pr_missed));                         
       
-    lines.push_back(fmt::format("{} AVERAGE MISS LATENCY: {} cycles", stats.name, ::print_ratio(stats.total_miss_latency_cycles, stats.total_returned_packets)));
+    lines.push_back(fmt::format("cpu{}->{} AVERAGE MISS LATENCY: {} cycles", cpu, stats.name, ::print_ratio(stats.total_miss_latency_cycles, stats.total_returned_packets)));
   }
 
   return lines;
