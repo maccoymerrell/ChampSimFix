@@ -36,7 +36,7 @@ uint32_t dram_prefetch_buffer_spp::prefetcher_cache_operate(champsim::address ad
     }
 
     //if prefetch and doesn't match an expected prefetch location, drop
-    if(type == access_type::PREFETCH && metadata_in != NEXT_LINE_ID) {
+    if(type == access_type::PREFETCH) {
       if(should_drop_prefetch(addr,cpu)) {
         intern_->drop_prefetch_access(addr);
         if(!intern_->warmup)
@@ -332,7 +332,7 @@ void dram_prefetch_buffer_spp::update_walker(champsim::address addr, uint32_t cp
         int amount_to_prefetch = std::min(depth,intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()));
         int prefetched_so_far = 0;
         //fmt::print("Prefetching forwards at row: {} rb: {} between columns:{} - {}\n",row,rb,col + 1,col + amount_to_prefetch > 63 ? 63 : col + amount_to_prefetch);
-        for(int i = col + 1; i < 64 && i <= col + amount_to_prefetch; i++) {
+        for(int i = col + 1; i < (1 << (column_bits.size())) && i <= col + amount_to_prefetch; i++) {
           bool success = true;
           if(!filter.check(compose_base_and_column(addr,i),intern_->current_cycle(),false)) {
             success = prefetch_line(compose_base_and_column(addr,i),true,cpu,i%2 == 0 ? BUFFER_ID : NEXT_LINE_ID,false,false);
@@ -386,7 +386,7 @@ void dram_prefetch_buffer_spp::issue_row_prefetch(champsim::address addr, uint32
 
     //issue prefetches
     if(direction == FORWARD) {
-      auto end = col + (number*stride*access_count) > 63 ? 63 : col + (number*stride*access_count);
+      auto end = col + (number*stride*access_count) > ((1 << column_bits.size()) - 1) ? ((1 << column_bits.size()) - 1) : col + (number*stride*access_count);
       fmt::print("Issuing prefetch from addr: {} col: {} to col: {} stride: {} num: {} count: {}\n",addr,col,end,stride,number,access_count);
       for(int i = col + stride; i <= end; i += stride) {
         if(!filter.check(compose_base_and_column(addr,i),intern_->current_cycle(),true))
@@ -408,14 +408,6 @@ champsim::address dram_prefetch_buffer_spp::compose_base_and_column(champsim::ad
   //1. iterate through all column bits in the base
   //2. set each bit to the matching bits in the column
   uint64_t base_temp = base.to<uint64_t>();
-  std::vector<uint64_t> column_bits;
-  //8GB
-  if(NUM_CPUS == 1)
-    column_bits = {7,12,13,14,15,16};
-  //32GB
-  else //multicore, 32GB of RAM
-    column_bits = {7,13,14,15,16,17};
-
   for(std::size_t i = 0; i < column_bits.size(); i++) {
     if(column & (1ull << i))
       base_temp |= 1ull << column_bits[i];
@@ -437,6 +429,13 @@ void dram_prefetch_buffer_spp::prefetcher_initialize() {
 
   row_open_table.resize(MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->rowbuffers());
   row_interval_table.resize(MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->rowbuffers());
+
+  //find column bits
+  for(int i = 0; i < 64; i ++) {
+    if(MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_column(champsim::address{1ul << i}) != 0)
+      column_bits.push_back(i);
+  }
+  fmt::print("[{}] DRAM Column Bits are: {}\n",intern_->NAME,fmt::join(column_bits, ","));
 }
 
 uint32_t dram_prefetch_buffer_spp::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)

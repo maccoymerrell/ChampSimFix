@@ -48,6 +48,8 @@ struct dram_prefetch_buffer_spp : public champsim::modules::prefetcher {
 
   std::size_t pf_issue_pos = 0;
 
+  std::vector<std::size_t> column_bits;
+
 
   uint64_t accesses_so_far = 0;
 

@@ -43,10 +43,11 @@ CACHE::CACHE(CACHE&& other)
       upper_levels(std::move(other.upper_levels)), lower_level(std::move(other.lower_level)), lower_translate(std::move(other.lower_translate)),
 
       cpu(other.cpu), NAME(std::move(other.NAME)), NUM_SET(other.NUM_SET), NUM_WAY(other.NUM_WAY), MSHR_SIZE(other.MSHR_SIZE), PQ_SIZE(other.PQ_SIZE), MQ_SIZE(other.MQ_SIZE),
-      PQM_SIZE(other.PQM_SIZE),
+      PQM_SIZE(other.PQM_SIZE), MQC_ENABLED(other.MQC_ENABLED), PQM_ENABLED(other.PQM_ENABLED), CC_ENABLED(other.CC_ENABLED),
       HIT_LATENCY(other.HIT_LATENCY), FILL_LATENCY(other.FILL_LATENCY), OFFSET_BITS(other.OFFSET_BITS), block(std::move(other.block)), MAX_TAG(other.MAX_TAG),
       MAX_FILL(other.MAX_FILL), prefetch_as_load(other.prefetch_as_load), match_offset_bits(other.match_offset_bits), virtual_prefetch(other.virtual_prefetch),
-      pref_activate_mask(std::move(other.pref_activate_mask)),
+      pref_activate_mask(std::move(other.pref_activate_mask)), prefetches_in_mshr(other.prefetches_in_mshr), prefetch_limits(other.prefetch_limits), 
+      prefetch_counter(other.prefetch_counter), prefetch_hit_limit(other.prefetch_hit_limit), demands_in_mshr(other.demands_in_mshr),
 
       sim_stats(std::move(other.sim_stats)), roi_stats(std::move(other.roi_stats)),
 
@@ -99,10 +100,19 @@ auto CACHE::operator=(CACHE&& other) -> CACHE&
   this->pref_module_pimpl = std::move(other.pref_module_pimpl);
   this->repl_module_pimpl = std::move(other.repl_module_pimpl);
 
+  this->MQC_ENABLED = other.MQC_ENABLED;
+  this->PQM_ENABLED = other.PQM_ENABLED;
+  this->CC_ENABLED = other.CC_ENABLED;
+
   pref_module_pimpl->bind(this);
   repl_module_pimpl->bind(this);
 
   this->internal_PQ = other.internal_PQ;
+  this->prefetches_in_mshr = std::move(other.prefetches_in_mshr);
+  this->demands_in_mshr = std::move(other.demands_in_mshr);
+  this->prefetch_limits = std::move(other.prefetches_in_mshr);
+  this->prefetch_counter = std::move(other.prefetch_counter);
+  this->prefetch_hit_limit = std::move(other.prefetch_hit_limit);
   prefetch_usefulness.clear();
 
   return *this;
@@ -216,6 +226,18 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
                 fill_mshr.instr_id, fill_mshr.address, fill_mshr.v_address, get_set_index(fill_mshr.address), way_idx,
                 access_type_names.at(champsim::to_underlying(fill_mshr.type)), fill_mshr.data_promise->pf_metadata,
                 (fill_mshr.time_enqueued.time_since_epoch()) / clock_period, (current_time.time_since_epoch()) / clock_period);
+    }
+
+    //increment limit by 1
+    if(fill_mshr.type == access_type::PREFETCH || fill_mshr.was_promoted) {
+      if(prefetch_hit_limit[fill_mshr.cpu > NUM_CPUS ? 0 : fill_mshr.cpu])
+        prefetch_counter[fill_mshr.cpu > NUM_CPUS ? 0 : fill_mshr.cpu]++;
+      if(prefetch_counter[fill_mshr.cpu > NUM_CPUS ? 0 : fill_mshr.cpu] > prefetch_limits[fill_mshr.cpu > NUM_CPUS ? 0 : fill_mshr.cpu]) {
+        //fmt::print("[{}] Increasing threshold for CPU: {}\n", NAME, fill_mshr.cpu);
+        prefetch_limits[fill_mshr.cpu > NUM_CPUS ? 0 : fill_mshr.cpu]++;
+        prefetch_counter[fill_mshr.cpu > NUM_CPUS ? 0 : fill_mshr.cpu] = 0;
+        prefetch_hit_limit[fill_mshr.cpu > NUM_CPUS ? 0 : fill_mshr.cpu] = false;
+      }
     }
 
     if (way != set_end && way->valid && way->dirty) {
@@ -574,8 +596,7 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
       match->to_return = merged_return;
     }
   }
-
-  sim_stats.misses.increment(std::pair{handle_pkt.type,used_cpu});
+  sim_stats.misses.increment(std::pair{handle_pkt.type,handle_pkt.cpu >= NUM_CPUS ? 0 : handle_pkt.cpu});
 
   return true;
 }
@@ -584,26 +605,63 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
 void CACHE::schedule_mshr() {
   //need to first see if MSHR is empty
   //if so, we need to schedule the next request
-  if(MSHR.size() >= MSHR_SIZE)
-    return;
+  //if(MSHR.size() >= MSHR_SIZE)
+  //  return;
   //check if current core can issue request
+  prefetches_in_mshr = std::vector<std::size_t>(NUM_CPUS,0);
+  demands_in_mshr = std::vector<std::size_t>(NUM_CPUS,0);
+  std::vector<bool> prefetch_limited = std::vector<bool>(NUM_CPUS,false);
+  for(auto entry : MSHR) {
+    if(entry.type == access_type::PREFETCH) {
+      prefetches_in_mshr[entry.cpu >= NUM_CPUS ? 0 : entry.cpu]++;
+      if(prefetches_in_mshr[entry.cpu >= NUM_CPUS ? 0 : entry.cpu] >= prefetch_limits[entry.cpu >= NUM_CPUS ? 0 : entry.cpu]) {
+        prefetch_limited[entry.cpu >= NUM_CPUS ? 0 : entry.cpu] = true;
+        prefetch_hit_limit[entry.cpu >= NUM_CPUS ? 0 : entry.cpu] = true;
+      }
+    }
+    else {
+      demands_in_mshr[entry.cpu >= NUM_CPUS ? 0 : entry.cpu]++;
+    }
+  }
 
   //fmt::print("[{}] scheduling for MSHR...\n",NAME);
-  auto valid_demand = [cache = this](auto& entry) {
+  auto valid_demand = [cache = this, &pref_limit = prefetch_limited](auto& entry) {
     std::size_t bank_id = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(entry.address);
     //fmt::print("\t[{}] Outgoing requests to bank {}: {}\n", cache->NAME, bank_id,cache->OUTGOING_BANK_REQUESTS.at(bank_id));
     //disable check if MQC is disabled, always be true
-    return cache->OUTGOING_BANK_REQUESTS.at(bank_id) <= cache->BANK_DEMAND_THRESHOLD || !cache->MQC_ENABLED;
+    //bool should_bc_prefetch = !cache->CC_ENABLED || entry.type != access_type::PREFETCH || !pref_limit[entry.cpu >= NUM_CPUS ? 0 : entry.cpu];
+    //if(!should_bc_prefetch)
+    //  fmt::print("Ignored prefetch due to too many in queue\n");
+    return (cache->OUTGOING_BANK_REQUESTS.at(bank_id) <= cache->BANK_DEMAND_THRESHOLD || !cache->MQC_ENABLED) /* && (!cache->CC_ENABLED || entry.type != access_type::PREFETCH || !pref_limit[entry.cpu >= NUM_CPUS ? 0 : entry.cpu])*/;
   };
   auto search = std::find_if(std::begin(MQ.at(ACTIVE_CORE)),std::end(MQ.at(ACTIVE_CORE)),valid_demand);
   //don't limit starvation if MQC is disabled
   if(search != std::end(MQ.at(ACTIVE_CORE)) && (MQ_COUNTER < MQ_STARVE || !MQC_ENABLED)) {
     //found a packet to issue
+    //check if we should drop this packet
+    bool should_not_drop = !CC_ENABLED || search->type != access_type::PREFETCH || !prefetch_limited[ACTIVE_CORE];
+    if(!should_not_drop) {
+      response_type response{search->back_off, search->row_act, access_type::DROPPED, search->address, search->v_address, champsim::address{}, 0, search->instr_depend_on_me};
+      for (auto* ret : search->to_return) {
+        ret->push_back(response);
+      }
+      MQ.at(ACTIVE_CORE).erase(search);
+      MQ_COUNTER++;
+    }
     //fmt::print("[{}] Trying scheduling from demand queue...\n",NAME);
-    if(allocate_mshr(*search)) {
+    else if(allocate_mshr(*search)) {
       MQ.at(ACTIVE_CORE).erase(search);
       MQ_COUNTER++;
       //fmt::print("\tSuccess!\n");
+    } else {
+      //half prefetch limit if we hit the max
+      if(search->type == access_type::PREFETCH) {
+        //fmt::print("[{}] Halving threshold for CPU: {}\n", NAME, search->cpu);
+        prefetch_limits[ACTIVE_CORE] = std::max(prefetch_limits[ACTIVE_CORE] >> 1, 1ul);
+        
+
+        //drop
+      }
     }
     return;
   }
@@ -628,21 +686,41 @@ void CACHE::schedule_mshr() {
           //fmt::print("[{}]\tUsing threshold {}...\n", NAME, BANK_PREFETCH_THRESHOLD[thresh]);
           //fmt::print("[{}]\tBank occupancy is {}...\n",NAME,OUTGOING_BANK_REQUESTS.at(bank_occu));
           if (OUTGOING_BANK_REQUESTS.at(bank_occu) < BANK_PREFETCH_THRESHOLD[thresh] && PREFETCH_BANK_QUEUES.at(bank_occu).size() < smallest_outstanding_pf) {
+            //check first entry for cc if enabled
+            //if(!CC_ENABLED || !prefetch_limited[PREFETCH_MISS_STORAGE.at(PREFETCH_BANK_QUEUES.at(bank_occu).front()).cpu >= NUM_CPUS ? 0 : PREFETCH_MISS_STORAGE.at(PREFETCH_BANK_QUEUES.at(bank_occu).front()).cpu]) {
             smallest_valid_bank = bank_occu;
             smallest_outstanding_pf = PREFETCH_BANK_QUEUES.at(bank_occu).size();
+            //}
             //fmt::print("[{}]\tTrying to schedule from bank {}...\n",NAME,bank_occu);
           }
         }
       }
       if(smallest_valid_bank != PREFETCH_BANK_QUEUES.size()) {
         std::size_t ind = PREFETCH_BANK_QUEUES.at(smallest_valid_bank).front();
+
+        bool should_not_drop = !CC_ENABLED || PREFETCH_MISS_STORAGE.at(ind).type != access_type::PREFETCH || !prefetch_limited[PREFETCH_MISS_STORAGE.at(ind).cpu >= NUM_CPUS ? 0 : PREFETCH_MISS_STORAGE.at(ind).cpu];
+        if(!should_not_drop) {
+          response_type response{PREFETCH_MISS_STORAGE.at(ind).back_off, PREFETCH_MISS_STORAGE.at(ind).row_act, access_type::DROPPED, PREFETCH_MISS_STORAGE.at(ind).address, PREFETCH_MISS_STORAGE.at(ind).v_address, champsim::address{}, 0, PREFETCH_MISS_STORAGE.at(ind).instr_depend_on_me};
+          for (auto* ret : PREFETCH_MISS_STORAGE.at(ind).to_return) {
+            ret->push_back(response);
+          }
+          PREFETCH_MISS_STORAGE.at(ind).address = champsim::address{};
+          PREFETCH_BANK_QUEUES.at(smallest_valid_bank).pop_front();
+          PREFETCH_FREE_LIST.push_back(ind);
+        }
         //issue
         //fmt::print("[{}]\tScheduling from PQ...\n", NAME);
-        if(allocate_mshr(PREFETCH_MISS_STORAGE.at(ind))) {
+        else if(allocate_mshr(PREFETCH_MISS_STORAGE.at(ind))) {
           PREFETCH_MISS_STORAGE.at(ind).address = champsim::address{};
           PREFETCH_BANK_QUEUES.at(smallest_valid_bank).pop_front();
           PREFETCH_FREE_LIST.push_back(ind);
           //fmt::print("[{}]\tSuccess!\n",NAME);
+        } else {
+          //half prefetch limit if we max out the mshr
+          if(search->type == access_type::PREFETCH) {
+            //fmt::print("[{}] Halving threshold for CPU: {}\n", NAME, search->cpu);
+            prefetch_limits[PREFETCH_MISS_STORAGE.at(ind).cpu >= NUM_CPUS ? 0 : PREFETCH_MISS_STORAGE.at(ind).cpu] = std::max(prefetch_limits[PREFETCH_MISS_STORAGE.at(ind).cpu >= NUM_CPUS ? 0 : PREFETCH_MISS_STORAGE.at(ind).cpu] >> 1, 1ul);
+          }
         }
       }
     }
@@ -652,12 +730,11 @@ void CACHE::schedule_mshr() {
 
       
       std::size_t MQ_CORE_SEL = 0;
-      ACTIVE_CORE = MQ_CORE[MQ_CORE_SEL];
-      bool has_valid_request = std::find_if(std::begin(MQ.at(ACTIVE_CORE)),std::end(MQ.at(ACTIVE_CORE)),valid_demand) != std::end(MQ.at(ACTIVE_CORE));
+      bool has_valid_request = false;
       while(!has_valid_request && MQ_CORE_SEL < MQ_CORE.size()){
-        MQ_CORE_SEL++;
         ACTIVE_CORE = MQ_CORE[MQ_CORE_SEL];
         has_valid_request = std::find_if(std::begin(MQ.at(ACTIVE_CORE)),std::end(MQ.at(ACTIVE_CORE)),valid_demand) != std::end(MQ.at(ACTIVE_CORE));
+        MQ_CORE_SEL++;
       }
     }
     //fmt::print("[{}] Swapped core to {} size: {}\n",NAME, MQ_CORE, MQ.at(MQ_CORE).size());
@@ -866,6 +943,33 @@ long CACHE::operate()
                "bw {}\n",
                NAME, __func__, current_time.time_since_epoch() / clock_period, tag_check_bw.amount_consumed(), std::size(inflight_tag_check),
                stash_bandwidth_consumed, std::size(translation_stash), channels_bandwidth_consumed, pq_bandwidth_consumed, initiate_tag_bw.amount_remaining());
+  }
+
+  if((current_cycle() + 1) % print_report_interval == 0) {
+    if(NAME.compare("LLC") == 0 && !warmup) {
+      fmt::print("[{}] CC Values:\n",NAME);
+      for(int i = 0; i < NUM_CPUS; i++) {
+        fmt::print("\t {}: {}\n", i, prefetch_limits[i]);
+      }
+    }
+    if(NAME.compare("LLC") == 0 && !warmup) {
+      fmt::print("[{}] Demand MSHR Occupancy:\n",NAME);
+      for(int i = 0; i < NUM_CPUS; i++) {
+        fmt::print("\t {}: {}\n", i, demands_in_mshr[i]);
+      }
+    }
+    if(NAME.compare("LLC") == 0 && !warmup) {
+      fmt::print("[{}] Prefetch MSHR Occupancy:\n",NAME);
+      for(int i = 0; i < NUM_CPUS; i++) {
+        fmt::print("\t {}: {}\n", i, prefetches_in_mshr[i]);
+      }
+    }
+    if(NAME.compare("LLC") == 0 && !warmup) {
+      fmt::print("[{}] MQ Occupancy:\n",NAME);
+      for(int i = 0; i < NUM_CPUS; i++) {
+        fmt::print("\t {}: {}\n", i, MQ[i].size());
+      }
+    }
   }
 
   if ((current_cycle() + 1) % pf_report_interval == 0) {

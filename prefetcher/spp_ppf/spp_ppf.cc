@@ -191,8 +191,8 @@ uint32_t spp_ppf::prefetcher_cache_operate(champsim::address addr, champsim::add
 		GHR.depth_num++;
 		GHR.depth_sum += depth;
 	}
-
-	depth_track[depth]++;
+    if(depth < 30)
+	    depth_track[depth]++;
 	return metadata_in;
 }
 
@@ -261,7 +261,7 @@ void spp_ppf::prefetcher_final_stats()
 
 	int tot = 0;
     fmt::print("------------------\n");
-    fmt::print("Depth Distribution\n");
+    fmt::print("{} Depth Distribution\n", intern_->NAME);
     fmt::print("------------------\n");
 
 	for(int a = 0; a < 30; a++){

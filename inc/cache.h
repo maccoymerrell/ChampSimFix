@@ -276,6 +276,12 @@ public:
   std::optional<champsim::address> marked_for_drop;
   std::vector<access_type> pref_activate_mask;
 
+  std::vector<std::size_t> prefetches_in_mshr;
+  std::vector<std::size_t> demands_in_mshr;
+  std::vector<std::size_t> prefetch_limits;
+  std::vector<std::size_t> prefetch_counter;
+  std::vector<bool> prefetch_hit_limit;
+
   using stats_type = cache_stats;
 
   stats_type sim_stats, roi_stats;
@@ -292,6 +298,7 @@ public:
   std::size_t MQ_STARVE = 10;
 
   uint64_t pf_report_interval = 100000;
+  uint64_t print_report_interval = 100000;
 
   std::vector<tag_lookup_type> PREFETCH_MISS_STORAGE;
   std::deque<std::size_t> PREFETCH_FREE_LIST;
@@ -301,6 +308,7 @@ public:
 
   bool PQM_ENABLED;
   bool MQC_ENABLED;
+  bool CC_ENABLED;
 
   void manage_pq();
   long operate() final;
@@ -455,7 +463,7 @@ public:
   template <typename... Ps, typename... Rs>
   explicit CACHE(champsim::cache_builder<champsim::cache_builder_module_type_holder<Ps...>, champsim::cache_builder_module_type_holder<Rs...>> b)
       : champsim::operable(b.m_clock_period), internal_PQ(b.m_pq_size), upper_levels(b.m_uls), lower_level(b.m_ll), lower_translate(b.m_lt), 
-        NAME(b.m_name), NUM_SET(b.get_num_sets()), PQM_ENABLED(b.m_pqm_enabled), MQC_ENABLED(b.m_mqc_enabled),
+        NAME(b.m_name), NUM_SET(b.get_num_sets()), PQM_ENABLED(b.m_pqm_enabled), MQC_ENABLED(b.m_mqc_enabled), CC_ENABLED(b.m_cc_enabled),
         NUM_WAY(b.get_num_ways()), MSHR_SIZE(b.get_num_mshrs()), PQ_SIZE(b.m_pq_size), PQM_SIZE(b.get_num_mshrs()*2), MQ_SIZE(b.get_num_mshrs()*2), HIT_LATENCY(b.get_hit_latency() * b.m_clock_period),
         FILL_LATENCY(b.get_fill_latency() * b.m_clock_period), OFFSET_BITS(b.m_offset_bits), MAX_TAG(b.get_tag_bandwidth()), MAX_FILL(b.get_fill_bandwidth()),
         prefetch_as_load(b.m_pref_load), match_offset_bits(b.m_wq_full_addr), virtual_prefetch(b.m_va_pref), pref_activate_mask(b.m_pref_act_mask),
@@ -486,6 +494,15 @@ public:
     if(MQC_ENABLED) {
       fmt::print("[{}] MQC Enabled, Cores: {}, Size: {}, Demand Limit: {}\n",NAME, NUM_CPUS, MQ_SIZE, BANK_DEMAND_THRESHOLD);
     }
+    if(CC_ENABLED) {
+      fmt::print("[{}] CC Enabled, Cores: {}\n", NAME, NUM_CPUS);
+    }
+
+    prefetches_in_mshr = std::vector<std::size_t>(NUM_CPUS,0);
+    demands_in_mshr = std::vector<std::size_t>(NUM_CPUS,0);
+    prefetch_limits = std::vector<std::size_t>(NUM_CPUS,1);
+    prefetch_counter = std::vector<std::size_t>(NUM_CPUS,0);
+    prefetch_hit_limit = std::vector<bool>(NUM_CPUS,false);
   }
 
   CACHE(const CACHE&) = delete;

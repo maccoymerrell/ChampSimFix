@@ -37,9 +37,9 @@ class ActivateCounter
   uint64_t phase;
 
   // cycle values
-  uint64_t highest_activates_per_cycle_read;
-  uint64_t highest_activates_per_cycle_prefetch;
-  uint64_t highest_activates_per_cycle_writeback;
+  uint64_t highest_activates_per_cycle_read = 0;
+  uint64_t highest_activates_per_cycle_prefetch = 0;
+  uint64_t highest_activates_per_cycle_writeback = 0;
   uint64_t highest_activates_row;
   uint64_t last_activate_cycles;
   
