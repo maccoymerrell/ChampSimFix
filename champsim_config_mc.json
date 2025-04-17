@@ -74,8 +74,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -146,8 +146,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -267,8 +267,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -339,8 +339,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -460,8 +460,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -532,8 +532,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -653,8 +653,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -725,8 +725,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -844,8 +844,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -916,8 +916,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -1035,8 +1035,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -1107,8 +1107,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -1226,8 +1226,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -1298,8 +1298,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -1417,8 +1417,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -1489,8 +1489,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -1610,8 +1610,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -1682,8 +1682,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -1804,8 +1804,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -1876,8 +1876,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -1997,8 +1997,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -2069,8 +2069,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -2190,8 +2190,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -2262,8 +2262,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -2383,8 +2383,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -2455,8 +2455,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -2574,8 +2574,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -2646,8 +2646,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -2767,8 +2767,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -2839,8 +2839,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
@@ -2958,8 +2958,8 @@
     },
 
     "L2C": {
-        "sets": 2048,
-        "ways": 10,
+        "sets": 1024,
+        "ways": 16,
         "rq_size": 64,
         "wq_size": 48,
         "pq_size": 16,
@@ -3030,8 +3030,8 @@
 
     "LLC": {
         "frequency": 4000,
-        "sets": 32768,
-        "ways": 10,
+        "sets": 65536,
+        "ways": 16,
         "rq_size": 192,
         "wq_size": 192,
         "pq_size": 64,
