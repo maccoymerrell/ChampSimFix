@@ -945,6 +945,7 @@ long CACHE::operate()
                stash_bandwidth_consumed, std::size(translation_stash), channels_bandwidth_consumed, pq_bandwidth_consumed, initiate_tag_bw.amount_remaining());
   }
 
+    /*
   if((current_cycle() + 1) % print_report_interval == 0) {
     if(NAME.compare("LLC") == 0 && !warmup) {
       fmt::print("[{}] CC Values:\n",NAME);
@@ -970,7 +971,7 @@ long CACHE::operate()
         fmt::print("\t {}: {}\n", i, MQ[i].size());
       }
     }
-  }
+  }*/
 
   if ((current_cycle() + 1) % pf_report_interval == 0) {
     //redo core scheduling

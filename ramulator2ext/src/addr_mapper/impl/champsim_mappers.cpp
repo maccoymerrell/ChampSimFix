@@ -183,6 +183,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
 
     void init() override {
       debug = param<bool>("debug").desc("Enable debug printouts").default_val(false);
+      fmt::print("Using ZEN4 DRAM Mapping\n");
      };
     void setup(IFrontEnd* frontend, IMemorySystem* memory_system) {
       m_dram = memory_system->get_ifce<IDRAM>();
@@ -214,7 +215,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
 
       Request R(268435456,0,0,nullptr);
       int groups = 1 << (m_addr_bits[m_dram->m_levels("bankgroup")] + m_addr_bits[m_dram->m_levels("bank")] + m_addr_bits[m_dram->m_levels("channel")] + m_addr_bits[m_dram->m_levels("rank")]);
-      int columns = (1 << m_addr_bits[m_dram->m_levels("column")]) / m_dram->m_internal_prefetch_size;
+      int columns = (1 << m_addr_bits[m_dram->m_levels("column")]);
       std::vector<std::vector<bool>> bitmap = std::vector<std::vector<bool>>(groups,std::vector<bool>(columns,false));
       for(int i = 0; i < columns*groups; i++)
       {
@@ -323,7 +324,9 @@ class ZEN4 final : public IAddrMapper, public Implementation {
     int m_col_bits_idx = -1;
     int m_row_bits_idx = -1;
 
-    void init() override { };
+    void init() override { 
+      fmt::print("Using ZEN4_8GB DRAM Mapping\n");
+    };
     void setup(IFrontEnd* frontend, IMemorySystem* memory_system) {
       m_dram = memory_system->get_ifce<IDRAM>();
 
@@ -355,7 +358,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
       //sanity check, check that we don't map into ourselves anywhere
       Request R(268435456,0,0,nullptr);
       int groups = 1 << (m_addr_bits[m_dram->m_levels("bankgroup")] + m_addr_bits[m_dram->m_levels("bank")] + m_addr_bits[m_dram->m_levels("channel")] + m_addr_bits[m_dram->m_levels("rank")]);
-      int columns = (1 << m_addr_bits[m_dram->m_levels("column")]) / m_dram->m_internal_prefetch_size;
+      int columns = (1 << m_addr_bits[m_dram->m_levels("column")]);
       std::vector<std::vector<bool>> bitmap = std::vector<std::vector<bool>>(groups,std::vector<bool>(columns,false));
       for(int i = 0; i < columns*groups; i++)
       {
@@ -831,7 +834,9 @@ class ZEN4_8GB_RAF_3 final : public IAddrMapper, public Implementation {
     int m_col_bits_idx = -1;
     int m_row_bits_idx = -1;
 
-    void init() override { };
+    void init() override { 
+      fmt::print("Using basic PBPI DRAM mapping\n");
+    };
     void setup(IFrontEnd* frontend, IMemorySystem* memory_system) {
       m_dram = memory_system->get_ifce<IDRAM>();
 
@@ -896,4 +901,159 @@ class ZEN4_8GB_RAF_3 final : public IAddrMapper, public Implementation {
     }
     
   };
+
+
+
+class MINIMALIST final : public IAddrMapper, public Implementation {
+  RAMULATOR_REGISTER_IMPLEMENTATION(IAddrMapper, MINIMALIST, "MINIMALIST", "Applies a MINIMALIST mapping to the address");
+
+public:
+  IDRAM* m_dram = nullptr;
+
+  int m_num_levels = -1;          // How many levels in the hierarchy?
+  std::vector<int> m_addr_bits;   // How many address bits for each level in the hierarchy?
+  Addr_t m_tx_offset = -1; 
+
+  int m_col_bits_idx = -1;
+  int m_row_bits_idx = -1;
+
+  bool debug = false;
+
+  std::size_t gang_size;
+
+  void init() override {
+    debug = param<bool>("debug").desc("Enable debug printouts").default_val(false);
+    gang_size = param<std::size_t>("gang_size").desc("Cluster of consecutive columns on the same rowbuffer").default_val(4ul);
+    fmt::print("Using MINIMALIST DRAM Mapping, gang_size: {}\n",gang_size);
+   };
+  void setup(IFrontEnd* frontend, IMemorySystem* memory_system) {
+    m_dram = memory_system->get_ifce<IDRAM>();
+
+    // Populate m_addr_bits vector with the number of address bits for each level in the hierachy
+    const auto& count = m_dram->m_organization.count;
+    m_num_levels = count.size();
+    m_addr_bits.resize(m_num_levels);
+    for (size_t level = 0; level < m_addr_bits.size(); level++) {
+      m_addr_bits[level] = calc_log2(count[level]);
+    }
+
+    // Last (Column) address have the granularity of the prefetch size
+    m_addr_bits[m_num_levels - 1] -= calc_log2(m_dram->m_internal_prefetch_size);
+
+    int tx_bytes = m_dram->m_internal_prefetch_size * m_dram->m_channel_width / 8;
+    m_tx_offset = calc_log2(tx_bytes);
+
+    // Determine where are the row and col bits for ChRaBaRoCo and RoBaRaCoCh
+    try {
+      m_row_bits_idx = m_dram->m_levels("row");
+    } catch (const std::out_of_range& r) {
+      throw std::runtime_error(fmt::format("Organization \"row\" not found in the spec, cannot use linear mapping!"));
+    }
+
+    // Assume column is always the last level
+    m_col_bits_idx = m_num_levels - 1;
+
+
+    Request R(268435456,0,0,nullptr);
+    int groups = 1 << (m_addr_bits[m_dram->m_levels("bankgroup")] + m_addr_bits[m_dram->m_levels("bank")] + m_addr_bits[m_dram->m_levels("channel")] + m_addr_bits[m_dram->m_levels("rank")]);
+    int columns = (1 << m_addr_bits[m_dram->m_levels("column")]);
+    std::vector<std::vector<bool>> bitmap = std::vector<std::vector<bool>>(groups,std::vector<bool>(columns,false));
+    for(int i = 0; i < columns*groups; i++)
+    {
+      R.addr = (columns * groups * 2151 * tx_bytes) + i*tx_bytes;
+      apply(R);
+      int rank_num = R.addr_vec[m_dram->m_levels("rank")];
+      int bg_num = R.addr_vec[m_dram->m_levels("bankgroup")];
+      int bank_num = R.addr_vec[m_dram->m_levels("bank")];
+      int channel_num = R.addr_vec[m_dram->m_levels("channel")];
+      int column_num = R.addr_vec[m_dram->m_levels("column")];
+      int index = bank_num;
+      index |= (bg_num << m_addr_bits[m_dram->m_levels("bank")]);
+      index |= (rank_num << (m_addr_bits[m_dram->m_levels("bank")] + m_addr_bits[m_dram->m_levels("bankgroup")]));
+      index |= (channel_num << (m_addr_bits[m_dram->m_levels("bank")] + m_addr_bits[m_dram->m_levels("bankgroup")]) + m_addr_bits[m_dram->m_levels("rank")]);
+      if(bitmap[index][column_num]) {
+        fmt::print("addr: {} index: {} column: {} assert: {}\n",R.addr,index, column_num,!bitmap[index][column_num]);
+        std::abort();
+      }
+      
+      bitmap[index][column_num] = true;
+    }
+
+    assert(m_addr_bits[m_dram->m_levels("column")] <= gang_size);
+  }
+
+  int64_t gitBit(unsigned long BitIndex, Addr_t address){
+    return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
+  }
+
+  void apply(Request& req) override {
+    req.addr_vec.resize(m_num_levels, -1);
+    Addr_t reference_addr = req.addr;
+    Addr_t addr = req.addr >> m_tx_offset;
+
+    //column bit 0,1 (6,7)
+    long int column_bits = slice_lower_bits(addr, gang_size);
+
+    //channels (6)
+    long int channel_bits = slice_lower_bits(addr, m_addr_bits[m_dram->m_levels("channel")]);
+
+    //bankgroup bits 0 and 1 (8-9)
+    long int bg_bits = slice_lower_bits(addr,m_addr_bits[m_dram->m_levels("bankgroup")]);
+
+    //bank bits (10-11)
+    long int bank_bits = slice_lower_bits(addr,m_addr_bits[m_dram->m_levels("bank")]);
+
+    //rank bits (18)
+    long int rank_bits = slice_lower_bits(addr, m_addr_bits[m_dram->m_levels("rank")]);
+
+    //remaining column bits (13-17)
+    column_bits |= slice_lower_bits(addr,m_addr_bits[m_dram->m_levels("column")] - gang_size) << gang_size;
+
+    //row bits  (19-34)
+    long int row_bits = slice_lower_bits(addr, m_addr_bits[m_dram->m_levels("row")]);
+
+    //XOR time
+
+    //channel xors with all row bits
+    for(int c = 0; c < m_addr_bits[m_dram->m_levels("channel")]; c++)
+      for(int i = 0; i < m_addr_bits[m_dram->m_levels("row")]; i++)
+        channel_bits ^= gitBit(row_bits,i) << c;
+
+    //bankgroup gets specific bits
+    int bg_key = 0x1084;
+
+    assert(m_addr_bits[m_dram->m_levels("bankgroup")] + 12 <= m_addr_bits[m_dram->m_levels("row")]);
+    for(int bg = 0; bg < m_addr_bits[m_dram->m_levels("bankgroup")]; bg++) {
+      bg_bits ^= (gitBit(row_bits,2 + bg) ^ gitBit(row_bits,7 + bg) ^ gitBit(row_bits,12 + bg)) << bg;
+    }
+
+    //banks get specific bits
+    int b_key = 0x8421;
+    assert(m_addr_bits[m_dram->m_levels("bank")] + 10 <= m_addr_bits[m_dram->m_levels("row")]);
+    for(int b = 0; b < m_addr_bits[m_dram->m_levels("bank")]; b++) {
+      bank_bits ^= ( gitBit(row_bits,b) ^ gitBit(row_bits,5 + b) ^ gitBit(row_bits,10 + b)) << b;
+    }
+    bank_bits ^= gitBit(row_bits,15);
+
+    //assign
+    req.addr_vec[m_dram->m_levels("channel")] = channel_bits;
+    req.addr_vec[m_dram->m_levels("column")] = column_bits;
+    req.addr_vec[m_dram->m_levels("bank")] = bank_bits;
+    req.addr_vec[m_dram->m_levels("bankgroup")] = bg_bits;
+    req.addr_vec[m_dram->m_levels("rank")] = rank_bits;
+    req.addr_vec[m_dram->m_levels("row")] = row_bits;
+    if(debug) {
+      fmt::print("Mapped address: {:X} to Channel: {} Column: {} Bank: {} Bankgroup: {} Rank: {} Row: {}\n",
+        req.addr,
+        req.addr_vec[m_dram->m_levels("channel")],
+        req.addr_vec[m_dram->m_levels("column")],
+        req.addr_vec[m_dram->m_levels("bank")],
+        req.addr_vec[m_dram->m_levels("bankgroup")],
+        req.addr_vec[m_dram->m_levels("rank")],
+        req.addr_vec[m_dram->m_levels("row")]
+      );
+    }
+  }
+};
+
 }
