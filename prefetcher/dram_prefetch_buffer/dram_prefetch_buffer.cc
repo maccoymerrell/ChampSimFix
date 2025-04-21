@@ -406,6 +406,13 @@ void dram_prefetch_buffer::prefetcher_initialize() {
 
   row_open_table.resize(MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->rowbuffers());
   row_interval_table.resize(MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->rowbuffers());
+
+  //find column bits
+  for(int i = 0; i < 64; i ++) {
+    if(MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_column(champsim::address{1ul << i}) != 0)
+      column_bits.push_back(i);
+  }
+  fmt::print("[{}] DRAM Column Bits are: {}\n",intern_->NAME,fmt::join(column_bits, ","));
 }
 
 uint32_t dram_prefetch_buffer::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)

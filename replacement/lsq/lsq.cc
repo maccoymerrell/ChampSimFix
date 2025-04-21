@@ -19,6 +19,8 @@ long lsq::find_victim(uint32_t triggering_cpu, uint64_t instr_id, long set, cons
   uint8_t lsq_score = type == access_type::WRITE ? lsq_scores.at(set*NUM_WAY + victim) : intern_->get_mshr_occupancy();//intern_->lsq_score;
   uint64_t cycle_score = type == access_type::WRITE ? last_used_cycles.at(set*NUM_WAY + victim) : cycle + 1;
   bool found = type == access_type::WRITE;
+
+  bool was_ranked_by_lru = false;
   for(auto it = set*NUM_WAY; it < (set + 1)*NUM_WAY; it++) {
     //higher lsq score is always victim
     if(lsq_scores.at(it) > lsq_score) {
@@ -33,6 +35,7 @@ long lsq::find_victim(uint32_t triggering_cpu, uint64_t instr_id, long set, cons
       lsq_score = lsq_scores.at(it);
       cycle_score = last_used_cycles.at(it);
       found = true;
+      was_ranked_by_lru = true;
     }
   }
   //couldn't find a victim, bypass
@@ -47,6 +50,13 @@ long lsq::find_victim(uint32_t triggering_cpu, uint64_t instr_id, long set, cons
   if(!intern_->warmup && lsq_score != 255) {
     evictions++;
     score_at_eviction += lsq_score;
+  }
+
+  if(!intern_->warmup) {
+    if(was_ranked_by_lru)
+      ranked_by_lru++;
+    else
+      ranked_by_lsq++;
   }
   
   //fmt::print("Evicting way {} lsq_score was {} ours was {}\n",victim,lsq_score,intern_->lsq_score);
@@ -80,13 +90,13 @@ void lsq::update_replacement_state(uint32_t triggering_cpu, long set, long way, 
     //for(auto it = begin; it != end; it++) {
     //  *it = *it >= avg_score ? *it : *it + 1; 
     //}
-    lsq_scores.at((std::size_t)(set * NUM_WAY + way)) = std::min(intern_->get_mshr_occupancy()/*intern_->lsq_score*/,(std::size_t)lsq_scores.at((std::size_t)(set * NUM_WAY + way)));
+    lsq_scores.at((std::size_t)(set * NUM_WAY + way)) = intern_->get_mshr_occupancy();
     if(!intern_->warmup) {
       hits++;
       score_at_hit += lsq_scores.at((std::size_t)(set * NUM_WAY + way));
     }
   }
-  rollover_counter++;
+  rollover_counter += get_rollover_rate(intern_->get_mshr_occupancy());
   if(rollover_counter >= rollover_max) {
     auto begin = std::next(std::begin(lsq_scores), set * NUM_WAY);
     auto end = std::next(begin, NUM_WAY);
@@ -107,6 +117,16 @@ uint8_t lsq::get_lsq_placement(uint8_t lsq_score) {
   return lsq_place.at(position-1);
 }
 
+uint8_t lsq::get_rollover_rate(uint8_t lsq_score) {
+  int position = 0;
+  for(auto entry : lsq_bins) {
+    position++;
+    if(lsq_score < entry)
+      break;
+  }
+  return lsq_rollover_rate.at(position-1);
+}
+
 void lsq::replacement_final_stats() {
   fmt::print("LSQ Replacement Stats\n");
   if(fills != 0)
@@ -117,4 +137,6 @@ void lsq::replacement_final_stats() {
     fmt::print("\tScore at Hit: {}\n",score_at_hit / (float)hits);
   if(bypassed_fills != 0)
     fmt::print("\tScore at Bypass: {}\n", score_at_bypass / (float)bypassed_fills);
+  
+  fmt::print("\tRanked by LSQ: {} LRU: {}\n",ranked_by_lsq,ranked_by_lru);
 }

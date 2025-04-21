@@ -1,6 +1,7 @@
 #include "dram_controller/drac_controller.h"
 #include "memory_system/memory_system.h"
 #include "frontend/frontend.h"
+#include "addr_mapper/addr_mapper.h"
 
 #include <map>
 
@@ -25,12 +26,17 @@ class DRACController final : public IDRACController, public Implementation {
     int m_bankgroup_addr_idx = -1;
     int m_bank_addr_idx = -1;
     int m_row_addr_idx = -1;
+    int m_col_addr_idx = -1;
 
     float m_wr_low_watermark;
     float m_wr_high_watermark;
 
     int m_read_queue_size;
     int m_write_queue_size;
+
+    bool m_bundle_prefetch_requests = false;
+    bool m_bundle_demand_requests = false;
+    int m_bundle_length = -1;
 
     bool  m_is_write_mode = false;
 
@@ -63,6 +69,8 @@ class DRACController final : public IDRACController, public Implementation {
 
     bool m_drop_enabled;
 
+    IAddrMapper* m_addr_map;
+
 
   public:
     static std::vector<DRACController*> drac_controllers;
@@ -73,6 +81,11 @@ class DRACController final : public IDRACController, public Implementation {
 
       m_read_queue_size =  param<int>("read_queue_size").desc("Size of read queue.").default_val(128);
       m_write_queue_size = param<int>("write_queue_size").desc("Size of write queue.").default_val(128);
+
+      m_bundle_prefetch_requests = param<bool>("prefetch_bundle").desc("Enable bundling prefetches").default_val(true);
+      m_bundle_demand_requests = param<bool>("demand_bundle").desc("Enable bundling demands").default_val(false);
+      m_bundle_length = param<int>("bundle_length").desc("Column range of bundles").default_val(4);
+
 
       m_scheduler = create_child_ifce<IBHScheduler>();
       m_refresh = create_child_ifce<IRefreshManager>();
@@ -114,7 +127,10 @@ class DRACController final : public IDRACController, public Implementation {
       m_bankgroup_addr_idx = m_dram->m_levels("bankgroup");
       m_bank_addr_idx = m_dram->m_levels("bank");
       m_row_addr_idx = m_dram->m_levels("row");
+      m_col_addr_idx = m_dram->m_levels("column");
       m_priority_buffer.max_size = 512*3 + 32;
+
+      m_addr_map = memory_system->get_ifce<IAddrMapper>();
       
       int num_cores = frontend->get_num_cores();
       s_core_row_hits.resize(num_cores);
@@ -183,7 +199,79 @@ class DRACController final : public IDRACController, public Implementation {
         //fmt::print("\tCouldn't find one\n");
       }
 
-      //if is a prefetch, go ahead and drop half according to their arrival cycle
+      int bundle_index = req.addr_vec[m_col_addr_idx] / m_bundle_length;
+      int row = req.addr_vec[m_row_addr_idx];
+      int rank = req.addr_vec[m_rank_addr_idx];
+      int bank = req.addr_vec[m_bank_addr_idx];
+      int bankgroup = req.addr_vec[m_bankgroup_addr_idx];
+
+      //fmt::print("Bundle PF requests: {} Bundle DM requests: {} is_prefetch: {} addr: {:#x}\n",m_bundle_prefetch_requests,m_bundle_demand_requests,req.is_prefetch,req.addr);
+
+      //if prefetch, check through read queue and bundle if within certain column range
+      if(m_bundle_prefetch_requests && m_bundle_demand_requests && req.type_id == Request::Type::Read) {
+        //bundle to everything
+        auto find_for_bundle = [&](const Request& rreq) {
+          int req_bundle_index = rreq.addr_vec[m_col_addr_idx] / m_bundle_length;
+          int req_row = rreq.addr_vec[m_row_addr_idx];
+          int req_rank = rreq.addr_vec[m_rank_addr_idx];
+          int req_bank = rreq.addr_vec[m_bank_addr_idx];
+          int req_bankgroup = rreq.addr_vec[m_bankgroup_addr_idx];
+          //fmt::print("\tBG: {} MBG: {} B: {} MB: {} R: {} MR: {} RW: {} MRW: {} BN: {} MBN: {}\n",bankgroup,req_bankgroup,bank,req_bank,rank,req_rank,row,req_row,bundle_index,req_bundle_index);
+          bool matching_rb = (req_row == row) && (req_rank == rank) && (req_bank == bank) && (req_bankgroup == bankgroup);
+          return (matching_rb && (bundle_index == req_bundle_index));
+        };
+        auto in_rq = std::find_if(m_read_buffer.begin(), m_read_buffer.end(), find_for_bundle);
+        //found something to bundle to
+        if(in_rq != m_read_buffer.end()) {
+          in_rq->bundled_callbacks.emplace_back(std::pair{req.addr,req.callback});
+          if(debug)
+            fmt::print("[MEMORY CONTROLLER] Bundling request {:x} into {:#x}\n",req.addr,in_rq->addr);
+          return true;
+        }
+      }
+      else if(m_bundle_prefetch_requests && req.is_prefetch && req.type_id == Request::Type::Read) {
+        //bundle to prefetches only
+        int bundle_index = req.addr_vec[m_col_addr_idx] / m_bundle_length;
+        auto find_for_bundle = [&](const Request& rreq) {
+          int req_bundle_index = rreq.addr_vec[m_col_addr_idx] / m_bundle_length;
+          int req_row = rreq.addr_vec[m_row_addr_idx];
+          int req_rank = rreq.addr_vec[m_rank_addr_idx];
+          int req_bank = rreq.addr_vec[m_bank_addr_idx];
+          int req_bankgroup = rreq.addr_vec[m_bankgroup_addr_idx];
+          bool matching_rb = (req_row == row) && (req_rank == rank) && (req_bank == bank) && (req_bankgroup == bankgroup);
+          return (matching_rb && (bundle_index == req_bundle_index) && rreq.is_prefetch);
+        };
+        auto in_rq = std::find_if(m_read_buffer.begin(), m_read_buffer.end(), find_for_bundle);
+        //found something to bundle to
+        if(in_rq != m_read_buffer.end()) {
+          in_rq->bundled_callbacks.emplace_back(std::pair{req.addr,req.callback});
+          if(debug)
+            fmt::print("[MEMORY CONTROLLER] Bundling request {:x} into {:#x}\n",req.addr,in_rq->addr);
+          return true;
+        }
+      }
+      else if(m_bundle_demand_requests && !req.is_prefetch && req.type_id == Request::Type::Read) {
+        //bundle to demands only
+        int bundle_index = req.addr_vec[m_col_addr_idx] / m_bundle_length;
+        auto find_for_bundle = [&](const Request& rreq) {
+          int req_bundle_index = rreq.addr_vec[m_col_addr_idx] / m_bundle_length;
+          int req_row = rreq.addr_vec[m_row_addr_idx];
+          int req_rank = rreq.addr_vec[m_rank_addr_idx];
+          int req_bank = rreq.addr_vec[m_bank_addr_idx];
+          int req_bankgroup = rreq.addr_vec[m_bankgroup_addr_idx];
+          bool matching_rb = (req_row == row) && (req_rank == rank) && (req_bank == bank) && (req_bankgroup == bankgroup);
+          return (matching_rb && (bundle_index == req_bundle_index) && !rreq.is_prefetch);
+        };
+        auto in_rq = std::find_if(m_read_buffer.begin(), m_read_buffer.end(), find_for_bundle);
+        //found something to bundle to
+        if(in_rq != m_read_buffer.end()) {
+          in_rq->bundled_callbacks.emplace_back(std::pair{req.addr,req.callback});
+          if(debug)
+            fmt::print("[MEMORY CONTROLLER] Bundling request {:x} into {:#x}\n",req.addr,in_rq->addr);
+          return true;
+        }
+      }
+
       if(debug)
       fmt::print(fmt::runtime("[MEMORY CONTROLLER] Adding packet: {:#x} promotion: {} prefetch: {} cycle: {} to queue\n"),req.addr, req.is_promotion, req.is_prefetch, m_clk);
       // Else, enqueue them to corresponding buffer based on request type id
@@ -268,7 +356,17 @@ class DRACController final : public IDRACController, public Implementation {
           fmt::print("[MEMORY CONTROLLER] Serving request: {:#x} promotion: {} prefetch: {} dropped: {} cycle: {}\n",req_it->addr, req_it->was_promoted, req_it->is_prefetch, req_it->was_dropped, m_clk);
 
         // If we are issuing the last command, set depart clock cycle and move the request to the pending queue
-        if (req_it->command == req_it->final_command) {
+        if(req_it->command == req_it->final_command) {
+          if(req_it->type_id == Request::Type::Read && debug)
+            fmt::print("[MEMORY CONTROLLER] Incrementing commands issued for request: {:#x}, cycle: {} prefetch: {}\n",req_it->addr,m_clk,req_it->is_prefetch);
+          req_it->commands_issued++;
+          if(req_it->bundled_callbacks.size() >= req_it->commands_issued) {
+            req_it->addr = req_it->bundled_callbacks.at(req_it->commands_issued - 1).first;
+            m_addr_map->apply(*req_it);
+            
+          }
+        }
+        if (req_it->command == req_it->final_command && (req_it->commands_issued >= 1 + req_it->bundled_callbacks.size())) {
           if (req_it->type_id == Request::Type::Read) {
             if(debug)
               fmt::print("[MEMORY CONTROLLER] Finishing read request: {:#x} promotion: {} prefetch: {} dropped: {} cycle: {}\n",req_it->addr, req_it->was_promoted, req_it->is_prefetch, req_it->was_dropped, m_clk);
@@ -330,6 +428,8 @@ class DRACController final : public IDRACController, public Implementation {
 
           if (req.callback) {
             req.callback(req);
+            for(int i = 0; i < req.bundled_callbacks.size(); i++)
+              req.bundled_callbacks.at(i).second(req);
           }
           // Finally, remove this request from the pending queue
           if(debug)

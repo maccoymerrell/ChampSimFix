@@ -4,6 +4,7 @@
 #include <vector>
 #include <list>
 #include <string>
+#include <utility>
 
 #include "base/base.h"
 
@@ -45,6 +46,8 @@ struct Request {
   std::array<int, 4> scratchpad = { 0 };    // A scratchpad for the request
 
   std::function<void(Request&)> callback;
+  std::vector<std::pair<int64_t, std::function<void(Request&)>>> bundled_callbacks;
+  int commands_issued = 0;
 
   void* m_payload = nullptr;    // Point to a generic payload
 

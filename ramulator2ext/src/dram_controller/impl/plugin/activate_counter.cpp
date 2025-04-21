@@ -99,7 +99,7 @@ class ActivateCounterPlugin : public IControllerPlugin, public Implementation {
   double tCK;
   uint64_t processed_packets = 0;
   uint64_t cycles_per_heartbeat;
-
+  uint64_t heartbeats = 0;
   uint64_t channel_num = 0;
 
   private:
@@ -169,13 +169,15 @@ class ActivateCounterPlugin : public IControllerPlugin, public Implementation {
       HC.log_cycle();
 
       if (total_cycles % cycles_per_heartbeat == 0) {
+        if(processed_packets != 0)
+          heartbeats++;
         // print heartbeat
         uint64_t bank_util = processed_packets * m_dram->m_internal_prefetch_size * (m_dram->m_channel_width/8);
         double cum_hit_rate = ((rb_hits) / double(rb_hits + rb_miss));
         double hit_rate = ((rb_hits - last_rb_hits) / double((rb_hits-last_rb_hits + rb_miss - last_rb_miss)));
 
         double throughput = (((bank_util - last_bank_util)/double(cycles_per_heartbeat)) * (1.0/tCK)) / double(1<<30);
-        double cum_throughput = ((bank_util/double(HC.total_cycles)) * (1.0/tCK)) / double(1<<30);
+        double cum_throughput = processed_packets != 0 ? ((bank_util/double(cycles_per_heartbeat*heartbeats)) * (1.0/tCK)) / double(1<<30) : 0.0;
         printf("Heartbeat DRAM %lu : Throughput: %.3fGiB/s Cumulative Throughput: %.3fGiB/s Row Buffer Hit Rate: %.3f Cumulative Row Buffer Hit Rate: %.3f\n",channel_num, throughput,cum_throughput,hit_rate,cum_hit_rate);
         last_bank_util = bank_util;
         last_rb_hits = rb_hits;

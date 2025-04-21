@@ -17,9 +17,11 @@ class lsq : public champsim::modules::replacement
   std::array<uint8_t,5> lsq_bins = {2,4,8,16,32};
   std::array<uint8_t,5> lsq_place = {32,16,8,4,2};
 
+  std::array<uint8_t,5> lsq_rollover_rate = {4,3,2,1,1};
+
   uint8_t avg_score = 0;
 
-  static constexpr int rollover_max = 24;
+  static constexpr int rollover_max = 12;
   uint8_t rollover_counter = 0;
 
   uint64_t bypassed_fills = 0;
@@ -31,6 +33,9 @@ class lsq : public champsim::modules::replacement
   uint64_t score_at_eviction = 0;
   uint64_t score_at_fill = 0;
   uint64_t score_at_hit = 0;
+
+  uint64_t ranked_by_lru = 0;
+  uint64_t ranked_by_lsq = 0;
 
 public:
   explicit lsq(CACHE* cache);
@@ -46,6 +51,8 @@ public:
   void update_replacement_state(uint32_t triggering_cpu, long set, long way, champsim::address full_addr, champsim::address ip, champsim::address victim_addr,
                                 access_type type, uint8_t hit);
   void replacement_final_stats();
+
+  uint8_t get_rollover_rate(uint8_t lsq_score);
 };
 
 #endif
