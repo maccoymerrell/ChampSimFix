@@ -32,6 +32,8 @@ struct Request {
   bool was_promoted = false;
   bool was_dropped = false;
 
+  int pf_distance = 0;
+
   bool back_off = false;
   bool row_act = false;
   bool is_critical = false;
@@ -54,7 +56,7 @@ struct Request {
   Request(Addr_t addr, int type);
   Request(AddrVec_t addr_vec, int type);
   Request(Addr_t addr, int type, int source_id, std::function<void(Request&)> callback);
-  Request(Addr_t addr, int type, int source_id, void* source_ptr_, bool prefetch, bool promotion, std::function<void(Request&)> callback);
+  Request(Addr_t addr, int type, int source_id, void* source_ptr_, bool prefetch, bool promotion, int pf_distance_, std::function<void(Request&)> callback);
 };
 
 

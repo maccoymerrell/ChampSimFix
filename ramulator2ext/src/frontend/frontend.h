@@ -56,7 +56,7 @@ class IFrontEnd : public Clocked<IFrontEnd>, public TopLevel<IFrontEnd> {
      * 
      */
     virtual bool receive_external_requests(int req_type_id, Addr_t addr, int source_id, std::function<void(Request&)> callback) { return false; }
-    virtual bool receive_external_requests(int req_type_id, Addr_t addr, int source_id, void* source_ptr, std::function<void(Request&)> callback) { return false; }
+    virtual bool receive_external_requests(int req_type_id, Addr_t addr, int source_id, void* source_ptr, int pf_distance, std::function<void(Request&)> callback) { return false; }
 };
 
 }        // namespace Ramulator

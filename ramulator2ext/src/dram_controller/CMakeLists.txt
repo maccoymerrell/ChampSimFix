@@ -26,10 +26,12 @@ target_sources(
   impl/scheduler/prac_scheduler.cpp
   impl/scheduler/pra_scheduler.cpp
   impl/scheduler/drac_scheduler.cpp
+  impl/scheduler/minimalist_scheduler.cpp
 
   impl/refresh/all_bank_refresh.cpp
   
   impl/rowpolicy/basic_rowpolicies.cpp
+  impl/rowpolicy/minimalist_rowpolicy.cpp
 
   impl/plugin/trace_recorder.cpp
   impl/plugin/cmd_counter.cpp

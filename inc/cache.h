@@ -149,6 +149,7 @@ class CACHE : public champsim::operable
     CACHE* source_ptr;
 
     uint8_t lsq_score = 0;
+    int pf_distance = 0;
 
     access_type type;
     bool prefetch_from_this;
@@ -303,6 +304,8 @@ public:
   std::vector<tag_lookup_type> PREFETCH_MISS_STORAGE;
   std::deque<std::size_t> PREFETCH_FREE_LIST;
   std::vector<std::deque<std::size_t>> PREFETCH_BANK_QUEUES;
+
+  champsim::address pf_base = champsim::address{};
 
   std::vector<int> OUTGOING_BANK_REQUESTS;
 

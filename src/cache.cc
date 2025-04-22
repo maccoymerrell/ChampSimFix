@@ -120,7 +120,7 @@ auto CACHE::operator=(CACHE&& other) -> CACHE&
 
 CACHE::tag_lookup_type::tag_lookup_type(const request_type& req, bool local_pref, bool skip, CACHE* source_ptr_, bool return_hit_status_)
     : address(req.address), v_address(req.v_address), data(req.data), ip(req.ip), instr_id(req.instr_id), pf_metadata(req.pf_metadata), cpu(req.cpu),
-      back_off(req.back_off), row_act(req.row_act), lsq_score(req.lsq_rating),
+      back_off(req.back_off), row_act(req.row_act), lsq_score(req.lsq_rating), pf_distance(req.pf_distance),
       type(req.type), prefetch_from_this(local_pref), skip_fill(skip), return_hit_status(return_hit_status_), source_ptr(source_ptr_), is_translated(req.is_translated), instr_depend_on_me(req.instr_depend_on_me)
 {
 }
@@ -207,6 +207,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
 {
   cpu = fill_mshr.cpu;
   lsq_score = fill_mshr.lsq_score;
+  pf_base = fill_mshr.address;
 
   if(fill_mshr.type != access_type::DROPPED) {
     // find victim
@@ -340,6 +341,7 @@ bool CACHE::check_hit(champsim::address address) {
 bool CACHE::try_hit(tag_lookup_type& handle_pkt)
 {
   cpu = handle_pkt.cpu;
+  pf_base = handle_pkt.address;
 
   // access cache
   auto [set_begin, set_end] = get_set_span(handle_pkt.address);
@@ -433,6 +435,7 @@ bool CACHE::allocate_mshr(const tag_lookup_type& handle_pkt) {
   mshr_type to_allocate{handle_pkt, current_time};
   //fmt::print("Allocating MSHR for address: {} cpu: {}\n",handle_pkt.address,handle_pkt.cpu);
   cpu = handle_pkt.cpu;
+  pf_base = handle_pkt.address;
   bool mshr_full = (MSHR.size() == MSHR_SIZE);
   auto mshr_pkt = mshr_and_forward_packet(handle_pkt);
   auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(handle_pkt.address));
@@ -675,9 +678,9 @@ void CACHE::schedule_mshr() {
       for(std::size_t bank_occu = 0; bank_occu < PREFETCH_BANK_QUEUES.size(); bank_occu++) {
         if(PREFETCH_BANK_QUEUES.at(bank_occu).size() > 0) {
           //fmt::print("[{}] Prefetch queue at bank {} being checked...\n", NAME, bank_occu);
-          uint32_t cpu = PREFETCH_MISS_STORAGE.at(PREFETCH_BANK_QUEUES.at(bank_occu).front()).cpu;
+          uint32_t n_cpu = PREFETCH_MISS_STORAGE.at(PREFETCH_BANK_QUEUES.at(bank_occu).front()).cpu;
           CACHE* device = PREFETCH_MISS_STORAGE.at(PREFETCH_BANK_QUEUES.at(bank_occu).front()).source_ptr;
-          double usefulness = prefetch_usefulness[{device,cpu}];
+          double usefulness = prefetch_usefulness[{device,n_cpu}];
           std::size_t thresh = 0;
           if(usefulness > 0.4)
             thresh++;
@@ -1114,6 +1117,7 @@ bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint3
   pf_packet.source_ptr = this;
   pf_packet.v_address = virtual_prefetch ? pf_addr : champsim::address{};
   pf_packet.is_translated = !virtual_prefetch;
+  pf_packet.pf_distance = pf_base.to<uint64_t>() > pf_addr.to<uint64_t>() ? champsim::block_number{pf_base}.to<int>() - champsim::block_number{pf_addr}.to<int>() : champsim::block_number{pf_addr}.to<int>() - champsim::block_number{pf_base}.to<int>();
 
   internal_PQ.emplace_back(pf_packet, true, !fill_this_level, this, false);
   ++sim_stats.pf_issued;
@@ -1136,6 +1140,7 @@ bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint3
   pf_packet.source_ptr = this;
   pf_packet.v_address = virtual_prefetch ? pf_addr : champsim::address{};
   pf_packet.is_translated = !virtual_prefetch;
+  pf_packet.pf_distance = pf_base.to<uint64_t>() > pf_addr.to<uint64_t>() ? champsim::block_number{pf_base}.to<int>() - champsim::block_number{pf_addr}.to<int>() : champsim::block_number{pf_addr}.to<int>() - champsim::block_number{pf_base}.to<int>();
 
   if(skip_tag_check) {
     return handle_miss(tag_lookup_type{pf_packet, true, !fill_this_level, this, return_hit_status});

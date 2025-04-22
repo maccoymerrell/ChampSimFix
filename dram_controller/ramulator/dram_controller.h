@@ -61,15 +61,15 @@ public:
     void init() override { m_translation = create_child_ifce<ITranslation>(); };
     void tick() override { };
 
-    bool receive_external_requests(int req_type_id, Addr_t addr, int source_id, void* source_ptr, std::function<void(Request&)> callback) override {
+    bool receive_external_requests(int req_type_id, Addr_t addr, int source_id, void* source_ptr, int pf_distance, std::function<void(Request&)> callback) override {
       if(req_type_id == (int)access_type::PREFETCH)
-        return m_memory_system->send({addr,Ramulator::Request::Type::Read,source_id,source_ptr,true,false,callback});
+        return m_memory_system->send({addr,Ramulator::Request::Type::Read,source_id,source_ptr,true,false,pf_distance,callback});
       else if(req_type_id == (int)access_type::WRITE)
-        return m_memory_system->send({addr,Ramulator::Request::Type::Write,source_id,source_ptr,false,false,callback});
+        return m_memory_system->send({addr,Ramulator::Request::Type::Write,source_id,source_ptr,false,false,pf_distance,callback});
       else if(req_type_id == (int)access_type::PROMOTION)
-        return m_memory_system->send({addr,Ramulator::Request::Type::Read,source_id,source_ptr,false,true,callback});
+        return m_memory_system->send({addr,Ramulator::Request::Type::Read,source_id,source_ptr,false,true,pf_distance,callback});
       else
-        return m_memory_system->send({addr,Ramulator::Request::Type::Read,source_id,source_ptr,false,false,callback});
+        return m_memory_system->send({addr,Ramulator::Request::Type::Read,source_id,source_ptr,false,false,pf_distance,callback});
     }
 
     int get_num_cores() { return (int)NUM_CPUS; };
