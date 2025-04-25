@@ -31,6 +31,7 @@ struct Request {
   bool is_promotion = false;
   bool was_promoted = false;
   bool was_dropped = false;
+  bool should_drop = false;
 
   int pf_distance = 0;
 

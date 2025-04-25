@@ -464,9 +464,8 @@ class DRACController final : public IDRACController, public Implementation {
       bool request_found = false;
 
       // 2.05   Search for prefetches to drop.
-      if(m_drop_enabled)
       for (auto it = m_read_buffer.begin(); it != m_read_buffer.end(); it++) {
-        if(it->is_prefetch) {
+        if(it->is_prefetch && m_drop_enabled) {
           uint64_t age = m_clk - it->arrive;
           bool drop = false;
           double usefulness = m_core_usefulness[std::pair{it->source_ptr,it->source_id}];
@@ -486,6 +485,13 @@ class DRACController final : public IDRACController, public Implementation {
             s_prefetches_dropped++;
             break;
           }
+        }
+        if(it->should_drop && it->is_prefetch) {
+          it->was_dropped = true;
+          it->depart = m_clk + 1;
+          pending.push_back(*it);
+          m_read_buffer.remove(it);
+          s_prefetches_dropped++;
         }
       }
       // 2.1    First, check the act buffer to serve requests that are already activating (avoid useless ACTs)

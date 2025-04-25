@@ -30,7 +30,7 @@ class DDR5VRR : public IDRAM, public Implementation {
       {"DDR5_3200AN",  {3200,   8,  24,  24,   24,   52,   75,   48,   12,  22,  2,    8,     8,     22+8+4,    8,     16,    22+8+16,   8,   -1,   -1,  -1,   -1,   -1,    -1,     30,    -1,   -1,   -1,     -1,     -1,    -1,  2,   625}},
       {"DDR5_3200BN",  {3200,   8,  26,  26,   26,   52,   77,   48,   12,  24,  2,    8,     8,     24+8+4,    8,     16,    24+8+16,   8,   -1,   -1,  -1,   -1,   -1,    -1,     30,    -1,   -1,   -1,     -1,     -1,    -1,  2,   625}},
       {"DDR5_3200C",   {3200,   8,  28,  28,   28,   52,   79,   48,   12,  26,  2,    8,     8,     26+8+4,    8,     16,    26+8+16,   8,   -1,   -1,  -1,   -1,   -1,    -1,     30,    -1,   -1,   -1,     -1,     -1,    -1,  2,   625}},
-      {"DDR5_6000C",   {6000,   8,  45,  45,   45,   98,   141,  90,   23,  42,  4,    8,     8,     42+8+4,   15,     30,    42+8+16,   8,   -1,   -1,  -1,   -1,   -1,    -1,     57,    -1,   -1,   -1,     -1,     -1,    -1,  2,   334}},
+      {"DDR5_6400C",   {6400,   8,  52,  52,   52,   104,  154,  96,   24,  48,  4,    8,     8,     48+8+4,   16,     32,    48+8+16,   8,   -1,   -1,  -1,   -1,   -1,    -1,     60,    -1,   -1,   -1,     -1,     -1,    -1,  2,   312}},
     };
 
     inline static const std::map<std::string, std::vector<double>> voltage_presets = {
@@ -40,7 +40,7 @@ class DDR5VRR : public IDRAM, public Implementation {
 
     inline static const std::map<std::string, std::vector<double>> current_presets = {
       // name           IDD0  IDD2N   IDD3N   IDD4R   IDD4W   IDD5B   IPP0  IPP2N  IPP3N  IPP4R  IPP4W  IPP5B
-      {"Default",       {60,   50,     55,     145,    145,    362,     3,    3,     3,     3,     3,     48}},
+      {"Default",       {232,   219,   270,   450,    511,    404,    10,    11,     13,     11,    44,   35}},
     };
   /************************************************
    *                Organization
@@ -434,7 +434,7 @@ class DDR5VRR : public IDRAM, public Implementation {
       int rate_id = [](int rate) -> int {
         switch (rate) {
           case 3200:  return 0;
-          case 6000:  return 1;
+          case 6400:  return 1;
           default:    return -1;
         }
       }(m_timing_vals("rate"));
@@ -447,9 +447,9 @@ class DDR5VRR : public IDRAM, public Implementation {
       };
       constexpr int nFAW_TABLE[3][2] = {
       // 3200  
-        { 40, 75},  // x4
-        { 32, 60},  // x8
-        { 32, 60},  // x16
+        { 40, 80},  // x4
+        { 32, 64},  // x8
+        { 32, 64},  // x16
       };
 
       if (dq_id != -1 && rate_id != -1) {

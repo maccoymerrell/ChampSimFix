@@ -25,6 +25,9 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
     int m_pref_thresh_3 = -1;
     int m_pref_thresh_4 = -1;
 
+    int64_t incr_cycles = -1;
+    bool drop_enabled = false;
+
     IDRACController* m_controller;
 
   public:
@@ -35,21 +38,25 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
       m_dram = cast_parent<IDRAMController>()->m_dram;
       m_controller = cast_parent<IDRACController>();
       
+      incr_cycles = param<int>("age_ns").desc("Ns window on which to age requests").default_val(100) / (m_dram->m_timing_vals("tCK_ps") * 1e-3);
+      drop_enabled = param<bool>("drop").desc("Whether to drop prefetch requests or not").default_val(true);
+      assert(incr_cycles != 0);
+      fmt::print("Initialized Minimalist Scheduler, Age Interval: {} ({} ns)\n",incr_cycles,incr_cycles * m_dram->m_timing_vals("tCK_ps") * 1e-3);
 
     }
 
     int get_priority(ReqBuffer::iterator req) {
       if(req->is_prefetch) {
         if(m_pref_thresh_1 > req->pf_distance)
-          return 4;
+          return 4 + ((m_clk - req->arrive) / incr_cycles);
         else if(m_pref_thresh_2 > req->pf_distance)
-          return 3;
+          return 3 + ((m_clk - req->arrive) / incr_cycles);
         else if(m_pref_thresh_3 > req->pf_distance)
-          return 2;
+          return 2 + ((m_clk - req->arrive) / incr_cycles);
         else if(m_pref_thresh_4 > req->pf_distance)
-          return 1;
+          return 1 + ((m_clk - req->arrive) / incr_cycles);
         else
-          return 0;
+          return 0 + ((m_clk - req->arrive) / incr_cycles);
       } else {
         int mlp = m_controller->get_core_occupancy(req->source_id,req->type_id == Request::Type::Write);
         if(m_demand_thresh_1 > mlp)
@@ -66,13 +73,28 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
       bool ready2 = m_dram->check_ready(req2->command, req2->addr_vec);
 
       int prio1 = get_priority(req1);
+      bool blacklist1 = prio1 > 4 && req1->is_prefetch && drop_enabled;
+      if(blacklist1) {
+        req1->should_drop = true;
+        prio1 = 4;
+      }
       int prio2 = get_priority(req2);
+      bool blacklist2 = prio2 > 4 && req2->is_prefetch && drop_enabled;
+      if(blacklist2) {
+        req2->should_drop = true;
+        prio2 = 4;
+      }
 
       bool age1 = req1->arrive <= req2->arrive;
       bool age2 = req2->arrive <= req1->arrive;
       //we also need to check if its a prefetch and not a row hit
       //if its a prefetch, not a row hit, and new enough that its not starving, don't serve
-
+      if(blacklist1 ^ blacklist2) {
+        if(blacklist1)
+          return req2;
+        else
+          return req1;
+      }
       //First ready first served
       if(ready1 ^ ready2) {
         if(ready1)
