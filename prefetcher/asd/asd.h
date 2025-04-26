@@ -9,13 +9,14 @@
 #include <map>
 #include <vector>
 #include <array>
+#include <utility>
 
 struct asd : public champsim::modules::prefetcher {
 
   static constexpr std::size_t H_BINS = 64;
   static constexpr std::size_t MAX_PREFETCH = 22;
-  static constexpr std::size_t MAX_STREAMS = 16;
-  static constexpr std::size_t AGE = 1000;
+  static constexpr std::size_t MAX_STREAMS = 32;
+  static constexpr std::size_t AGE = 128;
   static constexpr uint64_t EPOCH_MAX = 8192;
   static constexpr uint64_t EPOCH_MIN = 256;
   static constexpr uint64_t DIFF_THRESH = 0.3;
@@ -30,11 +31,12 @@ struct asd : public champsim::modules::prefetcher {
         hist.at(i) = 0;
     }
 
-    void tally(std::size_t b_pos) {
+    void tally(std::size_t b_pos, std::size_t stride) {
       assert(b_pos != 0);
       if(b_pos > bins)
         return;
-      hist.at(b_pos - 1) += b_pos;
+      //hist.at(b_pos - 1) += (b_pos / stride);
+      hist.at(b_pos - 1)++;
       global_count += b_pos;
     }
 
@@ -168,28 +170,35 @@ struct asd : public champsim::modules::prefetcher {
     uint64_t age = 0;
     champsim::block_number base{};
     std::size_t depth = 0;
+    //add stride?
+    std::size_t stride = 0;
   };
 
   template<std::size_t max_streams, uint64_t age_factor>
   struct StreamBuffer {
     std::vector<Streamer> streams;
 
-    std::size_t check_stream(champsim::address addr) {
+    std::pair<std::size_t,std::size_t> check_stream(champsim::address addr) {
       //search for match
       //if no match, check size,
       std::size_t victim = streams.size();
       for(int i = 0; i < streams.size(); i++) {
         streams.at(i).age++;
-        if(streams.at(i).base + streams.at(i).depth + 1 == champsim::block_number{addr}) {
+        //if next location is above or equal to block number, and previous location is below or equal to block number
+        if(streams.at(i).base + streams.at(i).depth + (streams.at(i).stride * 2)  > champsim::block_number{addr} && streams.at(i).base + (streams.at(i).depth) < champsim::block_number{addr}) {
+          //if we crossed a page boundary
           if((champsim::address{streams.at(i).base}.to<uint64_t>() >> 12) != (addr.to<uint64_t>() >> 12)) {
             streams.at(i).depth = 1;
             streams.at(i).age = 0;
+            streams.at(i).stride = streams.at(i).stride;
             streams.at(i).base = champsim::block_number{addr};
-            return 1;
+            return std::pair{1,1};
           }
-          streams.at(i).depth += 1;
+          streams.at(i).stride = champsim::block_number{addr}.to<uint64_t>() - (streams.at(i).base.to<uint64_t>() + streams.at(i).depth);
+          //streams.at(i).stride = 1;
+          streams.at(i).depth += streams.at(i).stride;
           streams.at(i).age = 0;
-          return streams.at(i).depth;
+          return std::pair{streams.at(i).depth,streams.at(i).stride};
         } else if (streams.at(i).age > (age_factor >> streams.at(i).depth)) {
           victim = i;
         }
@@ -200,20 +209,54 @@ struct asd : public champsim::modules::prefetcher {
         S.age = 0;
         S.base = champsim::block_number{addr};
         S.depth = 1;
+        S.stride = 1;
         streams.push_back(S);
-        return 1;
+        return std::pair{1,1};
       }
       //we don't have space, check for victim
       else if(victim != streams.size()) {
         streams.at(victim).age = 0;
         streams.at(victim).base = champsim::block_number{addr};
         streams.at(victim).depth = 1;
-        return 1;
+        streams.at(victim).stride = 1;
+        return std::pair{1,1};
       }
       //we don't have any space at all, return 0 (don't prefetch)
-      return 0;
+      return std::pair{0,0};
     }
 
+  };
+
+  struct RAF {
+    constexpr static std::size_t RAF_FILTER_SETS = 16;
+    constexpr static std::size_t RAF_FILTER_WAYS = 16;
+    constexpr static std::size_t RAF_TIMEOUT = 300;
+    struct raf_entry {
+      champsim::block_number block;
+      uint64_t first_accessed;
+
+      raf_entry() : raf_entry(champsim::block_number{0},0) {}
+      explicit raf_entry(champsim::block_number block_, uint64_t first_accessed_) : block(block_), first_accessed(first_accessed_) {}
+    };
+    struct raf_indexer {
+      auto operator()(const raf_entry& entry) const {return entry.block;}
+    };
+    champsim::msl::lru_table<raf_entry, raf_indexer, raf_indexer> raf_filter{RAF_FILTER_SETS,RAF_FILTER_WAYS};
+    bool check(champsim::address block, uint64_t check_time, bool update_table) {
+      auto raf_filter_entry = raf_filter.check_hit(raf_entry{champsim::block_number{block},0});
+      bool should_drop = false;
+      if(raf_filter_entry.has_value()) {
+        if(check_time - raf_filter_entry->first_accessed < RAF_TIMEOUT)
+          should_drop = true;
+      }
+      if(update_table)
+        raf_filter.fill(raf_entry{champsim::block_number{block},check_time});
+      return should_drop;
+    }
+    void invalidate(champsim::address block) {
+      raf_filter.invalidate(raf_entry{champsim::block_number{block},0});
+    }
+    
   };
 
   struct ASD_Module {
@@ -223,8 +266,10 @@ struct asd : public champsim::modules::prefetcher {
     uint64_t epoch_timer = 0;
     StreamBuffer<MAX_STREAMS,AGE> Streams;
     StateMachine SM;
+    RAF Filter;
 
     std::array<uint64_t,H_BINS> pf_depths;
+    std::array<uint64_t,H_BINS> pf_strides;
 
 
     void increment_epoch() {
@@ -248,17 +293,17 @@ struct asd : public champsim::modules::prefetcher {
       }
     }
 
-    std::size_t get_prefetch_depth(champsim::address addr) {
+    std::pair<std::size_t,std::size_t> get_prefetch_depth(champsim::address addr) {
       increment_epoch();
-      std::size_t stream_pos = Streams.check_stream(addr);
+       auto [stream_pos, stride] = Streams.check_stream(addr);
       //fmt::print("Found stream from addr: {} pos: {}\n",addr,stream_pos);
       if(stream_pos != 0) {
-        BuildHist.tally(stream_pos);
+        BuildHist.tally(stream_pos, stride);
         std::size_t depth = std::min(ActiveHist.get_depth_from(stream_pos),MAX_PREFETCH);
         //fmt::print("ASD advising depth of {}\n",depth);
-        return depth;
+        return std::pair<std::size_t,std::size_t>{depth,stride};
       }
-      return 0;
+      return std::pair<std::size_t,std::size_t>{0,0};
     }
   };
 

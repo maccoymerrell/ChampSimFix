@@ -207,7 +207,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
 {
   cpu = fill_mshr.cpu;
   lsq_score = fill_mshr.lsq_score;
-  pf_base = fill_mshr.address;
+  pf_base = virtual_prefetch ? fill_mshr.v_address : fill_mshr.address;
 
   if(fill_mshr.type != access_type::DROPPED) {
     // find victim
@@ -341,7 +341,7 @@ bool CACHE::check_hit(champsim::address address) {
 bool CACHE::try_hit(tag_lookup_type& handle_pkt)
 {
   cpu = handle_pkt.cpu;
-  pf_base = handle_pkt.address;
+  pf_base = virtual_prefetch ? handle_pkt.v_address : handle_pkt.address;
 
   // access cache
   auto [set_begin, set_end] = get_set_span(handle_pkt.address);
@@ -435,7 +435,7 @@ bool CACHE::allocate_mshr(const tag_lookup_type& handle_pkt) {
   mshr_type to_allocate{handle_pkt, current_time};
   //fmt::print("Allocating MSHR for address: {} cpu: {}\n",handle_pkt.address,handle_pkt.cpu);
   cpu = handle_pkt.cpu;
-  pf_base = handle_pkt.address;
+  pf_base = virtual_prefetch ? handle_pkt.v_address : handle_pkt.address;
   bool mshr_full = (MSHR.size() == MSHR_SIZE);
   auto mshr_pkt = mshr_and_forward_packet(handle_pkt);
   auto mshr_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(handle_pkt.address));
@@ -1117,7 +1117,7 @@ bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint3
   pf_packet.source_ptr = this;
   pf_packet.v_address = virtual_prefetch ? pf_addr : champsim::address{};
   pf_packet.is_translated = !virtual_prefetch;
-  pf_packet.pf_distance = pf_base.to<uint64_t>() > pf_addr.to<uint64_t>() ? champsim::block_number{pf_base}.to<int>() - champsim::block_number{pf_addr}.to<int>() : champsim::block_number{pf_addr}.to<int>() - champsim::block_number{pf_base}.to<int>();
+  pf_packet.pf_distance = pf_base.to<uint64_t>() > pf_addr.to<uint64_t>() ? champsim::block_number{pf_base}.to<uint64_t>() - champsim::block_number{pf_addr}.to<uint64_t>() : champsim::block_number{pf_addr}.to<uint64_t>() - champsim::block_number{pf_base}.to<uint64_t>();
 
   internal_PQ.emplace_back(pf_packet, true, !fill_this_level, this, false);
   ++sim_stats.pf_issued;

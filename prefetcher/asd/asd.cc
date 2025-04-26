@@ -5,14 +5,28 @@ uint32_t asd::prefetcher_cache_operate(champsim::address addr, champsim::address
 {
   //if(useful_prefetch)
   //  useful[cpu]++;
-  
-  std::size_t depth = ASD_Modules.at(cpu).get_prefetch_depth(addr);
-  for(int i = 0; i < depth; i++) {
-    champsim::address pf_addr = champsim::address{champsim::block_number{addr} + i + 1};
-    if(!intern_->warmup)
-      ASD_Modules.at(cpu).pf_depths.at(i)++;
+  //if(cache_hit != 0)
+  //  return metadata_in;
+
+  auto [depth,stride] = ASD_Modules.at(cpu).get_prefetch_depth(addr);
+  if(!intern_->warmup) {
+    if(stride < H_BINS)
+      ASD_Modules.at(cpu).pf_strides.at(stride)++;
+      ASD_Modules.at(cpu).pf_depths.at(depth)++;
+  }
+
+  for(int i = stride; i < depth; i += stride) {
+    champsim::address pf_addr = champsim::address{champsim::block_number{addr} + i};
+
     //fmt::print("Issuing prefetch for address: {}\n",pf_addr);
-    prefetch_line(pf_addr,true,cpu,0,false,false);
+    //filter out redundant prefetches
+    bool filter = ASD_Modules.at(cpu).Filter.check(pf_addr,intern_->current_cycle(),false);
+    bool success = true;
+    if(!filter) {
+      success = prefetch_line(pf_addr,true,cpu,0,false,false);
+    }
+    if(success)
+      ASD_Modules.at(cpu).Filter.check(pf_addr,intern_->current_cycle(),true);
   }
   return metadata_in;
 }
@@ -24,6 +38,7 @@ void asd::prefetcher_initialize() {
   for(int i = 0; i < NUM_CPUS; i++) {
     for(int j = 0; j < H_BINS; j++) {
       ASD_Modules.at(i).pf_depths.at(j) = 0;
+      ASD_Modules.at(i).pf_strides.at(j) = 0;
     }
   }
 }
@@ -40,9 +55,18 @@ void asd::prefetcher_final_stats() {
   fmt::print("ASD Prefetch Depths by Core:\n");
 
   for(int i = 0; i < NUM_CPUS; i++) {
-    fmt::print("\tCPU: {}\n",i,ASD_Modules.at(i).epoch);
+    fmt::print("\tCPU: {}\n",i);
     for(int j = 0; j < H_BINS; j++) {
-      fmt::print("\t\t{} : {}\n",j + 1,ASD_Modules.at(i).pf_depths.at(j));
+      fmt::print("\t\t{} : {}\n",j,ASD_Modules.at(i).pf_depths.at(j));
+    }
+  }
+
+  fmt::print("ASD Prefetch Strides by Core:\n");
+
+  for(int i = 0; i < NUM_CPUS; i++) {
+    fmt::print("\tCPU: {}\n",i);
+    for(int j = 0; j < H_BINS; j++) {
+      fmt::print("\t\t{} : {}\n",j,ASD_Modules.at(i).pf_strides.at(j));
     }
   }
 }
