@@ -9,6 +9,14 @@ uint32_t asd::prefetcher_cache_operate(champsim::address addr, champsim::address
   //  return metadata_in;
 
   auto [depth,stride] = ASD_Modules.at(cpu).get_prefetch_depth(addr);
+  //modulate depth according to MSHR occupancy
+  if(intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back() > 0.9 * intern_->get_mshr_size())
+    depth = std::min(MAX_PREFETCH / 8, depth);
+  else if(intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back() > 0.7 * intern_->get_mshr_size())
+    depth = std::min(MAX_PREFETCH / 4, depth);
+  else if(intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back() > 0.5 * intern_->get_mshr_size())
+    depth = std::min(MAX_PREFETCH / 2, depth);
+
   if(!intern_->warmup) {
     if(stride < H_BINS)
       ASD_Modules.at(cpu).pf_strides.at(stride)++;
@@ -17,7 +25,8 @@ uint32_t asd::prefetcher_cache_operate(champsim::address addr, champsim::address
 
   for(int i = stride; i < depth; i += stride) {
     champsim::address pf_addr = champsim::address{champsim::block_number{addr} + i};
-
+    if(champsim::page_number{pf_addr} != champsim::page_number{addr})
+      continue;
     //fmt::print("Issuing prefetch for address: {}\n",pf_addr);
     //filter out redundant prefetches
     bool filter = ASD_Modules.at(cpu).Filter.check(pf_addr,intern_->current_cycle(),false);

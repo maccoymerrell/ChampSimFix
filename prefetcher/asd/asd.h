@@ -1,3 +1,13 @@
+//Title: Feedback Mechanisms for Improving Probabilistic Memory Prefetching
+//Authors: Ibrahim Hur, Calvin Lin
+//Institutions: IBM Corporation, The University of Texas at Austin
+//Publisher: IEEE, HPCA
+//Date: 02/14/2009
+
+//I. Hur and C. Lin, "Feedback mechanisms for improving probabilistic memory prefetching," 2009 IEEE 15th International Symposium on High Performance Computer Architecture, Raleigh, NC, USA, 2009, pp. 443-454, doi: 10.1109/HPCA.2009.4798282.
+//keywords: {Feedback;Prefetching;Variable speed drives;Random access memory;Energy consumption;Histograms;Timing;Computer applications},
+
+
 #ifndef PREFETCHER_ASD_H
 #define PREFETCHER_ASD_H
 
@@ -16,10 +26,10 @@ struct asd : public champsim::modules::prefetcher {
   static constexpr std::size_t H_BINS = 64;
   static constexpr std::size_t MAX_PREFETCH = 22;
   static constexpr std::size_t MAX_STREAMS = 32;
-  static constexpr std::size_t AGE = 128;
+  static constexpr std::size_t AGE = 64;
   static constexpr uint64_t EPOCH_MAX = 8192;
   static constexpr uint64_t EPOCH_MIN = 256;
-  static constexpr uint64_t DIFF_THRESH = 0.3;
+  static constexpr double DIFF_THRESH = 0.1;
   
   template<std::size_t bins>
   struct Histogram {
@@ -185,18 +195,24 @@ struct asd : public champsim::modules::prefetcher {
       for(int i = 0; i < streams.size(); i++) {
         streams.at(i).age++;
         //if next location is above or equal to block number, and previous location is below or equal to block number
-        if(streams.at(i).base + streams.at(i).depth + (streams.at(i).stride * 2)  > champsim::block_number{addr} && streams.at(i).base + (streams.at(i).depth) < champsim::block_number{addr}) {
-          //if we crossed a page boundary
+        if(streams.at(i).base + streams.at(i).depth + (streams.at(i).stride * 2)  >= champsim::block_number{addr} && streams.at(i).base + (streams.at(i).depth) < champsim::block_number{addr}) {
+          //if we crossed a 4kB page boundary
           if((champsim::address{streams.at(i).base}.to<uint64_t>() >> 12) != (addr.to<uint64_t>() >> 12)) {
+            //reset depth
             streams.at(i).depth = 1;
+            //reset age
             streams.at(i).age = 0;
+            //maintain stride
             streams.at(i).stride = streams.at(i).stride;
+            //update base
             streams.at(i).base = champsim::block_number{addr};
-            return std::pair{1,1};
+            return std::pair<std::size_t,std::size_t>{1,streams.at(i).stride};
           }
+          //update stride
           streams.at(i).stride = champsim::block_number{addr}.to<uint64_t>() - (streams.at(i).base.to<uint64_t>() + streams.at(i).depth);
-          //streams.at(i).stride = 1;
+          //update depth
           streams.at(i).depth += streams.at(i).stride;
+          //reset age
           streams.at(i).age = 0;
           return std::pair{streams.at(i).depth,streams.at(i).stride};
         } else if (streams.at(i).age > (age_factor >> streams.at(i).depth)) {
@@ -215,6 +231,7 @@ struct asd : public champsim::modules::prefetcher {
       }
       //we don't have space, check for victim
       else if(victim != streams.size()) {
+        //set to default entry
         streams.at(victim).age = 0;
         streams.at(victim).base = champsim::block_number{addr};
         streams.at(victim).depth = 1;
@@ -227,6 +244,9 @@ struct asd : public champsim::modules::prefetcher {
 
   };
 
+  //This is a small table to filter out recent prefetches, since this prefetcher prefetches over itself a lot
+  //It fills the table with recent prefetches, and prevents them from being prefetched again until they are evicted
+  //by other prefetches or time out
   struct RAF {
     constexpr static std::size_t RAF_FILTER_SETS = 16;
     constexpr static std::size_t RAF_FILTER_WAYS = 16;
@@ -271,10 +291,10 @@ struct asd : public champsim::modules::prefetcher {
     std::array<uint64_t,H_BINS> pf_depths;
     std::array<uint64_t,H_BINS> pf_strides;
 
-
     void increment_epoch() {
       if(epoch_timer == 0) {
         double diff = ActiveHist.compare(BuildHist);
+        //fmt::print("Diff was: {}\n",diff);
         epoch = SM.update_state(diff > DIFF_THRESH,epoch);
         if(epoch > EPOCH_MAX)
           epoch = EPOCH_MAX;

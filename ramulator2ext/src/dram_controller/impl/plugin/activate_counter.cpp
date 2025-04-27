@@ -434,7 +434,7 @@ void ActivateCounter::print_file(bool is_end)
       file_hwb << (i) << " " << 0 << "\n";
   }
   file_hwb.close();
-  system((std::string("xz ") + file_name + std::string("*")).c_str());
+  system((std::string("xz --force ") + file_name + std::string("*")).c_str());
   if(is_end)
   phase++;
 
