@@ -18,7 +18,7 @@ uint32_t asd::prefetcher_cache_operate(champsim::address addr, champsim::address
     depth = std::min(MAX_PREFETCH / 2, depth);
 
   if(!intern_->warmup) {
-    if(stride < H_BINS)
+    if(stride < num_bins)
       ASD_Modules.at(cpu).pf_strides.at(stride)++;
       ASD_Modules.at(cpu).pf_depths.at(depth)++;
   }
@@ -41,11 +41,13 @@ uint32_t asd::prefetcher_cache_operate(champsim::address addr, champsim::address
 }
 
 void asd::prefetcher_initialize() {
+
+  num_bins = FORCE_4KiB_PAGES ? (4096 / BLOCK_SIZE) : (PAGE_SIZE / BLOCK_SIZE);
   for(int i = 0; i < NUM_CPUS; i++) {
-    ASD_Modules.emplace_back(ASD_Module{});
+    ASD_Modules.emplace_back(ASD_Module(num_bins));
   }
   for(int i = 0; i < NUM_CPUS; i++) {
-    for(int j = 0; j < H_BINS; j++) {
+    for(int j = 0; j < num_bins; j++) {
       ASD_Modules.at(i).pf_depths.at(j) = 0;
       ASD_Modules.at(i).pf_strides.at(j) = 0;
     }
@@ -53,30 +55,9 @@ void asd::prefetcher_initialize() {
 }
 
 void asd::prefetcher_final_stats() {
-  fmt::print("ASD Histograms by Core:\n");
-
   for(int i = 0; i < NUM_CPUS; i++) {
-    fmt::print("\tCPU: {} epoch: {}\n",i,ASD_Modules.at(i).epoch);
-    for(int j = 0; j < H_BINS; j++) {
-      fmt::print("\t\t{} : {}\n",j + 1,ASD_Modules.at(i).ActiveHist.get_bin_occu(j+1));
-    }
-  }
-  fmt::print("ASD Prefetch Depths by Core:\n");
-
-  for(int i = 0; i < NUM_CPUS; i++) {
-    fmt::print("\tCPU: {}\n",i);
-    for(int j = 0; j < H_BINS; j++) {
-      fmt::print("\t\t{} : {}\n",j,ASD_Modules.at(i).pf_depths.at(j));
-    }
-  }
-
-  fmt::print("ASD Prefetch Strides by Core:\n");
-
-  for(int i = 0; i < NUM_CPUS; i++) {
-    fmt::print("\tCPU: {}\n",i);
-    for(int j = 0; j < H_BINS; j++) {
-      fmt::print("\t\t{} : {}\n",j,ASD_Modules.at(i).pf_strides.at(j));
-    }
+    fmt::print("ASD for Core {}:\n",i);
+    ASD_Modules.at(i).print_stats();
   }
 }
 

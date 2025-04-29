@@ -42,7 +42,6 @@ std::size_t spp_dev_llc_frag::get_bank_queue_size(champsim::address addr) {
 }
 uint32_t spp_dev_llc_frag::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
-
   //look at fills, grab next columns from fills
   
   remove_from_bank_queue(addr);

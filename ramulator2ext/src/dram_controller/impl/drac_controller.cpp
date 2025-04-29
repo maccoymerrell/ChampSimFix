@@ -67,6 +67,9 @@ class DRACController final : public IDRACController, public Implementation {
     uint64_t s_prefetch_row_misses = 0;
     uint64_t s_prefetches_dropped = 0;
 
+    std::vector<uint64_t> s_dropped_by_scheduler;
+    std::vector<uint64_t> s_bundled_requests;
+
     bool m_drop_enabled;
 
     IAddrMapper* m_addr_map;
@@ -136,6 +139,8 @@ class DRACController final : public IDRACController, public Implementation {
       s_core_row_hits.resize(num_cores);
       s_core_row_misses.resize(num_cores);
       s_core_row_conflicts.resize(num_cores);
+      s_bundled_requests.resize(num_cores);
+      s_dropped_by_scheduler.resize(num_cores);
       m_read_core_count.resize(num_cores);
       m_write_core_count.resize(num_cores);
       m_read_core_total.resize(num_cores);
@@ -145,12 +150,19 @@ class DRACController final : public IDRACController, public Implementation {
         m_write_core_count[i] = 0;
         m_read_core_total[i] = 0;
         m_write_core_total[i] = 0;
+        s_bundled_requests[i] = 0;
+        s_dropped_by_scheduler[i] = 0;
+        s_core_row_conflicts[i] = 0;
+        s_core_row_hits[i] = 0;
+        s_core_row_misses[i] = 0;
       }
 
       for (int i = 0; i < num_cores; i++) {
         register_stat(s_core_row_hits[i]).name("controller_core_row_hits_{}", i);
         register_stat(s_core_row_misses[i]).name("controller_core_row_misses_{}", i);
         register_stat(s_core_row_conflicts[i]).name("controller_core_row_conflicts_{}", i);
+        register_stat(s_bundled_requests[i]).name("controller_core_bundled_requests_{}", i);
+        register_stat(s_dropped_by_scheduler[i]).name("controller_core_dropped_by_scheduler_{}", i);
       }
 
       m_priority_buffer.max_size = INT_MAX;
@@ -224,6 +236,7 @@ class DRACController final : public IDRACController, public Implementation {
         //found something to bundle to
         if(in_rq != m_read_buffer.end()) {
           in_rq->bundled_callbacks.emplace_back(std::pair{req.addr,req.callback});
+          s_bundled_requests[req.source_id]++;
           if(debug)
             fmt::print("[MEMORY CONTROLLER] Bundling request {:x} into {:#x}\n",req.addr,in_rq->addr);
           return true;
@@ -245,6 +258,7 @@ class DRACController final : public IDRACController, public Implementation {
         //found something to bundle to
         if(in_rq != m_read_buffer.end()) {
           in_rq->bundled_callbacks.emplace_back(std::pair{req.addr,req.callback});
+          s_bundled_requests[req.source_id]++;
           if(debug)
             fmt::print("[MEMORY CONTROLLER] Bundling request {:x} into {:#x}\n",req.addr,in_rq->addr);
           return true;
@@ -266,6 +280,7 @@ class DRACController final : public IDRACController, public Implementation {
         //found something to bundle to
         if(in_rq != m_read_buffer.end()) {
           in_rq->bundled_callbacks.emplace_back(std::pair{req.addr,req.callback});
+          s_bundled_requests[req.source_id]++;
           if(debug)
             fmt::print("[MEMORY CONTROLLER] Bundling request {:x} into {:#x}\n",req.addr,in_rq->addr);
           return true;
@@ -488,10 +503,12 @@ class DRACController final : public IDRACController, public Implementation {
         }
         if(it->should_drop && it->is_prefetch) {
           it->was_dropped = true;
+          s_dropped_by_scheduler[it->source_id]++;
           it->depart = m_clk + 1;
           pending.push_back(*it);
           m_read_buffer.remove(it);
           s_prefetches_dropped++;
+          break;
         }
       }
       // 2.1    First, check the act buffer to serve requests that are already activating (avoid useless ACTs)

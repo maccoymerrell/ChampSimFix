@@ -30,6 +30,12 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
 
     IDRACController* m_controller;
 
+    uint64_t s_blacklist_scheduled = 0;
+    uint64_t s_ready_scheduled = 0;
+    uint64_t s_prio_scheduled = 0;
+    uint64_t s_age_scheduled = 0;
+    uint64_t s_tied_scheduled = 0;
+
   public:
     void init() override {
     }
@@ -42,6 +48,13 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
       drop_enabled = param<bool>("drop").desc("Whether to drop prefetch requests or not").default_val(true);
       assert(incr_cycles != 0);
       fmt::print("Initialized Minimalist Scheduler, Age Interval: {} ({} ns)\n",incr_cycles,incr_cycles * m_dram->m_timing_vals("tCK_ps") * 1e-3);
+
+
+      register_stat(s_blacklist_scheduled).name("packets scheduled by blacklist");
+      register_stat(s_ready_scheduled).name("packets scheduled by readiness");
+      register_stat(s_prio_scheduled).name("packets scheduled by priority");
+      register_stat(s_age_scheduled).name("packets scheduled by age");
+      register_stat(s_tied_scheduled).name("packets scheduled by default (tied)");
 
     }
 
@@ -90,6 +103,7 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
       //we also need to check if its a prefetch and not a row hit
       //if its a prefetch, not a row hit, and new enough that its not starving, don't serve
       if(blacklist1 ^ blacklist2) {
+        s_blacklist_scheduled++;
         if(blacklist1)
           return req2;
         else
@@ -97,6 +111,7 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
       }
       //First ready first served
       if(ready1 ^ ready2) {
+        s_ready_scheduled++;
         if(ready1)
           return req1;
         else
@@ -104,6 +119,7 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
       }
       //Highest prio, served first
       if (prio1 != prio2) {
+        s_prio_scheduled++;
         if (prio1 > prio2) {
           return req1;
         } else {
@@ -112,12 +128,14 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
       }
       //finally do FCFS if they are still tied, i.e. both are ready, but both cause row activations and are prefetches
       if ((age1) ^ (age2)) {
+        s_age_scheduled++;
         if(age1)
           return req1;
         else
           return req2;
       }
       //we tied in everything, choose req1
+      s_tied_scheduled++;
       return req1;
     }
 

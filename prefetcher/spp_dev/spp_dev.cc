@@ -158,6 +158,9 @@ uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::add
 
 uint32_t spp_dev::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
+  //prefetch dropped
+  if(way == intern_->NUM_WAY && evicted_addr == champsim::address{})
+    return metadata_in;
 
   if(prefetch)
     filled[cpu]++;

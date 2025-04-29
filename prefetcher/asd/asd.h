@@ -23,27 +23,27 @@
 
 struct asd : public champsim::modules::prefetcher {
 
-  static constexpr std::size_t H_BINS = 64;
+  static constexpr bool FORCE_4KiB_PAGES = true;
   static constexpr std::size_t MAX_PREFETCH = 22;
   static constexpr std::size_t MAX_STREAMS = 32;
+  static constexpr std::size_t MAX_STRIDE = 8;
   static constexpr std::size_t AGE = 64;
   static constexpr uint64_t EPOCH_MAX = 8192;
   static constexpr uint64_t EPOCH_MIN = 256;
   static constexpr double DIFF_THRESH = 0.1;
   
-  template<std::size_t bins>
   struct Histogram {
-    std::array<uint64_t,bins> hist;
+    std::vector<uint64_t> hist;
     uint64_t global_count = 0;
 
-    Histogram() {
+    Histogram(std::size_t bins) {
       for(auto i = 0; i < bins; i++)
-        hist.at(i) = 0;
+        hist.push_back(0);
     }
 
     void tally(std::size_t b_pos, std::size_t stride) {
       assert(b_pos != 0);
-      if(b_pos > bins)
+      if(b_pos > hist.size())
         return;
       //hist.at(b_pos - 1) += (b_pos / stride);
       hist.at(b_pos - 1)++;
@@ -52,14 +52,14 @@ struct asd : public champsim::modules::prefetcher {
 
     double get_bin_prob(std::size_t b_pos) {
       assert(b_pos != 0);
-      if(b_pos > bins)
+      if(b_pos > hist.size())
         return 0.0;
       return (hist.at(b_pos - 1) / (double)global_count);
     }
 
     std::size_t get_bin_occu(std::size_t b_pos) {
       assert(b_pos != 0);
-      if(b_pos > bins)
+      if(b_pos > hist.size())
         return 0;
       return hist.at(b_pos-1);
     }
@@ -68,14 +68,14 @@ struct asd : public champsim::modules::prefetcher {
       assert(b_pos != 0);
 
       std::size_t depth = 0;
-      while((b_pos + depth) < bins && hist.at(b_pos-1) < 2 * hist.at(b_pos + depth - 1))
+      while((b_pos + depth) < hist.size() && hist.at(b_pos-1) < 2 * hist.at(b_pos + depth - 1))
         depth++;
       
       return depth;
     }
 
     void clear() {
-      for(int i = 0; i < bins; i++)
+      for(int i = 0; i < hist.size(); i++)
         hist.at(i) = 0;
       global_count = 0;
     }
@@ -84,7 +84,7 @@ struct asd : public champsim::modules::prefetcher {
       assert(H.hist.size() == hist.size());
       double normal_factor = (H.global_count == 0 || global_count == 0) ? 1.0 : H.global_count / global_count;
       double diff = 0;
-      for(std::size_t i = 0; i < bins; i++) {
+      for(std::size_t i = 0; i < hist.size(); i++) {
         diff += std::abs((double)H.hist.at(i) - (double)(hist.at(i)*normal_factor));
       }
       if(global_count == 0 && H.global_count == 0)
@@ -195,9 +195,20 @@ struct asd : public champsim::modules::prefetcher {
       for(int i = 0; i < streams.size(); i++) {
         streams.at(i).age++;
         //if next location is above or equal to block number, and previous location is below or equal to block number
-        if(streams.at(i).base + streams.at(i).depth + (streams.at(i).stride * 2)  >= champsim::block_number{addr} && streams.at(i).base + (streams.at(i).depth) < champsim::block_number{addr}) {
-          //if we crossed a 4kB page boundary
-          if((champsim::address{streams.at(i).base}.to<uint64_t>() >> 12) != (addr.to<uint64_t>() >> 12)) {
+        if(streams.at(i).base + streams.at(i).depth + (MAX_STRIDE)  >= champsim::block_number{addr} && streams.at(i).base + (streams.at(i).depth) < champsim::block_number{addr}) {
+          //if we crossed a page boundary
+          if((champsim::address{streams.at(i).base}.to<uint64_t>() >> 12) != (addr.to<uint64_t>() >> 12) && FORCE_4KiB_PAGES) {
+            //reset depth
+            streams.at(i).depth = 1;
+            //reset age
+            streams.at(i).age = 0;
+            //maintain stride
+            streams.at(i).stride = streams.at(i).stride;
+            //update base
+            streams.at(i).base = champsim::block_number{addr};
+            return std::pair<std::size_t,std::size_t>{1,streams.at(i).stride};
+          }
+          else if (champsim::page_number{champsim::address{streams.at(i).base}} != champsim::page_number{addr}) {
             //reset depth
             streams.at(i).depth = 1;
             //reset age
@@ -280,16 +291,25 @@ struct asd : public champsim::modules::prefetcher {
   };
 
   struct ASD_Module {
-    Histogram<H_BINS> ActiveHist;
-    Histogram<H_BINS> BuildHist;
+    Histogram ActiveHist;
+    Histogram BuildHist;
     uint64_t epoch = EPOCH_MAX;
     uint64_t epoch_timer = 0;
     StreamBuffer<MAX_STREAMS,AGE> Streams;
     StateMachine SM;
     RAF Filter;
+    std::vector<uint64_t> pf_depths;
+    std::vector<uint64_t> pf_strides;
+    std::size_t bins;
 
-    std::array<uint64_t,H_BINS> pf_depths;
-    std::array<uint64_t,H_BINS> pf_strides;
+    ASD_Module(std::size_t bins_) : ActiveHist(bins_), BuildHist(bins_), bins(bins_) {
+      for(int i = 0; i < bins_; i++) {
+        pf_depths.push_back(0);
+        pf_strides.push_back(0);
+      }
+    }
+
+
 
     void increment_epoch() {
       if(epoch_timer == 0) {
@@ -325,8 +345,27 @@ struct asd : public champsim::modules::prefetcher {
       }
       return std::pair<std::size_t,std::size_t>{0,0};
     }
+
+    void print_stats() {
+      fmt::print("\tASD Histogram, epoch: {}\n",epoch);
+      for(int j = 0; j < bins; j++) {
+        fmt::print("\t\t{} : {}\n",j + 1,ActiveHist.get_bin_occu(j+1));
+      }
+      fmt::print("ASD Prefetch Depths:\n");
+    
+      for(int j = 0; j < bins; j++) {
+        fmt::print("\t\t{} : {}\n",j,pf_depths.at(j));
+      }
+    
+      fmt::print("ASD Prefetch Strides:\n");
+    
+      for(int j = 0; j < bins; j++) {
+        fmt::print("\t\t{} : {}\n",j,pf_strides.at(j));
+      }
+    }
   };
 
+  std::size_t num_bins;
   std::vector<ASD_Module> ASD_Modules;
 
   using prefetcher::prefetcher;

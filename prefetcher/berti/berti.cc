@@ -1097,7 +1097,16 @@ uint32_t berti::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool
   ShadowCache* tscache = scache[me];
   HistoryTable* thistoryt = historyt[me];
 
+
+
   champsim::block_number line_addr{addr}; // Line addr
+
+  //added this to handle dropped packets
+  if(evicted_addr == champsim::address{} && way == intern_->NUM_WAY) {
+    tlatencyt->del(line_addr.to<uint64_t>());
+    return metadata_in;
+  }
+
   uint64_t tag     = tlatencyt->get_tag(line_addr.to<uint64_t>());
   uint64_t cycle   = tlatencyt->del(line_addr.to<uint64_t>()) & TIME_MASK;
   uint64_t latency = 0;

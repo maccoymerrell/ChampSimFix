@@ -24,12 +24,16 @@ class MinimalistRowPolicy : public IRowPolicy, public Implementation {
 
     int m_PRE_req_id = -1;
 
+    uint64_t s_bundle_closes = 0;
+    uint64_t s_row_closes = 0;
+
     
   public:
     void init() override { };
 
     void setup(IFrontEnd* frontend, IMemorySystem* memory_system) override { 
-      m_dram = m_ctrl->m_dram;
+      m_dram = cast_parent<IDRAMController>()->m_dram;
+      m_ctrl = cast_parent<IDRAMController>();
 
       m_rank_level = m_dram->m_levels("rank");
       m_bankgroup_level = m_dram->m_levels("bankgroup");
@@ -44,6 +48,9 @@ class MinimalistRowPolicy : public IRowPolicy, public Implementation {
 
       m_timer.resize(m_num_banks * m_num_bankgroups * m_num_ranks, 0);
       m_opening_request.resize(m_num_banks * m_num_bankgroups * m_num_ranks,Request{0,Request::Type::Read});
+
+      register_stat(s_bundle_closes).name("Rows closed due to bundle");
+      register_stat(s_row_closes).name("Rows closed in total");
     };
 
     void update(bool request_found, ReqBuffer::iterator& req_it) override { 
@@ -55,6 +62,7 @@ class MinimalistRowPolicy : public IRowPolicy, public Implementation {
           if(m_timer.at(i) == 1) {
             Request req(m_opening_request.at(i).addr_vec, m_PRE_req_id);
             m_ctrl->priority_send(req);
+            s_row_closes++;
           }
           m_timer.at(i)--;
         }
@@ -95,6 +103,7 @@ class MinimalistRowPolicy : public IRowPolicy, public Implementation {
                            req_it->addr_vec[m_bankgroup_level] * m_num_banks + 
                            req_it->addr_vec[m_rank_level] * m_num_banks * m_num_bankgroups;
         m_timer[flat_bank_id] = m_dram->m_timing_vals("nRC");
+        m_opening_request[flat_bank_id] = *req_it;
 
       } else if (m_dram->m_command_meta(req_it->command).is_accessing) {
         //short timer if we issued the last command for a bundle
@@ -104,6 +113,7 @@ class MinimalistRowPolicy : public IRowPolicy, public Implementation {
                                req_it->addr_vec[m_bankgroup_level] * m_num_banks + 
                                req_it->addr_vec[m_rank_level] * m_num_banks * m_num_bankgroups;
             m_timer[flat_bank_id] = 1;
+            s_bundle_closes++;
           }
         }
       }

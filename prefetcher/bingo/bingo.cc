@@ -910,7 +910,8 @@ uint32_t bingo::prefetcher_cache_operate(champsim::address addr, champsim::addre
 
 uint32_t bingo::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in) {
     champsim::block_number evicted_block_number{evicted_addr};
-
+    if(evicted_addr == champsim::address{})
+        return metadata_in;
     //if (this->block[set][way].valid == 0)
         //return metadata_in; /* no eviction */
 

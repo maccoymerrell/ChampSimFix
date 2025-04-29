@@ -202,6 +202,10 @@ uint32_t spp_raf_l2c::prefetcher_cache_operate(champsim::address addr, champsim:
 
 uint32_t spp_raf_l2c::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
+
+  //prefetch dropped
+  if(way == intern_->NUM_WAY && evicted_addr == champsim::address{})
+    return metadata_in;
   if constexpr (FILTER_ON) {
     if constexpr (SPP_DEBUG_PRINT) {
       std::cout << std::endl;
