@@ -30,6 +30,8 @@ ship::ship(CACHE* cache)
   // randomly selected sampler sets
   std::generate_n(std::back_inserter(SHCT), NUM_CPUS, []() -> typename decltype(SHCT)::value_type { return {}; });
   fmt::print("Using SHiP in {}\n",intern_->NAME);
+  champsim::data::bytes cache_size{NUM_SET*NUM_WAY*BLOCK_SIZE};
+  fmt::print("\tSIZE: {} SETS: {} WAYS: {} SET SAMPLE RATE: {}\n", champsim::data::mebibytes{cache_size},NUM_SET,NUM_WAY,SET_SAMPLE_RATE);
 }
 
 int& ship::get_rrpv(long set, long way) { return rrpv_values.at(static_cast<std::size_t>(set * NUM_WAY + way)); }

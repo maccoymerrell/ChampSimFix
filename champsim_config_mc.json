@@ -2860,7 +2860,7 @@
         "virtual_prefetch": false,
         "prefetch_activate": "LOAD,PREFETCH",
         "prefetcher": "dram_prefetch_buffer_spp",
-        "replacement": "ship_pa",
+        "replacement": "ship",
         "pqm": false,
         "mqc": true
     },

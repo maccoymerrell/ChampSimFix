@@ -360,7 +360,7 @@ bool CACHE::try_hit(tag_lookup_type& handle_pkt)
   auto metadata_thru = handle_pkt.pf_metadata;
   bool should_drop = false;
   if (should_activate_prefetcher(handle_pkt)) {
-    metadata_thru = impl_prefetcher_cache_operate(module_address(handle_pkt), handle_pkt.ip, handle_pkt.cpu >= NUM_CPUS ? 0 : handle_pkt.cpu, hit, useful_prefetch, handle_pkt.type, metadata_thru);
+    metadata_thru = impl_prefetcher_cache_operate(module_address(handle_pkt), handle_pkt.ip, handle_pkt.cpu >= NUM_CPUS ? 0 : handle_pkt.cpu, hit, useful_prefetch, handle_pkt.type, metadata_thru,hit ? way->pf_metadata : 0);
     handle_pkt.invoked_prefetcher = true;
     if(marked_for_drop.has_value() && champsim::block_number{marked_for_drop.value()} == champsim::block_number{handle_pkt.address}) {
       should_drop = true;
@@ -604,6 +604,15 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
   sim_stats.misses.increment(std::pair{handle_pkt.type,handle_pkt.cpu >= NUM_CPUS ? 0 : handle_pkt.cpu});
 
   return true;
+}
+
+double CACHE::get_cache_occupancy_ratio() const {
+  std::size_t valid_blocks = 0;
+  for (auto const b: block) {
+    if(b.valid)
+      valid_blocks++;
+  }
+  return (valid_blocks / (double)(NUM_WAY*NUM_SET));
 }
 
 //schedule MSHR
@@ -999,6 +1008,9 @@ long CACHE::operate()
     for(int i = 0; i < NUM_CPUS; i++) {
       //if(do_print_status)
       //fmt::print("\t {}: {}\n", i, MQ.at(i).size());
+    }
+    if(do_print_status && NAME.compare("LLC") == 0) {
+      fmt::print("[{}] Occupancy: {}\n",NAME,get_cache_occupancy_ratio());
     }
     for(int core = 0; core < NUM_CPUS; core++) {
       double pf_filled = sim_stats.pf_fill_core.value_or(core,0) - sim_stats.last_pf_fill_core.value_or(core,0);
@@ -1422,9 +1434,9 @@ std::vector<double> CACHE::get_pq_occupancy_ratio() const { return ::occupancy_r
 void CACHE::impl_prefetcher_initialize() const { pref_module_pimpl->impl_prefetcher_initialize(); }
 
 uint32_t CACHE::impl_prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, bool cache_hit, bool useful_prefetch, access_type type,
-                                              uint32_t metadata_in) const
+                                              uint32_t metadata_in, uint32_t metadata_hit) const
 {
-  return pref_module_pimpl->impl_prefetcher_cache_operate(addr, ip, cpu, cache_hit, useful_prefetch, type, metadata_in);
+  return pref_module_pimpl->impl_prefetcher_cache_operate(addr, ip, cpu, cache_hit, useful_prefetch, type, metadata_in, metadata_hit);
 }
 
 uint32_t CACHE::impl_prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, bool prefetch, champsim::address evicted_addr,
