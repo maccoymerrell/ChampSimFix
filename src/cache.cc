@@ -289,7 +289,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
   }
   bool useless = (way != set_end && way->valid && way->prefetch);
   auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill_mshr), fill_mshr.cpu >= NUM_CPUS ? 0 : fill_mshr.cpu, useless, get_set_index(fill_mshr.address), way_idx,
-                                                  (fill_mshr.type == access_type::PREFETCH), evicting_address, fill_mshr.data_promise->pf_metadata);
+                                                  (fill_mshr.type == access_type::PREFETCH), evicting_address, fill_mshr.data_promise->pf_metadata, way != set_end && way->valid ? way->pf_metadata : 0);
   
     impl_replacement_cache_fill(fill_mshr.cpu >= NUM_CPUS ? 0 : fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, module_address(fill_mshr), fill_mshr.ip, evicting_address,
                                 fill_mshr.type);
@@ -323,7 +323,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
       fmt::print("[{}] Dropped PREFETCH for {} from MSHR\n", NAME, fill_mshr.address);
     }
     auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill_mshr), fill_mshr.cpu >= NUM_CPUS ? 0 : fill_mshr.cpu, false, get_set_index(fill_mshr.address), NUM_WAY,
-                                                  (fill_mshr.type == access_type::PREFETCH), champsim::address{}, fill_mshr.data_promise->pf_metadata);
+                                                  (fill_mshr.type == access_type::PREFETCH), champsim::address{}, fill_mshr.data_promise->pf_metadata, 0);
     response_type response{fill_mshr.back_off, fill_mshr.row_act, fill_mshr.type, fill_mshr.address, fill_mshr.v_address, fill_mshr.data_promise->data, 0, fill_mshr.instr_depend_on_me};
     for (auto* ret : fill_mshr.to_return) {
       //fmt::print("\tSending response...\n");
@@ -1440,9 +1440,9 @@ uint32_t CACHE::impl_prefetcher_cache_operate(champsim::address addr, champsim::
 }
 
 uint32_t CACHE::impl_prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, bool prefetch, champsim::address evicted_addr,
-                                           uint32_t metadata_in) const
+                                           uint32_t metadata_in, uint32_t metadata_evict) const
 {
-  return pref_module_pimpl->impl_prefetcher_cache_fill(addr, cpu, useless, set, way, prefetch, evicted_addr, metadata_in);
+  return pref_module_pimpl->impl_prefetcher_cache_fill(addr, cpu, useless, set, way, prefetch, evicted_addr, metadata_in, metadata_evict);
 }
 
 void CACHE::impl_prefetcher_cycle_operate() const { pref_module_pimpl->impl_prefetcher_cycle_operate(); }

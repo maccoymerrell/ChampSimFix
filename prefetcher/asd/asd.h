@@ -31,6 +31,10 @@ struct asd : public champsim::modules::prefetcher {
   static constexpr uint64_t EPOCH_MAX = 8192;
   static constexpr uint64_t EPOCH_MIN = 256;
   static constexpr double DIFF_THRESH = 0.1;
+
+  static constexpr std::size_t PM_SETS = 32;
+  static constexpr std::size_t PM_WAYS = 4;
+  static constexpr std::size_t PAGE_MAP_SIZE = 64;
   
   struct Histogram {
     std::vector<uint64_t> hist;
@@ -258,37 +262,26 @@ struct asd : public champsim::modules::prefetcher {
   //This is a small table to filter out recent prefetches, since this prefetcher prefetches over itself a lot
   //It fills the table with recent prefetches, and prevents them from being prefetched again until they are evicted
   //by other prefetches or time out
-  struct RAF {
-    constexpr static std::size_t RAF_FILTER_SETS = 16;
-    constexpr static std::size_t RAF_FILTER_WAYS = 16;
-    constexpr static std::size_t RAF_TIMEOUT = 300;
-    struct raf_entry {
-      champsim::block_number block;
-      uint64_t first_accessed;
+  struct page_map {
+    uint64_t page_num;
+    constexpr static std::size_t PM_BASE = 100;
+    std::array<uint8_t,PAGE_MAP_SIZE> bits;
 
-      raf_entry() : raf_entry(champsim::block_number{0},0) {}
-      explicit raf_entry(champsim::block_number block_, uint64_t first_accessed_) : block(block_), first_accessed(first_accessed_) {}
-    };
-    struct raf_indexer {
-      auto operator()(const raf_entry& entry) const {return entry.block;}
-    };
-    champsim::msl::lru_table<raf_entry, raf_indexer, raf_indexer> raf_filter{RAF_FILTER_SETS,RAF_FILTER_WAYS};
-    bool check(champsim::address block, uint64_t check_time, bool update_table) {
-      auto raf_filter_entry = raf_filter.check_hit(raf_entry{champsim::block_number{block},0});
-      bool should_drop = false;
-      if(raf_filter_entry.has_value()) {
-        if(check_time - raf_filter_entry->first_accessed < RAF_TIMEOUT)
-          should_drop = true;
-      }
-      if(update_table)
-        raf_filter.fill(raf_entry{champsim::block_number{block},check_time});
-      return should_drop;
+    page_map() : page_map(0) {}
+    explicit page_map(uint64_t page_num_) : page_num(page_num_) {
+      for(std::size_t i = 0; i < PAGE_MAP_SIZE; i++)
+        bits.at(i) = 0;
     }
-    void invalidate(champsim::address block) {
-      raf_filter.invalidate(raf_entry{champsim::block_number{block},0});
-    }
-    
   };
+
+  struct page_map_set {
+    auto operator()(const page_map& entry) const { return entry.page_num; }
+  };
+  struct page_map_way {
+    auto operator()(const page_map& entry) const { return entry.page_num; }
+  };
+
+  
 
   struct ASD_Module {
     Histogram ActiveHist;
@@ -297,10 +290,13 @@ struct asd : public champsim::modules::prefetcher {
     uint64_t epoch_timer = 0;
     StreamBuffer<MAX_STREAMS,AGE> Streams;
     StateMachine SM;
-    RAF Filter;
     std::vector<uint64_t> pf_depths;
     std::vector<uint64_t> pf_strides;
     std::size_t bins;
+
+    uint64_t filtered_prefetches = 0;
+
+    champsim::msl::lru_table<page_map,page_map_set,page_map_way> page_map_table{PM_SETS,PM_WAYS};
 
     ASD_Module(std::size_t bins_) : ActiveHist(bins_), BuildHist(bins_), bins(bins_) {
       for(int i = 0; i < bins_; i++) {
@@ -308,6 +304,10 @@ struct asd : public champsim::modules::prefetcher {
         pf_strides.push_back(0);
       }
     }
+
+    void add_to_pagemap(champsim::address addr);
+    bool check_pagemap(champsim::address addr);
+    void remove_from_pagemap(champsim::address addr);
 
 
 
@@ -347,7 +347,7 @@ struct asd : public champsim::modules::prefetcher {
     }
 
     void print_stats() {
-      fmt::print("\tASD Histogram, epoch: {}\n",epoch);
+      fmt::print("\tASD Histogram, epoch: {}, filtered: {}\n",epoch, filtered_prefetches);
       for(int j = 0; j < bins; j++) {
         fmt::print("\t\t{} : {}\n",j + 1,ActiveHist.get_bin_occu(j+1));
       }

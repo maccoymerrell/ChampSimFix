@@ -1,5 +1,5 @@
-#ifndef PREFETCHER_DRAM_BUFFER_SPP_H
-#define PREFETCHER_DRAM_BUFFER_SPP_H
+#ifndef PREFETCHER_DRAM_BUFFER_ASD_H
+#define PREFETCHER_DRAM_BUFFER_ASD_H
 
 #include <cstdint>
 #include <array>
@@ -8,24 +8,20 @@
 #include "modules.h"
 #include "cache.h"
 #include "dram_controller.h"
+#include "../asd/asd.h"
 
-struct dram_prefetch_buffer_spp : public champsim::modules::prefetcher {
+struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
 
   constexpr static std::size_t RW_WAYS = 32;
   constexpr static std::size_t RW_SETS = 128;
 
-  constexpr static std::size_t PM_WAYS = 4;
-  constexpr static std::size_t PM_SETS = 32;
-
-  constexpr static std::size_t PAGE_MAP_SIZE = 32;
-
   constexpr static std::size_t CONF_MAX = 255;
   constexpr static std::size_t CONF_DROP_THRESH = 30;
 
-  constexpr static uint32_t NEXT_LINE_ID = 1;
+  constexpr static uint32_t ASD_ID = 1;
   constexpr static uint32_t BUFFER_ID = 2;
 
-  constexpr static double NL_THRESH = 0.5;
+  constexpr static double ASD_THRESH = 0.5;
 
   constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11};
   constexpr static std::array<uint8_t,25> THRESH = {10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200,210,220,230,240,250};
@@ -40,9 +36,9 @@ struct dram_prefetch_buffer_spp : public champsim::modules::prefetcher {
   constexpr static std::size_t MAX_DEPTH = 11;
 
   constexpr static std::size_t usefulness_measure_epoch = 1000000;
-  constexpr static std::size_t MAX_NL_DEPTH = 4;
+  constexpr static std::size_t MAX_ASD_DEPTH = 22;
   std::size_t variable_max_depth = MAX_DEPTH;
-  std::size_t variable_nl_depth = MAX_NL_DEPTH;
+  std::size_t variable_asd_depth = MAX_ASD_DEPTH;
 
   constexpr static bool FORWARD = true;
   constexpr static bool BACKWARD = false;
@@ -54,8 +50,8 @@ struct dram_prefetch_buffer_spp : public champsim::modules::prefetcher {
   double useful_tallied = 0;
   double useless_tallied = 0;
   double prefetches_dropped = 0;
-  double prefetches_rejected = 0;
   double prefetches_filtered = 0;
+  double prefetches_rejected = 0;
   double prefetches_dropped_too_far_back = 0;
   double prefetches_dropped_too_far_forward = 0;
   double pp_thrashes = 0;
@@ -63,32 +59,10 @@ struct dram_prefetch_buffer_spp : public champsim::modules::prefetcher {
   std::vector<std::size_t> column_bits;
 
   std::size_t global_useful_buffer = 0;
-  std::size_t global_useful_nextline = 0;
-  std::size_t global_fills_buffer = 0;
-  std::size_t global_fills_nextline = 0;
+  std::size_t global_useful_asd = 0;
+  std::size_t global_useless_buffer = 0;
+  std::size_t global_useless_asd = 0;
   std::size_t epoch_counter = 0;
-
-
-  struct page_map {
-    uint64_t page_num;
-    constexpr static std::size_t PM_BASE = 100;
-    std::array<uint8_t,PAGE_MAP_SIZE> bits;
-
-    page_map() : page_map(0) {}
-    explicit page_map(uint64_t page_num_) : page_num(page_num_) {
-      for(std::size_t i = 0; i < PAGE_MAP_SIZE; i++)
-        bits.at(i) = 0;
-    }
-  };
-
-  struct page_map_set {
-    auto operator()(const page_map& entry) const { return entry.page_num; }
-  };
-  struct page_map_way {
-    auto operator()(const page_map& entry) const { return entry.page_num; }
-  };
-
-  champsim::msl::lru_table<page_map,page_map_set,page_map_way> page_map_table{PM_SETS,PM_WAYS};
 
 
   struct row_walker {
@@ -107,7 +81,6 @@ struct dram_prefetch_buffer_spp : public champsim::modules::prefetcher {
   };
 
   std::vector<champsim::msl::lru_table<row_walker,row_walker_set,row_walker_way>> row_walker_table;
-
 
   bool should_drop_prefetch(champsim::address addr, uint32_t cpu);
   void update_walker(champsim::address addr, uint32_t cpu);
@@ -130,22 +103,21 @@ struct dram_prefetch_buffer_spp : public champsim::modules::prefetcher {
   std::vector<row_open_table_entry> row_open_table;
 
   double global_usefulness_buffer = 1.0;
-  double global_usefulness_nextline = 1.0;
+  double global_usefulness_asd = 1.0;
+
+  std::size_t num_bins;
+  std::vector<asd::ASD_Module> ASD_Modules;
 
 
   void update_row_open_table(champsim::address addr);
   bool is_row_open(champsim::address addr);
-
-  void add_to_pagemap(champsim::address addr);
-  bool check_pagemap(champsim::address addr);
-  void remove_from_pagemap(champsim::address addr);
 
   champsim::address compose_base_and_column(champsim::address base, uint64_t column);
 
   using prefetcher::prefetcher;
   uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                     uint32_t metadata_in, uint32_t metadata_hit);
-  uint32_t prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in);
+  uint32_t prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in, uint32_t metadata_evict);
   void prefetcher_initialize();
   // void prefetcher_branch_operate(champsim::address ip, uint8_t branch_type, champsim::address branch_target) {}
   void prefetcher_cycle_operate();
