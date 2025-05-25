@@ -85,6 +85,7 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
       bool ready1 = m_dram->check_ready(req1->command, req1->addr_vec);
       bool ready2 = m_dram->check_ready(req2->command, req2->addr_vec);
 
+
       int prio1 = get_priority(req1);
       bool blacklist1 = prio1 > 4 && req1->is_prefetch && drop_enabled;
       if(blacklist1) {
@@ -98,8 +99,11 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
         prio2 = 4;
       }
 
+
+
       bool age1 = req1->arrive <= req2->arrive;
       bool age2 = req2->arrive <= req1->arrive;
+
       //we also need to check if its a prefetch and not a row hit
       //if its a prefetch, not a row hit, and new enough that its not starving, don't serve
       if(blacklist1 ^ blacklist2) {
@@ -117,6 +121,14 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
         else
           return req2;
       }
+
+      if(req1->strict_prio ^ req2->strict_prio) {
+        if(req1->strict_prio)
+          return req1;
+        else
+          return req2;
+      }
+      
       //Highest prio, served first
       if (prio1 != prio2) {
         s_prio_scheduled++;

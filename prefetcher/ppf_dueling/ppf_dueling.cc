@@ -51,10 +51,11 @@ void ppf_dueling::prefetcher_initialize()
 }
 
 uint32_t ppf_dueling::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
-										uint32_t metadata_in)
+                                             uint32_t metadata_in, uint32_t metadata_hit)
 {
 
-
+    FILTER_SHORT.add_to_pagemap(addr);
+    FILTER_LONG.add_to_pagemap(addr);
     int duel_flag = 0;
 	long set = addr.slice(champsim::dynamic_extent{intern_->OFFSET_BITS, champsim::lg2(intern_->NUM_SET)}).to<long>();
 	if(is_sampled(set)) {
@@ -64,12 +65,15 @@ uint32_t ppf_dueling::prefetcher_cache_operate(champsim::address addr, champsim:
 			duel_flag = 2;
 	}
 
-	if(duel_flag != 0 && useful_prefetch) {
-		if(duel_flag == 1)
-			dueling_counter = dueling_counter == 0 ? 0 : dueling_counter - 1;
-		else
-			dueling_counter = dueling_counter == CNT_DUELING_MAX ? CNT_DUELING_MAX : dueling_counter + 1;
-	}
+    //fmt::print("Checking metadata_in: {}\n",metadata_in);
+	if(metadata_hit == SHORT_PAGE_DUEL_ID && useful_prefetch) {
+		dueling_counter = dueling_counter == 0 ? 0 : dueling_counter - 1;
+        //fmt::print("Logged useful prefetch for short page, set: {}\n",set);
+    }
+	else if(metadata_hit == LONG_PAGE_DUEL_ID && useful_prefetch) {
+		dueling_counter = dueling_counter == CNT_DUELING_MAX ? CNT_DUELING_MAX : dueling_counter + 1;
+        //fmt::print("Logged useful prefetch for long page, set: {}\n",set);
+    }
 
 	if(duel_flag == 0){
 		if(dueling_counter < CNT_DUELING_MAX/2)
@@ -92,6 +96,13 @@ uint32_t ppf_dueling::prefetcher_cache_operate(champsim::address addr, champsim:
 
 uint32_t ppf_dueling::do_prefetch_short(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type, uint32_t metadata_in) {
 	int distinct_pages = update_ghrs(addr,ip, cpu, cache_hit, useful_prefetch, type, metadata_in,false);
+
+    uint32_t duel_metadata = 0;
+	long set = addr.slice(champsim::dynamic_extent{intern_->OFFSET_BITS, champsim::lg2(intern_->NUM_SET)}).to<long>();
+	if(is_sampled(set)) {
+		duel_metadata = SHORT_PAGE_DUEL_ID;
+        //fmt::print("Marked this set for prefetching short page\n");
+	}
 
 	uint64_t page = addr.to<uint64_t>() >> SHORT_PAGE_BITS;
     champsim::address_slice<block_in_page_extent<SHORT_PAGE_BITS>> page_offset{addr};
@@ -166,7 +177,9 @@ uint32_t ppf_dueling::do_prefetch_short(champsim::address addr, champsim::addres
                             FILTER_SHORT.hist_tots[hist_index]++;
                         
                             //[DO NOT TOUCH]:	
-                            prefetch_line(pf_addr, (fill_level == SPP_L2C_PREFETCH),0); // Use addr (not base_addr) to obey the same physical page boundary
+                            prefetch_line(pf_addr, (fill_level == SPP_L2C_PREFETCH),duel_metadata); // Use addr (not base_addr) to obey the same physical page boundary
+                            FILTER_SHORT.add_to_pagemap(pf_addr);
+                            FILTER_LONG.add_to_pagemap(pf_addr);
                             num_pf++;
 
                             // Only for stats
@@ -237,6 +250,12 @@ uint32_t ppf_dueling::do_prefetch_short(champsim::address addr, champsim::addres
 uint32_t ppf_dueling::do_prefetch_long(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type, uint32_t metadata_in) {
 	int distinct_pages = update_ghrs(addr,ip, cpu, cache_hit, useful_prefetch, type, metadata_in,true);
 
+    uint32_t duel_metadata = 0;
+	long set = addr.slice(champsim::dynamic_extent{intern_->OFFSET_BITS, champsim::lg2(intern_->NUM_SET)}).to<long>();
+	if(is_sampled(set)) {
+		duel_metadata = LONG_PAGE_DUEL_ID;
+        //fmt::print("Marked this set for prefetching long page\n");
+	}
 
 	uint64_t page = addr.to<uint64_t>() >> LONG_PAGE_BITS;
     champsim::address_slice<block_in_page_extent<LONG_PAGE_BITS>> page_offset{addr};
@@ -310,7 +329,10 @@ uint32_t ppf_dueling::do_prefetch_long(champsim::address addr, champsim::address
                             FILTER_LONG.hist_tots[hist_index]++;
                         
                             //[DO NOT TOUCH]:	
-                            prefetch_line(pf_addr, (fill_level == SPP_L2C_PREFETCH),0); // Use addr (not base_addr) to obey the same physical page boundary
+                            prefetch_line(pf_addr, (fill_level == SPP_L2C_PREFETCH),duel_metadata); // Use addr (not base_addr) to obey the same physical page boundary
+                            FILTER_SHORT.add_to_pagemap(pf_addr);
+                            FILTER_LONG.add_to_pagemap(pf_addr);
+
                             num_pf++;
 
                             // Only for stats
@@ -526,7 +548,7 @@ void ppf_dueling::prefetcher_final_stats()
         fmt::print("depth {}: {}\n",a, depth_track_short[a]);
 		tot += depth_track_short[a];
 	}
-    fmt::print("Total: {}\n",tot);
+    fmt::print("Total: {} Filtered: {}\n",tot,FILTER_SHORT.filtered);
 	fmt::print("------------------\n");
 
 	tot = 0;
@@ -538,7 +560,7 @@ void ppf_dueling::prefetcher_final_stats()
         fmt::print("depth {}: {}\n",a, depth_track_long[a]);
 		tot += depth_track_long[a];
 	}
-    fmt::print("Total: {}\n",tot);
+    fmt::print("Total: {} Filtered: {}\n",tot, FILTER_LONG.filtered);
 	fmt::print("------------------\n");
 
 }
@@ -853,6 +875,50 @@ void ppf_dueling::PATTERN_TABLE<page_bits>::read_pattern(uint32_t curr_sig, std:
 }
 
 template<std::size_t page_bits>
+void ppf_dueling::PREFETCH_FILTER<page_bits>::add_to_pagemap(champsim::address addr) {
+  uint64_t pn = addr.to<uint64_t>() >> (champsim::lg2(PAGE_MAP_SIZE) + LOG2_BLOCK_SIZE);
+  uint64_t bn = (addr.to<uint64_t>() % (1 << (champsim::lg2(PAGE_MAP_SIZE) + LOG2_BLOCK_SIZE))) >> LOG2_BLOCK_SIZE;
+  page_map pm(pn);
+
+  auto entry = page_map_table.check_hit(pm);
+  if(entry.has_value()) {
+    entry->bits.at(bn) = page_map::PM_BASE;
+    page_map_table.fill(entry.value());
+  } else {
+    pm.bits.at(bn) = page_map::PM_BASE;
+    page_map_table.fill(pm);
+  }
+}
+template<std::size_t page_bits>
+void ppf_dueling::PREFETCH_FILTER<page_bits>::remove_from_pagemap(champsim::address addr) {
+  uint64_t pn = addr.to<uint64_t>() >> (champsim::lg2(PAGE_MAP_SIZE) + LOG2_BLOCK_SIZE);
+  uint64_t bn = (addr.to<uint64_t>() % (1 << (champsim::lg2(PAGE_MAP_SIZE) + LOG2_BLOCK_SIZE))) >> LOG2_BLOCK_SIZE;
+  page_map pm(pn);
+  auto entry = page_map_table.check_hit(pm);
+  if(entry.has_value()) {
+    entry->bits.at(bn) = 0;
+    page_map_table.fill(entry.value());
+  }
+}
+template<std::size_t page_bits>
+bool ppf_dueling::PREFETCH_FILTER<page_bits>::check_pagemap(champsim::address addr) {
+  uint64_t pn = addr.to<uint64_t>() >> (champsim::lg2(PAGE_MAP_SIZE) + LOG2_BLOCK_SIZE);
+  uint64_t bn = (addr.to<uint64_t>() % (1 << (champsim::lg2(PAGE_MAP_SIZE) + LOG2_BLOCK_SIZE))) >> LOG2_BLOCK_SIZE;
+  page_map pm(pn);
+  auto entry = page_map_table.check_hit(pm);
+  if(entry.has_value()) {
+    if(entry->bits.at(bn) == 0) {
+      return false;
+    } else {
+      entry->bits.at(bn)--;
+      page_map_table.fill(entry.value());
+      filtered++;
+      return true;
+    }
+  }
+  return false;
+}
+template<std::size_t page_bits>
 bool ppf_dueling::PREFETCH_FILTER<page_bits>::check(champsim::address check_addr, champsim::address base_addr, champsim::address ip, FILTER_REQUEST filter_request, typename champsim::block_number::difference_type cur_delta, uint32_t last_sig, uint32_t curr_sig, uint32_t conf, int32_t sum, uint32_t depth)
 {
 	PERCEPTRON<SHORT_PAGE_BITS>* PERC_SHORT = &parent_->PERC_SHORT;
@@ -953,7 +1019,7 @@ bool ppf_dueling::PREFETCH_FILTER<page_bits>::check(champsim::address check_addr
             break;
 
         case SPP_LLC_PREFETCH:
-            if ((valid[quotient] || useful[quotient]) && remainder_tag[quotient] == remainder) { 
+            if (((valid[quotient] || useful[quotient]) && remainder_tag[quotient] == remainder) /*|| check_pagemap(check_addr)*/) { 
                 if(SPP_DEBUG_PRINT) {
                     std::cout << "[FILTER] " << __func__ << " line is already in the filter check_addr: " << std::hex << check_addr << " cache_line: " << cache_line << std::dec;
                     std::cout << " quotient: " << quotient << " valid: " << valid[quotient] << " useful: " << useful[quotient] << std::endl; 

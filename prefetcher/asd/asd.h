@@ -40,6 +40,8 @@ struct asd : public champsim::modules::prefetcher {
     std::vector<uint64_t> hist;
     uint64_t global_count = 0;
 
+    double histogram_factor = 2.0; //can vary between 1 and n to set aggression (1 is 100% chance, 2 is 50%, 3 is 33%, and so on)
+
     Histogram(std::size_t bins) {
       for(auto i = 0; i < bins; i++)
         hist.push_back(0);
@@ -72,7 +74,7 @@ struct asd : public champsim::modules::prefetcher {
       assert(b_pos != 0);
 
       std::size_t depth = 0;
-      while((b_pos + depth) < hist.size() && hist.at(b_pos-1) < 2 * hist.at(b_pos + depth - 1))
+      while((b_pos + depth) < hist.size() && hist.at(b_pos-1) < histogram_factor * hist.at(b_pos + depth - 1))
         depth++;
       
       return depth;
@@ -303,6 +305,11 @@ struct asd : public champsim::modules::prefetcher {
         pf_depths.push_back(0);
         pf_strides.push_back(0);
       }
+    }
+
+    void set_histogram_factor(double factor) {
+      ActiveHist.histogram_factor = factor;
+      BuildHist.histogram_factor = factor;
     }
 
     void add_to_pagemap(champsim::address addr);

@@ -33,6 +33,8 @@ struct Request {
   bool was_dropped = false;
   bool should_drop = false;
 
+  bool strict_prio = false;
+
   int pf_distance = 0;
 
   bool back_off = false;

@@ -14,6 +14,9 @@ struct spp_ppf : public champsim::modules::prefetcher {
 
 	//#define SPP_DEBUG_PRINT
 	constexpr static bool SPP_DEBUG_PRINT = false;
+
+	constexpr static uint32_t SPP_L2C_TARGET_ID = 20;
+	constexpr static uint32_t SPP_LLC_TARGET_ID = 30;
 	//#ifdef SPP_DEBUG_PRINT
 	//#define SPP_DP(x) x
 	//#else

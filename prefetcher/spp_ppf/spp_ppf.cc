@@ -128,7 +128,7 @@ uint32_t spp_ppf::prefetcher_cache_operate(champsim::address addr, champsim::add
                             FILTER.hist_tots[hist_index]++;
                         
                             //[DO NOT TOUCH]:	
-                            prefetch_line(pf_addr, (fill_level == SPP_L2C_PREFETCH),0); // Use addr (not base_addr) to obey the same physical page boundary
+                            prefetch_line(pf_addr, (fill_level == SPP_L2C_PREFETCH),fill_level == SPP_L2C_PREFETCH ? SPP_L2C_TARGET_ID : SPP_LLC_TARGET_ID); // Use addr (not base_addr) to obey the same physical page boundary
                             num_pf++;
 
                             // Only for stats
@@ -200,8 +200,10 @@ uint32_t spp_ppf::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bo
 {
 
     //prefetch dropped
-    if(way == intern_->NUM_WAY && evicted_addr == champsim::address{})
+    if(way == intern_->NUM_WAY && evicted_addr == champsim::address{}) {
+        FILTER.check(addr, champsim::address{}, champsim::address{}, L2C_EVICT, 0, 0, 0, 0, 0, 0);
         return metadata_in;
+    }
 
     if(FILTER_ON) {
         if(SPP_DEBUG_PRINT) {

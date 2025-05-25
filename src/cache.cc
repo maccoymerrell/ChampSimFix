@@ -180,6 +180,7 @@ auto CACHE::fill_block(mshr_type mshr, uint32_t metadata) -> BLOCK
   CACHE::BLOCK to_fill;
   to_fill.valid = true;
   to_fill.prefetch = mshr.prefetch_from_this;
+  to_fill.cpu = mshr.cpu;
   to_fill.dirty = (mshr.type == access_type::WRITE);
   to_fill.address = mshr.address;
   to_fill.v_address = mshr.v_address;
@@ -289,7 +290,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
   }
   bool useless = (way != set_end && way->valid && way->prefetch);
   auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill_mshr), fill_mshr.cpu >= NUM_CPUS ? 0 : fill_mshr.cpu, useless, get_set_index(fill_mshr.address), way_idx,
-                                                  (fill_mshr.type == access_type::PREFETCH), evicting_address, fill_mshr.data_promise->pf_metadata, way != set_end && way->valid ? way->pf_metadata : 0);
+                                                  (fill_mshr.type == access_type::PREFETCH), evicting_address, fill_mshr.data_promise->pf_metadata, way != set_end && way->valid ? way->pf_metadata : 0,way != set_end && way->valid ? way->cpu : NUM_CPUS);
   
     impl_replacement_cache_fill(fill_mshr.cpu >= NUM_CPUS ? 0 : fill_mshr.cpu, get_set_index(fill_mshr.address), way_idx, module_address(fill_mshr), fill_mshr.ip, evicting_address,
                                 fill_mshr.type);
@@ -323,7 +324,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
       fmt::print("[{}] Dropped PREFETCH for {} from MSHR\n", NAME, fill_mshr.address);
     }
     auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill_mshr), fill_mshr.cpu >= NUM_CPUS ? 0 : fill_mshr.cpu, false, get_set_index(fill_mshr.address), NUM_WAY,
-                                                  (fill_mshr.type == access_type::PREFETCH), champsim::address{}, fill_mshr.data_promise->pf_metadata, 0);
+                                                  (fill_mshr.type == access_type::PREFETCH), champsim::address{}, fill_mshr.data_promise->pf_metadata, 0, NUM_CPUS);
     response_type response{fill_mshr.back_off, fill_mshr.row_act, fill_mshr.type, fill_mshr.address, fill_mshr.v_address, fill_mshr.data_promise->data, 0, fill_mshr.instr_depend_on_me};
     for (auto* ret : fill_mshr.to_return) {
       //fmt::print("\tSending response...\n");
@@ -812,7 +813,7 @@ void CACHE::manage_pq() {
     bool dupe = false;
     for (auto pq_m = (pq_it + 1); pq_m != std::end(internal_PQ); pq_m++) {
       if(champsim::block_number{pq_it->address} == champsim::block_number{pq_m->address}) {
-        if(pq_it->skip_fill == pq_m->skip_fill && pq_it->is_translated == pq_m->is_translated) {
+        if(pq_it->skip_fill == pq_m->skip_fill && pq_it->is_translated == pq_m->is_translated && pq_it->pf_metadata == pq_m->pf_metadata) {
           dupe = true;
           //merge
           std::vector<uint64_t> merged_instr{};
@@ -1440,9 +1441,9 @@ uint32_t CACHE::impl_prefetcher_cache_operate(champsim::address addr, champsim::
 }
 
 uint32_t CACHE::impl_prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, bool prefetch, champsim::address evicted_addr,
-                                           uint32_t metadata_in, uint32_t metadata_evict) const
+                                           uint32_t metadata_in, uint32_t metadata_evict, uint32_t cpu_evict) const
 {
-  return pref_module_pimpl->impl_prefetcher_cache_fill(addr, cpu, useless, set, way, prefetch, evicted_addr, metadata_in, metadata_evict);
+  return pref_module_pimpl->impl_prefetcher_cache_fill(addr, cpu, useless, set, way, prefetch, evicted_addr, metadata_in, metadata_evict, cpu_evict);
 }
 
 void CACHE::impl_prefetcher_cycle_operate() const { pref_module_pimpl->impl_prefetcher_cycle_operate(); }

@@ -76,6 +76,8 @@ class DRACScheduler : public IBHScheduler, public Implementation {
       //we also need to check if its a prefetch and not a row hit
       //if its a prefetch, not a row hit, and new enough that its not starving, don't serve
 
+
+
       //first ready, first served
       if ((ready1) ^ (ready2)) {
         m_ready_scheduled++;
@@ -85,6 +87,14 @@ class DRACScheduler : public IBHScheduler, public Implementation {
           return req2;
         }
       }
+    
+      if(req1->strict_prio ^ req2->strict_prio) {
+        if(req1->strict_prio)
+          return req1;
+        else
+          return req2;
+      }
+      
       //now do critical over non-critical
       if ((crit1) ^ (crit2)) {
         m_critical_scheduled++;

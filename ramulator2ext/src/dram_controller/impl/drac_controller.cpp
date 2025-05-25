@@ -378,7 +378,7 @@ class DRACController final : public IDRACController, public Implementation {
           if(req_it->bundled_callbacks.size() >= req_it->commands_issued) {
             req_it->addr = req_it->bundled_callbacks.at(req_it->commands_issued - 1).first;
             m_addr_map->apply(*req_it);
-            
+            req_it->strict_prio = true;
           }
         }
         if (req_it->command == req_it->final_command && (req_it->commands_issued >= 1 + req_it->bundled_callbacks.size())) {

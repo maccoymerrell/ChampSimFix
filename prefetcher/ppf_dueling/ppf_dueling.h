@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <fstream>
+#include "cache.h"
 using namespace std;
 
 struct ppf_dueling : public champsim::modules::prefetcher {
@@ -76,12 +77,38 @@ struct ppf_dueling : public champsim::modules::prefetcher {
 	constexpr static unsigned SHORT_PAGE_BITS = 12;
 	constexpr static unsigned LONG_PAGE_BITS = 21;
 
+	constexpr static uint32_t SHORT_PAGE_DUEL_ID = 1000;
+	constexpr static uint32_t LONG_PAGE_DUEL_ID = 2000;
+
+	static constexpr std::size_t PM_SETS = 32;
+  	static constexpr std::size_t PM_WAYS = 4;
+  	static constexpr std::size_t PAGE_MAP_SIZE = 64;
+
 
 	constexpr static unsigned CNT_DUELING_MAX = 32;
 
 	enum FILTER_REQUEST {SPP_L2C_PREFETCH, SPP_LLC_PREFETCH, L2C_DEMAND, L2C_EVICT, SPP_PERC_REJECT}; // Request type for prefetch filter
 
 	static uint64_t get_hash(uint64_t key);
+
+	struct page_map {
+		uint64_t page_num;
+		constexpr static std::size_t PM_BASE = 100;
+		std::array<uint8_t,PAGE_MAP_SIZE> bits;
+
+		page_map() : page_map(0) {}
+		explicit page_map(uint64_t page_num_) : page_num(page_num_) {
+			for(std::size_t i = 0; i < PAGE_MAP_SIZE; i++)
+				bits.at(i) = 0;
+		}
+  	};
+
+	struct page_map_set {
+		auto operator()(const page_map& entry) const { return entry.page_num; }
+	};
+	struct page_map_way {
+		auto operator()(const page_map& entry) const { return entry.page_num; }
+	};
 	
 
 	template<std::size_t page_bits>
@@ -151,6 +178,8 @@ struct ppf_dueling : public champsim::modules::prefetcher {
 	template<std::size_t page_bits>
 	class PREFETCH_FILTER {
 	public:
+		champsim::msl::lru_table<page_map,page_map_set,page_map_way> page_map_table{PM_SETS,PM_WAYS};
+		double filtered = 0;
 		ppf_dueling* parent_;
 		uint64_t remainder_tag[FILTER_SET];
 		champsim::address pc[FILTER_SET],
@@ -211,6 +240,10 @@ struct ppf_dueling : public champsim::modules::prefetcher {
 			}
 			train_neg = 0;
 		}
+
+		void add_to_pagemap(champsim::address addr);
+		bool check_pagemap(champsim::address addr);
+		void remove_from_pagemap(champsim::address addr);
 
 		bool     check(champsim::address pf_addr,champsim::address base_addr, champsim::address ip, FILTER_REQUEST filter_request, champsim::block_number::difference_type cur_delta, uint32_t last_sign, uint32_t cur_sign, uint32_t confidence, int32_t sum, uint32_t depth);
 	};
@@ -330,7 +363,7 @@ struct ppf_dueling : public champsim::modules::prefetcher {
 
 	using prefetcher::prefetcher;
 	uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
-										uint32_t metadata_in);
+                                             uint32_t metadata_in, uint32_t metadata_hit);
 	uint32_t do_prefetch_short(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
 											uint32_t metadata_in);
 	uint32_t do_prefetch_long(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
