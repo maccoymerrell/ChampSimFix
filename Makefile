@@ -332,7 +332,7 @@ $(test_main_name): $(call get_base_objs,TEST) $(test_base_objs) $(base_module_ob
 $(executable_name): $(call get_base_objs,$$(build_id)) $(base_module_objs) $(nonbase_module_objs) | $$(dir $$@)
 
 $(executable_name) $(test_main_name):
-	$(CXX) $(LDFLAGS) -o $@ $^ $(LOADLIBES) $(LDLIBS)
+	$(CXX) $(CPPFLAGS) $(LDFLAGS) -o $@ $^ $(LOADLIBES) $(LDLIBS)
 
 # Tests: build and run
 ifdef TEST_NUM

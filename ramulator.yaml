@@ -1,4 +1,3 @@
-
 Frontend:
   impl: ChampSim
   clock_ratio: 1
@@ -16,28 +15,40 @@ MemorySystem:
     impl: DDR5-VRR
     RFM:
     org:
-      preset: DDR5_16Gb_x16
-      channel: 2
-      rank: 1
+      preset: DDR5_16Gb_x8
+      channel: 4
+      rank: 2
       channel_width: 32
     timing:
-      preset: DDR5_3200AN
+      preset: DDR5_6400C
+    drampower_enable: true
+    voltage:
+      preset: Default
+    current:
+      preset: Default
 
   DRACController:
     impl: DRACController
     prefetch_starve_cycles: 0
     drop_enabled: false
-    read_queue_size: 160
-    write_queue_size: 160
+    read_queue_size: 320
+    write_queue_size: 320
+    prefetch_bundle: true
+    demand_bundle: false
+    bundle_length: 16
     BHScheduler:
-      impl: BHScheduler
+      impl: MinimalistScheduler
     RefreshManager:
       impl: AllBank
     RowPolicy:
       impl: OpenRowPolicy
+      #cap: 64
     plugins:
       - ControllerPlugin: {
           impl: ChampSimPlugin }
+      #- ControllerPlugin: {
+      #    impl: TraceRecorder,
+      #    path: "./powertrace.csv" }
       - ControllerPlugin: {
           impl: ActivateCounter,
           output_file: hammer_test,
@@ -46,7 +57,15 @@ MemorySystem:
           histogram_period: 500e-6 }
       - ControllerPlugin: {
           impl: RFMManager,
+          sb_mode: false,
           rfm_thresh: 16}
+      - ControllerPlugin: {
+          impl: CommandCounter,
+          commands_to_count: [],
+          path: "./trace.txt"}
 
   AddrMapper:
-    impl: ZEN4_8GB
+    impl: MINIMALIST
+    gang_size: 2
+    spacing: 2
+    debug: false

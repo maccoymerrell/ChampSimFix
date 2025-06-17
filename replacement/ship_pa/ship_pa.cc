@@ -27,9 +27,10 @@ ship_pa::ship_pa(CACHE* cache)
   assert(NUM_SET >= SET_SAMPLE_RATE); // Guarantee at least one sampled set
 
   sampler.resize(NUM_SET / SET_SAMPLE_RATE * NUM_CPUS * static_cast<std::size_t>(NUM_WAY));
+  is_prefetched = std::vector<bool>(NUM_SET * NUM_WAY,0);
   // randomly selected sampler sets
   std::generate_n(std::back_inserter(SHCT), NUM_CPUS, []() -> typename decltype(SHCT)::value_type { return {}; });
-  fmt::print("Using SHiP in {}\n",intern_->NAME);
+  fmt::print("Using PA-SHiP in {}\n",intern_->NAME);
 }
 
 int& ship_pa::get_rrpv(long set, long way) { return rrpv_values.at(static_cast<std::size_t>(set * NUM_WAY + way)); }
@@ -42,14 +43,40 @@ long ship_pa::find_victim(uint32_t triggering_cpu, uint64_t instr_id, long set, 
   auto begin = std::next(std::begin(rrpv_values), set * NUM_WAY);
   auto end = std::next(begin, NUM_WAY);
 
-  auto victim = std::max_element(begin, end);
-  if (auto rrpv_update = maxRRPV - *victim; rrpv_update != 0)
+  long victim_way = set * NUM_WAY;
+  long victim_max = 0;
+  bool found_victim = false;
+
+  long prefetch_way = set * NUM_WAY;
+  long prefetch_max = 0;
+  bool found_prefetch = false;
+
+  for(int i = set*NUM_WAY; i < (set*NUM_WAY) + NUM_WAY; i++) {
+    if(rrpv_values[i] > victim_max && !is_prefetched[i]) {
+      victim_way = i;
+      victim_max = rrpv_values[i];
+      found_victim = true;
+    }
+    if(rrpv_values[i] > prefetch_max) {
+      prefetch_way = i;
+      prefetch_max = rrpv_values[i];
+      found_prefetch = true;
+    }
+  }
+  is_prefetched[prefetch_way] = false;
+
+  //if we couldn't find an eviction candidate without considering prefetches,
+  //consider the prefetch candidate for eviction
+  if(found_prefetch && !found_victim)
+    victim_way = prefetch_way;
+
+  if (auto rrpv_update = maxRRPV - rrpv_values[victim_way]; rrpv_update != 0)
     for (auto it = begin; it != end; ++it)
       *it += rrpv_update;
 
-  assert(begin <= victim);
-  assert(victim < end);
-  return std::distance(begin, victim);
+  assert(set * NUM_WAY <= victim_way);
+  assert(victim_way < (set * NUM_WAY) + NUM_WAY);
+  return victim_way - (set*NUM_WAY);
 }
 
 // called on every cache hit and cache fill
@@ -91,10 +118,15 @@ void ship_pa::update_replacement_state(uint32_t triggering_cpu, long set, long w
     match->last_used = access_count++;
   }
 
-  if(hit && type != access_type::PREFETCH && type != access_type::PROMOTION)
+  //update prefetch bit
+  if(hit)
+    is_prefetched[(set * NUM_WAY) + way] = is_prefetched[(set * NUM_WAY) + way] && (type == access_type::PREFETCH);
+
+  //set 0 for demand, 1 for prefetch
+  if(hit && !is_prefetched[(set * NUM_WAY) + way] && type != access_type::PROMOTION)
     get_rrpv(set, way) = 0;
-  else if(hit && type == access_type::PREFETCH)
-    get_rrpv(set, way) = 1;
+  else if(hit && is_prefetched[(set * NUM_WAY) + way])
+    get_rrpv(set,way) = 1;
 }
 
 void ship_pa::replacement_cache_fill(uint32_t triggering_cpu, long set, long way, champsim::address full_addr, champsim::address ip, champsim::address victim_addr, access_type type)
@@ -105,13 +137,16 @@ void ship_pa::replacement_cache_fill(uint32_t triggering_cpu, long set, long way
     return;
   }
 
+  is_prefetched[(set * NUM_WAY) + way] = (type == access_type::PREFETCH);
+
   using namespace champsim::data::data_literals;
   // SHIP prediction
   auto SHCT_idx = ip.slice_lower<32_b>().to<std::size_t>() % SHCT_PRIME;
 
-  get_rrpv(set, way) = maxRRPV - 1;
-  if (type == access_type::PREFETCH)
-    get_rrpv(set, way) = maxRRPV - 3;
-  else if (SHCT[triggering_cpu][SHCT_idx].is_max())
+  if(is_prefetched[(set * NUM_WAY) + way])
+    get_rrpv(set,way) = maxRRPV - 2;
+  else
+    get_rrpv(set, way) = maxRRPV - 1;
+  if (SHCT[triggering_cpu][SHCT_idx].is_max())
     get_rrpv(set, way) = maxRRPV;
 }

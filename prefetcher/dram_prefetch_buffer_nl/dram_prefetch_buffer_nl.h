@@ -20,7 +20,9 @@ struct dram_prefetch_buffer_nl : public champsim::modules::prefetcher {
   constexpr static uint32_t NEXTLINE_ID = 1;
   constexpr static uint32_t BUFFER_ID = 2;
 
+  //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22};
   constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11};
+  //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,1,1,1,1,1,2,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5};
   constexpr static std::array<uint8_t,25> THRESH = {10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200,210,220,230,240,250};
 
   constexpr static int STARTING_CONF = 40;
@@ -36,12 +38,12 @@ struct dram_prefetch_buffer_nl : public champsim::modules::prefetcher {
 
   constexpr static int STREAM_FORWARD_WINDOW = 2;
 
-
-  constexpr static std::size_t MAX_DEPTH = 11;
-
   constexpr static int32_t BUFFER_MAX_NCONF = 220;
   constexpr static int32_t BUFFER_MIN_NCONF = 0;
   constexpr static std::size_t BUFFER_NCONF_STEP = 10;
+
+  constexpr static uint32_t NEXTLINE_MAX_DEPTH = 4;
+  constexpr static uint32_t NEXTLINE_MIN_DEPTH = 1;
 
   constexpr static std::size_t PM_WAYS = 4;
   constexpr static std::size_t PM_SETS = 32;
@@ -49,7 +51,11 @@ struct dram_prefetch_buffer_nl : public champsim::modules::prefetcher {
 
   constexpr static std::size_t usefulness_measure_epoch = 500000;
 
+  constexpr static float TARGET_NL_ACCURACY = 0.75;
+  constexpr static float TARGET_BUFFER_ACCURACY = 0.75;
+
   std::vector<int32_t> variable_buffer_conf;
+  std::vector<int32_t> variable_nextline_conf;
 
   constexpr static bool FORWARD = true;
   constexpr static bool BACKWARD = false;
@@ -79,6 +85,8 @@ struct dram_prefetch_buffer_nl : public champsim::modules::prefetcher {
 
   std::vector<std::size_t> global_useful_buffer;
   std::vector<std::size_t> global_useless_buffer;
+  std::vector<std::size_t> global_useful_nextline;
+  std::vector<std::size_t> global_useless_nextline;
   std::size_t epoch_counter = 0;
 
 

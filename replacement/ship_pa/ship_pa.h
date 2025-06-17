@@ -39,6 +39,9 @@ public:
   std::vector<SAMPLER_class> sampler;
   std::vector<int> rrpv_values;
 
+  // prefetch bit
+  std::vector<bool> is_prefetched;
+
   // prediction table structure
   std::vector<std::array<champsim::msl::fwcounter<champsim::msl::lg2(SHCT_MAX + 1)>, SHCT_SIZE>> SHCT;
 

@@ -15,6 +15,7 @@ uint32_t dram_prefetch_buffer_nl::prefetcher_cache_operate(champsim::address add
     //useful[cpu]++;
     //fmt::print("Increasing confidence via useful prefetch\n");
     if(metadata_hit == NEXTLINE_ID) {
+      global_useful_nextline[cpu]++;
     }
     else if (metadata_hit == BUFFER_ID)
       global_useful_buffer[cpu]++;
@@ -52,7 +53,7 @@ uint32_t dram_prefetch_buffer_nl::prefetcher_cache_operate(champsim::address add
   if(metadata_in != NEXTLINE_ID) {
     champsim::block_number pf_addr{addr};
     //fmt::print("[{}] Invoked prefetch for address: {}, hit: {}\n", intern_->NAME, addr, cache_hit);
-    for(std::size_t offset = 1; offset <= 4; offset++) {
+    for(std::size_t offset = 1; offset <= variable_nextline_conf[cpu]; offset++) {
       bool success = false;
       //we should do a confidence lookup here
         //fmt::print("[{}] \tIssued prefetch for address: {}, bank: {}, cpu: {}\n",intern_->NAME, champsim::address{pf_addr + offset}, MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(champsim::address{pf_addr + offset}),cpu);
@@ -253,7 +254,7 @@ void dram_prefetch_buffer_nl::update_walker(champsim::address addr, uint32_t cpu
   if(entry.has_value()) {
     uint8_t prev_col = entry->position;
     rw.opened_at = !is_open ? entry->position + 1 : entry->opened_at;
-    rw.confidence = intern_->get_mshr_size() <= intern_->get_mshr_occupancy() ? entry->confidence * 0.9 : entry->confidence;
+    rw.confidence = entry->confidence;
     //rw.confidence = intern_->get_pq_occupancy().back() >= 16 ? entry->confidence * 0.9 : entry->confidence;
     //rw.confidence = entry->confidence;
     std::size_t depth = get_depth(rw.confidence,cpu);
@@ -261,40 +262,11 @@ void dram_prefetch_buffer_nl::update_walker(champsim::address addr, uint32_t cpu
     //issue prefetches backwards
     //if(rw.confidence >= 50) {
     bool all_success = true;
-      if(col > prev_col + 1 /*&& (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()) < intern_->get_mshr_size()*0.7*/) {
-        //fmt::print("Filling backwards gap at row: {} rb: {} between columns:{} - {}\n",row,rb,prev_col + 1,col - 1);
-        int amount_to_prefetch = std::min(depth,intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()));
-        int prefetched_so_far = 0;
-        for(int i = (int)col - 1; i > prev_col && i > (int)col - amount_to_prefetch; i--) {
-          bool success = true;
-          bool pm = check_pagemap(compose_base_and_column(addr,i),cpu);
-          if(!pm) {
-            success = prefetch_line(compose_base_and_column(addr,i),true,cpu,BUFFER_ID,false,false);
-            if(success) {
-              add_to_pagemap(compose_base_and_column(addr,i),cpu);
-              //rw.confidence = modify_confidence(rw.confidence,1,false);
-              if(!intern_->warmup)
-                backward_buffer_issued += 1;
-            } else if(!intern_->warmup) {
-              prefetches_rejected++;
-            }
-          } else if (!intern_->warmup) {
-            prefetches_filtered++;
-          }
-          if(success)
-            prefetched_so_far++;
-          else {
-            all_success = false;
-            //rw.confidence *= 0.9;
-            break;
-          }
-            
-        }
-        rw.position = all_success ? col : prev_col + prefetched_so_far;
-      }
       //issue prefetches forwards
-      if(col >= rw.opened_at/*&& (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()) < intern_->get_mshr_size()*0.7*/) {
-        int amount_to_prefetch = std::min(depth,intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()));
+      //if(col >= rw.opened_at/*&& (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()) < intern_->get_mshr_size()*0.7*/) {
+        //int amount_to_prefetch = std::min(depth,(intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()))/2);
+        int amount_to_prefetch = std::min(depth,(intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back())));
+        //int amount_to_prefetch = depth;
         int prefetched_so_far = 0;
         //fmt::print("Prefetching forwards at row: {} rb: {} between columns:{} - {}\n",row,rb,col + 1,col + amount_to_prefetch > 63 ? 63 : col + amount_to_prefetch);
         for(int i = col + 1; i < (1 << (column_bits.size())) && i <= col + amount_to_prefetch; i++) {
@@ -321,7 +293,7 @@ void dram_prefetch_buffer_nl::update_walker(champsim::address addr, uint32_t cpu
           }
         }
         rw.position = col + prefetched_so_far;
-      }
+      //}
     //}
     
     row_walker_table[rb].fill(rw);
@@ -370,7 +342,10 @@ void dram_prefetch_buffer_nl::prefetcher_initialize() {
   for(int i = 0; i < NUM_CPUS; i++) {
     global_useful_buffer.push_back(0);
     global_useless_buffer.push_back(0);
+    global_useful_nextline.push_back(0);
+    global_useless_nextline.push_back(0);
     variable_buffer_conf.push_back(BUFFER_MIN_NCONF);
+    variable_nextline_conf.push_back(NEXTLINE_MAX_DEPTH);
   }
 }
 
@@ -392,8 +367,10 @@ uint32_t dram_prefetch_buffer_nl::prefetcher_cache_fill(champsim::address addr, 
   }
   if(metadata_evict == BUFFER_ID && useless && cpu_evict != NUM_CPUS)
     global_useless_buffer[cpu_evict]++;
-  else if (metadata_evict == NEXTLINE_ID && useless && metadata_in == BUFFER_ID)
+  else if (metadata_evict == NEXTLINE_ID && useless && metadata_in == BUFFER_ID && cpu_evict != NUM_CPUS)
     global_useless_buffer[cpu]++;
+  else if (metadata_evict == NEXTLINE_ID && useless && cpu_evict != NUM_CPUS)
+    global_useless_nextline[cpu]++;
   
   if(evicted_addr != champsim::address{}) {
     for(int i = 0; i < NUM_CPUS; i++)
@@ -450,17 +427,24 @@ void dram_prefetch_buffer_nl::prefetcher_cycle_operate() {
   if(epoch_counter >= usefulness_measure_epoch) {
     for(int i = 0; i < NUM_CPUS; i++) {
       double global_usefulness_buffer = (global_useless_buffer[i] <= 100 || (global_useful_buffer[i] + global_useless_buffer[i] <= 100)) ? 1.0 : (global_useful_buffer[i]) / (double)(global_useless_buffer[i] + global_useful_buffer[i]);
-
-      fmt::print("CPU: {} Buffer usefulness: {} ({}/{})\n",i,global_usefulness_buffer,global_useful_buffer[i],global_useless_buffer[i]);
+      double global_usefulness_nextline = (global_useless_nextline[i] <= 100 || (global_useful_nextline[i] + global_useless_nextline[i] <= 100)) ? 1.0 : (global_useful_nextline[i]) / (double)(global_useless_nextline[i] + global_useful_nextline[i]);
+      fmt::print("CPU: {} Buffer usefulness: {} ({}/{}) Nextline usefulness: {} ({}/{})\n",i,global_usefulness_buffer,global_useful_buffer[i],global_useless_buffer[i],global_usefulness_nextline,global_useful_nextline[i],global_useless_nextline[i]);
       global_useless_buffer[i] = 0;
       global_useful_buffer[i] = 0;
+      global_useless_nextline[i] = 0;
+      global_useful_nextline[i] = 0;
       
-      if(global_usefulness_buffer > 0.75)
+      if(global_usefulness_buffer > TARGET_BUFFER_ACCURACY)
         variable_buffer_conf[i] = variable_buffer_conf[i] < BUFFER_NCONF_STEP + BUFFER_MIN_NCONF ? BUFFER_MIN_NCONF : variable_buffer_conf[i] - BUFFER_NCONF_STEP;
       else
         variable_buffer_conf[i] = variable_buffer_conf[i] + BUFFER_NCONF_STEP > BUFFER_MAX_NCONF ? BUFFER_MAX_NCONF : variable_buffer_conf[i] + BUFFER_NCONF_STEP;
 
-      fmt::print("\tBuffer confidence modifier: {}\n",variable_buffer_conf[i]);
+      if(global_usefulness_nextline > TARGET_NL_ACCURACY)
+        variable_nextline_conf[i] = variable_nextline_conf[i] + 1 > NEXTLINE_MAX_DEPTH ? NEXTLINE_MAX_DEPTH : variable_nextline_conf[i] + 1;
+      else
+        variable_nextline_conf[i] = variable_nextline_conf[i] < NEXTLINE_MIN_DEPTH + 1 ? NEXTLINE_MIN_DEPTH : variable_nextline_conf[i] - 1;
+
+      fmt::print("\tBuffer confidence modifier: {} Next line: {}\n",variable_buffer_conf[i],variable_nextline_conf[i]);
     }
     epoch_counter = 0;
   }

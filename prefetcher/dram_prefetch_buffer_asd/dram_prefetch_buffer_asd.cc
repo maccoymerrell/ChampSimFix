@@ -283,7 +283,7 @@ void dram_prefetch_buffer_asd::update_walker(champsim::address addr, uint32_t cp
   if(entry.has_value()) {
     uint8_t prev_col = entry->position;
     rw.opened_at = !is_open ? entry->position + 1 : entry->opened_at;
-    rw.confidence = intern_->get_mshr_size() <= intern_->get_mshr_occupancy() ? entry->confidence * 0.9 : entry->confidence;
+    rw.confidence = entry->confidence;
     //rw.confidence = intern_->get_pq_occupancy().back() >= 16 ? entry->confidence * 0.9 : entry->confidence;
     //rw.confidence = entry->confidence;
     std::size_t depth = get_depth(rw.confidence,cpu);
@@ -291,40 +291,11 @@ void dram_prefetch_buffer_asd::update_walker(champsim::address addr, uint32_t cp
     //issue prefetches backwards
     //if(rw.confidence >= 50) {
     bool all_success = true;
-      if(col > prev_col + 1 /*&& (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()) < intern_->get_mshr_size()*0.7*/) {
-        //fmt::print("Filling backwards gap at row: {} rb: {} between columns:{} - {}\n",row,rb,prev_col + 1,col - 1);
-        int amount_to_prefetch = std::min(depth,intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()));
-        int prefetched_so_far = 0;
-        for(int i = (int)col - 1; i > prev_col && i > (int)col - amount_to_prefetch; i--) {
-          bool success = true;
-          bool pm = ASD_Modules.at(cpu).check_pagemap(compose_base_and_column(addr,i));
-          if(!pm) {
-            success = prefetch_line(compose_base_and_column(addr,i),true,cpu,BUFFER_ID,false,false);
-            if(success) {
-              ASD_Modules.at(cpu).add_to_pagemap(compose_base_and_column(addr,i));
-              //rw.confidence = modify_confidence(rw.confidence,1,false);
-              if(!intern_->warmup)
-                backward_buffer_issued += 1;
-            } else if(!intern_->warmup) {
-              prefetches_rejected++;
-            }
-          } else if (!intern_->warmup) {
-            prefetches_filtered++;
-          }
-          if(success)
-            prefetched_so_far++;
-          else {
-            all_success = false;
-            //rw.confidence *= 0.9;
-            break;
-          }
-            
-        }
-        rw.position = all_success ? col : prev_col + prefetched_so_far;
-      }
       //issue prefetches forwards
-      if(col >= rw.opened_at/*&& (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()) < intern_->get_mshr_size()*0.7*/) {
-        int amount_to_prefetch = std::min(depth,intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()));
+      //if(col >= rw.opened_at/*&& (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()) < intern_->get_mshr_size()*0.7*/) {
+        //int amount_to_prefetch = std::min(depth,(intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back()))/2);
+        int amount_to_prefetch = std::min(depth,(intern_->get_mshr_size() - (intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back())));
+        //int amount_to_prefetch = depth;
         int prefetched_so_far = 0;
         //fmt::print("Prefetching forwards at row: {} rb: {} between columns:{} - {}\n",row,rb,col + 1,col + amount_to_prefetch > 63 ? 63 : col + amount_to_prefetch);
         for(int i = col + 1; i < (1 << (column_bits.size())) && i <= col + amount_to_prefetch; i++) {
@@ -351,7 +322,7 @@ void dram_prefetch_buffer_asd::update_walker(champsim::address addr, uint32_t cp
           }
         }
         rw.position = col + prefetched_so_far;
-      }
+      //}
     //}
     
     row_walker_table[rb].fill(rw);
@@ -487,12 +458,12 @@ void dram_prefetch_buffer_asd::prefetcher_cycle_operate() {
       global_useless_asd_up[i] = 0;
       global_useless_asd_down[i] = 0;
       
-      if(global_usefulness_buffer > 0.75)
+      if(global_usefulness_buffer > TARGET_BUFFER_ACCURACY)
         variable_buffer_conf[i] = variable_buffer_conf[i] < BUFFER_NCONF_STEP + BUFFER_MIN_NCONF ? BUFFER_MIN_NCONF : variable_buffer_conf[i] - BUFFER_NCONF_STEP;
       else
         variable_buffer_conf[i] = variable_buffer_conf[i] + BUFFER_NCONF_STEP > BUFFER_MAX_NCONF ? BUFFER_MAX_NCONF : variable_buffer_conf[i] + BUFFER_NCONF_STEP;
 
-      if(global_usefulness_asd > 0.75)
+      if(global_usefulness_asd > TARGET_ASD_ACCURACY)
         variable_asd_thresh[i] = std::min(variable_asd_thresh[i] + ASD_THRESH_STEP, ASD_MAX_THRESH);
       else if(global_usefulness_asd < 0.75) {
         variable_asd_thresh[i] = variable_asd_thresh[i] - ASD_THRESH_STEP;
@@ -545,5 +516,10 @@ void dram_prefetch_buffer_asd::prefetcher_final_stats() {
   fmt::print("PER ROWBUFFER:(RB, CONF, TRACKED)\n");
   for (int i = 0; i < row_walker_table.size(); i++) {
     fmt::print("\t{}: {} {}\n",i,confidence_total_per_rb[i] / (double)tracked_rows_per_rb[i], tracked_rows_per_rb[i]);
+  }
+
+  for(int i = 0; i < NUM_CPUS; i++) {
+    fmt::print("ASD for Core {}:\n",i);
+    ASD_Modules.at(i).print_stats();
   }
 }
