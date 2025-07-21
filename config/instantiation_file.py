@@ -152,7 +152,9 @@ def get_cache_builder(elem, ul_pairs):
         ('pqm', True): '.set_pqm_enable()',
         ('pqm', False): '.reset_pqm_enable()',
         ('cc', True): '.set_cc_enable()',
-        ('cc', False):'.reset_cc_enable()'
+        ('cc', False):'.reset_cc_enable()',
+        ('partition_cache', True): '.set_partition_cache()',
+        ('partition_cache',False): '.reset_partition_cache()'
     }
 
     uppers = (v for v in ul_pairs if v[0] == elem.get('name'))

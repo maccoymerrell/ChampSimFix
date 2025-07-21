@@ -92,6 +92,8 @@ MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::chrono::picoseconds dbus_period, 
   }
 
   DRAM_CONTROLLER = this;
+
+  complete_cpus = std::vector<bool>(NUM_CPUS,false);
 }
 
   DRAM_CHANNEL::DRAM_CHANNEL(champsim::chrono::picoseconds dbus_period, champsim::chrono::picoseconds mc_period, std::size_t t_rp, std::size_t t_rcd, std::size_t t_cas,
@@ -177,8 +179,12 @@ void MEMORY_CONTROLLER::end_phase(unsigned cpu)
    //finalize ramulator (if not warmup)
   if(!warmup)
   {
-    ramulator2_frontend->finalize();
-    ramulator2_memorysystem->finalize();
+    complete_cpus[cpu] = true;
+    int sum = std::accumulate(std::begin(complete_cpus),std::end(complete_cpus), 0);
+    if(sum == NUM_CPUS) {
+      ramulator2_frontend->finalize();
+      ramulator2_memorysystem->finalize();
+    }
   }
 
   //grab stats from each channel for ramulator

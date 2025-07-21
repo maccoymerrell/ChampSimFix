@@ -9,7 +9,7 @@ uint32_t asd::prefetcher_cache_operate(champsim::address addr, champsim::address
   //  return metadata_in;
   ASD_Modules.at(cpu).add_to_pagemap(addr);
 
-  auto [depth,stride] = ASD_Modules.at(cpu).get_prefetch_depth(addr);
+  auto [depth,stride] = ASD_Modules.at(cpu).get_prefetch_depth(addr, ip);
   //modulate depth according to MSHR occupancy
   if(intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back() > 0.9 * intern_->get_mshr_size())
     depth = std::min(MAX_PREFETCH / 8, depth);
@@ -18,14 +18,8 @@ uint32_t asd::prefetcher_cache_operate(champsim::address addr, champsim::address
   else if(intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back() > 0.5 * intern_->get_mshr_size())
     depth = std::min(MAX_PREFETCH / 2, depth);
 
-  if(!intern_->warmup) {
-    if(stride < num_bins)
-      ASD_Modules.at(cpu).pf_strides.at(stride)++;
-      ASD_Modules.at(cpu).pf_depths.at(depth)++;
-  }
-
-  for(int i = stride; i < depth; i += stride) {
-    champsim::address pf_addr = champsim::address{champsim::block_number{addr} + i};
+  for(int i = 1; i <= depth; i++) {
+    champsim::address pf_addr = champsim::address{champsim::block_number{addr} + i*stride};
     if(champsim::page_number{pf_addr} != champsim::page_number{addr})
       continue;
     //fmt::print("Issuing prefetch for address: {}\n",pf_addr);
@@ -33,7 +27,7 @@ uint32_t asd::prefetcher_cache_operate(champsim::address addr, champsim::address
     bool pm = ASD_Modules.at(cpu).check_pagemap(pf_addr);
     bool success = true;
     if(!pm) {
-      success = prefetch_line(pf_addr,true,cpu,0,false,false);
+      success = prefetch_line(pf_addr,true,cpu,ip,0,false,false);
     } else if (!intern_->warmup) {
       ASD_Modules.at(cpu).filtered_prefetches++;
     }
@@ -66,6 +60,10 @@ void asd::prefetcher_final_stats() {
 
 uint32_t asd::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
+if(evicted_addr != champsim::address{})
+	for(int i = 0; i < NUM_CPUS; i++)
+	ASD_Modules.at(i).remove_from_pagemap(evicted_addr);
+
   return metadata_in;
 }
 

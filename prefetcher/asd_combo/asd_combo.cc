@@ -7,7 +7,7 @@ uint32_t asd_combo::prefetcher_cache_operate(champsim::address addr, champsim::a
   ASD_Modules.at(cpu).add_to_pagemap(addr);
 
   if(metadata_in != ASD_ID) {
-    auto [depth_base, stride_base] = ASD_Modules.at(cpu).get_prefetch_depth(addr);
+    auto [depth_base, stride_base] = ASD_Modules.at(cpu).get_prefetch_depth(addr, ip);
     //modulate depth according to MSHR occupancy
     if(intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back() > 0.9 * intern_->get_mshr_size())
       depth_base = std::min(asd::MAX_PREFETCH / 8, depth_base);
@@ -15,23 +15,17 @@ uint32_t asd_combo::prefetcher_cache_operate(champsim::address addr, champsim::a
       depth_base = std::min(asd::MAX_PREFETCH / 4, depth_base);
     else if(intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back() > 0.5 * intern_->get_mshr_size())
       depth_base = std::min(asd::MAX_PREFETCH / 2, depth_base);
-    
-    if(!intern_->warmup) {
-      if(stride_base < num_bins)
-        ASD_Modules.at(cpu).pf_strides.at(stride_base)++;
-        ASD_Modules.at(cpu).pf_depths.at(depth_base)++;
-    }
 
-    for(int i = stride_base; i < depth_base; i+= stride_base) {
+    for(int i = 1; i <= depth_base; i++) {
 
-      champsim::address pf_addr = champsim::address{champsim::block_number{addr} + i};
+      champsim::address pf_addr = champsim::address{champsim::block_number{addr} + i*stride_base};
       if(champsim::page_number{pf_addr} != champsim::page_number{addr})
         continue;
 
       bool pm = ASD_Modules.at(cpu).check_pagemap(pf_addr);
       bool success = true;
       if(!pm) {
-        success = prefetch_line(pf_addr,true,cpu,ASD_ID,false,true);
+        success = prefetch_line(pf_addr,true,cpu,ip,ASD_ID,false,true);
       } else if (!intern_->warmup) {
         ASD_Modules.at(cpu).filtered_prefetches++;
       }
@@ -68,7 +62,7 @@ uint32_t asd_combo::prefetcher_cache_operate(champsim::address addr, champsim::a
         bool pm_col = ASD_COL_Modules.at(cpu).check_pagemap(pf_addr_col);
         bool success_col = true;
         if(!pm_col) {
-          success_col = prefetch_line(pf_addr_col,true,cpu,0,false,false);
+          success_col = prefetch_line(pf_addr_col,true,cpu,ip,0,false,false);
         } else if (!intern_->warmup) {
           ASD_COL_Modules.at(cpu).filtered_prefetches++;
         }

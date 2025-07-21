@@ -26,9 +26,9 @@ bool champsim::modules::prefetcher::prefetch_line(champsim::address pf_addr, boo
   return intern_->prefetch_line(pf_addr, fill_this_level, prefetch_metadata);
 }
 
-bool champsim::modules::prefetcher::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t pf_cpu, uint32_t prefetch_metadata, bool skip_tag_check, bool return_hit_status) const
+bool champsim::modules::prefetcher::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t pf_cpu, champsim::address pf_ip, uint32_t prefetch_metadata, bool skip_tag_check, bool return_hit_status) const
 {
-  return intern_->prefetch_line(pf_addr, fill_this_level, pf_cpu, prefetch_metadata, skip_tag_check, return_hit_status);
+  return intern_->prefetch_line(pf_addr, fill_this_level, pf_cpu, pf_ip, prefetch_metadata, skip_tag_check, return_hit_status);
 }
 
 // LCOV_EXCL_START Exclude deprecated function

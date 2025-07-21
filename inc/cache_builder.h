@@ -61,6 +61,7 @@ struct cache_builder_base {
   bool m_pqm_enabled{};
   bool m_mqc_enabled{};
   bool m_cc_enabled{};
+  bool m_partition_cache{};
 
   std::vector<access_type> m_pref_act_mask{access_type::LOAD, access_type::PREFETCH};
   std::vector<champsim::channel*> m_uls{};
@@ -216,6 +217,12 @@ public:
   */
   self_type& set_mqc_enable();
   self_type& reset_mqc_enable();
+
+  /** 
+  * Specify that a prefetch-miss-queue should be created, and try to balance bank requests 
+  */
+  self_type& set_partition_cache();
+  self_type& reset_partition_cache();
 
   /** 
   * Specify that a prefetch-miss-queue should be created, and try to balance bank requests 
@@ -526,6 +533,20 @@ template <typename P, typename R>
 auto champsim::cache_builder<P, R>::reset_pqm_enable() -> self_type&
 {
   m_pqm_enabled = false;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::set_partition_cache() -> self_type&
+{
+  m_partition_cache = true;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::reset_partition_cache() -> self_type&
+{
+  m_partition_cache = false;
   return *this;
 }
 

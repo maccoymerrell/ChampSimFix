@@ -100,7 +100,7 @@ uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::add
 
         if (champsim::page_number{pf_addr} == page) { // Prefetch request is in the same physical page
           if (FILTER.check(pf_addr, ((confidence_q[i] >= FILL_THRESHOLD) ? spp_dev::SPP_L2C_PREFETCH : spp_dev::SPP_LLC_PREFETCH))) {
-            prefetch_line(pf_addr, (confidence_q[i] >= FILL_THRESHOLD), cpu,0); // Use addr (not base_addr) to obey the same physical page boundary
+            prefetch_line(pf_addr, (confidence_q[i] >= FILL_THRESHOLD), cpu, ip, 0); // Use addr (not base_addr) to obey the same physical page boundary
 
             if (confidence_q[i] >= FILL_THRESHOLD) {
               GHR.pf_issued++;

@@ -6,6 +6,7 @@ _configuration.mk
 
 bin/
 bin_no_prom/
+results/
 
 **/*.o
 **/*.d

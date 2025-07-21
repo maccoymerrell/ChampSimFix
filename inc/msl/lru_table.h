@@ -78,7 +78,7 @@ private:
     value_type data;
   };
   using block_vec_type = std::vector<block_t>;
-  using diff_type = typename block_vec_type::difference_type;
+  using diff_type = uint64_t;
 
   SetProj set_projection;
   TagProj tag_projection;
@@ -179,6 +179,12 @@ public:
     }
 
     return std::exchange(*hit, {}).data;
+  }
+
+  void flush() {
+    for (auto &b : block) {
+      b.last_used = 0;
+    }
   }
 
   block_vec_type get_contents() {

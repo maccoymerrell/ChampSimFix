@@ -399,11 +399,11 @@ class DRACController final : public IDRACController, public Implementation {
           if (m_dram->m_command_meta(req_it->command).is_opening) {
             if(debug)
               fmt::print("[MEMORY CONTROLLER] Opening row for request: {:#x} promotion: {} prefetch: {} dropped: {} cycle: {}\n",req_it->addr, req_it->was_promoted, req_it->is_prefetch, req_it->was_dropped, m_clk);
-              bool success = m_active_buffer.enqueue(*req_it);
+            bool success = m_active_buffer.enqueue(*req_it);
               if(debug)
                 fmt::print("[MEMORY CONTROLLER] Opening row for request: {:#x} promotion: {} prefetch: {} dropped: {} cycle: {} success: {}\n",req_it->addr, req_it->was_promoted, req_it->is_prefetch, req_it->was_dropped, m_clk,success);
-
-            buffer->remove(req_it);
+            if(success)
+              buffer->remove(req_it);
           }
         }
       }

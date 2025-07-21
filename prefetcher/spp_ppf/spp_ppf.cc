@@ -126,9 +126,8 @@ uint32_t spp_ppf::prefetcher_cache_operate(champsim::address addr, champsim::add
                             int32_t perc_sum_shifted = perc_sum + (PERC_COUNTER_MAX+1)*PERC_FEATURES; 
                             int32_t hist_index = perc_sum_shifted / 10;
                             FILTER.hist_tots[hist_index]++;
-                        
                             //[DO NOT TOUCH]:	
-                            prefetch_line(pf_addr, (fill_level == SPP_L2C_PREFETCH),fill_level == SPP_L2C_PREFETCH ? SPP_L2C_TARGET_ID : SPP_LLC_TARGET_ID); // Use addr (not base_addr) to obey the same physical page boundary
+                            prefetch_line(pf_addr, (fill_level == SPP_L2C_PREFETCH),cpu,ip,fill_level == SPP_L2C_PREFETCH ? SPP_L2C_TARGET_ID : SPP_LLC_TARGET_ID,false,false); // Use addr (not base_addr) to obey the same physical page boundary
                             num_pf++;
 
                             // Only for stats

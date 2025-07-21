@@ -15,6 +15,17 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
   constexpr static std::size_t RW_WAYS = 32;
   constexpr static std::size_t RW_SETS = 128;
 
+  constexpr static bool ENABLE_IP_BLACKLIST = true;
+  constexpr static std::size_t IP_BLACKLIST_SETS = 16;
+  constexpr static std::size_t IP_BLACKLIST_WAYS = 4;
+  constexpr static uint8_t IP_BLACKLIST_THRESH = 4;
+  constexpr static std::size_t IP_BLACKLIST_HARMFUL = 0;
+  constexpr static std::size_t IP_BLACKLIST_USEFUL = 1;
+  constexpr static std::size_t IP_BLACKLIST_DEMAND = 2;
+
+  //constexpr static std::size_t IP_TRACKING_SETS = 64;
+  //constexpr static std::size_t IP_TRACKING_WAYS = 8;
+
   constexpr static std::size_t CONF_MAX = 255;
   constexpr static std::size_t CONF_DROP_THRESH = 0;
 
@@ -48,10 +59,13 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
   constexpr static int32_t BUFFER_MIN_NCONF = 0;
   constexpr static std::size_t BUFFER_NCONF_STEP = 10;
 
-  constexpr static float TARGET_ASD_ACCURACY = 0.75;
-  constexpr static float TARGET_BUFFER_ACCURACY = 0.75;
+  constexpr static float TARGET_ASD_ACCURACY = 0.65;
+  constexpr static float TARGET_BUFFER_ACCURACY = 0.65;
 
   constexpr static std::size_t usefulness_measure_epoch = 500000;
+  constexpr static std::size_t usefulness_measure_print_interval = 1;
+
+  constexpr static std::size_t blacklist_reset_interval =  10000000;
 
   std::vector<int32_t> variable_buffer_conf;
   std::vector<double> variable_asd_thresh;
@@ -72,6 +86,9 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
   double prefetches_dropped_too_far_forward = 0;
   double pp_thrashes = 0;
 
+  double conflict_filters = 0;
+  double ip_not_found = 0;
+
   double conf_demand_stream = 0;
   double conf_demand_random = 0;
   double conf_prefetch_stream = 0;
@@ -86,7 +103,13 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
   std::vector<std::size_t> global_useful_asd;
   std::vector<std::size_t> global_useless_buffer;
   std::vector<std::size_t> global_useless_asd;
+
+  std::vector<double> global_usefulness_asd;
+  std::vector<double> global_usefulness_buffer;
+
   std::size_t epoch_counter = 0;
+  uint64_t epochs = 0;
+  uint64_t blacklist_counter = 0;
 
   std::vector<std::size_t> global_useless_asd_up;
   std::vector<std::size_t> global_useful_asd_up;
@@ -112,7 +135,7 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
   std::vector<champsim::msl::lru_table<row_walker,row_walker_set,row_walker_way>> row_walker_table;
 
   bool should_drop_prefetch(champsim::address addr, uint32_t cpu);
-  void update_walker(champsim::address addr, uint32_t cpu);
+  void update_walker(champsim::address addr, uint32_t cpu, champsim::address ip, bool is_blacklisted);
   void increase_confidence_useful(champsim::address addr);
   void increase_confidence_stream(champsim::address addr, bool prefetch);
   void increase_confidence_opened(champsim::address addr);
@@ -129,6 +152,37 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
     uint8_t position = 0;
   };
 
+  struct ip_blacklist_counter {
+    champsim::address ip;
+    uint8_t counter = 0;
+
+    ip_blacklist_counter() : ip_blacklist_counter(champsim::address{}) {}
+    explicit ip_blacklist_counter(champsim::address ip_) : ip(ip_) {} 
+  };
+  struct ip_blacklist_set {
+    auto operator()(const ip_blacklist_counter& entry) const {return entry.ip;}
+  };
+  struct ip_blacklist_way {
+    auto operator()(const ip_blacklist_counter& entry) const {return entry.ip;}
+  };
+
+  /*struct ip_tracking_table_entry {
+    champsim::address pf_addr;
+    champsim::address ip_addr;
+    ip_tracking_table_entry() : ip_tracking_table_entry(champsim::address{},champsim::address{}) {}
+    explicit ip_tracking_table_entry(champsim::address pf, champsim::address ip) : pf_addr(pf), ip_addr(ip) {} 
+  };
+  struct ip_tracking_set {
+    auto operator()(const ip_tracking_table_entry& entry) const {return entry.pf_addr;}
+  };
+  struct ip_tracking_way {
+    auto operator()(const ip_tracking_table_entry& entry) const {return entry.pf_addr;}
+  };*/
+
+  std::vector<champsim::msl::lru_table<ip_blacklist_counter,ip_blacklist_set,ip_blacklist_way>> ip_blacklist_table;
+
+  //std::vector<champsim::msl::lru_table<ip_tracking_table_entry,ip_tracking_set,ip_tracking_way>> ip_tracking_table;
+
   //row state table
   std::vector<row_open_table_entry> row_open_table;
 
@@ -137,6 +191,13 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
 
   std::size_t num_bins;
   std::vector<asd::ASD_Module> ASD_Modules;
+
+  void reset_ip_blacklist();
+  bool is_ip_blacklisted(champsim::address ip, uint32_t cpu);
+  void update_ip_blacklist(std::size_t collision_type, champsim::address ip, uint32_t cpu, uint32_t victim_cpu, uint32_t target_prefetcher, uint32_t victim_prefetcher);
+
+  //champsim::address get_ip(champsim::address pf_addr, uint32_t cpu);
+  //void log_ip(champsim::address pf_addr, champsim::address ip_addr, uint32_t cpu);
 
 
   void update_row_open_table(champsim::address addr);
@@ -147,7 +208,7 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
   using prefetcher::prefetcher;
   uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                     uint32_t metadata_in, uint32_t metadata_hit);
-  uint32_t prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in, uint32_t metadata_evict, uint32_t cpu_evict);
+  uint32_t prefetcher_cache_fill(champsim::address addr, champsim::address ip, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in, uint32_t metadata_evict, uint32_t cpu_evict);
   void prefetcher_initialize();
   // void prefetcher_branch_operate(champsim::address ip, uint8_t branch_type, champsim::address branch_target) {}
   void prefetcher_cycle_operate();

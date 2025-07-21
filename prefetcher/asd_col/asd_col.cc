@@ -34,7 +34,7 @@ uint32_t asd_col::prefetcher_cache_operate(champsim::address addr, champsim::add
     bool pm = ASD_COL_Modules.at(cpu).check_pagemap(pf_addr);
     bool success = true;
     if(!pm) {
-      success = prefetch_line(pf_addr,true,cpu,0,false,false);
+      success = prefetch_line(pf_addr,true,cpu,ip,0,false,false);
     } else if (!intern_->warmup) {
       ASD_COL_Modules.at(cpu).filtered_prefetches++;
     }

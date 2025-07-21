@@ -32,6 +32,7 @@ target_sources(
   
   impl/rowpolicy/basic_rowpolicies.cpp
   impl/rowpolicy/minimalist_rowpolicy.cpp
+  impl/rowpolicy/adaptive_rowpolicy.cpp
 
   impl/plugin/trace_recorder.cpp
   impl/plugin/cmd_counter.cpp

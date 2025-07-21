@@ -24,10 +24,14 @@
 struct asd : public champsim::modules::prefetcher {
 
   static constexpr bool FORCE_4KiB_PAGES = true;
+  static constexpr bool PAGE_MATCH = true;
+  static constexpr bool IP_MATCH = false;
+
   static constexpr std::size_t MAX_PREFETCH = 22;
   static constexpr std::size_t MAX_STREAMS = 32;
   static constexpr std::size_t MAX_STRIDE = 8;
-  static constexpr std::size_t AGE = 64;
+  static constexpr std::size_t MAX_DEPTH = 64;
+  static constexpr std::size_t AGE = MAX_STREAMS*4;
   static constexpr uint64_t EPOCH_MAX = 8192;
   static constexpr uint64_t EPOCH_MIN = 256;
   static constexpr double DIFF_THRESH = 0.1;
@@ -184,7 +188,8 @@ struct asd : public champsim::modules::prefetcher {
 
   struct Streamer {
     uint64_t age = 0;
-    champsim::block_number base{};
+    champsim::block_number pos{};
+    champsim::address ip{};
     std::size_t depth = 0;
     //add stride?
     std::size_t stride = 0;
@@ -194,43 +199,49 @@ struct asd : public champsim::modules::prefetcher {
   struct StreamBuffer {
     std::vector<Streamer> streams;
 
-    std::pair<std::size_t,std::size_t> check_stream(champsim::address addr) {
+    std::pair<std::size_t,std::size_t> check_stream(champsim::address addr, champsim::address ip) {
       //search for match
       //if no match, check size,
       std::size_t victim = streams.size();
       for(int i = 0; i < streams.size(); i++) {
         streams.at(i).age++;
-        //if next location is above or equal to block number, and previous location is below or equal to block number
-        if(streams.at(i).base + streams.at(i).depth + (MAX_STRIDE)  >= champsim::block_number{addr} && streams.at(i).base + (streams.at(i).depth) < champsim::block_number{addr}) {
-          //if we crossed a page boundary
-          if((champsim::address{streams.at(i).base}.to<uint64_t>() >> 12) != (addr.to<uint64_t>() >> 12) && FORCE_4KiB_PAGES) {
+        if(((streams.at(i).ip == ip) && IP_MATCH) || 
+          (PAGE_MATCH && (streams.at(i).pos + (MAX_STRIDE)  >= champsim::block_number{addr} && streams.at(i).pos < champsim::block_number{addr}))) {
+          //if force 4KiB pages, kill streams after end of 4KiB page
+          //if not force 4KiB pages, kill streams after end of regular page
+          if((PAGE_MATCH && !IP_MATCH && FORCE_4KiB_PAGES && (champsim::address{streams.at(i).pos}.to<uint64_t>() >> 12) != (addr.to<uint64_t>() >> 12)) || 
+             (PAGE_MATCH && !IP_MATCH && !FORCE_4KiB_PAGES && champsim::page_number{champsim::address{streams.at(i).pos}} != champsim::page_number{addr})) {
             //reset depth
             streams.at(i).depth = 1;
             //reset age
             streams.at(i).age = 0;
             //maintain stride
             streams.at(i).stride = streams.at(i).stride;
-            //update base
-            streams.at(i).base = champsim::block_number{addr};
+            //update pos
+            streams.at(i).pos = champsim::block_number{addr};
+            streams.at(i).ip = ip;
             return std::pair<std::size_t,std::size_t>{1,streams.at(i).stride};
           }
-          else if (champsim::page_number{champsim::address{streams.at(i).base}} != champsim::page_number{addr}) {
+          //kill streams once they reach an unacceptable depth or stride negative or stride exceeds max
+          else if (streams.at(i).depth + 1 > MAX_DEPTH || (champsim::block_number{addr}.to<int64_t>() - streams.at(i).pos.to<int64_t>() < 0) || (champsim::block_number{addr}.to<int64_t>() - streams.at(i).pos.to<int64_t>() > MAX_STRIDE)) {
             //reset depth
             streams.at(i).depth = 1;
             //reset age
             streams.at(i).age = 0;
-            //maintain stride
+            //maintain old stride
             streams.at(i).stride = streams.at(i).stride;
-            //update base
-            streams.at(i).base = champsim::block_number{addr};
+            //update pos
+            streams.at(i).pos = champsim::block_number{addr};
+            streams.at(i).ip = ip;
             return std::pair<std::size_t,std::size_t>{1,streams.at(i).stride};
           }
           //update stride
-          streams.at(i).stride = champsim::block_number{addr}.to<uint64_t>() - (streams.at(i).base.to<uint64_t>() + streams.at(i).depth);
+          streams.at(i).stride = champsim::block_number{addr}.to<uint64_t>() - streams.at(i).pos.to<uint64_t>();
           //update depth
-          streams.at(i).depth += streams.at(i).stride;
+          streams.at(i).depth += 1;
           //reset age
           streams.at(i).age = 0;
+          streams.at(i).pos = champsim::block_number{addr};
           return std::pair{streams.at(i).depth,streams.at(i).stride};
         } else if (streams.at(i).age > (age_factor >> streams.at(i).depth)) {
           victim = i;
@@ -240,7 +251,8 @@ struct asd : public champsim::modules::prefetcher {
       if(streams.size() < max_streams) {
         Streamer S;
         S.age = 0;
-        S.base = champsim::block_number{addr};
+        S.pos = champsim::block_number{addr};
+        S.ip = ip;
         S.depth = 1;
         S.stride = 1;
         streams.push_back(S);
@@ -250,9 +262,10 @@ struct asd : public champsim::modules::prefetcher {
       else if(victim != streams.size()) {
         //set to default entry
         streams.at(victim).age = 0;
-        streams.at(victim).base = champsim::block_number{addr};
+        streams.at(victim).pos = champsim::block_number{addr};
         streams.at(victim).depth = 1;
         streams.at(victim).stride = 1;
+        streams.at(victim).ip = ip;
         return std::pair{1,1};
       }
       //we don't have any space at all, return 0 (don't prefetch)
@@ -340,14 +353,18 @@ struct asd : public champsim::modules::prefetcher {
       }
     }
 
-    std::pair<std::size_t,std::size_t> get_prefetch_depth(champsim::address addr) {
+    std::pair<std::size_t,std::size_t> get_prefetch_depth(champsim::address addr, champsim::address ip) {
       increment_epoch();
-       auto [stream_pos, stride] = Streams.check_stream(addr);
+       auto [stream_pos, stride] = Streams.check_stream(addr, ip);
       //fmt::print("Found stream from addr: {} pos: {}\n",addr,stream_pos);
       if(stream_pos != 0) {
         BuildHist.tally(stream_pos, stride);
         std::size_t depth = std::min(ActiveHist.get_depth_from(stream_pos),MAX_PREFETCH);
         //fmt::print("ASD advising depth of {}\n",depth);
+        if(stride < pf_strides.size())
+          pf_strides.at(stride)++;
+        if(depth < pf_depths.size())
+          pf_depths.at(depth)++;
         return std::pair<std::size_t,std::size_t>{depth,stride};
       }
       return std::pair<std::size_t,std::size_t>{0,0};

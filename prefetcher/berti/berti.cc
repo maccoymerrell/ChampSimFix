@@ -1059,8 +1059,7 @@ uint32_t berti::prefetcher_cache_operate(champsim::address addr, champsim::addre
     if (i.rpl == BERTI_L1 && mshr_load >= MSHR_LIMIT) pf_to_l2_bc_mshr++; 
     if (fill_this_level) pf_to_l1++;
     else pf_to_l2++;
-
-    if (prefetch_line(p_addr, fill_this_level, metadata_in))
+    if (prefetch_line(p_addr, fill_this_level, cpu, ip, metadata_in, false, false))
     {
       ++average_issued;
       if (first_issue)

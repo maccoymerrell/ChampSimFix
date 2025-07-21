@@ -25,9 +25,9 @@ struct cache_stats {
   champsim::stats::event_counter<std::pair<access_type, std::remove_cv_t<decltype(NUM_CPUS)>>> downstream_packets = {};
   champsim::stats::event_counter<std::pair<access_type, std::remove_cv_t<decltype(NUM_CPUS)>>> returned_packets = {};
   champsim::stats::event_counter<std::remove_cv_t<decltype(NUM_CPUS)>> pf_useful_core = {};
-  champsim::stats::event_counter<std::remove_cv_t<decltype(NUM_CPUS)>> pf_fill_core = {};
+  champsim::stats::event_counter<std::remove_cv_t<decltype(NUM_CPUS)>> pf_useless_core = {};
   champsim::stats::event_counter<std::remove_cv_t<decltype(NUM_CPUS)>> last_pf_useful_core = {};
-  champsim::stats::event_counter<std::remove_cv_t<decltype(NUM_CPUS)>> last_pf_fill_core = {};
+  champsim::stats::event_counter<std::remove_cv_t<decltype(NUM_CPUS)>> last_pf_useless_core = {};
 
   long total_miss_latency_cycles{};
   uint64_t total_returned_packets{};

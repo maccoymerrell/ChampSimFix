@@ -45,7 +45,7 @@ uint32_t dram_prefetch_buffer_nl::prefetcher_cache_operate(champsim::address add
       }
     }*/
 
-    update_walker(addr,cpu);
+    update_walker(addr,cpu,ip);
 
   }
 
@@ -59,7 +59,7 @@ uint32_t dram_prefetch_buffer_nl::prefetcher_cache_operate(champsim::address add
         //fmt::print("[{}] \tIssued prefetch for address: {}, bank: {}, cpu: {}\n",intern_->NAME, champsim::address{pf_addr + offset}, MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(champsim::address{pf_addr + offset}),cpu);
         bool pm = check_pagemap(champsim::address{pf_addr + offset},cpu);
         if(!pm)
-          success = prefetch_line(champsim::address{pf_addr + offset}, true, cpu, NEXTLINE_ID, false, true);
+          success = prefetch_line(champsim::address{pf_addr + offset}, true, cpu, ip, NEXTLINE_ID, false, true);
         else if(!intern_->warmup)
           prefetches_filtered++;
         if(success) {
@@ -238,7 +238,7 @@ std::size_t dram_prefetch_buffer_nl::get_depth(uint8_t conf, uint32_t cpu) {
   return DEPTHS.at(threshold - 1);
 }
 
-void dram_prefetch_buffer_nl::update_walker(champsim::address addr, uint32_t cpu) {
+void dram_prefetch_buffer_nl::update_walker(champsim::address addr, uint32_t cpu, champsim::address ip) {
   std::size_t rb = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(addr);
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
   std::size_t col = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_column(addr);
@@ -273,7 +273,7 @@ void dram_prefetch_buffer_nl::update_walker(champsim::address addr, uint32_t cpu
           bool success = true;
           bool pm = check_pagemap(compose_base_and_column(addr,i),cpu);
           if(!pm) {
-            success = prefetch_line(compose_base_and_column(addr,i),true,cpu,BUFFER_ID,false,false);
+            success = prefetch_line(compose_base_and_column(addr,i),true,cpu, ip, BUFFER_ID,false,false);
             if(success) {
              add_to_pagemap(compose_base_and_column(addr,i),cpu);
               //rw.confidence = modify_confidence(rw.confidence,1,false);
@@ -428,7 +428,10 @@ void dram_prefetch_buffer_nl::prefetcher_cycle_operate() {
     for(int i = 0; i < NUM_CPUS; i++) {
       double global_usefulness_buffer = (global_useless_buffer[i] <= 100 || (global_useful_buffer[i] + global_useless_buffer[i] <= 100)) ? 1.0 : (global_useful_buffer[i]) / (double)(global_useless_buffer[i] + global_useful_buffer[i]);
       double global_usefulness_nextline = (global_useless_nextline[i] <= 100 || (global_useful_nextline[i] + global_useless_nextline[i] <= 100)) ? 1.0 : (global_useful_nextline[i]) / (double)(global_useless_nextline[i] + global_useful_nextline[i]);
-      fmt::print("CPU: {} Buffer usefulness: {} ({}/{}) Nextline usefulness: {} ({}/{})\n",i,global_usefulness_buffer,global_useful_buffer[i],global_useless_buffer[i],global_usefulness_nextline,global_useful_nextline[i],global_useless_nextline[i]);
+
+      if(epochs % usefulness_measure_print_interval == 0)
+        fmt::print("CPU: {} Buffer usefulness: {} ({}/{}) Nextline usefulness: {} ({}/{})\n",i,global_usefulness_buffer,global_useful_buffer[i],global_useless_buffer[i],global_usefulness_nextline,global_useful_nextline[i],global_useless_nextline[i]);
+
       global_useless_buffer[i] = 0;
       global_useful_buffer[i] = 0;
       global_useless_nextline[i] = 0;
@@ -444,9 +447,11 @@ void dram_prefetch_buffer_nl::prefetcher_cycle_operate() {
       else
         variable_nextline_conf[i] = variable_nextline_conf[i] < NEXTLINE_MIN_DEPTH + 1 ? NEXTLINE_MIN_DEPTH : variable_nextline_conf[i] - 1;
 
-      fmt::print("\tBuffer confidence modifier: {} Next line: {}\n",variable_buffer_conf[i],variable_nextline_conf[i]);
+      if(epochs % usefulness_measure_print_interval == 0)
+        fmt::print("\tBuffer confidence modifier: {} Next line: {}\n",variable_buffer_conf[i],variable_nextline_conf[i]);
     }
     epoch_counter = 0;
+    epochs += 1;
   }
   epoch_counter++;
 }

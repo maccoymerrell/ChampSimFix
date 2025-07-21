@@ -9,7 +9,7 @@ uint32_t next_line_n::prefetcher_cache_operate(champsim::address addr, champsim:
   //fmt::print("[{}] Invoked prefetch for address: {}, hit: {}\n", intern_->NAME, addr, cache_hit);
   for(std::size_t offset = 1; offset <= 4; offset++) {
     //fmt::print("[{}] \tIssued prefetch for address: {}, bank: {}, cpu: {}\n",intern_->NAME, champsim::address{pf_addr + offset}, MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(champsim::address{pf_addr + offset}),cpu);
-    prefetch_line(champsim::address{pf_addr + offset}, true, cpu, metadata_in);
+    prefetch_line(champsim::address{pf_addr + offset}, true, cpu, ip, metadata_in);
   }
   return metadata_in;
 }

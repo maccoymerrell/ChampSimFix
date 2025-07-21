@@ -6,7 +6,7 @@ uint32_t next_line::prefetcher_cache_operate(champsim::address addr, champsim::a
   //if(useful_prefetch)
   //  useful[cpu]++;
   champsim::block_number pf_addr{addr};
-  prefetch_line(champsim::address{pf_addr + 1}, true, cpu, metadata_in);
+  prefetch_line(champsim::address{pf_addr + 1}, true, cpu, ip, metadata_in);
   return metadata_in;
 }
 

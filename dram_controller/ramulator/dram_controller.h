@@ -160,7 +160,7 @@ class MEMORY_CONTROLLER : public champsim::operable
 
   void return_packet_rq_rr(Ramulator::Request& req, DRAM_CHANNEL::request_type pkt);
   
-
+  std::vector<bool> complete_cpus;
 
 public:
   std::vector<DRAM_CHANNEL> channels;

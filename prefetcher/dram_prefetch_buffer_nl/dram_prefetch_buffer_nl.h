@@ -49,10 +49,11 @@ struct dram_prefetch_buffer_nl : public champsim::modules::prefetcher {
   constexpr static std::size_t PM_SETS = 32;
   constexpr static std::size_t PAGE_MAP_SIZE = 64;
 
-  constexpr static std::size_t usefulness_measure_epoch = 500000;
+  constexpr static std::size_t usefulness_measure_epoch = 100000;
+  constexpr static std::size_t usefulness_measure_print_interval = 5;
 
-  constexpr static float TARGET_NL_ACCURACY = 0.75;
-  constexpr static float TARGET_BUFFER_ACCURACY = 0.75;
+  constexpr static float TARGET_NL_ACCURACY = 0.65;
+  constexpr static float TARGET_BUFFER_ACCURACY = 0.65;
 
   std::vector<int32_t> variable_buffer_conf;
   std::vector<int32_t> variable_nextline_conf;
@@ -88,7 +89,7 @@ struct dram_prefetch_buffer_nl : public champsim::modules::prefetcher {
   std::vector<std::size_t> global_useful_nextline;
   std::vector<std::size_t> global_useless_nextline;
   std::size_t epoch_counter = 0;
-
+  uint64_t epochs = 0;
 
 
   struct row_walker {
@@ -109,7 +110,7 @@ struct dram_prefetch_buffer_nl : public champsim::modules::prefetcher {
   std::vector<champsim::msl::lru_table<row_walker,row_walker_set,row_walker_way>> row_walker_table;
 
   bool should_drop_prefetch(champsim::address addr, uint32_t cpu);
-  void update_walker(champsim::address addr, uint32_t cpu);
+  void update_walker(champsim::address addr, uint32_t cpu, champsim::address ip);
   void increase_confidence_useful(champsim::address addr);
   void increase_confidence_stream(champsim::address addr, bool prefetch);
   void increase_confidence_opened(champsim::address addr);

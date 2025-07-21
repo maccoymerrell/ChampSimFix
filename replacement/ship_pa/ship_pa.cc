@@ -51,6 +51,7 @@ long ship_pa::find_victim(uint32_t triggering_cpu, uint64_t instr_id, long set, 
   long prefetch_max = 0;
   bool found_prefetch = false;
 
+  //find victim
   for(int i = set*NUM_WAY; i < (set*NUM_WAY) + NUM_WAY; i++) {
     if(rrpv_values[i] > victim_max && !is_prefetched[i]) {
       victim_way = i;
@@ -63,7 +64,10 @@ long ship_pa::find_victim(uint32_t triggering_cpu, uint64_t instr_id, long set, 
       found_prefetch = true;
     }
   }
-  is_prefetched[prefetch_way] = false;
+
+  //reset prefetch bit 25% of the time
+  if((accesses % 4 == 0) && found_prefetch)
+    is_prefetched[prefetch_way] = false;
 
   //if we couldn't find an eviction candidate without considering prefetches,
   //consider the prefetch candidate for eviction
@@ -84,7 +88,7 @@ void ship_pa::update_replacement_state(uint32_t triggering_cpu, long set, long w
                                     champsim::address victim_addr, access_type type, uint8_t hit)
 {
   using namespace champsim::data::data_literals;
-
+  accesses++;
   // update sampler
   if (is_sampled(set)) {
     auto s_idx = set / SET_SAMPLE_RATE;
@@ -120,7 +124,7 @@ void ship_pa::update_replacement_state(uint32_t triggering_cpu, long set, long w
 
   //update prefetch bit
   if(hit)
-    is_prefetched[(set * NUM_WAY) + way] = is_prefetched[(set * NUM_WAY) + way] && (type == access_type::PREFETCH);
+    is_prefetched[(set * NUM_WAY) + way] = is_prefetched[(set * NUM_WAY) + way] && (type == access_type::PREFETCH || type == access_type::PROMOTION);
 
   //set 0 for demand, 1 for prefetch
   if(hit && !is_prefetched[(set * NUM_WAY) + way] && type != access_type::PROMOTION)
@@ -137,7 +141,7 @@ void ship_pa::replacement_cache_fill(uint32_t triggering_cpu, long set, long way
     return;
   }
 
-  is_prefetched[(set * NUM_WAY) + way] = (type == access_type::PREFETCH);
+  is_prefetched[(set * NUM_WAY) + way] = (type == access_type::PREFETCH || type == access_type::PROMOTION);
 
   using namespace champsim::data::data_literals;
   // SHIP prediction

@@ -1,15 +1,16 @@
-#ifndef REPLACEMENT_SHIP_PA_H
-#define REPLACEMENT_SHIP_PA_H
+#ifndef REPLACEMENT_SHIP_SHARE_PF_TARGET_H
+#define REPLACEMENT_SHIP_SHARE_PF_TARGET_H
 
 #include <array>
 #include <vector>
+#include <map>
 
 #include "cache.h"
 #include "modules.h"
 #include "msl/bits.h"
 #include "msl/fwcounter.h"
 
-struct ship_pa : public champsim::modules::replacement {
+struct ship_share_pf_target : public champsim::modules::replacement {
 private:
   int& get_rrpv(long set, long way);
 
@@ -37,21 +38,46 @@ public:
 
   // sampler
   std::vector<SAMPLER_class> sampler;
+
+  //per line
   std::vector<int> rrpv_values;
+  std::vector<uint32_t> cpus;
 
-  // prefetch bit
-  std::vector<bool> is_prefetched;
+  static constexpr std::size_t epoch = 8192;
+  static constexpr std::size_t global_epoch = 262144;
+  static constexpr bool CHANGE_RATE = true;
 
-  //access counter
-  uint64_t accesses = 0;
+  uint64_t global_epoch_counter = 0;
+
+  //params
+  std::map<uint32_t,std::size_t> DNE_MAX;
+  std::map<uint32_t,std::size_t> DNE_DEFAULT;
+  std::map<uint32_t,std::size_t> DNE_MIN;
+
+  //per core
+  std::vector<int64_t> occupancy_counter;
+  std::vector<uint64_t> hits;
+  std::vector<uint64_t> misses;
+  std::vector<uint64_t> epoch_counter;
+  std::vector<uint64_t> do_not_evict;
+  std::vector<double> hit_rate;
+  std::vector<uint64_t> accesses;
+
+  uint64_t fills_bypassed = 0;
+  uint64_t altered_evictions = 0;
+  uint64_t standard_evictions = 0;
 
   // prediction table structure
   std::vector<std::array<champsim::msl::fwcounter<champsim::msl::lg2(SHCT_MAX + 1)>, SHCT_SIZE>> SHCT;
 
-  explicit ship_pa(CACHE* cache);
+  explicit ship_share_pf_target(CACHE* cache);
+
+  bool find_victim_called = false;
+  bool replacement_cache_fill_called = false;
+  bool update_replacement_state_called = false;
 
   long find_victim(uint32_t triggering_cpu, uint64_t instr_id, long set, const champsim::cache_block* current_set, champsim::address ip,
-                   champsim::address full_addr, access_type type);
+                   champsim::address full_addr, access_type type, bool prefetch);
   void replacement_cache_fill(uint32_t triggering_cpu, long set, long way, champsim::address full_addr, champsim::address ip, champsim::address victim_addr,
                               access_type type);
   void update_replacement_state(uint32_t triggering_cpu, long set, long way, champsim::address full_addr, champsim::address ip, champsim::address victim_addr,
@@ -66,7 +92,7 @@ public:
   }
 
   // use this function to print out your own stats at the end of simulation
-  // void replacement_final_stats() {}
+  void replacement_final_stats();
 };
 
 #endif

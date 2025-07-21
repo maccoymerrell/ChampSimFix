@@ -35,6 +35,7 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
     uint64_t s_prio_scheduled = 0;
     uint64_t s_age_scheduled = 0;
     uint64_t s_tied_scheduled = 0;
+    uint64_t s_marked_for_drop = 0;
 
   public:
     void init() override {
@@ -48,7 +49,13 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
       drop_enabled = param<bool>("drop").desc("Whether to drop prefetch requests or not").default_val(true);
       assert(incr_cycles != 0);
       fmt::print("Initialized Minimalist Scheduler, Age Interval: {} ({} ns)\n",incr_cycles,incr_cycles * m_dram->m_timing_vals("tCK_ps") * 1e-3);
+      m_pref_thresh_1 = param<int>("pref_thresh_1").desc("Prefetch threshold 1").default_val(4);
+      m_pref_thresh_2 = param<int>("pref_thresh_2").desc("Prefetch threshold 2").default_val(8);
+      m_pref_thresh_3 = param<int>("pref_thresh_3").desc("Prefetch threshold 3").default_val(12);
+      m_pref_thresh_4 = param<int>("pref_thresh_4").desc("Prefetch threshold 4").default_val(16);
 
+      m_demand_thresh_1 = param<int>("demand_thresh_1").desc("Demand threshold 1").default_val(2);
+      m_demand_thresh_2 = param<int>("demand_thresh_2").desc("Demand threshold 2").default_val(4);
 
       register_stat(s_blacklist_scheduled).name("packets scheduled by blacklist");
       register_stat(s_ready_scheduled).name("packets scheduled by readiness");
@@ -90,13 +97,13 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
       bool blacklist1 = prio1 > 4 && req1->is_prefetch && drop_enabled;
       if(blacklist1) {
         req1->should_drop = true;
-        prio1 = 4;
+        prio1 = 0;
       }
       int prio2 = get_priority(req2);
       bool blacklist2 = prio2 > 4 && req2->is_prefetch && drop_enabled;
       if(blacklist2) {
         req2->should_drop = true;
-        prio2 = 4;
+        prio2 = 0;
       }
 
 
