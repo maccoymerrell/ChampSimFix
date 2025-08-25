@@ -76,6 +76,8 @@ cache_builder_parts = {
     'latency': '.latency({latency})',
     'hit_latency': '.hit_latency({hit_latency})',
     'fill_latency': '.fill_latency({fill_latency})',
+    'mqc_thresh': '.set_mqc_thresh({mqc_thresh})',
+    'pqm_thresh': '.set_pqm_thresh({pqm_thresh})',
     'max_tag_check': '.tag_bandwidth(champsim::bandwidth::maximum_type{{{max_tag_check}}})',
     'max_fill': '.fill_bandwidth(champsim::bandwidth::maximum_type{{{max_fill}}})',
     '_offset_bits': '.offset_bits(champsim::data::bits{{{_offset_bits}}})',

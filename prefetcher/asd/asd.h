@@ -25,7 +25,7 @@ struct asd : public champsim::modules::prefetcher {
 
   static constexpr bool FORCE_4KiB_PAGES = true;
   static constexpr bool PAGE_MATCH = true;
-  static constexpr bool IP_MATCH = false;
+  static constexpr bool IP_MATCH = true;
 
   static constexpr std::size_t MAX_PREFETCH = 22;
   static constexpr std::size_t MAX_STREAMS = 32;
@@ -36,9 +36,9 @@ struct asd : public champsim::modules::prefetcher {
   static constexpr uint64_t EPOCH_MIN = 256;
   static constexpr double DIFF_THRESH = 0.1;
 
-  static constexpr std::size_t PM_SETS = 32;
+  static constexpr std::size_t PM_SETS = 64;
   static constexpr std::size_t PM_WAYS = 4;
-  static constexpr std::size_t PAGE_MAP_SIZE = 64;
+  static constexpr std::size_t PAGE_MAP_SIZE = 64; //12.8 KiB
   
   struct Histogram {
     std::vector<uint64_t> hist;
@@ -373,19 +373,40 @@ struct asd : public champsim::modules::prefetcher {
     void print_stats() {
       fmt::print("\tASD Histogram, epoch: {}, filtered: {}\n",epoch, filtered_prefetches);
       for(int j = 0; j < bins; j++) {
-        fmt::print("\t\t{} : {}\n",j + 1,ActiveHist.get_bin_occu(j+1));
+        if(ActiveHist.get_bin_occu(j+1) != 0)
+          fmt::print("\t\t{} : {}\n",j + 1,ActiveHist.get_bin_occu(j+1));
       }
       fmt::print("ASD Prefetch Depths:\n");
     
       for(int j = 0; j < bins; j++) {
-        fmt::print("\t\t{} : {}\n",j,pf_depths.at(j));
+        if(pf_depths.at(j) != 0)
+          fmt::print("\t\t{} : {}\n",j,pf_depths.at(j));
       }
     
       fmt::print("ASD Prefetch Strides:\n");
     
       for(int j = 0; j < bins; j++) {
-        fmt::print("\t\t{} : {}\n",j,pf_strides.at(j));
+        if(pf_strides.at(j) != 0)
+          fmt::print("\t\t{} : {}\n",j,pf_strides.at(j));
       }
+    }
+
+    void print_size(int num = 1) {
+      int bits_pagemap = PM_SETS*PM_WAYS*(PAGE_MAP_SIZE+(64-champsim::lg2(PAGE_MAP_SIZE*BLOCK_SIZE)));
+      //streamer size (age + stride + depth + block number)*MAX_STREAMS
+      int bits_streamer = 8 + (champsim::lg2(MAX_STRIDE) + champsim::lg2(MAX_DEPTH) + (64-LOG2_BLOCK_SIZE))*MAX_STREAMS;
+      if(IP_MATCH)//if ip, add ip bits per stream
+        bits_streamer += 64*MAX_STREAMS;
+      //hist size (present and past)
+      int bits_hist = bins*champsim::lg2(EPOCH_MAX)*2;
+      //state machine
+      int bits_sm = 3 + champsim::lg2(EPOCH_MAX);
+
+      fmt::print("\tASD x{} Size: {}\n",num,champsim::data::kibibytes{champsim::data::bytes{((bits_pagemap + bits_streamer + bits_hist + bits_sm)*num)/8}});
+      fmt::print("\t\tPage map: {} ({} entries, {} each)\n",champsim::data::kibibytes{champsim::data::bytes{bits_pagemap/8}},PM_SETS*PM_WAYS,PAGE_MAP_SIZE+(64-LOG2_PAGE_SIZE));
+      fmt::print("\t\tStreamers: {} ({} streamers)\n",champsim::data::bytes{bits_streamer/8},MAX_STREAMS);
+      fmt::print("\t\tHistogram: {} ({} bins, {} each, x2)\n",champsim::data::bytes{bits_hist/8},bins,champsim::lg2(EPOCH_MAX));
+      fmt::print("\t\tState Machine: {}\n",champsim::data::bytes{bits_sm/8});
     }
   };
 

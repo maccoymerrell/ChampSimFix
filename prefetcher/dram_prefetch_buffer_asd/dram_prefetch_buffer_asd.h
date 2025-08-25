@@ -23,6 +23,16 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
   constexpr static std::size_t IP_BLACKLIST_USEFUL = 1;
   constexpr static std::size_t IP_BLACKLIST_DEMAND = 2;
 
+  constexpr static bool ENABLE_IP_THRASH_DROP = false; //doesn't seem to help at all, only filters a few thousand prefetches
+  constexpr static std::size_t IP_THRASH_SETS = 16;
+  constexpr static std::size_t IP_THRASH_WAYS = 4;
+  constexpr static std::size_t IP_THRASH_COUNTER_UP = 2;
+  constexpr static std::size_t IP_THRASH_COUNTER_DOWN = 1;
+  constexpr static std::size_t IP_THRASH_COUNTER_MAX = 16;
+  constexpr static std::size_t IP_THRASH_MISS = 0;
+  constexpr static std::size_t IP_THRASH_HIT = 1;
+  constexpr static std::size_t IP_THRASH_FILL = 2;
+
   //constexpr static std::size_t IP_TRACKING_SETS = 64;
   //constexpr static std::size_t IP_TRACKING_WAYS = 8;
 
@@ -35,7 +45,8 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
   constexpr static double ASD_THRESH = 0.5;
 
   //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22};
-  constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11};
+  //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11};
+  constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9};
   //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,1,1,1,1,1,2,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5};
   constexpr static std::array<uint8_t,25> THRESH = {10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200,210,220,230,240,250};
 
@@ -55,14 +66,18 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
   constexpr static double ASD_MIN_THRESH = 1.0;
   constexpr static double ASD_THRESH_STEP = 0.1;
 
+  constexpr static bool SKIP_TAG_CHECK_BUFFER = false;
+  constexpr static bool SKIP_TAG_CHECK_ASD = false;
+
   constexpr static int32_t BUFFER_MAX_NCONF = 220;
   constexpr static int32_t BUFFER_MIN_NCONF = 0;
   constexpr static std::size_t BUFFER_NCONF_STEP = 10;
 
-  constexpr static float TARGET_ASD_ACCURACY = 0.65;
-  constexpr static float TARGET_BUFFER_ACCURACY = 0.65;
+  constexpr static bool DISABLE_ASD = false;
+  constexpr static float TARGET_ASD_ACCURACY = 0.75;
+  constexpr static float TARGET_BUFFER_ACCURACY = 0.75;
 
-  constexpr static std::size_t usefulness_measure_epoch = 500000;
+  constexpr static std::size_t usefulness_measure_epoch = 4096;
   constexpr static std::size_t usefulness_measure_print_interval = 1;
 
   constexpr static std::size_t blacklist_reset_interval =  10000000;
@@ -85,6 +100,7 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
   double prefetches_dropped_too_far_back = 0;
   double prefetches_dropped_too_far_forward = 0;
   double pp_thrashes = 0;
+  double upper_level_thrash_drops = 0;
 
   double conflict_filters = 0;
   double ip_not_found = 0;
@@ -107,14 +123,9 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
   std::vector<double> global_usefulness_asd;
   std::vector<double> global_usefulness_buffer;
 
-  std::size_t epoch_counter = 0;
+  std::vector<std::size_t> epoch_counter;
   uint64_t epochs = 0;
   uint64_t blacklist_counter = 0;
-
-  std::vector<std::size_t> global_useless_asd_up;
-  std::vector<std::size_t> global_useful_asd_up;
-  std::vector<std::size_t> global_useless_asd_down;
-  std::vector<std::size_t> global_useful_asd_down;
 
 
   struct row_walker {
@@ -166,6 +177,20 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
     auto operator()(const ip_blacklist_counter& entry) const {return entry.ip;}
   };
 
+  struct ip_thrash_counter {
+    champsim::address ip;
+    uint8_t counter = 0;
+
+    ip_thrash_counter() : ip_thrash_counter(champsim::address{}) {}
+    explicit ip_thrash_counter(champsim::address ip_) : ip(ip_) {} 
+  };
+  struct ip_thrash_set {
+    auto operator()(const ip_thrash_counter& entry) const {return entry.ip;}
+  };
+  struct ip_thrash_way {
+    auto operator()(const ip_thrash_counter& entry) const {return entry.ip;}
+  };
+
   /*struct ip_tracking_table_entry {
     champsim::address pf_addr;
     champsim::address ip_addr;
@@ -180,6 +205,7 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
   };*/
 
   std::vector<champsim::msl::lru_table<ip_blacklist_counter,ip_blacklist_set,ip_blacklist_way>> ip_blacklist_table;
+  std::vector<champsim::msl::lru_table<ip_thrash_counter,ip_thrash_set,ip_thrash_way>> ip_thrash_table;
 
   //std::vector<champsim::msl::lru_table<ip_tracking_table_entry,ip_tracking_set,ip_tracking_way>> ip_tracking_table;
 
@@ -196,9 +222,8 @@ struct dram_prefetch_buffer_asd : public champsim::modules::prefetcher {
   bool is_ip_blacklisted(champsim::address ip, uint32_t cpu);
   void update_ip_blacklist(std::size_t collision_type, champsim::address ip, uint32_t cpu, uint32_t victim_cpu, uint32_t target_prefetcher, uint32_t victim_prefetcher);
 
-  //champsim::address get_ip(champsim::address pf_addr, uint32_t cpu);
-  //void log_ip(champsim::address pf_addr, champsim::address ip_addr, uint32_t cpu);
-
+  bool is_ip_thrashing(champsim::address ip, uint32_t cpu);
+  void update_ip_thrash(std::size_t thrash_type, champsim::address ip, uint32_t cpu);
 
   void update_row_open_table(champsim::address addr);
   bool is_row_open(champsim::address addr);

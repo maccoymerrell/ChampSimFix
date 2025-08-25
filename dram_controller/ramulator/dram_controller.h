@@ -103,6 +103,7 @@ struct DRAM_CHANNEL final : public champsim::operable {
     champsim::address address{};
     champsim::address v_address{};
     champsim::address data{};
+    int pf_distance = 0;
     champsim::chrono::clock::time_point ready_time = champsim::chrono::clock::time_point::max();
 
     std::vector<uint64_t> instr_depend_on_me{};

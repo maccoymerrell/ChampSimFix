@@ -363,6 +363,8 @@ public:
 
   bool prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t pf_cpu, champsim::address pf_ip, uint32_t prefetch_metadata, bool skip_tag_check, bool return_hit_status);
 
+  bool prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t pf_cpu, champsim::address pf_ip, uint32_t prefetch_metadata, bool skip_tag_check, bool return_hit_status, int pf_distance);
+
   [[deprecated]] bool prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata);
 
   [[deprecated("Use CACHE::prefetch_line(pf_addr, fill_this_level, prefetch_metadata) instead.")]] bool
@@ -491,8 +493,8 @@ public:
 
     OUTGOING_BANK_REQUESTS = std::vector<int>(MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->rowbuffers(),0);
 
-    BANK_PREFETCH_THRESHOLD = {1, (MSHR_SIZE / 4) - 1, (MSHR_SIZE / 2) - 1};
-    BANK_DEMAND_THRESHOLD = MSHR_SIZE / 4;
+    BANK_PREFETCH_THRESHOLD = b.m_pqm_thresh;
+    BANK_DEMAND_THRESHOLD = b.m_mqc_thresh;
     assert(MSHR_SIZE > 4);
     if(PQM_ENABLED) {
       fmt::print("[{}] PQM Enabled, Banks: {}, Size: {}, Prefetch Limits: {}, {}, {}\n",NAME,PREFETCH_BANK_QUEUES.size(),PQM_SIZE,BANK_PREFETCH_THRESHOLD[0],BANK_PREFETCH_THRESHOLD[1],BANK_PREFETCH_THRESHOLD[2]);

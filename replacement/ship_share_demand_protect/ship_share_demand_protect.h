@@ -1,5 +1,5 @@
-#ifndef REPLACEMENT_SHIP_SHARE_PF_TARGET_H
-#define REPLACEMENT_SHIP_SHARE_PF_TARGET_H
+#ifndef REPLACEMENT_SHIP_SHARE_DEMAND_PROTECT_H
+#define REPLACEMENT_SHIP_SHARE_DEMAND_PROTECT_H
 
 #include <array>
 #include <vector>
@@ -10,7 +10,7 @@
 #include "msl/bits.h"
 #include "msl/fwcounter.h"
 
-struct ship_share_pf_target : public champsim::modules::replacement {
+struct ship_share_demand_protect : public champsim::modules::replacement {
 private:
   int& get_rrpv(long set, long way);
 
@@ -46,6 +46,7 @@ public:
   static constexpr std::size_t epoch = 8192;
   static constexpr std::size_t global_epoch = 262144;
   static constexpr bool CHANGE_RATE = true;
+  static constexpr bool USE_MISS_RATE = true;
 
   uint64_t global_epoch_counter = 0;
 
@@ -63,14 +64,13 @@ public:
   std::vector<double> hit_rate;
   std::vector<uint64_t> accesses;
 
-  uint64_t fills_bypassed = 0;
   uint64_t altered_evictions = 0;
   uint64_t standard_evictions = 0;
 
   // prediction table structure
   std::vector<std::array<champsim::msl::fwcounter<champsim::msl::lg2(SHCT_MAX + 1)>, SHCT_SIZE>> SHCT;
 
-  explicit ship_share_pf_target(CACHE* cache);
+  explicit ship_share_demand_protect(CACHE* cache);
 
   bool find_victim_called = false;
   bool replacement_cache_fill_called = false;

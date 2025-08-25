@@ -126,8 +126,17 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
     lines.push_back(fmt::format("cpu{}->{} PROMOTIONS SUCCESSFUL: {:10} FAILED: {:10}", cpu, stats.name, returned_promotions, stats.pr_missed));                         
       
     lines.push_back(fmt::format("cpu{}->{} AVERAGE MISS LATENCY: {} cycles", cpu, stats.name, ::print_ratio(stats.total_miss_latency_cycles, stats.total_returned_packets)));
+    
   }
 
+  lines.push_back(fmt::format("{} AVERAGE RQ OCCUPANCY: {}", stats.name, stats.total_rq_occupancy_cycles / (double)(stats.cycle_denominator+1)));
+  lines.push_back(fmt::format("{} AVERAGE WQ OCCUPANCY: {}", stats.name, stats.total_wq_occupancy_cycles / (double)(stats.cycle_denominator+1)));
+  lines.push_back(fmt::format("{} AVERAGE PQ OCCUPANCY: {}", stats.name, stats.total_pq_occupancy_cycles / (double)(stats.cycle_denominator+1)));
+  lines.push_back(fmt::format("{} AVERAGE INTERNAL PQ OCCUPANCY: {}", stats.name, stats.total_internal_pq_occupancy_cycles / (double)(stats.cycle_denominator+1)));
+  lines.push_back(fmt::format("{} AVERAGE MQ OCCUPANCY: {}", stats.name, stats.total_mq_occupancy_cycles / (double)(stats.cycle_denominator+1)));
+  lines.push_back(fmt::format("{} AVERAGE MSHR OCCUPANCY: {}", stats.name, stats.total_mshr_occupancy_cycles / (double)(stats.cycle_denominator+1)));
+  lines.push_back(fmt::format("{} AVERAGE INFLIGHT TAG CHECKS: {}", stats.name, stats.total_tag_check_occupancy_cycles / (double)(stats.cycle_denominator+1)));
+  lines.push_back(fmt::format("{} AVERAGE INFLIGHT WRITES: {}", stats.name, stats.total_inflight_writes_occupancy_cycles / (double)(stats.cycle_denominator+1)));
   return lines;
 }
 

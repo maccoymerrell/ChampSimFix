@@ -130,7 +130,7 @@ void DRAM_CHANNEL::end_phase(unsigned /*cpu*/) { roi_stats = sim_stats; }
 
 
 DRAM_CHANNEL::request_type::request_type(const typename champsim::channel::request_type& req)
-    : pf_metadata(req.pf_metadata), address(req.address), v_address(req.address), type(req.type), data(req.data), instr_depend_on_me(req.instr_depend_on_me)
+    : pf_metadata(req.pf_metadata), address(req.address), v_address(req.address), type(req.type), data(req.data), instr_depend_on_me(req.instr_depend_on_me), pf_distance(req.pf_distance)
 {
   asid[0] = req.asid[0];
   asid[1] = req.asid[1];

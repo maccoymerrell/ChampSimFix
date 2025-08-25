@@ -259,7 +259,7 @@ void ship_share::update_replacement_state(uint32_t triggering_cpu, long set, lon
     for(int i = 0; i < NUM_CPUS; i++) {
       accesses[i] += hits[i] + misses[i];
       total_accesses += accesses[i];
-      total_accesses_hit_weighted += USE_MISS_RATE ? accesses[i]/hit_rate[i] :
+      total_accesses_hit_weighted += USE_MISS_RATE ? accesses[i]*(1-hit_rate[i]) :
                                                      accesses[i]*hit_rate[i];
     }
 
@@ -275,7 +275,7 @@ void ship_share::update_replacement_state(uint32_t triggering_cpu, long set, lon
 
     //now we need to divide up the cache by also modulating by hit rate
     for(int i = 0; i < NUM_CPUS; i++) {
-      std::size_t prop = USE_MISS_RATE ? ((accesses[i]/hit_rate[i]) / (double)total_accesses_hit_weighted) * cache_size :  
+      std::size_t prop = USE_MISS_RATE ? ((accesses[i]*(1-hit_rate[i])) / (double)total_accesses_hit_weighted) * cache_size :  
                                          ((accesses[i]*hit_rate[i]) / (double)total_accesses_hit_weighted) * cache_size;
       prop = std::max(DNE_MIN[NUM_CPUS],prop);
       prop = std::min(DNE_MAX[NUM_CPUS],prop);

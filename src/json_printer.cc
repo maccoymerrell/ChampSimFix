@@ -52,6 +52,14 @@ void to_json(nlohmann::json& j, const CACHE::stats_type& stats)
   statsmap.emplace("useful prefetch", stats.pf_useful);
   statsmap.emplace("useless prefetch", stats.pf_useless);
   statsmap.emplace("missed promotion", stats.pr_missed);
+  statsmap.emplace("average pq occupancy", stats.total_pq_occupancy_cycles / (double)(stats.cycle_denominator+1));
+  statsmap.emplace("average rq occupancy", stats.total_rq_occupancy_cycles / (double)(stats.cycle_denominator+1));
+  statsmap.emplace("average wq occupancy", stats.total_wq_occupancy_cycles / (double)(stats.cycle_denominator+1));
+  statsmap.emplace("average mq occupancy", stats.total_wq_occupancy_cycles / (double)(stats.cycle_denominator+1));
+  statsmap.emplace("average mshr occupancy", stats.total_mshr_occupancy_cycles / (double)(stats.cycle_denominator+1));
+  statsmap.emplace("average internal pq occupancy", stats.total_internal_pq_occupancy_cycles / (double)(stats.cycle_denominator+1));
+  statsmap.emplace("average inflight tag checks", stats.total_tag_check_occupancy_cycles / (double)(stats.cycle_denominator+1));
+  statsmap.emplace("average inflight writes", stats.total_inflight_writes_occupancy_cycles / (double)(stats.cycle_denominator+1));
 
   statsmap.emplace("miss latency", std::ceil(stats.total_miss_latency_cycles) / std::ceil(stats.total_returned_packets));
   for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION, access_type::PROMOTION, access_type::DROPPED, access_type::REFETCH}) {

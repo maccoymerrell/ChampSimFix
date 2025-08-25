@@ -28,6 +28,7 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
     int64_t incr_cycles = -1;
     bool drop_enabled = false;
 
+
     IDRACController* m_controller;
 
     uint64_t s_blacklist_scheduled = 0;
@@ -57,6 +58,8 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
       m_demand_thresh_1 = param<int>("demand_thresh_1").desc("Demand threshold 1").default_val(2);
       m_demand_thresh_2 = param<int>("demand_thresh_2").desc("Demand threshold 2").default_val(4);
 
+      m_is_debug = param<bool>("debug").desc("").default_val(false);
+
       register_stat(s_blacklist_scheduled).name("packets scheduled by blacklist");
       register_stat(s_ready_scheduled).name("packets scheduled by readiness");
       register_stat(s_prio_scheduled).name("packets scheduled by priority");
@@ -66,7 +69,10 @@ class MinimalistScheduler : public IBHScheduler, public Implementation {
     }
 
     int get_priority(ReqBuffer::iterator req) {
+     
       if(req->is_prefetch) {
+        if(m_is_debug)
+          fmt::print("Prefetch address was: {} distance was: {}\n",req->addr,req->pf_distance);
         if(m_pref_thresh_1 > req->pf_distance)
           return 4 + ((m_clk - req->arrive) / incr_cycles);
         else if(m_pref_thresh_2 > req->pf_distance)

@@ -20,6 +20,18 @@ struct cache_stats {
 
   uint64_t pr_missed = 0;
 
+
+  uint64_t total_pq_occupancy_cycles = 0;
+  uint64_t total_rq_occupancy_cycles = 0;
+  uint64_t total_wq_occupancy_cycles = 0;
+  uint64_t total_mq_occupancy_cycles = 0;
+  uint64_t total_mshr_occupancy_cycles = 0;
+  uint64_t total_internal_pq_occupancy_cycles = 0;
+  uint64_t total_tag_check_occupancy_cycles = 0;
+  uint64_t total_inflight_writes_occupancy_cycles = 0;
+
+  uint64_t cycle_denominator = 0;
+
   champsim::stats::event_counter<std::pair<access_type, std::remove_cv_t<decltype(NUM_CPUS)>>> hits = {};
   champsim::stats::event_counter<std::pair<access_type, std::remove_cv_t<decltype(NUM_CPUS)>>> misses = {};
   champsim::stats::event_counter<std::pair<access_type, std::remove_cv_t<decltype(NUM_CPUS)>>> downstream_packets = {};

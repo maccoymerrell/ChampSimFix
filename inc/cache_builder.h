@@ -63,6 +63,9 @@ struct cache_builder_base {
   bool m_cc_enabled{};
   bool m_partition_cache{};
 
+  int m_mqc_thresh{4};
+  std::vector<int> m_pqm_thresh{1, 7, 15};
+
   std::vector<access_type> m_pref_act_mask{access_type::LOAD, access_type::PREFETCH};
   std::vector<champsim::channel*> m_uls{};
   champsim::channel* m_ll{};
@@ -232,6 +235,11 @@ public:
 
   self_type& set_cc_enable();
   self_type& reset_cc_enable();
+
+  self_type& set_mqc_thresh(int thresh);
+
+  template <typename... Elems>
+  self_type& set_pqm_thresh(Elems... pqm_threshes);
   /**
    * Specify that prefetchers should operate in the physical address space.
    */
@@ -533,6 +541,19 @@ template <typename P, typename R>
 auto champsim::cache_builder<P, R>::reset_pqm_enable() -> self_type&
 {
   m_pqm_enabled = false;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::set_mqc_thresh(int thresh) -> self_type& {
+  m_mqc_thresh = thresh;
+  return *this;
+}
+
+template <typename P, typename R>
+template <typename... Elems>
+auto champsim::cache_builder<P, R>::set_pqm_thresh(Elems... pqm_threshes) -> self_type& {
+  m_pqm_thresh = {pqm_threshes...};
   return *this;
 }
 

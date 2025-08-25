@@ -43,12 +43,6 @@ void asd::prefetcher_initialize() {
   for(int i = 0; i < NUM_CPUS; i++) {
     ASD_Modules.emplace_back(ASD_Module(num_bins));
   }
-  for(int i = 0; i < NUM_CPUS; i++) {
-    for(int j = 0; j < num_bins; j++) {
-      ASD_Modules.at(i).pf_depths.at(j) = 0;
-      ASD_Modules.at(i).pf_strides.at(j) = 0;
-    }
-  }
 }
 
 void asd::prefetcher_final_stats() {
