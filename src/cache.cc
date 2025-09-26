@@ -882,7 +882,7 @@ long CACHE::operate()
   champsim::bandwidth fill_bw{MAX_FILL};
   for (auto q : {std::ref(MSHR), std::ref(inflight_writes)}) {
     auto [fill_begin, fill_end] = champsim::get_span_p(std::cbegin(q.get()), std::cend(q.get()), fill_bw,
-                                                       [time = current_time, clock_period = clock_period](const auto& x) { return x.data_promise.is_ready_at(time) || x.type == access_type::DROPPED || (((time - (x.time_enqueued + clock_period)) / clock_period) > 1e5);  });
+                                                       [time = current_time, clock_period = clock_period](const auto& x) { return x.data_promise.is_ready_at(time) || x.type == access_type::DROPPED || (((time - (x.time_enqueued + clock_period)) / clock_period) > 1e6);  });
     auto complete_end = std::find_if_not(fill_begin, fill_end, [this](const auto& x) { return this->handle_fill(x); });
     fill_bw.consume(std::distance(fill_begin, complete_end));
     q.get().erase(fill_begin, complete_end);

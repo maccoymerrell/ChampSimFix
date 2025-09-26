@@ -44,7 +44,7 @@ class DRACController final : public IDRACController, public Implementation {
     std::vector<int> s_core_row_misses;
     std::vector<int> s_core_row_conflicts;
 
-    std::map<std::pair<void*,int>,double> m_core_usefulness;
+
     std::vector<int> m_read_core_count;
     std::vector<int> m_write_core_count;
 
@@ -97,7 +97,7 @@ class DRACController final : public IDRACController, public Implementation {
 
 
   public:
-    static std::vector<DRACController*> drac_controllers;
+
     void init() override {
       m_invalidate_ctr = 0;
       m_wr_low_watermark =  param<float>("wr_low_watermark").desc("Threshold for switching back to read mode.").default_val(0.2f);
@@ -139,7 +139,7 @@ class DRACController final : public IDRACController, public Implementation {
           m_plugins.push_back(create_child_ifce<IControllerPlugin>(*it));
         }
       }
-      drac_controllers.push_back(this);
+      IDRACController::drac_controllers.push_back(static_cast<IDRACController*>(this));
       if(debug)
       fmt::print("[MEMORY CONTROLLER] RQ size: {} WQ size: {}\n",m_read_buffer.max_size,m_write_buffer.max_size);
     };
@@ -653,9 +653,6 @@ class DRACController final : public IDRACController, public Implementation {
     }
 
     public:
-      void set_prefetch_usefulness(void* source_ptr, int core, double usefulness) {
-        m_core_usefulness[std::pair{source_ptr,core}] = usefulness;
-      }
       bool is_core_critical(void* source_ptr, int source_id) override {
         auto entry = m_core_usefulness.find(std::pair{source_ptr,source_id});
         if(entry == std::end(m_core_usefulness))
@@ -668,10 +665,10 @@ class DRACController final : public IDRACController, public Implementation {
 
 };
 
-std::vector<DRACController*> DRACController::drac_controllers;
+std::vector<IDRACController*> IDRACController::drac_controllers;
 
 void set_core_prefetch_usefulness(void* source_ptr, int core, double usefulness) {
-  for(auto& it : Ramulator::DRACController::drac_controllers)
+  for(auto& it : Ramulator::IDRACController::drac_controllers)
     it->set_prefetch_usefulness(source_ptr, core, usefulness);
 }
 }   // namespace Ramulator

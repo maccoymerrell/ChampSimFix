@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <deque>
+#include <utility>
 
 #include <spdlog/spdlog.h>
 #include <yaml-cpp/yaml.h>
@@ -21,8 +22,10 @@ class IDRACController : public IDRAMController {
 
   public:
     IBHScheduler* m_scheduler = nullptr;
+    static std::vector<IDRACController*> drac_controllers;
     virtual void tick() = 0;
 
+    std::map<std::pair<void*,int>,double> m_core_usefulness;
     template <class T>
     T* get_plugin() {
       for (auto plugin : m_plugins) {
@@ -36,8 +39,11 @@ class IDRACController : public IDRAMController {
 
     virtual bool is_core_critical(void* source_ptr, int source_id) {return true;}
     virtual int get_core_occupancy(int source_id, bool write) {return 0;}
-
     void tally_critical_requests();
+
+    void set_prefetch_usefulness(void* source_ptr, int core, double usefulness) {
+        m_core_usefulness[std::pair{source_ptr,core}] = usefulness;
+    }
 
 
   protected:

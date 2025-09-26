@@ -6,6 +6,10 @@ uint32_t dram_prefetch_buffer_asd_ip::prefetcher_cache_operate(champsim::address
 {
   if(addr == champsim::address{})
     return metadata_in;
+
+  //if(metadata_in == BUFFER_ID)
+  if(cache_hit != 0)
+    clear_from_pq(addr,cpu);
   
   if(cache_hit == 0 && type == access_type::PREFETCH && (metadata_in == ASD_ID || metadata_in == BUFFER_ID))
     pf_issued_to_dram_last_epoch[cpu]++;
@@ -47,7 +51,7 @@ uint32_t dram_prefetch_buffer_asd_ip::prefetcher_cache_operate(champsim::address
   //prevent prefetchers from grabbing a recently accessed entry
   ASD_Modules.at(cpu).add_to_pagemap(addr);
 
-  if(cache_hit == 0)
+  if(cache_hit == 0 || !TRIGGER_BUFFER_ON_MISS)
     update_walker(addr,cpu,ip,is_blacklisted);
 
 
@@ -163,12 +167,12 @@ void dram_prefetch_buffer_asd_ip::increase_confidence_useful(champsim::address i
   if(entry.has_value()) {
 
     if(coprefetch)
-      entry->coprefetch_confidence_counter = entry->coprefetch_confidence_counter + 1 > ASD_IP_COUNTER_MAX ? ASD_IP_COUNTER_MAX : entry->coprefetch_confidence_counter + 1;
+      entry->coprefetch_confidence_useful_counter = entry->coprefetch_confidence_useful_counter + ASD_IP_COUNTER_USEFUL_INCR > ASD_IP_COUNTER_USEFUL_MAX ? ASD_IP_COUNTER_USEFUL_MAX : entry->coprefetch_confidence_useful_counter + ASD_IP_COUNTER_USEFUL_INCR;
     else
-      entry->confidence_counter = entry->confidence_counter + 1 > BUFFER_IP_COUNTER_MAX ? BUFFER_IP_COUNTER_MAX : entry->confidence_counter + 1;
+      entry->confidence_useful_counter = entry->confidence_useful_counter + BUFFER_IP_COUNTER_USEFUL_INCR > BUFFER_IP_COUNTER_USEFUL_MAX ? BUFFER_IP_COUNTER_USEFUL_MAX : entry->confidence_useful_counter + BUFFER_IP_COUNTER_USEFUL_INCR;
 
-    bool eligible_for_promote = (coprefetch && CONF_COUNTER_ASD_IP && entry->coprefetch_confidence_counter >=ASD_IP_COUNTER_MAX);
-    eligible_for_promote |= (!coprefetch && CONF_COUNTER_BUFFER_IP && entry->confidence_counter >= BUFFER_IP_COUNTER_MAX);
+    bool eligible_for_promote = (coprefetch && CONF_COUNTER_ASD_IP && entry->coprefetch_confidence_useful_counter >=ASD_IP_COUNTER_USEFUL_MAX);
+    eligible_for_promote |= (!coprefetch && CONF_COUNTER_BUFFER_IP && entry->confidence_useful_counter >= BUFFER_IP_COUNTER_USEFUL_MAX);
     eligible_for_promote |= (coprefetch && !CONF_COUNTER_ASD_IP) || (!coprefetch && !CONF_COUNTER_BUFFER_IP);
     if(!intern_->warmup && eligible_for_promote)
       conf_useful++;
@@ -178,8 +182,10 @@ void dram_prefetch_buffer_asd_ip::increase_confidence_useful(champsim::address i
 
     if(coprefetch && eligible_for_promote) {
       entry->coprefetch_confidence = modify_confidence(entry->coprefetch_confidence,amount_to_increase,true);
+      entry->coprefetch_confidence_useful_counter = 0;
     } else if(eligible_for_promote) {
       entry->confidence = modify_confidence(entry->confidence,amount_to_increase,true);
+      entry->confidence_useful_counter = 0;
     }
     ip_tracker_table[cpu].fill(entry.value());
   }
@@ -192,13 +198,15 @@ void dram_prefetch_buffer_asd_ip::increase_confidence_useful(champsim::address i
   auto row_entry = row_walker_table[cpu].check_hit(rw);
   if(row_entry.has_value()) {
     int amount_to_increase = USEFUL_CONF - (USEFUL_NCONF*(row_entry->confidence / CONF_MAX));
-    row_entry->confidence_counter = row_entry->confidence_counter + 1 > BUFFER_ROW_COUNTER_MAX ? BUFFER_ROW_COUNTER_MAX : row_entry->confidence_counter + 1;
-    bool eligible_for_promote = !CONF_COUNTER_BUFFER_ROW || (row_entry->confidence_counter >= BUFFER_ROW_COUNTER_MAX);
+    row_entry->confidence_useful_counter = row_entry->confidence_useful_counter + BUFFER_ROW_COUNTER_USEFUL_INCR > BUFFER_ROW_COUNTER_USEFUL_MAX ? BUFFER_ROW_COUNTER_USEFUL_MAX : row_entry->confidence_useful_counter + BUFFER_ROW_COUNTER_USEFUL_INCR;
+    bool eligible_for_promote = !CONF_COUNTER_BUFFER_ROW || (row_entry->confidence_useful_counter >= BUFFER_ROW_COUNTER_USEFUL_MAX);
     if(!intern_->warmup && eligible_for_promote)
       conf_useless++;
     
-    if(eligible_for_promote)
+    if(eligible_for_promote) {
       row_entry->confidence = modify_confidence(row_entry->confidence,amount_to_increase,true);
+      row_entry->confidence_useful_counter = 0;
+    }
 
     row_walker_table[cpu].fill(row_entry.value());
   }
@@ -249,6 +257,7 @@ void dram_prefetch_buffer_asd_ip::increase_confidence_opened(champsim::address i
 void dram_prefetch_buffer_asd_ip::decrease_confidence_useless(champsim::address addr, uint32_t cpu, bool coprefetch) {
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
   
+  /*
   bool found_ip = false;
   double conf_modifier = 1.0;
   for(auto ip_hash : get_ip_hash_from_row(row,cpu)) {
@@ -259,7 +268,7 @@ void dram_prefetch_buffer_asd_ip::decrease_confidence_useless(champsim::address 
 
     if(entry.has_value()) {
         found_ip = true;
-        bool eligible_for_demote = ((coprefetch && CONF_COUNTER_ASD_IP && entry->coprefetch_confidence_counter < ASD_IP_COUNTER_MAX) || (!coprefetch && CONF_COUNTER_BUFFER_IP && entry->confidence_counter < BUFFER_IP_COUNTER_MAX));
+        bool eligible_for_demote = ((coprefetch && CONF_COUNTER_ASD_IP && entry->coprefetch_confidence_counter < ASD_IP_COUNTER_ACC_THRESH) || (!coprefetch && CONF_COUNTER_BUFFER_IP && entry->confidence_counter < BUFFER_IP_COUNTER_ACC_THRESH));
         if(coprefetch && !CONF_COUNTER_ASD_IP)
           eligible_for_demote = true;
         if(!coprefetch && !CONF_COUNTER_BUFFER_IP)
@@ -294,7 +303,7 @@ void dram_prefetch_buffer_asd_ip::decrease_confidence_useless(champsim::address 
 
   auto row_entry = row_walker_table[cpu].check_hit(rw);
   if(row_entry.has_value()) {
-    bool eligible_for_demote = !CONF_COUNTER_BUFFER_ROW || (row_entry->confidence_counter < BUFFER_ROW_COUNTER_MAX);
+    bool eligible_for_demote = !CONF_COUNTER_BUFFER_ROW || (row_entry->confidence_counter < BUFFER_ROW_COUNTER_ACC_THRESH);
     row_entry->confidence_counter = 0;
     if(!intern_->warmup && eligible_for_demote)
       conf_useless++;
@@ -303,20 +312,20 @@ void dram_prefetch_buffer_asd_ip::decrease_confidence_useless(champsim::address 
     else if(eligible_for_demote)
       row_entry->confidence = modify_confidence(row_entry->confidence,USELESS_NCONF,false);
     row_walker_table[cpu].fill(row_entry.value());
-  }
+  }*/
 
 }
 
 void dram_prefetch_buffer_asd_ip::decrease_confidence_conflict(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch) {
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
-  
+  /*
   uint16_t ip_hash = get_hash(ip.to<uint64_t>());
   ip_tracker it{ip_hash};
   auto entry = ip_tracker_table[cpu].check_hit(it);
 
   if(entry.has_value()) {
 
-      bool eligible_for_demote = ((coprefetch && CONF_COUNTER_ASD_IP && entry->coprefetch_confidence_counter < ASD_IP_COUNTER_MAX) || (!coprefetch && CONF_COUNTER_BUFFER_IP && entry->confidence_counter < BUFFER_IP_COUNTER_MAX));
+      bool eligible_for_demote = ((coprefetch && CONF_COUNTER_ASD_IP && entry->coprefetch_confidence_counter < ASD_IP_COUNTER_ACC_THRESH) || (!coprefetch && CONF_COUNTER_BUFFER_IP && entry->confidence_counter < BUFFER_IP_COUNTER_ACC_THRESH));
       if(coprefetch && !CONF_COUNTER_ASD_IP)
         eligible_for_demote = true;
       if(!coprefetch && !CONF_COUNTER_BUFFER_IP)
@@ -327,7 +336,7 @@ void dram_prefetch_buffer_asd_ip::decrease_confidence_conflict(champsim::address
         entry->confidence_counter = 0;
       
       if(eligible_for_demote && !intern_->warmup)
-        conf_conflict++;
+        conf_conflict++; 
 
       if(coprefetch && eligible_for_demote)
         if(MULT_DECREASE_ASD_IP)
@@ -347,7 +356,7 @@ void dram_prefetch_buffer_asd_ip::decrease_confidence_conflict(champsim::address
 
   auto row_entry = row_walker_table[cpu].check_hit(rw);
   if(row_entry.has_value()) {
-    bool eligible_for_demote = !CONF_COUNTER_BUFFER_ROW || (row_entry->confidence_counter < BUFFER_ROW_COUNTER_MAX);
+    bool eligible_for_demote = !CONF_COUNTER_BUFFER_ROW || (row_entry->confidence_counter < BUFFER_ROW_COUNTER_ACC_THRESH);
 
     if(!intern_->warmup && eligible_for_demote)
       conf_conflict++;
@@ -358,7 +367,7 @@ void dram_prefetch_buffer_asd_ip::decrease_confidence_conflict(champsim::address
       row_entry->confidence = modify_confidence(row_entry->confidence,CONFLICT_NCONF,false);
     row_walker_table[cpu].fill(row_entry.value());
   }
-
+  */
 }
 
 void dram_prefetch_buffer_asd_ip::decrease_confidence_fill(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch) {
@@ -366,23 +375,37 @@ void dram_prefetch_buffer_asd_ip::decrease_confidence_fill(champsim::address ip,
   uint16_t ip_hash = get_hash(ip.to<uint64_t>());
   ip_tracker it{ip_hash};
 
-  assert(FILL_NCONF == 0 || !(CONF_COUNTER_ASD_IP || CONF_COUNTER_BUFFER_IP || CONF_COUNTER_BUFFER_ROW));
+  //assert(FILL_NCONF == 0 || !(CONF_COUNTER_ASD_IP || CONF_COUNTER_BUFFER_IP || CONF_COUNTER_BUFFER_ROW));
 
   auto entry = ip_tracker_table[cpu].check_hit(it);
   if(entry.has_value()) {
     if(!intern_->warmup)
       conf_fill++;
-    //amount to increase should be dependent on current entry confidence
+
     if(coprefetch)
+      entry->coprefetch_confidence_issue_counter = entry->coprefetch_confidence_issue_counter + ASD_IP_COUNTER_ISSUE_DECR > ASD_IP_COUNTER_ISSUE_MAX ? ASD_IP_COUNTER_ISSUE_MAX : entry->coprefetch_confidence_issue_counter + ASD_IP_COUNTER_ISSUE_DECR;
+    else
+      entry->confidence_issue_counter = entry->confidence_issue_counter + BUFFER_IP_COUNTER_ISSUE_DECR > BUFFER_IP_COUNTER_ISSUE_MAX ? BUFFER_IP_COUNTER_ISSUE_MAX : entry->confidence_issue_counter + BUFFER_IP_COUNTER_ISSUE_DECR;
+
+
+    bool eligible_for_demote = (coprefetch && CONF_COUNTER_ASD_IP && entry->coprefetch_confidence_issue_counter >=ASD_IP_COUNTER_ISSUE_MAX);
+    eligible_for_demote |= (!coprefetch && CONF_COUNTER_BUFFER_IP && entry->confidence_issue_counter >= BUFFER_IP_COUNTER_ISSUE_MAX);
+    eligible_for_demote |= (coprefetch && !CONF_COUNTER_ASD_IP) || (!coprefetch && !CONF_COUNTER_BUFFER_IP);
+    //amount to increase should be dependent on current entry confidence
+    if(coprefetch && eligible_for_demote) {
       if(MULT_DECREASE_ASD_IP)
         entry->coprefetch_confidence = modify_confidence(entry->coprefetch_confidence,FILL_NCONF_FACTOR);
       else
         entry->coprefetch_confidence = modify_confidence(entry->coprefetch_confidence,FILL_NCONF,false);
-    else
+      entry->coprefetch_confidence_issue_counter = 0;
+    }
+    else if(eligible_for_demote) {
       if(MULT_DECREASE_BUFFER_IP)
         entry->confidence = modify_confidence(entry->confidence,FILL_NCONF_FACTOR);
       else
         entry->confidence = modify_confidence(entry->confidence,FILL_NCONF,false);
+      entry->confidence_issue_counter = 0;
+    }
     ip_tracker_table[cpu].fill(entry.value());
   }
 
@@ -391,10 +414,17 @@ void dram_prefetch_buffer_asd_ip::decrease_confidence_fill(champsim::address ip,
   if(row_entry.has_value()) {
     if(!intern_->warmup)
       conf_useless++;
-    if(MULT_DECREASE_BUFFER_ROW)
-      row_entry->confidence = modify_confidence(row_entry->confidence,FILL_NCONF_FACTOR);
-    else
-      row_entry->confidence = modify_confidence(row_entry->confidence,FILL_NCONF,false);
+
+    row_entry->confidence_issue_counter = row_entry->confidence_issue_counter + BUFFER_ROW_COUNTER_ISSUE_DECR > BUFFER_ROW_COUNTER_ISSUE_MAX ? BUFFER_ROW_COUNTER_ISSUE_MAX : row_entry->confidence_issue_counter + BUFFER_ROW_COUNTER_ISSUE_DECR;
+    bool eligible_for_demote = CONF_COUNTER_BUFFER_ROW && row_entry->confidence_issue_counter >= BUFFER_ROW_COUNTER_ISSUE_MAX;
+    eligible_for_demote |= !CONF_COUNTER_BUFFER_ROW;
+    if(eligible_for_demote) {
+      if(MULT_DECREASE_BUFFER_ROW)
+        row_entry->confidence = modify_confidence(row_entry->confidence,FILL_NCONF_FACTOR);
+      else
+        row_entry->confidence = modify_confidence(row_entry->confidence,FILL_NCONF,false);
+      row_entry->confidence_issue_counter = 0;
+    }
     row_walker_table[cpu].fill(row_entry.value());
   }
  
@@ -456,12 +486,17 @@ void dram_prefetch_buffer_asd_ip::update_walker(champsim::address addr, uint32_t
     increase_confidence_opened(ip,addr,cpu,false);
 
   //average confidence of row and ip
-  uint8_t confidence = USE_ROW_CONF && USE_IP_CONF ? ((long)get_confidence_from_ip_hash(ip_hash,cpu,false) + (long)get_confidence_from_row(addr,cpu)) >> 1 :
+  uint8_t confidence = USE_ROW_CONF && USE_IP_CONF ? (std::max(get_confidence_from_ip_hash(ip_hash,cpu,false),get_confidence_from_row(addr,cpu))) :
                        USE_ROW_CONF                ? get_confidence_from_row(addr,cpu) :
                        USE_IP_CONF                 ? get_confidence_from_ip_hash(ip_hash,cpu,false) :
                        0;
 
+  //number of clusters to prefetch
   std::size_t depth = get_depth(confidence,cpu);
+  //we need to fetch that many clusters in addition to the present one
+  std::size_t remaining_columns_in_cluster = column_cluster_size - (col%column_cluster_size) - 1;
+  depth = depth*column_cluster_size + remaining_columns_in_cluster;
+
   uint8_t squash_chance = get_squash_chance(confidence,cpu);
   if((rand() % 128) < squash_chance) {
     if(!intern_->warmup)
@@ -570,7 +605,19 @@ void dram_prefetch_buffer_asd_ip::prefetcher_initialize() {
     if(MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_column(champsim::address{1ul << i}) != 0)
       column_bits.push_back(i);
   }
-  fmt::print("[{}] Initialized Buffer-ASD IP, Column Bits are: {} Conflict Filtering: {}\n",intern_->NAME,SET_SAMPLE_RATE,fmt::join(column_bits, ","),ENABLE_IP_BLACKLIST);
+
+  //determine column cluster size
+  column_cluster_size = 1;
+  int prev_column_bit = column_bits.at(0);
+  for(int i = 1; i < column_bits.size(); i++) {
+    if(column_bits.at(i) > prev_column_bit + 1)
+      break;
+    prev_column_bit = column_bits.at(i);
+    column_cluster_size++;
+  }
+  column_cluster_size = 1 << column_cluster_size;
+  fmt::print("[{}] Column Cluster Size: {}\n",intern_->NAME,column_cluster_size);
+  fmt::print("[{}] Initialized Buffer-ASD IP, Column Bits are: {} Conflict Filtering: {}\n",intern_->NAME,fmt::join(column_bits, ","),ENABLE_IP_BLACKLIST);
   int size_of_rw_table = RW_SETS * RW_WAYS * NUM_CPUS * row_walker::get_size_bits();
   int size_of_it_table = IP_TRACKER_SETS * IP_TRACKER_WAYS * NUM_CPUS * ip_tracker::get_size_bits();
   int size_of_ib_table = IP_BLACKLIST_SETS * IP_BLACKLIST_WAYS * NUM_CPUS * ip_blacklist_counter::get_size_bits(); 
@@ -599,6 +646,9 @@ void dram_prefetch_buffer_asd_ip::prefetcher_initialize() {
     PREFETCH_QUEUE_RATE.push_back(0);
     PREFETCH_QUEUE_LAST_ISSUE.push_back(0);
     last_subqueue_pos.push_back(0);
+
+    mshr_hist_new.push_back(Histogram(intern_->get_mshr_size()+1,16));
+    mshr_hist_old.push_back(Histogram(intern_->get_mshr_size()+1,16));
   }
 }
 
@@ -607,6 +657,9 @@ uint32_t dram_prefetch_buffer_asd_ip::prefetcher_cache_fill(champsim::address ad
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
   if(prefetch && metadata_in == BUFFER_ID && evicted_addr != champsim::address{})
     decrease_confidence_fill(ip,addr,cpu,false);
+  else if(prefetch && metadata_in == ASD_ID && evicted_addr != champsim::address{})
+    decrease_confidence_fill(ip,addr,cpu,true);
+    
   if(prefetch)
     epoch_counter[cpu]++;
   if(prefetch && metadata_in == BUFFER_ID)
@@ -621,7 +674,8 @@ uint32_t dram_prefetch_buffer_asd_ip::prefetcher_cache_fill(champsim::address ad
   //  if(!intern_->warmup)
   //    pp_thrashes++;
   //}
-
+  if(!intern_->warmup &&  metadata_evict == BUFFER_ID && useless)
+    useless_tallied++;
   //catch generic conflicts
   if(prefetch && useless && (cpu != cpu_evict)) {
       //conflict happened here
@@ -630,9 +684,8 @@ uint32_t dram_prefetch_buffer_asd_ip::prefetcher_cache_fill(champsim::address ad
       decrease_confidence_conflict(ip,addr,cpu,metadata_in == ASD_ID);
   } else if(useless) //useless
   {
+    //not a conflict, but still useless
     decrease_confidence_useless(evicted_addr,cpu_evict,metadata_evict == ASD_ID);
-    if(!intern_->warmup && metadata_evict == BUFFER_ID)
-      useless_tallied += 1;
   }
 
 
@@ -665,11 +718,15 @@ uint32_t dram_prefetch_buffer_asd_ip::prefetcher_cache_fill(champsim::address ad
     if(entry.has_value()) {
       if(evicted_addr != champsim::address{}) {
         demand_latency_cycles_last_epoch += intern_->current_cycle() - entry->cycle_missed;
+        mshr_hist_new.at(0).tally(intern_->get_mshr_occupancy(),intern_->current_cycle() - entry->cycle_missed);
         demand_sampled_last_epoch++;
       }
       demand_sample_table.invalidate(sample_table_entry{addr,0});
     }
   }
+
+  //close out pf queue
+  clear_from_pq(addr,cpu);
 
   return metadata_in;
 }
@@ -696,17 +753,26 @@ void dram_prefetch_buffer_asd_ip::prefetcher_cycle_operate() {
         lowest_core = i;
         lowest = pf_issued_to_dram_last_epoch[i];
       }
+
+      //flip hists
+      mshr_hist_old.at(i).hist = mshr_hist_new.at(i).hist;
+      mshr_hist_old.at(i).hist_count = mshr_hist_new.at(i).hist_count;
+      mshr_hist_old.at(i).global_count = mshr_hist_new.at(i).global_count;
+      mshr_hist_new.at(i).clear();
+
     }
     //need to throttle to protect demand bandwidth
-    if(demand_latency > prefetch_latency) {
-      //throttle the highest-prefetching core
-      PREFETCH_QUEUE_RATE[highest_core] = std::min(MAX_PREFETCH_QUEUE_RATE,PREFETCH_QUEUE_RATE[highest_core]+PREFETCH_QUEUE_RATE_INCR);
-    } else {
-      //release throttle on lowest-prefetching throttled core
-      if(PREFETCH_QUEUE_RATE[lowest_core] >= PREFETCH_QUEUE_RATE_INCR) {
-        PREFETCH_QUEUE_RATE[lowest_core] -= PREFETCH_QUEUE_RATE_INCR;
+    if(DELAY_PREFETCH_QUEUE_ISSUE) {
+      if(demand_latency > prefetch_latency + PREFETCH_QUEUE_RATE[highest_core]) {
+        //throttle the highest-prefetching core
+        PREFETCH_QUEUE_RATE[highest_core] = std::min(MAX_PREFETCH_QUEUE_RATE,PREFETCH_QUEUE_RATE[highest_core]+PREFETCH_QUEUE_RATE_INCR);
       } else {
-        PREFETCH_QUEUE_RATE[lowest_core] = 0;
+        //release throttle on lowest-prefetching throttled core
+        if(PREFETCH_QUEUE_RATE[lowest_core] >= PREFETCH_QUEUE_RATE_INCR) {
+          PREFETCH_QUEUE_RATE[lowest_core] -= PREFETCH_QUEUE_RATE_INCR;
+        } else {
+          PREFETCH_QUEUE_RATE[lowest_core] = 0;
+        }
       }
     }
 
@@ -782,8 +848,8 @@ void dram_prefetch_buffer_asd_ip::prefetcher_cycle_operate() {
 
 void dram_prefetch_buffer_asd_ip::prefetcher_final_stats() {
   fmt::print("Useful: {} Useless: {} ASD: {} Opened Rows: {} Prefetch-Prefetch Thrashes: {} Rejected: {} Filtered: {}\n", useful_tallied, useless_tallied, next_line_issued, opened_rows,pp_thrashes,prefetches_rejected, prefetches_filtered);
-  fmt::print("Confidence Types: Useful: {}, Useless: {}, Row ACT: {}\n",conf_useful,conf_useless,conf_act);
-  fmt::print("Conflict filters: {} Streams Squashed: {}\n",conflict_filters,streams_squashed);
+  fmt::print("Confidence Types: Useful: {}, Useless: {}, Row ACT: {}, Conflict: {}\n",conf_useful,conf_useless,conf_act,conf_conflict);
+  fmt::print("Conflict filters: {} Streams Squashed: {} Discarded: {}\n",conflict_filters,streams_squashed,prefetches_discarded_old);
   fmt::print("Rows without logged IPs: {}\n",orphaned_row_lookups);
   uint64_t confidence_total = 0;
   uint64_t confidence_row_total = 0;
@@ -864,6 +930,13 @@ void dram_prefetch_buffer_asd_ip::prefetcher_final_stats() {
     fmt::print("ASD for Core: {} Usefulness: {}\n",i,global_usefulness_asd[i]);
     ASD_Modules.at(i).print_stats();
   }
+
+  fmt::print("MSHR Histograms:\n");
+  mshr_hist_old.at(0).print();
+  //for(int i = 0; i < NUM_CPUS; i++) {
+  // fmt::print("\t{}\n",i);
+  //  mshr_hist_old.at(i).print();
+  //}
 }
 
 void dram_prefetch_buffer_asd_ip::reset_ip_blacklist() {
@@ -1010,14 +1083,43 @@ void dram_prefetch_buffer_asd_ip::add_to_pq(prefetch_queue_entry pqe) {
       }
       std::size_t rb = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(temp_pqe.start_addr) % PREFETCH_SUBQUEUES;
       if(pf_queue[pqe.cpu][rb].size() >= PREFETCH_SUBQUEUE_LIMIT) {
-        ASD_Modules.at(pqe.cpu).remove_from_pagemap(pf_queue[pqe.cpu][rb][0].start_addr);
-        pf_queue[pqe.cpu][rb].pop_front();
+        int entry_pos = 0;
+
+        //find a non-issued entry to remove
+        while(pf_queue[pqe.cpu][rb][entry_pos].waiting_for_response && entry_pos < pf_queue[pqe.cpu][rb].size())
+          entry_pos++;
+
+        //if we can't, drop this prefetch
+        if(entry_pos >= pf_queue[pqe.cpu][rb].size())
+          return;
+
+        //we found an entry to remove, update pagemap and erase the old entry from the queue
+        ASD_Modules.at(pqe.cpu).remove_from_pagemap(pf_queue[pqe.cpu][rb][entry_pos].start_addr);
+        pf_queue[pqe.cpu][rb].erase(std::next(pf_queue[pqe.cpu][rb].begin(),entry_pos));
         if(!intern_->warmup)
           prefetches_discarded_old++;
       }
+      if(pf_queue[pqe.cpu][rb].size() >= MIN_PREFETCH_GANG_ISSUE)
+        temp_pqe.has_company = true;
       pf_queue[pqe.cpu][rb].push_back(temp_pqe);
       ASD_Modules.at(pqe.cpu).add_to_pagemap(temp_pqe.start_addr);
     }
+}
+
+void dram_prefetch_buffer_asd_ip::clear_from_pq(champsim::address addr, uint32_t cpu) {
+  if(HOLD_PREFETCH_QUEUE_SLOT_UNTIL_COMPLETE) {
+    std::size_t rb = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(addr) % PREFETCH_SUBQUEUES;
+    auto it = pf_queue.at(cpu).at(rb).begin();
+    while(it != pf_queue.at(cpu).at(rb).end()) {
+      if(it->waiting_for_response) {
+        if(champsim::block_number{it->start_addr} == champsim::block_number{addr}) {
+          it = pf_queue[cpu][rb].erase(it);
+          continue;
+        }
+      }
+      it++;
+    }
+  }
 }
 
 void dram_prefetch_buffer_asd_ip::issue_from_pq() {
@@ -1033,8 +1135,17 @@ void dram_prefetch_buffer_asd_ip::issue_from_pq() {
       last_subqueue_pos[last_queue_pos] = (last_subqueue_pos[last_queue_pos] + 1) % PREFETCH_SUBQUEUES;
       //are we allowed to issue this one
       if(pf_queue[last_queue_pos][last_subqueue_pos[last_queue_pos]].size() > 0 && PREFETCH_QUEUE_LAST_ISSUE[last_queue_pos] > PREFETCH_QUEUE_RATE[last_queue_pos]) {
-        //we are! issue all
-        auto& entry = pf_queue[last_queue_pos][last_subqueue_pos[last_queue_pos]][0];
+        //we are! issue
+        int entry_pos = 0;
+        
+        //find first valid entry
+        while(pf_queue[last_queue_pos][last_subqueue_pos[last_queue_pos]][entry_pos].waiting_for_response && entry_pos < pf_queue[last_queue_pos][last_subqueue_pos[last_queue_pos]].size())
+          entry_pos++;
+        if(entry_pos >= pf_queue[last_queue_pos][last_subqueue_pos[last_queue_pos]].size())
+          continue;
+
+        auto& entry = pf_queue[last_queue_pos][last_subqueue_pos[last_queue_pos]].at(entry_pos);
+
         std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(entry.start_addr);
         bool issued_any = false;
         bool should_pop = true;
@@ -1050,6 +1161,10 @@ void dram_prefetch_buffer_asd_ip::issue_from_pq() {
           if(champsim::page_number{entry.start_addr} != champsim::page_number{to_pf}) {
             break;
           }
+
+          //check to see if its alone
+          if(pf_queue[last_queue_pos][last_subqueue_pos[last_queue_pos]].size() < MIN_PREFETCH_GANG_ISSUE && !entry.has_company)
+            break;
 
           //get pf distance
           int distance = to_pf.to<uint64_t>() >=  entry.start_addr.to<uint64_t>() ? (champsim::block_number{to_pf}.to<uint64_t>() - champsim::block_number{entry.start_addr}.to<uint64_t>()) : 
@@ -1086,7 +1201,11 @@ void dram_prefetch_buffer_asd_ip::issue_from_pq() {
         }
         //should erase entry
         if(should_pop) {
-          pf_queue[last_queue_pos][last_subqueue_pos[last_queue_pos]].pop_front();
+          if(HOLD_PREFETCH_QUEUE_SLOT_UNTIL_COMPLETE && issued_any) {
+            pf_queue[last_queue_pos][last_subqueue_pos[last_queue_pos]].at(entry_pos).waiting_for_response = true;
+          } else {
+            pf_queue[last_queue_pos][last_subqueue_pos[last_queue_pos]].pop_front();
+          }
         }
         break;
       }

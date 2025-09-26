@@ -27,6 +27,7 @@ target_sources(
   impl/scheduler/pra_scheduler.cpp
   impl/scheduler/drac_scheduler.cpp
   impl/scheduler/minimalist_scheduler.cpp
+  impl/scheduler/buffer_scheduler.cpp
 
   impl/refresh/all_bank_refresh.cpp
   
