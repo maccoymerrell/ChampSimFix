@@ -30,7 +30,7 @@ struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
     return key;
   }
 
-  constexpr static std::size_t RW_WAYS = 32;
+  constexpr static std::size_t RW_WAYS = 8;
   constexpr static std::size_t RW_SETS = 128;
   constexpr static std::size_t RW_IP_HASHES = 4;
 
@@ -50,13 +50,13 @@ struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
   constexpr static bool USE_PREFETCH_QUEUE = true;
   constexpr static bool DELAY_PREFETCH_QUEUE_ISSUE = false;
   constexpr static bool HOLD_PREFETCH_QUEUE_SLOT_UNTIL_COMPLETE = true;
-  constexpr static std::size_t PREFETCH_SUBQUEUES = 16; //split by rowbuffer
+  constexpr static std::size_t PREFETCH_SUBQUEUES = 8; //split by rowbuffer
   constexpr static std::size_t MAX_PREFETCH_QUEUE_RATE = 50; //delay each packet a max of 50 cycles
   constexpr static std::size_t PREFETCH_QUEUE_RATE_INCR = 3;
   constexpr static std::size_t PREFETCH_SUBQUEUE_LIMIT = 16;
   constexpr static std::size_t MIN_PREFETCH_GANG_ISSUE = 3;
 
-  constexpr static std::size_t IP_TRACKER_WAYS = 32;
+  constexpr static std::size_t IP_TRACKER_WAYS = 8;
   constexpr static std::size_t IP_TRACKER_SETS = 128;
 
   constexpr static std::size_t CONF_MAX = 255;
@@ -73,6 +73,13 @@ struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
   //todo, redo this to do absolute depth, since column bits cause variation in how deep each of these are
   //constexpr static std::array<uint8_t,25> DEPTHS = {1,1,1,1,1,1,1,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9};
   constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4};
+
+  //deep
+  //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,0,0,0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8};
+
+  //shallow
+  //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,0,0,0,0,0,0,1,1,1,1,1,2,2,2,2,2,3,3,3,3,4,4};
+
   //depths should indicate how many clusters deep the prefetcher should go
 
   constexpr static std::array<uint8_t,25> CHANCE = {1,5,10,20,40,60,80,127,127,127,127,127,127,127,127,127,127,127,127,127,127,127,127,127,127}; //chance to issue prefetch stream at given depth out of 127
@@ -94,26 +101,26 @@ struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
   //this means we should lose 9 count when issuing N prefetches, and regain 10 when N useful prefetches come back
 
   //16/19 is 84.21% for net confidence gain
-  constexpr static uint8_t ASD_IP_COUNTER_ISSUE_MAX = 2;
-  constexpr static uint8_t ASD_IP_COUNTER_USEFUL_MAX = 3;
+  constexpr static uint8_t ASD_IP_COUNTER_ISSUE_MAX = 5;
+  constexpr static uint8_t ASD_IP_COUNTER_USEFUL_MAX = 4;
   constexpr static uint8_t ASD_IP_COUNTER_ISSUE_DECR = 1;
   constexpr static uint8_t ASD_IP_COUNTER_USEFUL_INCR = 1;
   constexpr static bool MULT_DECREASE_BUFFER_IP = false;
   constexpr static bool CONF_COUNTER_BUFFER_IP = true;
-  constexpr static uint8_t BUFFER_IP_COUNTER_ISSUE_MAX = 2;
-  constexpr static uint8_t BUFFER_IP_COUNTER_USEFUL_MAX = 3;
+  constexpr static uint8_t BUFFER_IP_COUNTER_ISSUE_MAX = 5;
+  constexpr static uint8_t BUFFER_IP_COUNTER_USEFUL_MAX = 4;
   constexpr static uint8_t BUFFER_IP_COUNTER_ISSUE_DECR = 1;
   constexpr static uint8_t BUFFER_IP_COUNTER_USEFUL_INCR = 1;
   constexpr static bool MULT_DECREASE_BUFFER_ROW = false;
   constexpr static bool CONF_COUNTER_BUFFER_ROW = true;
-  constexpr static uint8_t BUFFER_ROW_COUNTER_ISSUE_MAX = 2;
-  constexpr static uint8_t BUFFER_ROW_COUNTER_USEFUL_MAX = 3;
+  constexpr static uint8_t BUFFER_ROW_COUNTER_ISSUE_MAX = 5;
+  constexpr static uint8_t BUFFER_ROW_COUNTER_USEFUL_MAX = 4;
   constexpr static uint8_t BUFFER_ROW_COUNTER_ISSUE_DECR = 1;
   constexpr static uint8_t BUFFER_ROW_COUNTER_USEFUL_INCR = 1;
 
   constexpr static int STARTING_CONF = 150;
   constexpr static int STARTING_CONF_COPREFETCH = 255;
-  constexpr static int USEFUL_CONF = 2;
+  constexpr static int USEFUL_CONF = 1;
   constexpr static int USEFUL_NCONF = 0; //slowly ramps as we approach max confidence, reducing the effect of useful prefetches on confidence (max, 7/8 prefetches must be good to gain confidence, 6/8 to lose confidence)
   constexpr static int USELESS_NCONF = 1;
   constexpr static double USELESS_NCONF_FACTOR = 0.9; //if we use multiplicative decrease, this is the decrease factor
@@ -295,7 +302,8 @@ struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
     }
     static int get_size_bits() {
       //size of each entry in table + lru overhead + row
-      int bits = (RW_IP_HASHES * 16) + (champsim::lg2(RW_IP_HASHES)) + 16;
+      //int bits = (RW_IP_HASHES * 16) + (champsim::lg2(RW_IP_HASHES)) + 16;
+      int bits = 16;
       if(USE_ROW_CONF)
         bits += 8;
       if(CONF_COUNTER_BUFFER_ROW)
@@ -327,6 +335,12 @@ struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
 
     bool waiting_for_response = false;
     prefetch_queue_entry(champsim::address start_addr_, int length_, int stride_, champsim::address ip_, uint32_t cpu_, uint32_t metadata_in_, bool fill, bool skip, bool return_tag, bool column_prefetch_) : start_addr(start_addr_), length(length_), stride(stride_), ip(ip_), cpu(cpu_), metadata_in(metadata_in_), fill_this_level(fill), skip_tag_check(skip), return_tag_check(return_tag), column_prefetch(column_prefetch_) {}
+
+    static int get_size_bits() {
+      int bits = 42 + 48; //block and ip
+      bits += 3 + 2 + 1 + 12 + 3 + 1; //cpu, prefetch id, column prefetch, length, stride, waiting for response 
+      return bits;
+    }
   };
 
   std::vector<std::vector<std::deque<prefetch_queue_entry>>> pf_queue;

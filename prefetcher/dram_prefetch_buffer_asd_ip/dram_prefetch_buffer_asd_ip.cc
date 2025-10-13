@@ -620,11 +620,13 @@ void dram_prefetch_buffer_asd_ip::prefetcher_initialize() {
   fmt::print("[{}] Initialized Buffer-ASD IP, Column Bits are: {} Conflict Filtering: {}\n",intern_->NAME,fmt::join(column_bits, ","),ENABLE_IP_BLACKLIST);
   int size_of_rw_table = RW_SETS * RW_WAYS * NUM_CPUS * row_walker::get_size_bits();
   int size_of_it_table = IP_TRACKER_SETS * IP_TRACKER_WAYS * NUM_CPUS * ip_tracker::get_size_bits();
-  int size_of_ib_table = IP_BLACKLIST_SETS * IP_BLACKLIST_WAYS * NUM_CPUS * ip_blacklist_counter::get_size_bits(); 
+  int size_of_pq = PREFETCH_SUBQUEUE_LIMIT * PREFETCH_SUBQUEUES * prefetch_queue_entry::get_size_bits() * NUM_CPUS;
+  int size_of_ip_table = IP_BLACKLIST_SETS * IP_BLACKLIST_WAYS * NUM_CPUS * ip_blacklist_counter::get_size_bits(); 
   fmt::print("\tSize of Row Walker Table(s): {}\n",champsim::data::kibibytes{champsim::data::bytes{size_of_rw_table/8}});
   fmt::print("\tSize of IP Tracker Table(s): {}\n",champsim::data::kibibytes{champsim::data::bytes{size_of_it_table/8}});
+  fmt::print("\tSize of Prefetch Queue: {}\n", champsim::data::kibibytes{champsim::data::bytes{size_of_pq/8}});
   if(ENABLE_IP_BLACKLIST)
-    fmt::print("\tSize of IP Blacklist Table(s): {}\n",champsim::data::kibibytes{champsim::data::bytes{size_of_ib_table/8}});
+    fmt::print("\tSize of IP Blacklist Table(s): {}\n",champsim::data::kibibytes{champsim::data::bytes{size_of_ip_table/8}});
 
   num_bins = (4096 / BLOCK_SIZE);
   for(int i = 0; i < NUM_CPUS; i++) {
