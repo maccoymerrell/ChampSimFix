@@ -188,6 +188,8 @@ void dram_prefetch_buffer_asd_ip::increase_confidence_useful(champsim::address i
       entry->confidence_useful_counter = 0;
     }
     ip_tracker_table[cpu].fill(entry.value());
+  } else if(!intern_->warmup) {
+    orphaned_ip_lookups++;
   }
 
   if(coprefetch)
@@ -201,7 +203,7 @@ void dram_prefetch_buffer_asd_ip::increase_confidence_useful(champsim::address i
     row_entry->confidence_useful_counter = row_entry->confidence_useful_counter + BUFFER_ROW_COUNTER_USEFUL_INCR > BUFFER_ROW_COUNTER_USEFUL_MAX ? BUFFER_ROW_COUNTER_USEFUL_MAX : row_entry->confidence_useful_counter + BUFFER_ROW_COUNTER_USEFUL_INCR;
     bool eligible_for_promote = !CONF_COUNTER_BUFFER_ROW || (row_entry->confidence_useful_counter >= BUFFER_ROW_COUNTER_USEFUL_MAX);
     if(!intern_->warmup && eligible_for_promote)
-      conf_useless++;
+      conf_useful++;
     
     if(eligible_for_promote) {
       row_entry->confidence = modify_confidence(row_entry->confidence,amount_to_increase,true);
@@ -247,7 +249,7 @@ void dram_prefetch_buffer_asd_ip::increase_confidence_opened(champsim::address i
     auto row_entry = row_walker_table[cpu].check_hit(rw);
     if(row_entry.has_value()) {
       if(!intern_->warmup)
-        conf_useless++;
+        conf_act++;
       row_entry->confidence = modify_confidence(row_entry->confidence,ACT_CONF,true);
       row_walker_table[cpu].fill(row_entry.value());
     }
@@ -379,8 +381,7 @@ void dram_prefetch_buffer_asd_ip::decrease_confidence_fill(champsim::address ip,
 
   auto entry = ip_tracker_table[cpu].check_hit(it);
   if(entry.has_value()) {
-    if(!intern_->warmup)
-      conf_fill++;
+
 
     if(coprefetch)
       entry->coprefetch_confidence_issue_counter = entry->coprefetch_confidence_issue_counter + ASD_IP_COUNTER_ISSUE_DECR > ASD_IP_COUNTER_ISSUE_MAX ? ASD_IP_COUNTER_ISSUE_MAX : entry->coprefetch_confidence_issue_counter + ASD_IP_COUNTER_ISSUE_DECR;
@@ -391,6 +392,9 @@ void dram_prefetch_buffer_asd_ip::decrease_confidence_fill(champsim::address ip,
     bool eligible_for_demote = (coprefetch && CONF_COUNTER_ASD_IP && entry->coprefetch_confidence_issue_counter >=ASD_IP_COUNTER_ISSUE_MAX);
     eligible_for_demote |= (!coprefetch && CONF_COUNTER_BUFFER_IP && entry->confidence_issue_counter >= BUFFER_IP_COUNTER_ISSUE_MAX);
     eligible_for_demote |= (coprefetch && !CONF_COUNTER_ASD_IP) || (!coprefetch && !CONF_COUNTER_BUFFER_IP);
+
+    if(!intern_->warmup && eligible_for_demote)
+      conf_fill++;
     //amount to increase should be dependent on current entry confidence
     if(coprefetch && eligible_for_demote) {
       if(MULT_DECREASE_ASD_IP)
@@ -412,12 +416,13 @@ void dram_prefetch_buffer_asd_ip::decrease_confidence_fill(champsim::address ip,
   row_walker rw{row};
   auto row_entry = row_walker_table[cpu].check_hit(rw);
   if(row_entry.has_value()) {
-    if(!intern_->warmup)
-      conf_useless++;
+
 
     row_entry->confidence_issue_counter = row_entry->confidence_issue_counter + BUFFER_ROW_COUNTER_ISSUE_DECR > BUFFER_ROW_COUNTER_ISSUE_MAX ? BUFFER_ROW_COUNTER_ISSUE_MAX : row_entry->confidence_issue_counter + BUFFER_ROW_COUNTER_ISSUE_DECR;
     bool eligible_for_demote = CONF_COUNTER_BUFFER_ROW && row_entry->confidence_issue_counter >= BUFFER_ROW_COUNTER_ISSUE_MAX;
     eligible_for_demote |= !CONF_COUNTER_BUFFER_ROW;
+    if(!intern_->warmup && eligible_for_demote)
+      conf_fill++;
     if(eligible_for_demote) {
       if(MULT_DECREASE_BUFFER_ROW)
         row_entry->confidence = modify_confidence(row_entry->confidence,FILL_NCONF_FACTOR);
@@ -850,7 +855,7 @@ void dram_prefetch_buffer_asd_ip::prefetcher_cycle_operate() {
 
 void dram_prefetch_buffer_asd_ip::prefetcher_final_stats() {
   fmt::print("Useful: {} Useless: {} ASD: {} Opened Rows: {} Prefetch-Prefetch Thrashes: {} Rejected: {} Filtered: {}\n", useful_tallied, useless_tallied, next_line_issued, opened_rows,pp_thrashes,prefetches_rejected, prefetches_filtered);
-  fmt::print("Confidence Types: Useful: {}, Useless: {}, Row ACT: {}, Conflict: {}\n",conf_useful,conf_useless,conf_act,conf_conflict);
+  fmt::print("Confidence Types: Useful: {}, Useful (No IP): {}, Fill: {}, Row ACT: {}, Conflict: {}\n",conf_useful,orphaned_ip_lookups,conf_fill,conf_act,conf_conflict);
   fmt::print("Conflict filters: {} Streams Squashed: {} Discarded: {}\n",conflict_filters,streams_squashed,prefetches_discarded_old);
   fmt::print("Rows without logged IPs: {}\n",orphaned_row_lookups);
   uint64_t confidence_total = 0;
@@ -1078,7 +1083,7 @@ void dram_prefetch_buffer_asd_ip::add_to_pq(prefetch_queue_entry pqe) {
       temp_pqe.length = 1;
       uint8_t column = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_column(pqe.start_addr);
       temp_pqe.start_addr = pqe.column_prefetch ? compose_base_and_column(pqe.start_addr, column + i*pqe.stride) : champsim::address{champsim::block_number{pqe.start_addr}+(i*pqe.stride)};
-      if(ASD_Modules.at(pqe.cpu).check_pagemap(temp_pqe.start_addr)) {
+      if(ASD_Modules.at(pqe.cpu).check_pagemap(temp_pqe.start_addr) || champsim::page_number{temp_pqe.start_addr} != champsim::page_number{pqe.start_addr}) {
         if(!intern_->warmup)
           prefetches_filtered++;
         continue;

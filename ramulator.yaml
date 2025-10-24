@@ -33,15 +33,39 @@ MemorySystem:
     drop_enabled: false
     read_queue_size: 320
     write_queue_size: 320
-    prefetch_bundle: true
+    wr_high_watermark: 0.8
+    wr_low_watermark: 0.2
+    prefetch_bundle: false
     demand_bundle: false
     bundle_length: 16
     BHScheduler:
       impl: MinimalistScheduler
+      drop: false #allow prefetches to be dropped
+      pref_thresh_1: 4 #should effectively disable prefetch scheduling (outside of making them lower prio than demand)
+      pref_thresh_2: 8
+      pref_thresh_3: 12
+      pref_thresh_4: 16
+      #pref_delay_1: 2
+      #pref_delay_2: 4
+      #pref_delay_3: 6
+      #pref_delay_4: 8
+      demand_thresh_1: 8
+      demand_thresh_2: 16
+      debug: false
+      #delay_ns: 10
+      #starvation_limit: 8
+      age_ns: 10
+      
     RefreshManager:
       impl: AllBank
     RowPolicy:
-      impl: OpenRowPolicy
+      impl: AdaptiveRowPolicy
+      printout_interval: 0
+      page_idle_threshold_max: 256
+      tracking_window_size: 64
+      late_close_threshold: 12
+      early_close_threshold: 6
+      page_idle_threshold_incr: 4
       #cap: 64
     plugins:
       - ControllerPlugin: {
@@ -65,7 +89,7 @@ MemorySystem:
           path: "./trace.txt"}
 
   AddrMapper:
-    impl: MINIMALIST
+    impl: ZEN4
     gang_size: 2
     spacing: 2
     debug: false

@@ -78,6 +78,7 @@ class berti : public champsim::modules::prefetcher {
     uint64_t found_berti = 0;
     uint64_t average_issued = 0;
     uint64_t average_num = 0;
+
     
     /*****************************************************************************
      *                      General Structs                                      *
@@ -135,6 +136,7 @@ class berti : public champsim::modules::prefetcher {
         shadow_cache **scache;
     
         public:
+        uint64_t aliased_cache_hits = 0;
         ShadowCache(const int sets, const int ways)
         {
             scache = new shadow_cache*[sets];

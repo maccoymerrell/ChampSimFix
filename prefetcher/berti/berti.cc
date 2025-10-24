@@ -314,7 +314,8 @@ void berti::ShadowCache::set_pf(uint64_t addr, bool pf)
   }
 
   // The address should always be in the cache
-  assert((0) && "Address is must be in shadow cache");
+  aliased_cache_hits++;
+  //assert((0) && "Address is must be in shadow cache");
 }
 
 bool berti::ShadowCache::is_pf(uint64_t addr)
@@ -349,7 +350,8 @@ bool berti::ShadowCache::is_pf(uint64_t addr)
     }
   }
 
-  assert((0) && "Address is must be in shadow cache");
+  aliased_cache_hits++;
+  //assert((0) && "Address is must be in shadow cache");
   return 0;
 }
 
@@ -385,8 +387,8 @@ uint64_t berti::ShadowCache::get_latency(uint64_t addr)
       }
     }
   }
-
-  assert((0) && "Address is must be in shadow cache");
+  aliased_cache_hits++;
+  //assert((0) && "Address is must be in shadow cache");
   return 0;
 }
 
@@ -1154,6 +1156,7 @@ void berti::prefetcher_final_stats()
 {
   std::cout << "BERTI " << "TO_L1: " << pf_to_l1 << " TO_L2: " << pf_to_l2;
   std::cout << " TO_L2_BC_MSHR: " << pf_to_l2_bc_mshr << std::endl;
+  std::cout << "DETECTED ALIASES: " << scache[me]->aliased_cache_hits << std::endl;
 
   std::cout << "BERTI AVG_LAT: ";
   std::cout << average_latency.average << " NUM_TRACK_LATENCY: ";

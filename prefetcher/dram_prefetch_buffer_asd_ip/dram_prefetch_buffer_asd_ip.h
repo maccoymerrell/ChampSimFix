@@ -53,7 +53,7 @@ struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
   constexpr static std::size_t PREFETCH_SUBQUEUES = 8; //split by rowbuffer
   constexpr static std::size_t MAX_PREFETCH_QUEUE_RATE = 50; //delay each packet a max of 50 cycles
   constexpr static std::size_t PREFETCH_QUEUE_RATE_INCR = 3;
-  constexpr static std::size_t PREFETCH_SUBQUEUE_LIMIT = 16;
+  constexpr static std::size_t PREFETCH_SUBQUEUE_LIMIT = 32;
   constexpr static std::size_t MIN_PREFETCH_GANG_ISSUE = 3;
 
   constexpr static std::size_t IP_TRACKER_WAYS = 8;
@@ -72,7 +72,7 @@ struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
 
   //todo, redo this to do absolute depth, since column bits cause variation in how deep each of these are
   //constexpr static std::array<uint8_t,25> DEPTHS = {1,1,1,1,1,1,1,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9};
-  constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4};
+  constexpr static std::array<uint8_t,25> DEPTHS = {1,1,1,1,1,1,1,1,1,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8};
 
   //deep
   //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,0,0,0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8};
@@ -82,7 +82,7 @@ struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
 
   //depths should indicate how many clusters deep the prefetcher should go
 
-  constexpr static std::array<uint8_t,25> CHANCE = {1,5,10,20,40,60,80,127,127,127,127,127,127,127,127,127,127,127,127,127,127,127,127,127,127}; //chance to issue prefetch stream at given depth out of 127
+  constexpr static std::array<uint8_t,25> CHANCE = {1,12,24,36,48,60,72,84,96,108,120,127,127,127,127,127,127,127,127,127,127,127,127,127,127}; //chance to issue prefetch stream at given depth out of 127
   //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,1,1,1,1,1,2,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5};
   constexpr static std::array<double,25> ASD_DEPTHS = {1.0,1.0,1.0,1.0,1.0,1.1,1.2,1.2,1.3,1.3,1.4,1.4,1.5,1.5,1.6,1.6,1.7,1.7,1.8,1.8,1.9,1.9,2,2,2};
   constexpr static std::array<uint8_t,25> THRESH = {10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200,210,220,230,240,250};
@@ -118,11 +118,11 @@ struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
   constexpr static uint8_t BUFFER_ROW_COUNTER_ISSUE_DECR = 1;
   constexpr static uint8_t BUFFER_ROW_COUNTER_USEFUL_INCR = 1;
 
-  constexpr static int STARTING_CONF = 150;
+  constexpr static int STARTING_CONF = 180;
   constexpr static int STARTING_CONF_COPREFETCH = 255;
   constexpr static int USEFUL_CONF = 1;
   constexpr static int USEFUL_NCONF = 0; //slowly ramps as we approach max confidence, reducing the effect of useful prefetches on confidence (max, 7/8 prefetches must be good to gain confidence, 6/8 to lose confidence)
-  constexpr static int USELESS_NCONF = 1;
+  constexpr static int USELESS_NCONF = 0;
   constexpr static double USELESS_NCONF_FACTOR = 0.9; //if we use multiplicative decrease, this is the decrease factor
   constexpr static double USELESS_NCONF_DEPTH_MOD = 0.0; //how much of this useless conf to carry on to other ips
   constexpr static int CONFLICT_NCONF = 0;
@@ -184,6 +184,7 @@ struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
   double streams_squashed = 0;
 
   double orphaned_row_lookups = 0;
+  double orphaned_ip_lookups = 0;
   
   double pp_thrashes = 0;
 
