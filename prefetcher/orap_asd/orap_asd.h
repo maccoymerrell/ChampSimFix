@@ -1,5 +1,5 @@
-#ifndef PREFETCHER_DRAM_BUFFER_ASD_IP_H
-#define PREFETCHER_DRAM_BUFFER_ASD_IP_H
+#ifndef PREFETCHER_ORAP_ASD_H
+#define PREFETCHER_ORAP_ASD_H
 
 #include <cstdint>
 #include <array>
@@ -8,9 +8,9 @@
 #include "modules.h"
 #include "cache.h"
 #include "dram_controller.h"
-#include "../asd/asd.h"
+#include "../hasd/hasd.h"
 
-struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
+struct orap_asd : public champsim::modules::prefetcher {
 
   static uint64_t get_hash(uint64_t key)
   {
@@ -48,13 +48,14 @@ struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
   //constexpr static std::size_t IP_TRACKING_SETS = 64;
   //constexpr static std::size_t IP_TRACKING_WAYS = 8;
   constexpr static bool USE_PREFETCH_QUEUE = true;
+  constexpr static bool UNIFIED_PREFETCH_QUEUE = true;
   constexpr static bool DELAY_PREFETCH_QUEUE_ISSUE = false;
   constexpr static bool HOLD_PREFETCH_QUEUE_SLOT_UNTIL_COMPLETE = true;
-  constexpr static std::size_t PREFETCH_SUBQUEUES = 8; //split by rowbuffer
+  constexpr static std::size_t PREFETCH_SUBQUEUES = 16; //split by rowbuffer
   constexpr static std::size_t MAX_PREFETCH_QUEUE_RATE = 50; //delay each packet a max of 50 cycles
   constexpr static std::size_t PREFETCH_QUEUE_RATE_INCR = 3;
   constexpr static std::size_t PREFETCH_SUBQUEUE_LIMIT = 32;
-  constexpr static std::size_t MIN_PREFETCH_GANG_ISSUE = 3;
+  constexpr static std::size_t MIN_PREFETCH_GANG_ISSUE = 0;
 
   constexpr static std::size_t IP_TRACKER_WAYS = 8;
   constexpr static std::size_t IP_TRACKER_SETS = 128;
@@ -101,14 +102,14 @@ struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
   //this means we should lose 9 count when issuing N prefetches, and regain 10 when N useful prefetches come back
 
   //16/19 is 84.21% for net confidence gain
-  constexpr static uint8_t ASD_IP_COUNTER_ISSUE_MAX = 5;
-  constexpr static uint8_t ASD_IP_COUNTER_USEFUL_MAX = 4;
+  constexpr static uint8_t ASD_IP_COUNTER_ISSUE_MAX = 3;
+  constexpr static uint8_t ASD_IP_COUNTER_USEFUL_MAX = 2;
   constexpr static uint8_t ASD_IP_COUNTER_ISSUE_DECR = 1;
   constexpr static uint8_t ASD_IP_COUNTER_USEFUL_INCR = 1;
   constexpr static bool MULT_DECREASE_BUFFER_IP = false;
   constexpr static bool CONF_COUNTER_BUFFER_IP = true;
-  constexpr static uint8_t BUFFER_IP_COUNTER_ISSUE_MAX = 5;
-  constexpr static uint8_t BUFFER_IP_COUNTER_USEFUL_MAX = 4;
+  constexpr static uint8_t BUFFER_IP_COUNTER_ISSUE_MAX = 3;
+  constexpr static uint8_t BUFFER_IP_COUNTER_USEFUL_MAX = 2;
   constexpr static uint8_t BUFFER_IP_COUNTER_ISSUE_DECR = 1;
   constexpr static uint8_t BUFFER_IP_COUNTER_USEFUL_INCR = 1;
   constexpr static bool MULT_DECREASE_BUFFER_ROW = false;
@@ -431,7 +432,7 @@ struct dram_prefetch_buffer_asd_ip : public champsim::modules::prefetcher {
   //double global_usefulness_asd = 1.0;
 
   std::size_t num_bins;
-  std::vector<asd::ASD_Module> ASD_Modules;
+  std::vector<hasd::ASD_Module> ASD_Modules;
 
   std::vector<Histogram> mshr_hist_new;
   std::vector<Histogram> mshr_hist_old;

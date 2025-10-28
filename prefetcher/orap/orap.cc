@@ -1,7 +1,7 @@
-#include "dram_prefetch_buffer_asd_ip.h"
+#include "orap.h"
 #include "../spp_ppf/spp_ppf.h"
 
-uint32_t dram_prefetch_buffer_asd_ip::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
+uint32_t orap::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                              uint32_t metadata_in, uint32_t metadata_hit)
 {
   if(addr == champsim::address{})
@@ -67,11 +67,11 @@ uint32_t dram_prefetch_buffer_asd_ip::prefetcher_cache_operate(champsim::address
     auto [depth,stride] = ASD_Modules.at(cpu).get_prefetch_depth(addr, ip);
     //modulate depth according to MSHR occupancy
     if(intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back() > 0.9 * intern_->get_mshr_size())
-      depth = std::min(asd::MAX_PREFETCH / 8, depth);
+      depth = std::min(hasd::MAX_PREFETCH / 8, depth);
     else if(intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back() > 0.7 * intern_->get_mshr_size())
-      depth = std::min(asd::MAX_PREFETCH / 4, depth);
+      depth = std::min(hasd::MAX_PREFETCH / 4, depth);
     else if(intern_->get_mshr_occupancy() + intern_->get_pq_occupancy().back() > 0.5 * intern_->get_mshr_size())
-      depth = std::min(asd::MAX_PREFETCH / 2, depth);
+      depth = std::min(hasd::MAX_PREFETCH / 2, depth);
   
     if(USE_PREFETCH_QUEUE) {
       if(depth != 0) {
@@ -118,7 +118,7 @@ uint32_t dram_prefetch_buffer_asd_ip::prefetcher_cache_operate(champsim::address
   return metadata_in;
 }
 
-bool dram_prefetch_buffer_asd_ip::update_row_open_table(champsim::address addr) {
+bool orap::update_row_open_table(champsim::address addr) {
   std::size_t rb = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(addr);
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
 
@@ -134,7 +134,7 @@ bool dram_prefetch_buffer_asd_ip::update_row_open_table(champsim::address addr) 
 }
 
 
-uint8_t dram_prefetch_buffer_asd_ip::modify_confidence(uint8_t conf, uint8_t amnt, bool increment) {
+uint8_t orap::modify_confidence(uint8_t conf, uint8_t amnt, bool increment) {
   if(increment) {
     if((int)conf + (int)amnt >= (int)CONF_MAX)
       conf = CONF_MAX;
@@ -150,14 +150,14 @@ uint8_t dram_prefetch_buffer_asd_ip::modify_confidence(uint8_t conf, uint8_t amn
   return conf;
 }
 
-uint8_t dram_prefetch_buffer_asd_ip::modify_confidence(uint8_t conf, double factor) {
+uint8_t orap::modify_confidence(uint8_t conf, double factor) {
   double adjusted_conf = conf * factor;
   adjusted_conf = std::max(0.0,adjusted_conf);
   adjusted_conf = std::min((double)CONF_MAX,adjusted_conf);
   return (uint8_t)adjusted_conf;
 }
 
-void dram_prefetch_buffer_asd_ip::increase_confidence_useful(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch) {
+void orap::increase_confidence_useful(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch) {
   uint16_t ip_hash = get_hash(ip.to<uint64_t>());
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
   //fmt::print("Increasing confidence, row: {} rb: {} col: {}\n",row,rb,col);
@@ -214,7 +214,7 @@ void dram_prefetch_buffer_asd_ip::increase_confidence_useful(champsim::address i
   }
 }
 
-void dram_prefetch_buffer_asd_ip::increase_confidence_opened(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch) {
+void orap::increase_confidence_opened(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch) {
   //fmt::print("Increasing confidence, row: {} rb: {} col: {}\n",row,rb,col);
   assert(!CONF_COUNTER_BUFFER_IP || !ACT_CONF_ON_IP || ACT_CONF == 0);
   assert(!CONF_COUNTER_ASD_IP || !ACT_CONF_ON_IP || ACT_CONF == 0);
@@ -256,7 +256,7 @@ void dram_prefetch_buffer_asd_ip::increase_confidence_opened(champsim::address i
   }
 }
 
-void dram_prefetch_buffer_asd_ip::decrease_confidence_useless(champsim::address addr, uint32_t cpu, bool coprefetch) {
+void orap::decrease_confidence_useless(champsim::address addr, uint32_t cpu, bool coprefetch) {
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
   
   /*
@@ -318,7 +318,7 @@ void dram_prefetch_buffer_asd_ip::decrease_confidence_useless(champsim::address 
 
 }
 
-void dram_prefetch_buffer_asd_ip::decrease_confidence_conflict(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch) {
+void orap::decrease_confidence_conflict(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch) {
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
   /*
   uint16_t ip_hash = get_hash(ip.to<uint64_t>());
@@ -372,7 +372,7 @@ void dram_prefetch_buffer_asd_ip::decrease_confidence_conflict(champsim::address
   */
 }
 
-void dram_prefetch_buffer_asd_ip::decrease_confidence_fill(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch) {
+void orap::decrease_confidence_fill(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch) {
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
   uint16_t ip_hash = get_hash(ip.to<uint64_t>());
   ip_tracker it{ip_hash};
@@ -435,7 +435,7 @@ void dram_prefetch_buffer_asd_ip::decrease_confidence_fill(champsim::address ip,
  
 }
 
-std::size_t dram_prefetch_buffer_asd_ip::get_depth(uint8_t conf, uint32_t cpu) {
+std::size_t orap::get_depth(uint8_t conf, uint32_t cpu) {
   uint8_t threshold = 0;
   uint8_t new_conf = conf < variable_buffer_conf[cpu] ? 0 : conf - variable_buffer_conf[cpu];
   for (auto thres : THRESH) {
@@ -448,7 +448,7 @@ std::size_t dram_prefetch_buffer_asd_ip::get_depth(uint8_t conf, uint32_t cpu) {
   return std::max(uint8_t{1},DEPTHS.at(threshold - 1));
 }
 
-uint8_t dram_prefetch_buffer_asd_ip::get_squash_chance(uint8_t conf, uint32_t cpu) {
+uint8_t orap::get_squash_chance(uint8_t conf, uint32_t cpu) {
   uint8_t threshold = 0;
   uint8_t new_conf = conf < variable_buffer_conf[cpu] ? 0 : conf - variable_buffer_conf[cpu];
   for (auto thres : THRESH) {
@@ -461,7 +461,7 @@ uint8_t dram_prefetch_buffer_asd_ip::get_squash_chance(uint8_t conf, uint32_t cp
   return std::max(1,127 - CHANCE.at(threshold - 1));
 }
 
-double dram_prefetch_buffer_asd_ip::get_asd_thresh(uint8_t conf, uint32_t cpu) {
+double orap::get_asd_thresh(uint8_t conf, uint32_t cpu) {
   uint8_t threshold = 0;
   for (auto thres : THRESH) {
     threshold++;
@@ -473,7 +473,7 @@ double dram_prefetch_buffer_asd_ip::get_asd_thresh(uint8_t conf, uint32_t cpu) {
   return std::min(ASD_DEPTHS.at(threshold - 1),variable_asd_thresh[cpu]);
 }
 
-void dram_prefetch_buffer_asd_ip::update_walker(champsim::address addr, uint32_t cpu, champsim::address ip, bool is_blacklisted) {
+void orap::update_walker(champsim::address addr, uint32_t cpu, champsim::address ip, bool is_blacklisted) {
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
   std::size_t col = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_column(addr);
   std::size_t rb = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(addr);
@@ -560,7 +560,7 @@ void dram_prefetch_buffer_asd_ip::update_walker(champsim::address addr, uint32_t
 }
 
 
-champsim::address dram_prefetch_buffer_asd_ip::compose_base_and_column(champsim::address base, uint64_t column) {
+champsim::address orap::compose_base_and_column(champsim::address base, uint64_t column) {
   //1. iterate through all column bits in the base
   //2. set each bit to the matching bits in the column
   uint64_t base_temp = base.to<uint64_t>();
@@ -574,7 +574,7 @@ champsim::address dram_prefetch_buffer_asd_ip::compose_base_and_column(champsim:
 }
 
 
-void dram_prefetch_buffer_asd_ip::prefetcher_initialize() {
+void orap::prefetcher_initialize() {
 
   //fmt::print("SIZE OF ROW HISTORY TABLE: {}\n",champsim::data::kibibytes{row_history_table_size});
   	// Determine set sampling rate
@@ -622,10 +622,10 @@ void dram_prefetch_buffer_asd_ip::prefetcher_initialize() {
   }
   column_cluster_size = 1 << column_cluster_size;
   fmt::print("[{}] Column Cluster Size: {}\n",intern_->NAME,column_cluster_size);
-  fmt::print("[{}] Initialized Buffer-ASD IP, Column Bits are: {} Conflict Filtering: {}\n",intern_->NAME,fmt::join(column_bits, ","),ENABLE_IP_BLACKLIST);
+  fmt::print("[{}] Initialized ORAP, Column Bits are: {} Conflict Filtering: {}\n",intern_->NAME,fmt::join(column_bits, ","),ENABLE_IP_BLACKLIST);
   int size_of_rw_table = RW_SETS * RW_WAYS * NUM_CPUS * row_walker::get_size_bits();
   int size_of_it_table = IP_TRACKER_SETS * IP_TRACKER_WAYS * NUM_CPUS * ip_tracker::get_size_bits();
-  int size_of_pq = PREFETCH_SUBQUEUE_LIMIT * PREFETCH_SUBQUEUES * prefetch_queue_entry::get_size_bits() * NUM_CPUS;
+  int size_of_pq = UNIFIED_PREFETCH_QUEUE ? (PREFETCH_SUBQUEUE_LIMIT * PREFETCH_SUBQUEUES * prefetch_queue_entry::get_size_bits()) : (PREFETCH_SUBQUEUE_LIMIT * PREFETCH_SUBQUEUES * prefetch_queue_entry::get_size_bits() * NUM_CPUS);
   int size_of_ip_table = IP_BLACKLIST_SETS * IP_BLACKLIST_WAYS * NUM_CPUS * ip_blacklist_counter::get_size_bits(); 
   fmt::print("\tSize of Row Walker Table(s): {}\n",champsim::data::kibibytes{champsim::data::bytes{size_of_rw_table/8}});
   fmt::print("\tSize of IP Tracker Table(s): {}\n",champsim::data::kibibytes{champsim::data::bytes{size_of_it_table/8}});
@@ -635,9 +635,9 @@ void dram_prefetch_buffer_asd_ip::prefetcher_initialize() {
 
   num_bins = (4096 / BLOCK_SIZE);
   for(int i = 0; i < NUM_CPUS; i++) {
-    ASD_Modules.emplace_back(asd::ASD_Module(num_bins));
+    ASD_Modules.emplace_back(hasd::ASD_Module(num_bins));
   }
-  ASD_Modules.at(0).print_size(NUM_CPUS);
+  //ASD_Modules.at(0).print_size(NUM_CPUS);
 
   for(int i = 0; i < NUM_CPUS; i++) {
     global_useful_buffer.push_back(0);
@@ -659,7 +659,7 @@ void dram_prefetch_buffer_asd_ip::prefetcher_initialize() {
   }
 }
 
-uint32_t dram_prefetch_buffer_asd_ip::prefetcher_cache_fill(champsim::address addr, champsim::address ip, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in, uint32_t metadata_evict, uint32_t cpu_evict)
+uint32_t orap::prefetcher_cache_fill(champsim::address addr, champsim::address ip, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in, uint32_t metadata_evict, uint32_t cpu_evict)
 {
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
   if(prefetch && metadata_in == BUFFER_ID && evicted_addr != champsim::address{})
@@ -738,7 +738,7 @@ uint32_t dram_prefetch_buffer_asd_ip::prefetcher_cache_fill(champsim::address ad
   return metadata_in;
 }
 
-void dram_prefetch_buffer_asd_ip::prefetcher_cycle_operate() {
+void orap::prefetcher_cycle_operate() {
   epoch_cycle_counter++;
   if(epoch_cycle_counter >= cycle_epoch) {
     //modify issue rate according to whether prefetch delay is higher than demand delay
@@ -853,7 +853,7 @@ void dram_prefetch_buffer_asd_ip::prefetcher_cycle_operate() {
   }
 }
 
-void dram_prefetch_buffer_asd_ip::prefetcher_final_stats() {
+void orap::prefetcher_final_stats() {
   fmt::print("Useful: {} Useless: {} ASD: {} Opened Rows: {} Prefetch-Prefetch Thrashes: {} Rejected: {} Filtered: {}\n", useful_tallied, useless_tallied, next_line_issued, opened_rows,pp_thrashes,prefetches_rejected, prefetches_filtered);
   fmt::print("Confidence Types: Useful: {}, Useful (No IP): {}, Fill: {}, Row ACT: {}, Conflict: {}\n",conf_useful,orphaned_ip_lookups,conf_fill,conf_act,conf_conflict);
   fmt::print("Conflict filters: {} Streams Squashed: {} Discarded: {}\n",conflict_filters,streams_squashed,prefetches_discarded_old);
@@ -946,13 +946,13 @@ void dram_prefetch_buffer_asd_ip::prefetcher_final_stats() {
   //}
 }
 
-void dram_prefetch_buffer_asd_ip::reset_ip_blacklist() {
+void orap::reset_ip_blacklist() {
   for(int i = 0; i < NUM_CPUS; i++) {
     ip_blacklist_table[i].flush();
   }
 }
 
-bool dram_prefetch_buffer_asd_ip::is_ip_blacklisted(champsim::address ip, uint32_t cpu) {
+bool orap::is_ip_blacklisted(champsim::address ip, uint32_t cpu) {
   ip_blacklist_counter bc{ip};
 
   if(ip == champsim::address{})
@@ -965,7 +965,7 @@ bool dram_prefetch_buffer_asd_ip::is_ip_blacklisted(champsim::address ip, uint32
   return false;
 } 
 
-void dram_prefetch_buffer_asd_ip::update_ip_blacklist(std::size_t collision_type, champsim::address ip, uint32_t cpu, uint32_t victim_cpu, uint32_t target_prefetcher, uint32_t victim_prefetcher) {
+void orap::update_ip_blacklist(std::size_t collision_type, champsim::address ip, uint32_t cpu, uint32_t victim_cpu, uint32_t target_prefetcher, uint32_t victim_prefetcher) {
   ip_blacklist_counter bc{ip};
 
   if(collision_type == IP_BLACKLIST_USEFUL) {
@@ -1008,7 +1008,7 @@ void dram_prefetch_buffer_asd_ip::update_ip_blacklist(std::size_t collision_type
   }
 }
 
-std::vector<uint16_t> dram_prefetch_buffer_asd_ip::get_ip_hash_from_row(uint32_t row, uint32_t cpu) {
+std::vector<uint16_t> orap::get_ip_hash_from_row(uint32_t row, uint32_t cpu) {
   row_walker rw{row};
   auto entry = row_walker_table[cpu].check_hit(rw);
   std::vector<uint16_t> hashes;
@@ -1026,7 +1026,7 @@ std::vector<uint16_t> dram_prefetch_buffer_asd_ip::get_ip_hash_from_row(uint32_t
   return hashes;
 }
 
-uint8_t dram_prefetch_buffer_asd_ip::get_confidence_from_ip_hash(uint16_t ip_hash, uint32_t cpu, bool coprefetch) {
+uint8_t orap::get_confidence_from_ip_hash(uint16_t ip_hash, uint32_t cpu, bool coprefetch) {
   ip_tracker it{ip_hash};
 
   auto entry = ip_tracker_table[cpu].check_hit(it);
@@ -1046,7 +1046,7 @@ uint8_t dram_prefetch_buffer_asd_ip::get_confidence_from_ip_hash(uint16_t ip_has
 }
 
 
-uint8_t dram_prefetch_buffer_asd_ip::get_confidence_from_row(champsim::address addr, uint32_t cpu) {
+uint8_t orap::get_confidence_from_row(champsim::address addr, uint32_t cpu) {
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
   row_walker rw{row};
 
@@ -1060,7 +1060,7 @@ uint8_t dram_prefetch_buffer_asd_ip::get_confidence_from_row(champsim::address a
   return rw.confidence;
 }
 
-void dram_prefetch_buffer_asd_ip::log_ip_hash_to_row(uint32_t row, uint16_t ip_hash, uint32_t cpu) {
+void orap::log_ip_hash_to_row(uint32_t row, uint16_t ip_hash, uint32_t cpu) {
   row_walker rw{row};
 
   auto entry = row_walker_table[cpu].check_hit(rw);
@@ -1074,10 +1074,10 @@ void dram_prefetch_buffer_asd_ip::log_ip_hash_to_row(uint32_t row, uint16_t ip_h
   }
 }
 
-void dram_prefetch_buffer_asd_ip::add_to_pq(prefetch_queue_entry pqe) {
+void orap::add_to_pq(prefetch_queue_entry pqe) {
   
     for(int i = 0; i < pqe.length; i++) {
-      
+      int cpu_to_use = UNIFIED_PREFETCH_QUEUE ? 0 : pqe.cpu;
       prefetch_queue_entry temp_pqe = pqe;
       temp_pqe.sent_so_far = 0;
       temp_pqe.length = 1;
@@ -1089,38 +1089,39 @@ void dram_prefetch_buffer_asd_ip::add_to_pq(prefetch_queue_entry pqe) {
         continue;
       }
       std::size_t rb = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(temp_pqe.start_addr) % PREFETCH_SUBQUEUES;
-      if(pf_queue[pqe.cpu][rb].size() >= PREFETCH_SUBQUEUE_LIMIT) {
+      if(pf_queue[cpu_to_use][rb].size() >= PREFETCH_SUBQUEUE_LIMIT) {
         int entry_pos = 0;
 
         //find a non-issued entry to remove
-        while(pf_queue[pqe.cpu][rb][entry_pos].waiting_for_response && entry_pos < pf_queue[pqe.cpu][rb].size())
+        while(pf_queue[cpu_to_use][rb][entry_pos].waiting_for_response && entry_pos < pf_queue[cpu_to_use][rb].size())
           entry_pos++;
 
         //if we can't, drop this prefetch
-        if(entry_pos >= pf_queue[pqe.cpu][rb].size())
+        if(entry_pos >= pf_queue[cpu_to_use][rb].size())
           return;
 
         //we found an entry to remove, update pagemap and erase the old entry from the queue
-        ASD_Modules.at(pqe.cpu).remove_from_pagemap(pf_queue[pqe.cpu][rb][entry_pos].start_addr);
-        pf_queue[pqe.cpu][rb].erase(std::next(pf_queue[pqe.cpu][rb].begin(),entry_pos));
+        ASD_Modules.at(pqe.cpu).remove_from_pagemap(pf_queue[cpu_to_use][rb][entry_pos].start_addr);
+        pf_queue[cpu_to_use][rb].erase(std::next(pf_queue[cpu_to_use][rb].begin(),entry_pos));
         if(!intern_->warmup)
           prefetches_discarded_old++;
       }
-      if(pf_queue[pqe.cpu][rb].size() >= MIN_PREFETCH_GANG_ISSUE)
+      if(pf_queue[cpu_to_use][rb].size() >= MIN_PREFETCH_GANG_ISSUE)
         temp_pqe.has_company = true;
-      pf_queue[pqe.cpu][rb].push_back(temp_pqe);
+      pf_queue[cpu_to_use][rb].push_back(temp_pqe);
       ASD_Modules.at(pqe.cpu).add_to_pagemap(temp_pqe.start_addr);
     }
 }
 
-void dram_prefetch_buffer_asd_ip::clear_from_pq(champsim::address addr, uint32_t cpu) {
+void orap::clear_from_pq(champsim::address addr, uint32_t cpu) {
   if(HOLD_PREFETCH_QUEUE_SLOT_UNTIL_COMPLETE) {
     std::size_t rb = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(addr) % PREFETCH_SUBQUEUES;
-    auto it = pf_queue.at(cpu).at(rb).begin();
-    while(it != pf_queue.at(cpu).at(rb).end()) {
+    int cpu_to_use = UNIFIED_PREFETCH_QUEUE ? 0 : cpu;
+    auto it = pf_queue.at(cpu_to_use).at(rb).begin();
+    while(it != pf_queue.at(cpu_to_use).at(rb).end()) {
       if(it->waiting_for_response) {
         if(champsim::block_number{it->start_addr} == champsim::block_number{addr}) {
-          it = pf_queue[cpu][rb].erase(it);
+          it = pf_queue[cpu_to_use][rb].erase(it);
           continue;
         }
       }
@@ -1129,15 +1130,15 @@ void dram_prefetch_buffer_asd_ip::clear_from_pq(champsim::address addr, uint32_t
   }
 }
 
-void dram_prefetch_buffer_asd_ip::issue_from_pq() {
+void orap::issue_from_pq() {
   //increment all pq counters
   for(int i = 0; i < NUM_CPUS; i++) {
     PREFETCH_QUEUE_LAST_ISSUE[i]++;
   }
 
   //find a packet to schedule, all cpu's can schedule 1 per cycle (since separate hardware)
-  for(int i = 0; i < NUM_CPUS; i++) {
-    last_queue_pos = (last_queue_pos + 1) % NUM_CPUS; //prevent weird priority issues (think of this like a round-robin that handles conflicts as all core queues merge into a single issue queue)
+  for(int i = 0; i < (UNIFIED_PREFETCH_QUEUE ? 2 : NUM_CPUS); i++) {
+    last_queue_pos = UNIFIED_PREFETCH_QUEUE ? 0 : ((last_queue_pos + 1) % NUM_CPUS); //prevent weird priority issues (think of this like a round-robin that handles conflicts as all core queues merge into a single issue queue)
     for(int j = 0; j < PREFETCH_SUBQUEUES; j++) {
       last_subqueue_pos[last_queue_pos] = (last_subqueue_pos[last_queue_pos] + 1) % PREFETCH_SUBQUEUES;
       //are we allowed to issue this one

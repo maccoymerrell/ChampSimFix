@@ -35,7 +35,14 @@ private:
 
     float m_wr_low_watermark;
     float m_wr_high_watermark;
+
+    int m_read_queue_size;
+    int m_write_queue_size;
+
+    float m_prom_threshold;
     bool  m_is_write_mode = false;
+
+    bool m_active = false;
 
     std::vector<int> m_read_core_count;
     std::vector<int> m_write_core_count;
@@ -47,6 +54,8 @@ private:
     int s_num_row_hits = 0;
     int s_num_row_misses = 0;
     int s_num_row_conflicts = 0;
+
+    int debug = false;
 
     // DEBUG STAT
     int m_invalidate_ctr = -1;
@@ -61,7 +70,7 @@ public:
         if(entry == std::end(m_core_usefulness))
             return true;
         
-        return entry->second >= 0.85;
+        return entry->second >= m_prom_threshold;
     }
     void tally_critical_requests() {
       for(int i = 0; i < m_read_core_count.size(); i++) {
@@ -84,6 +93,9 @@ public:
         m_invalidate_ctr = 0;
         m_wr_low_watermark =  param<float>("wr_low_watermark").desc("Threshold for switching back to read mode.").default_val(0.2f);
         m_wr_high_watermark = param<float>("wr_high_watermark").desc("Threshold for switching to write mode.").default_val(0.8f);
+        m_prom_threshold =  param<float>("promotion_threshold").desc("Threshold for treating prefetch as demand").default_val(0.85f);
+        m_read_queue_size =  param<int>("read_queue_size").desc("Size of read queue.").default_val(128);
+        m_write_queue_size = param<int>("write_queue_size").desc("Size of write queue.").default_val(128);
 
         m_scheduler = create_child_ifce<IBHScheduler>();
         m_refresh = create_child_ifce<IRefreshManager>();
@@ -105,6 +117,8 @@ public:
         }
 
         IDRACController::drac_controllers.push_back(static_cast<IDRACController*>(this));
+        m_read_buffer.max_size = m_read_queue_size;
+        m_write_buffer.max_size = m_write_queue_size;
     };
 
     void setup(IFrontEnd* frontend, IMemorySystem* memory_system) override {
@@ -114,7 +128,8 @@ public:
         m_bankgroup_addr_idx = m_dram->m_levels("bankgroup");
         m_bank_addr_idx = m_dram->m_levels("bank");
         m_row_addr_idx = m_dram->m_levels("row");
-        m_priority_buffer.max_size = 512*3 + 32;
+        m_priority_buffer.max_size = INT_MAX;
+        m_active_buffer.max_size = INT_MAX;
 
         std::vector<int> all_bank_addr_vec(m_dram->m_levels.size(), -1);
         all_bank_addr_vec[m_dram->m_levels("channel")] = m_channel_id;
@@ -155,38 +170,72 @@ public:
     };
 
     bool send(Request& req) override {
-        req.final_command = m_dram->m_request_translations(req.type_id);
-        
-        // Forward existing write requests to incoming read requests
-        if (req.type_id == Request::Type::Read) {
-            auto compare_addr = [req](const Request& wreq) {
-                return wreq.addr == req.addr;
-            };
-            if (std::find_if(m_write_buffer.begin(), m_write_buffer.end(), compare_addr) != m_write_buffer.end()) {
-                // The request will depart at the next cycle
-                req.depart = m_clk + 1;
-                pending.push_back(req);
-                return true;
-            }
+      m_active = true;
+      req.final_command = m_dram->m_request_translations(req.type_id);
+      if(debug)
+      fmt::print(fmt::runtime("[MEMORY CONTROLLER] Processing packet {:#x} promotion: {} prefetch: {} cycle: {}\n"),req.addr, req.is_promotion, req.is_prefetch,m_clk);
+      // Forward existing write requests to incoming read requests
+      if (req.type_id == Request::Type::Read) {
+        auto compare_addr = [req](const Request& wreq) {
+          return wreq.addr == req.addr;
+        };
+        if (std::find_if(m_write_buffer.begin(), m_write_buffer.end(), compare_addr) != m_write_buffer.end()) {
+          // The request will depart at the next cycle
+          if(debug)
+          fmt::print(fmt::runtime("[MEMORY CONTROLLER] Forwarding write for {:#x} cycle: {}\n"),req.addr, m_clk);
+          req.depart = m_clk + 1;
+          pending.push_back(req);
+          return true;
         }
-
-        // Else, enqueue them to corresponding buffer based on request type id
-        bool is_success = false;
-        req.arrive = m_clk;
-        if        (req.type_id == Request::Type::Read) {
-            is_success = m_read_buffer.enqueue(req);
-        } else if (req.type_id == Request::Type::Write) {
-            is_success = m_write_buffer.enqueue(req);
-        } else {
-            throw std::runtime_error("Invalid request type!");
+      }
+      
+      //Drop prefetches that are promoted via read
+      if ((req.type_id == Request::Type::Read) && req.is_promotion) {
+        //fmt::print("Received promotion for {0:x}, looking for candidate...\n",req.addr);
+        auto compare_prefetch = [req](const Request& rreq) {
+          return ((rreq.addr >> 6) == (req.addr >> 6)) && rreq.is_prefetch;
+        };
+        auto in_rq = std::find_if(m_read_buffer.begin(), m_read_buffer.end(), compare_prefetch);
+        if(in_rq != m_read_buffer.end()) {
+          //fmt::print("Promotion of packet {0:x} to DEMAND READ\n",in_rq->addr);
+          in_rq->is_prefetch = false;
+          in_rq->was_promoted = true;
         }
-        if (!is_success) {
-            // We could not enqueue the request
-            req.arrive = -1;
-            return false;
-        }
-
         return true;
+        //fmt::print("\tCouldn't find one\n");
+      }
+
+      //int bundle_index = req.addr_vec[m_col_addr_idx] / m_bundle_length;
+      int row = req.addr_vec[m_row_addr_idx];
+      int rank = req.addr_vec[m_rank_addr_idx];
+      int bank = req.addr_vec[m_bank_addr_idx];
+      int bankgroup = req.addr_vec[m_bankgroup_addr_idx];
+
+      //fmt::print("Bundle PF requests: {} Bundle DM requests: {} is_prefetch: {} addr: {:#x}\n",m_bundle_prefetch_requests,m_bundle_demand_requests,req.is_prefetch,req.addr);
+
+      if(debug)
+      fmt::print(fmt::runtime("[MEMORY CONTROLLER] Adding packet: {:#x} promotion: {} prefetch: {} cycle: {} to queue\n"),req.addr, req.is_promotion, req.is_prefetch, m_clk);
+      // Else, enqueue them to corresponding buffer based on request type id
+      bool is_success = false;
+      req.arrive = m_clk;
+      req.is_critical = !req.is_prefetch ? true : m_core_usefulness[std::pair{req.source_ptr,req.source_id}] >= m_prom_threshold;
+      if (req.type_id == Request::Type::Read) {
+        is_success = m_read_buffer.enqueue(req);
+      } else if (req.type_id == Request::Type::Write) {
+        is_success = m_write_buffer.enqueue(req);
+      } else {
+        throw std::runtime_error("Invalid request type!");
+      }
+      if (!is_success) {
+        // We could not enqueue the request
+        req.arrive = -1;
+        if(debug)
+        fmt::print(fmt::runtime("[MEMORY CONTROLLER] Failed to add packet: {:#x} promotion: {} prefetch: {} cycle: {} to queue\n"),req.addr, req.is_promotion, req.is_prefetch, m_clk);
+        return false;
+        
+      }
+
+      return true;
     };
 
     bool priority_send(Request& req) override {

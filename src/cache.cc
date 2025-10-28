@@ -364,6 +364,8 @@ bool CACHE::try_hit(tag_lookup_type& handle_pkt)
   auto metadata_thru = handle_pkt.pf_metadata;
   bool should_drop = false;
   if (should_activate_prefetcher(handle_pkt)) {
+    //if(NAME.compare("cpu0_L1D") == 0 && !warmup)
+    //  fmt::print("[{}] instr_id: {} block: {}\n",NAME,handle_pkt.instr_id,champsim::block_number{handle_pkt.address});
     metadata_thru = impl_prefetcher_cache_operate(module_address(handle_pkt), handle_pkt.ip, handle_pkt.cpu >= NUM_CPUS ? 0 : handle_pkt.cpu, hit, useful_prefetch, handle_pkt.type, metadata_thru,hit ? way->pf_metadata : 0);
     handle_pkt.invoked_prefetcher = true;
     if(marked_for_drop.has_value() && champsim::block_number{marked_for_drop.value()} == champsim::block_number{handle_pkt.address}) {

@@ -8,49 +8,37 @@
 //keywords: {Feedback;Prefetching;Variable speed drives;Random access memory;Energy consumption;Histograms;Timing;Computer applications},
 
 
-#ifndef PREFETCHER_ASD_COL_H
-#define PREFETCHER_ASD_COL_H
+#ifndef PREFETCHER_HASD_H
+#define PREFETCHER_HASD_H
 
 #include <cstdint>
 
 #include "address.h"
 #include "modules.h"
 #include "cache.h"
-#include "dram_controller.h"
 #include <map>
 #include <vector>
 #include <array>
 #include <utility>
 
-struct asd_col : public champsim::modules::prefetcher {
+struct hasd : public champsim::modules::prefetcher {
 
   static constexpr bool FORCE_4KiB_PAGES = true;
+  static constexpr bool PAGE_MATCH = true;
+  static constexpr bool IP_MATCH = true;
+
   static constexpr std::size_t MAX_PREFETCH = 22;
   static constexpr std::size_t MAX_STREAMS = 32;
   static constexpr std::size_t MAX_STRIDE = 8;
-  static constexpr std::size_t AGE = 64;
+  static constexpr std::size_t MAX_DEPTH = 64;
+  static constexpr std::size_t AGE = MAX_STREAMS*4;
   static constexpr uint64_t EPOCH_MAX = 8192;
   static constexpr uint64_t EPOCH_MIN = 256;
   static constexpr double DIFF_THRESH = 0.1;
 
-  static constexpr std::size_t PM_SETS = 32;
+  static constexpr std::size_t PM_SETS = 64;
   static constexpr std::size_t PM_WAYS = 4;
-  static constexpr std::size_t PAGE_MAP_SIZE = 64;
-
-  std::vector<std::size_t> column_bits;
-
-  champsim::address compose_base_and_column(champsim::address base, uint64_t column) {
-  //1. iterate through all column bits in the base
-  //2. set each bit to the matching bits in the column
-  uint64_t base_temp = base.to<uint64_t>();
-  for(std::size_t i = 0; i < column_bits.size(); i++) {
-    if(column & (1ull << i))
-      base_temp |= 1ull << column_bits[i];
-    else
-      base_temp &= ~(1ull << column_bits[i]);
-  }
-  return champsim::address{base_temp};
-}
+  static constexpr std::size_t PAGE_MAP_SIZE = 64; //3.2 KiB
   
   struct Histogram {
     std::vector<uint64_t> hist;
@@ -198,80 +186,96 @@ struct asd_col : public champsim::modules::prefetcher {
     }
   };
 
-  struct COL_Streamer {
+  struct Streamer {
     uint64_t age = 0;
-    std::size_t base{};
+    champsim::block_number pos{};
+    champsim::address ip{};
     std::size_t depth = 0;
-    std::size_t row = 0;
     //add stride?
     std::size_t stride = 0;
   };
 
   template<std::size_t max_streams, uint64_t age_factor>
-  struct COLStreamBuffer {
-    std::vector<COL_Streamer> streams;
+  struct StreamBuffer {
+    std::vector<Streamer> streams;
 
-    std::pair<std::size_t,std::size_t> check_stream(champsim::address addr) {
-      std::size_t col = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_column(addr);
-      
-      std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
+    std::pair<std::size_t,std::size_t> check_stream(champsim::address addr, champsim::address ip, bool update_state) {
       //search for match
       //if no match, check size,
       std::size_t victim = streams.size();
       for(int i = 0; i < streams.size(); i++) {
-        streams.at(i).age++;
-        //if next location is above or equal to block number, and previous location is below or equal to block number
-        if(streams.at(i).base + streams.at(i).depth + (MAX_STRIDE)  >= col && streams.at(i).base + (streams.at(i).depth) < col && row == streams.at(i).row) {
-          //if we crossed a row boundary
-          if(col < streams.at(i).base) {
-            //reset depth
-            streams.at(i).depth = 1;
-            streams.at(i).row = row;
+        if(update_state)
+          streams.at(i).age++;
+        if(((streams.at(i).ip == ip) && IP_MATCH) || 
+          (PAGE_MATCH && (streams.at(i).pos + (MAX_STRIDE)  >= champsim::block_number{addr} && streams.at(i).pos < champsim::block_number{addr}))) {
+          //if force 4KiB pages, kill streams after end of 4KiB page
+          //if not force 4KiB pages, kill streams after end of regular page
+          if(update_state) {
+            if((PAGE_MATCH && !IP_MATCH && FORCE_4KiB_PAGES && (champsim::address{streams.at(i).pos}.to<uint64_t>() >> 12) != (addr.to<uint64_t>() >> 12)) || 
+              (PAGE_MATCH && !IP_MATCH && !FORCE_4KiB_PAGES && champsim::page_number{champsim::address{streams.at(i).pos}} != champsim::page_number{addr})) {
+              //reset depth
+              streams.at(i).depth = 1;
+              //reset age
+              streams.at(i).age = 0;
+              //maintain stride
+              streams.at(i).stride = streams.at(i).stride;
+              //update pos
+              streams.at(i).pos = champsim::block_number{addr};
+              streams.at(i).ip = ip;
+              return std::pair<std::size_t,std::size_t>{1,streams.at(i).stride};
+            }
+            //kill streams once they reach an unacceptable depth or stride negative or stride exceeds max
+            else if (streams.at(i).depth + 1 > MAX_DEPTH || (champsim::block_number{addr}.to<int64_t>() - streams.at(i).pos.to<int64_t>() < 0) || (champsim::block_number{addr}.to<int64_t>() - streams.at(i).pos.to<int64_t>() > MAX_STRIDE)) {
+              //reset depth
+              streams.at(i).depth = 1;
+              //reset age
+              streams.at(i).age = 0;
+              //maintain old stride
+              streams.at(i).stride = streams.at(i).stride;
+              //update pos
+              streams.at(i).pos = champsim::block_number{addr};
+              streams.at(i).ip = ip;
+              return std::pair<std::size_t,std::size_t>{1,streams.at(i).stride};
+            }
+            //update stride
+            streams.at(i).stride = champsim::block_number{addr}.to<uint64_t>() - streams.at(i).pos.to<uint64_t>();
+            //update depth
+            streams.at(i).depth += 1;
             //reset age
             streams.at(i).age = 0;
-            //maintain stride
-            streams.at(i).stride = streams.at(i).stride;
-            //update base
-            streams.at(i).base = col;
-            return std::pair<std::size_t,std::size_t>{1,streams.at(i).stride};
+            streams.at(i).pos = champsim::block_number{addr};
           }
-          //update stride
-          streams.at(i).stride = col - (streams.at(i).base + streams.at(i).depth);
-          streams.at(i).row = row;
-          //update depth
-          streams.at(i).depth += streams.at(i).stride;
-          //reset age
-          streams.at(i).age = 0;
           return std::pair{streams.at(i).depth,streams.at(i).stride};
         } else if (streams.at(i).age > (age_factor >> streams.at(i).depth)) {
           victim = i;
         }
       }
-      //if we have space
-      if(streams.size() < max_streams) {
-        COL_Streamer S;
-        S.age = 0;
-        S.base = col;
-        S.row = row;
-        S.depth = 1;
-        S.stride = 1;
-        streams.push_back(S);
-        return std::pair{1,1};
-      }
-      //we don't have space, check for victim
-      else if(victim != streams.size()) {
-        //set to default entry
-        streams.at(victim).age = 0;
-        streams.at(victim).base = col;
-        streams.at(victim).depth = 1;
-        streams.at(victim).stride = 1;
-        streams.at(victim).row = row;
-        return std::pair{1,1};
+      if(update_state) {
+        //if we have space
+        if(streams.size() < max_streams) {
+          Streamer S;
+          S.age = 0;
+          S.pos = champsim::block_number{addr};
+          S.ip = ip;
+          S.depth = 1;
+          S.stride = 1;
+          streams.push_back(S);
+          return std::pair{1,1};
+        }
+        //we don't have space, check for victim
+        else if(victim != streams.size()) {
+          //set to default entry
+          streams.at(victim).age = 0;
+          streams.at(victim).pos = champsim::block_number{addr};
+          streams.at(victim).depth = 1;
+          streams.at(victim).stride = 1;
+          streams.at(victim).ip = ip;
+          return std::pair{1,1};
+        }
       }
       //we don't have any space at all, return 0 (don't prefetch)
       return std::pair{0,0};
     }
-
   };
 
   //This is a small table to filter out recent prefetches, since this prefetcher prefetches over itself a lot
@@ -298,12 +302,12 @@ struct asd_col : public champsim::modules::prefetcher {
 
   
 
-  struct ASD_COL_Module {
+  struct ASD_Module {
     Histogram ActiveHist;
     Histogram BuildHist;
     uint64_t epoch = EPOCH_MAX;
     uint64_t epoch_timer = 0;
-    std::vector<COLStreamBuffer<MAX_STREAMS,AGE>> Streams;
+    StreamBuffer<MAX_STREAMS,AGE> Streams;
     StateMachine SM;
     std::vector<uint64_t> pf_depths;
     std::vector<uint64_t> pf_strides;
@@ -313,7 +317,7 @@ struct asd_col : public champsim::modules::prefetcher {
 
     champsim::msl::lru_table<page_map,page_map_set,page_map_way> page_map_table{PM_SETS,PM_WAYS};
 
-    ASD_COL_Module(std::size_t bins_, std::size_t banks) : ActiveHist(bins_), BuildHist(bins_), bins(bins_), Streams(banks) {
+    ASD_Module(std::size_t bins_) : ActiveHist(bins_), BuildHist(bins_), bins(bins_) {
       for(int i = 0; i < bins_; i++) {
         pf_depths.push_back(0);
         pf_strides.push_back(0);
@@ -353,41 +357,67 @@ struct asd_col : public champsim::modules::prefetcher {
       }
     }
 
-    std::pair<std::size_t,std::size_t> get_prefetch_depth(champsim::address addr) {
-      increment_epoch();
-      std::size_t rb = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_rowbuffer(addr);
-       auto [stream_pos, stride] = Streams.at(rb).check_stream(addr);
+    std::pair<std::size_t,std::size_t> get_prefetch_depth(champsim::address addr, champsim::address ip, bool update_state = true) {
+      if(update_state)
+        increment_epoch();
+       auto [stream_pos, stride] = Streams.check_stream(addr, ip, update_state);
       //fmt::print("Found stream from addr: {} pos: {}\n",addr,stream_pos);
       if(stream_pos != 0) {
-        BuildHist.tally(stream_pos, stride);
+        if(update_state)
+          BuildHist.tally(stream_pos, stride);
         std::size_t depth = std::min(ActiveHist.get_depth_from(stream_pos),MAX_PREFETCH);
         //fmt::print("ASD advising depth of {}\n",depth);
+        if(stride < pf_strides.size() && update_state)
+          pf_strides.at(stride)++;
+        if(depth < pf_depths.size() && update_state)
+          pf_depths.at(depth)++;
         return std::pair<std::size_t,std::size_t>{depth,stride};
       }
       return std::pair<std::size_t,std::size_t>{0,0};
     }
 
     void print_stats() {
-      fmt::print("\tASD-COL Histogram, epoch: {}, filtered: {}\n",epoch, filtered_prefetches);
+      fmt::print("\tASD Histogram, epoch: {}, filtered: {}\n",epoch, filtered_prefetches);
       for(int j = 0; j < bins; j++) {
-        fmt::print("\t\t{} : {}\n",j + 1,ActiveHist.get_bin_occu(j+1));
+        if(ActiveHist.get_bin_occu(j+1) != 0)
+          fmt::print("\t\t{} : {}\n",j + 1,ActiveHist.get_bin_occu(j+1));
       }
-      fmt::print("ASD-COL Prefetch Depths:\n");
+      fmt::print("ASD Prefetch Depths:\n");
     
       for(int j = 0; j < bins; j++) {
-        fmt::print("\t\t{} : {}\n",j,pf_depths.at(j));
+        if(pf_depths.at(j) != 0)
+          fmt::print("\t\t{} : {}\n",j,pf_depths.at(j));
       }
     
-      fmt::print("ASD-COL Prefetch Strides:\n");
+      fmt::print("ASD Prefetch Strides:\n");
     
       for(int j = 0; j < bins; j++) {
-        fmt::print("\t\t{} : {}\n",j,pf_strides.at(j));
+        if(pf_strides.at(j) != 0)
+          fmt::print("\t\t{} : {}\n",j,pf_strides.at(j));
       }
+    }
+
+    void print_size(int num = 1) {
+      int bits_pagemap = PM_SETS*PM_WAYS*(PAGE_MAP_SIZE+(64-champsim::lg2(PAGE_MAP_SIZE*BLOCK_SIZE)));
+      //streamer size (age + stride + depth + block number)*MAX_STREAMS
+      int bits_streamer = 8 + (champsim::lg2(MAX_STRIDE) + champsim::lg2(MAX_DEPTH) + (64-LOG2_BLOCK_SIZE))*MAX_STREAMS;
+      if(IP_MATCH)//if ip, add ip bits per stream
+        bits_streamer += 64*MAX_STREAMS;
+      //hist size (present and past)
+      int bits_hist = bins*champsim::lg2(EPOCH_MAX)*2;
+      //state machine
+      int bits_sm = 3 + champsim::lg2(EPOCH_MAX);
+
+      fmt::print("\tASD x{} Size: {}\n",num,champsim::data::kibibytes{champsim::data::bytes{((std::ceil(bits_pagemap + bits_streamer + bits_hist + bits_sm)*num)/8.0)}});
+      fmt::print("\t\tPage map: {} ({} entries, {} each)\n",champsim::data::bytes{champsim::data::bytes{bits_pagemap/8}},PM_SETS*PM_WAYS,PAGE_MAP_SIZE+(64-LOG2_PAGE_SIZE));
+      fmt::print("\t\tStreamers: {} ({} streamers)\n",champsim::data::bytes{bits_streamer/8},MAX_STREAMS);
+      fmt::print("\t\tHistogram: {} ({} bins, {} each, x2)\n",champsim::data::bytes{bits_hist/8},bins,champsim::lg2(EPOCH_MAX));
+      fmt::print("\t\tState Machine: {}\n",champsim::data::bytes{bits_sm/8});
     }
   };
 
   std::size_t num_bins;
-  std::vector<ASD_COL_Module> ASD_COL_Modules;
+  std::vector<ASD_Module> ASD_Modules;
 
   using prefetcher::prefetcher;
   uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
