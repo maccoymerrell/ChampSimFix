@@ -55,7 +55,25 @@ private:
     int s_num_row_misses = 0;
     int s_num_row_conflicts = 0;
 
+    uint64_t s_wq_occupancy_cycles = 0;
+    uint64_t s_rq_occupancy_cycles = 0;
+    uint64_t s_occupancy_cycles = 0;
+
+    std::vector<uint64_t> s_packets_served;
+    std::vector<double> s_average_throughput;
+
+    double s_average_wq_occupancy = 0.0;
+    double s_average_rq_occupancy = 0.0;
+
     int debug = false;
+
+    int packet_size;
+    int m_num_banks;
+    int m_num_bankgroups;
+    int m_num_ranks;
+    int m_total_banks;
+
+    double tCLK = 0;
 
     // DEBUG STAT
     int m_invalidate_ctr = -1;
@@ -130,12 +148,12 @@ public:
         m_row_addr_idx = m_dram->m_levels("row");
         m_priority_buffer.max_size = INT_MAX;
         m_active_buffer.max_size = INT_MAX;
-
+        packet_size = m_dram->m_internal_prefetch_size * (m_dram->m_channel_width/8);
         std::vector<int> all_bank_addr_vec(m_dram->m_levels.size(), -1);
         all_bank_addr_vec[m_dram->m_levels("channel")] = m_channel_id;
         int m_prea_id = m_dram->m_commands("PREA");
         int m_rfmab_id = m_dram->m_commands("RFMab");
-        
+        tCLK = m_dram->m_timing_vals("tCK_ps") * 1e-12;
         m_prea_template = new Request(all_bank_addr_vec, m_dram->m_requests("close-all-bank"));
         m_prea_template->command = m_prea_id;
         m_prea_template->final_command = m_prea_id;
@@ -160,6 +178,8 @@ public:
         register_stat(s_num_row_hits).name("controller_num_row_hits");
         register_stat(s_num_row_misses).name("controller_num_row_misses");
         register_stat(s_num_row_conflicts).name("controller_num_row_conflicts");
+        register_stat(s_average_rq_occupancy).name("average_rq_occupancy");
+        register_stat(s_average_wq_occupancy).name("average_wq_occupancy");
 
         m_read_core_count.resize(num_cores);
         m_write_core_count.resize(num_cores);
@@ -167,8 +187,21 @@ public:
             m_read_core_count[i] = 0;
             m_write_core_count[i] = 0;
         }
-    };
 
+        m_num_ranks = m_dram->get_level_size("rank");
+        m_num_bankgroups = m_dram->get_level_size("bankgroup");
+        m_num_banks = m_dram->get_level_size("bank");
+        m_total_banks = m_num_ranks * m_num_bankgroups * m_num_banks;
+
+        s_packets_served.resize(m_total_banks,0);
+        s_average_throughput.resize(m_total_banks,0);
+        for(int i = 0; i < m_total_banks; i++) {
+          register_stat(s_average_throughput[i]).name("avg_throughput_gibs_bank_{}",i);
+        }
+    };
+    int get_bank(Request& req) {
+      return req.addr_vec[m_rank_addr_idx] * (m_num_bankgroups*m_num_banks) + req.addr_vec[m_bankgroup_addr_idx] * (m_num_banks) + req.addr_vec[m_bank_addr_idx];
+    };
     bool send(Request& req) override {
       m_active = true;
       req.final_command = m_dram->m_request_translations(req.type_id);
@@ -248,6 +281,11 @@ public:
 
     void tick() override {
         m_clk++;
+        if(m_active) {
+            s_occupancy_cycles++;
+            s_rq_occupancy_cycles += std::size(m_read_buffer);
+            s_wq_occupancy_cycles += std::size(m_write_buffer);
+        }
         // Serve completed reads
         serve_completed_reads();
 
@@ -296,9 +334,11 @@ public:
                 if (req_it->type_id == Request::Type::Read) {
                     req_it->depart = m_clk + m_dram->m_read_latency;
                     pending.push_back(*req_it);
+                    s_packets_served[get_bank(*req_it)] += 1 + req_it->bundled_callbacks.size();
                 }
                 else if (req_it->type_id == Request::Type::Write) {
                     // TODO: Add code to update statistics
+                    s_packets_served[get_bank(*req_it)] += 1 + req_it->bundled_callbacks.size();
                 }
                 buffer->remove(req_it);
             }
@@ -456,6 +496,11 @@ private:
     }
 
     void finalize() override {
+      s_average_rq_occupancy = s_rq_occupancy_cycles / (double)(s_occupancy_cycles + 1);
+      s_average_wq_occupancy = s_wq_occupancy_cycles / (double)(s_occupancy_cycles + 1);
+      for(int i = 0; i < m_total_banks; i++) {
+        s_average_throughput[i] = ((s_packets_served[i] / (double)s_occupancy_cycles)*packet_size) * (1.0/tCLK) / double(1<<30);
+      }
     }
 };
 }   // namespace Ramulator

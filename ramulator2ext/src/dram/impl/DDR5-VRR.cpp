@@ -26,11 +26,12 @@ class DDR5VRR : public IDRAM, public Implementation {
     };
 
     inline static const std::map<std::string, std::vector<int>> timing_presets = {
-      //   name         rate   nBL  nCL nRCD   nRP  nRAS   nRC   nWR  nRTP nCWL nPPD nCCDS nCCDS_WR nCCDS_WTR nCCDL nCCDL_WR nCCDL_WTR nRRDS nRRDL nFAW nRFC1 nRFC2 nRFCsb nREFI nREFSBRD nRFM1 nRFM2 nRFMsb nDRFMab nDRFMsb nVRR nCS, tCK_ps
-      {"DDR5_3200AN",  {3200,   8,  24,  24,   24,   52,   75,   48,   12,  22,  2,    8,     8,     22+8+4,    8,     16,    22+8+16,   8,   -1,   -1,  -1,   -1,   -1,    -1,     30,    -1,   -1,   -1,     -1,     -1,    -1,  2,   625}},
-      {"DDR5_3200BN",  {3200,   8,  26,  26,   26,   52,   77,   48,   12,  24,  2,    8,     8,     24+8+4,    8,     16,    24+8+16,   8,   -1,   -1,  -1,   -1,   -1,    -1,     30,    -1,   -1,   -1,     -1,     -1,    -1,  2,   625}},
-      {"DDR5_3200C",   {3200,   8,  28,  28,   28,   52,   79,   48,   12,  26,  2,    8,     8,     26+8+4,    8,     16,    26+8+16,   8,   -1,   -1,  -1,   -1,   -1,    -1,     30,    -1,   -1,   -1,     -1,     -1,    -1,  2,   625}},
-      {"DDR5_6400C",   {6400,   8,  52,  52,   52,   104,  154,  96,   32,  48,  4,    8,     8,     48+8+4,   16,     32,    48+8+16,   8,   -1,   -1,  -1,   -1,   -1,    -1,     60,    -1,   -1,   -1,     -1,     -1,    -1,  2,   312}},
+      //   name              rate   nBL  nCL nRCD   nRP  nRAS   nRC   nWR  nRTP nCWL nPPD nCCDS nCCDS_WR nCCDS_WTR nCCDL nCCDL_WR nCCDL_WTR nRRDS nRRDL nFAW nRFC1 nRFC2 nRFCsb nREFI nREFSBRD nRFM1 nRFM2 nRFMsb nDRFMab nDRFMsb nVRR nCS, tCK_ps
+      {"DDR5_3200AN",       {3200,   8,  24,  24,   24,   52,   75,   48,   12,  22,  2,    8,     8,     22+8+4,    8,     16,    22+8+16,   8,   -1,   -1,  -1,   -1,   -1,    -1,     30,    -1,   -1,   -1,     -1,     -1,    -1,  2,   625}},
+      {"DDR5_3200BN",       {3200,   8,  26,  26,   26,   52,   77,   48,   12,  24,  2,    8,     8,     24+8+4,    8,     16,    24+8+16,   8,   -1,   -1,  -1,   -1,   -1,    -1,     30,    -1,   -1,   -1,     -1,     -1,    -1,  2,   625}},
+      {"DDR5_3200C",        {3200,   8,  28,  28,   28,   52,   79,   48,   12,  26,  2,    8,     8,     26+8+4,    8,     16,    26+8+16,   8,   -1,   -1,  -1,   -1,   -1,    -1,     30,    -1,   -1,   -1,     -1,     -1,    -1,  2,   625}},
+      {"DDR5_6400",        {6400,   8,  52,  52,   52,   104,  154,  96,   24,  48,  4,    8,     8,     48+8+4,   16,     32,    48+8+16,   8,   -1,   -1,  -1,   -1,   -1,    -1,     60,    -1,   -1,   -1,     -1,     -1,    -1,  2,   312}},
+      {"DDR5_6400_PRAC",   {6400,   8,  52,  52,  116,   52,   167,  32,   16,  48,  4,    8,     8,     48+8+4,   16,     32,    48+8+16,   8,   -1,   -1,  -1,   -1,   -1,    -1,     60,    -1,   -1,   -1,     -1,     -1,    -1,  2,   312}},
     };
 
     inline static const std::map<std::string, std::vector<double>> voltage_presets = {

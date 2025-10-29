@@ -575,7 +575,10 @@ champsim::address orap_asd::compose_base_and_column(champsim::address base, uint
 
 
 void orap_asd::prefetcher_initialize() {
-
+  if(NUM_CPUS == 1) {
+    PREFETCH_SUBQUEUES = PREFETCH_SUBQUEUES_SC;
+    PREFETCH_SUBQUEUE_LIMIT = PREFETCH_SUBQUEUE_LIMIT_SC;
+  }
   //fmt::print("SIZE OF ROW HISTORY TABLE: {}\n",champsim::data::kibibytes{row_history_table_size});
   	// Determine set sampling rate
 	if(intern_->NUM_SET >= 1024) { // 1 in 32
@@ -784,7 +787,7 @@ void orap_asd::prefetcher_cycle_operate() {
     }
 
     fmt::print("[{}] PQ status (+Delay, Issued from Buffer, Issued from ASD, Total to DRAM):\n",intern_->NAME);
-    for(int i = 0; i < NUM_CPUS; i++) {
+    for(int i = 0; i < (UNIFIED_PREFETCH_QUEUE ? 1 : NUM_CPUS); i++) {
       fmt::print("\t{} : {} {} {} {}\n",i,PREFETCH_QUEUE_RATE[i],pf_issued_last_epoch[i],copf_issued_last_epoch[i],pf_issued_to_dram_last_epoch[i]);
       for(int j = 0; j < PREFETCH_SUBQUEUES; j++) {
         fmt::print("\t\tSubqueue {} Occupancy: {} Total Issued: {}\n",j,pf_queue[i][j].size(),pf_queue_counter[i][j]);

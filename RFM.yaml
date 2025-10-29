@@ -1,0 +1,105 @@
+Frontend:
+  impl: ChampSim
+  clock_ratio: 1
+  num_expected_insts: 3000000000
+  
+  Translation:
+    impl: None
+              
+
+MemorySystem:
+  impl: DRACSystem
+  clock_ratio: 1
+
+  DRAM:
+    impl: DDR5-VRR
+    RFM:
+    org:
+      preset: DDR5_16Gb_x16
+      #preset: DDR5_16Gb_x8
+      #channel: 4
+      channel: 2
+      #rank: 2
+      rank: 1
+      channel_width: 32
+    timing:
+      preset: DDR5_6400
+      #preset: DDR5_6400_PRAC
+    drampower_enable: true
+    voltage:
+      preset: Default
+    current:
+      preset: Default
+
+  DRACController:
+    impl: DRACController
+    #impl: PRACDRAMController
+    prefetch_starve_cycles: 0
+    drop_enabled: false
+    read_queue_size: 320
+    write_queue_size: 320
+    wr_high_watermark: 0.8
+    wr_low_watermark: 0.2
+    prefetch_bundle: false
+    demand_bundle: false
+    bundle_length: 16
+    BHScheduler:
+      impl: MinimalistScheduler
+      drop: false #allow prefetches to be dropped
+      pref_thresh_1: 4 #should effectively disable prefetch scheduling (outside of making them lower prio than demand)
+      pref_thresh_2: 8
+      pref_thresh_3: 12
+      pref_thresh_4: 16
+      #pref_delay_1: 2
+      #pref_delay_2: 4
+      #pref_delay_3: 6
+      #pref_delay_4: 8
+      demand_thresh_1: 8
+      demand_thresh_2: 16
+      debug: false
+      #delay_ns: 10
+      #starvation_limit: 8
+      age_ns: 10
+      
+    RefreshManager:
+      impl: AllBank
+    RowPolicy:
+      impl: AdaptiveRowPolicy
+      printout_interval: 0
+      page_idle_threshold_max: 256
+      tracking_window_size: 64
+      late_close_threshold: 12
+      early_close_threshold: 6
+      page_idle_threshold_incr: 4
+      #cap: 64
+    plugins:
+      - ControllerPlugin: {
+          impl: ChampSimPlugin }
+      #- ControllerPlugin: {
+      #    impl: TraceRecorder,
+      #    path: "./powertrace.csv" }
+      - ControllerPlugin: {
+          impl: ActivateCounter,
+          output_file: hammer_test,
+          cycles_per_heartbeat: 1000000,
+          refresh_period: 32e-3,
+          histogram_period: 500e-6 }
+      - ControllerPlugin: {
+          impl: RFMManager,
+          sb_mode: false,
+          rfm_thresh: 16}
+      #- ControllerPlugin: {
+      #    impl: PRAC,
+      #    sb_mode: false,
+      #    rfm_thresh: 16}
+      - ControllerPlugin: {
+          impl: CommandCounter,
+          commands_to_count: [],
+          path: "./trace.txt"}
+
+  AddrMapper:
+    #impl: ZEN4
+    impl: ZEN4_8GB
+    gang_size: 2
+    spacing: 2
+    debug: false

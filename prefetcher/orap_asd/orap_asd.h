@@ -51,10 +51,12 @@ struct orap_asd : public champsim::modules::prefetcher {
   constexpr static bool UNIFIED_PREFETCH_QUEUE = true;
   constexpr static bool DELAY_PREFETCH_QUEUE_ISSUE = false;
   constexpr static bool HOLD_PREFETCH_QUEUE_SLOT_UNTIL_COMPLETE = true;
-  constexpr static std::size_t PREFETCH_SUBQUEUES = 16; //split by rowbuffer
+  std::size_t PREFETCH_SUBQUEUES = 16; //split by rowbuffer
+  std::size_t PREFETCH_SUBQUEUES_SC = 4; //split by rowbuffer
   constexpr static std::size_t MAX_PREFETCH_QUEUE_RATE = 50; //delay each packet a max of 50 cycles
   constexpr static std::size_t PREFETCH_QUEUE_RATE_INCR = 3;
-  constexpr static std::size_t PREFETCH_SUBQUEUE_LIMIT = 32;
+  std::size_t PREFETCH_SUBQUEUE_LIMIT = 32;
+  std::size_t PREFETCH_SUBQUEUE_LIMIT_SC = 16;
   constexpr static std::size_t MIN_PREFETCH_GANG_ISSUE = 0;
 
   constexpr static std::size_t IP_TRACKER_WAYS = 8;
