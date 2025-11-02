@@ -23,7 +23,7 @@ override RAMULATOR_ROOT:= $(ROOT_DIR)/ramulator2
 TRIPLET_DIR = $(patsubst %/,%,$(firstword $(filter-out $(ROOT_DIR)/vcpkg_installed/vcpkg/, $(wildcard $(ROOT_DIR)/vcpkg_installed/*/))))
 override CPPFLAGS += -I$(OBJ_ROOT) -I$(DRAM_CONTROLLER_ROOT) -I$(RAMULATOR_ROOT)/src
 override LDFLAGS  += -L$(TRIPLET_DIR)/lib -L$(TRIPLET_DIR)/lib/manual-link 
-override LDLIBS   += -lCLI11 -llzma -lz -lbz2 -lfmt
+override LDLIBS   += -llzma -lz -lbz2 -lfmt
 
 # find vcpkg's local copy of cmake for building ramulator if it was installed
 ifneq ($(wildcard $(ROOT_DIR)/vcpkg/downloads/tools/cmake*),)

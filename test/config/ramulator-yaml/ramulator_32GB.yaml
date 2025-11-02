@@ -23,6 +23,9 @@ MemorySystem:
 
   Controller:
     impl: Generic
+    RowPolicy:
+      impl: ClosedRowPolicy
+      cap: 4
     Scheduler:
       impl: FRFCFS
     RefreshManager:
