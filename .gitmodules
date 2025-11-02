@@ -3,4 +3,4 @@
 	url = https://github.com/Microsoft/vcpkg.git
 [submodule "ramulator2"]
 	path = ramulator2
-	url = https://github.com/CMU-SAFARI/ramulator2.git
+	url = https://github.com/CMU-SAFARI/ramulator2
