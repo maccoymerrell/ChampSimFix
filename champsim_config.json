@@ -160,7 +160,8 @@
   },
 
   "physical_memory": {
-    	"model": "integrated",
+    "model": "integrated",
+    "config": "ramulator.yaml",
     "data_rate": 3200,
     "channels": 1,
     "ranks": 1,
@@ -176,9 +177,7 @@
     "tRP": 24,
     "tRAS": 52,
     "refresh_period": 32,
-    "refreshes_per_period": 8192,
-        "refresh_period": 64,
-        "rows_per_refresh": 8
+    "refreshes_per_period": 8192
   },
 
   "virtual_memory": {
