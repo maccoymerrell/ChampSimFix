@@ -22,8 +22,8 @@ import multiprocessing as mp
 from . import util
 from . import cxx
 
-pmem_fmtstr = 'champsim::chrono::picoseconds{{{clock_period}}}, champsim::chrono::picoseconds{{{_tRP}}}, champsim::chrono::picoseconds{{{_tRCD}}}, champsim::chrono::picoseconds{{{_tCAS}}}, champsim::chrono::microseconds{{{_refresh_period}}}, champsim::chrono::picoseconds{{{_turn_around_time}}}, {{{_ulptr}}}, {rq_size}, {wq_size}, {channels}, champsim::data::bytes{{{channel_width}}}, {rows}, {columns}, {ranks}, {banks}, {_rows_per_refresh}, "{_config}"'
-vmem_fmtstr = 'champsim::data::bytes{{{pte_page_size}}}, {num_levels}, champsim::chrono::picoseconds{{{clock_period}*{minor_fault_penalty}}}, {dram_name}'
+pmem_fmtstr = 'champsim::chrono::picoseconds{{{clock_period_dbus}}}, champsim::chrono::picoseconds{{{clock_period_mc}}}, std::size_t{{{_tRP}}}, std::size_t{{{_tRCD}}}, std::size_t{{{_tCAS}}}, std::size_t{{{_tRAS}}}, champsim::chrono::microseconds{{{_refresh_period}}}, {{{_ulptr}}}, {rq_size}, {wq_size}, {channels}, champsim::data::bytes{{{channel_width}}}, {_bank_rows}, {_bank_columns}, {ranks}, {bankgroups}, {banks}, {_refreshes_per_period}, "{_config}"'
+vmem_fmtstr = 'champsim::data::bytes{{{pte_page_size}}}, {num_levels}, champsim::chrono::picoseconds{{{clock_period}*{minor_fault_penalty}}}, {dram_name}, {_randomization}'
 
 queue_fmtstr = '{rq_size}, {pq_size}, {wq_size}, champsim::data::bits{{{_offset_bits}}}, {_queue_check_full_addr:b}'
 
@@ -31,6 +31,7 @@ core_builder_parts = {
     'ifetch_buffer_size': '.ifetch_buffer_size({ifetch_buffer_size})',
     'decode_buffer_size': '.decode_buffer_size({decode_buffer_size})',
     'dispatch_buffer_size': '.dispatch_buffer_size({dispatch_buffer_size})',
+    'register_file_size': '.register_file_size({register_file_size})',
     'rob_size': '.rob_size({rob_size})',
     'lq_size': '.lq_size({lq_size})',
     'sq_size': '.sq_size({sq_size})',
@@ -55,7 +56,7 @@ core_builder_parts = {
     '_branch_predictor_data': '.branch_predictor<{^branch_predictor_string}>()',
     '_btb_data': '.btb<{^btb_string}>()',
     '_index': '.index({_index})',
-    '^clock_period': '.clock_period(champsim::chrono::picoseconds{{{^clock_period}}})'
+    'frequency': '.clock_period(champsim::chrono::picoseconds{{{^clock_period}}})'
 }
 
 dib_builder_parts = {
@@ -84,7 +85,7 @@ cache_builder_parts = {
     '_prefetcher_data': '.prefetcher<{^prefetcher_string}>()',
     'lower_translate': '.lower_translate(&{^lower_translate_queues})',
     'lower_level': '.lower_level(&{^lower_level_queues})',
-    '^clock_period': '.clock_period(champsim::chrono::picoseconds{{{^clock_period}}})'
+    'frequency': '.clock_period(champsim::chrono::picoseconds{{{^clock_period}}})'
 }
 
 ptw_builder_parts = {
@@ -94,7 +95,7 @@ ptw_builder_parts = {
     'mshr_size': '.mshr_size({mshr_size})',
     'max_read': '.tag_bandwidth(champsim::bandwidth::maximum_type{{{max_read}}})',
     'max_write': '.fill_bandwidth(champsim::bandwidth::maximum_type{{{max_write}}})',
-    '^clock_period': '.clock_period(champsim::chrono::picoseconds{{{^clock_period}}})'
+    'frequency': '.clock_period(champsim::chrono::picoseconds{{{^clock_period}}})'
 }
 
 def vector_string(iterable):
@@ -122,6 +123,8 @@ def get_cpu_builder(cpu, caches, ul_pairs):
         '^l1i_ptr': f'(*std::next(std::begin(caches), {cache_index(cpu.get("L1I"))}))',
         '^l1d_ptr': f'(*std::next(std::begin(caches), {cache_index(cpu.get("L1D"))}))'
     }
+    if 'frequency' in cpu:
+        local_params['^clock_period'] = int(1000000/cpu['frequency'])
 
     builder_parts = itertools.chain(util.multiline(itertools.chain(
         ('champsim::core_builder{{ champsim::defaults::default_core }}',),
@@ -151,7 +154,6 @@ def get_cache_builder(elem, ul_pairs):
 
     uppers = (v for v in ul_pairs if v[0] == elem.get('name'))
     local_params = {
-        '^clock_period': int(1000000/elem['frequency']),
         '^defaults': elem.get('_defaults', ''),
         '^upper_levels_string': vector_string(f'&channels.at({ul_pairs.index(v)})' for v in uppers),
         '^prefetch_activate_string': ', '.join('access_type::'+t for t in elem.get('prefetch_activate',[])),
@@ -159,6 +161,8 @@ def get_cache_builder(elem, ul_pairs):
         '^prefetcher_string': ', '.join(f'class {k["class"]}' for k in elem.get('_prefetcher_data',[])),
         '^lower_level_queues': f'channels.at({ul_pairs.index((elem.get("lower_level"), elem.get("name")))})'
     }
+    if 'frequency' in elem:
+        local_params['^clock_period'] = int(1000000/elem['frequency'])
     if 'lower_translate' in elem:
         local_params.update({
             '^lower_translate_queues': f'channels.at({ul_pairs.index((elem.get("lower_translate"), elem.get("name")))})'
@@ -191,10 +195,11 @@ def get_ptw_builder(ptw, ul_pairs):
 
     uppers = (v for v in ul_pairs if v[0] == ptw.get('name'))
     local_params = {
-        '^clock_period': int(1000000/ptw['frequency']),
         '^upper_levels_string': vector_string(f'&channels.at({ul_pairs.index(v)})' for v in uppers),
         '^lower_level_queues': f'channels.at({ul_pairs.index((ptw.get("lower_level"), ptw.get("name")))})'
     }
+    if 'frequency' in ptw:
+        local_params['^clock_period'] = int(1000000/ptw['frequency'])
 
     builder_parts = itertools.chain(util.multiline(itertools.chain(
         ('champsim::ptw_builder{{ champsim::defaults::default_ptw }}',),
@@ -332,13 +337,16 @@ def get_instantiation_lines(cores, caches, ptws, pmem, vmem, build_id):
     pmem_instantiation_body = (
         'DRAM{',
         pmem_fmtstr.format(
-            clock_period=int(1000000/pmem['frequency']),
-            _tRP=int(1000*pmem['tRP']),
-            _tRCD=int(1000*pmem['tRCD']),
-            _tCAS=int(1000*pmem['tCAS']),
+            clock_period_dbus=int(1000000/pmem['data_rate']),
+            clock_period_mc=int(1000000/pmem['frequency']),
+            _tRP=int(pmem['tRP']),
+            _tRCD=int(pmem['tRCD']),
+            _tCAS=int(pmem['tCAS']),
+            _tRAS=int(pmem['tRAS']),
+            _bank_rows=int(pmem['bank_rows']), #added for supporting old configs, mainly column size change
+            _bank_columns=int(pmem['columns']*8 if 'columns' in pmem else pmem['bank_columns']),
             _refresh_period=int(1000*pmem['refresh_period']),
-            _rows_per_refresh=int(pmem['rows_per_refresh']),
-            _turn_around_time=int(1000*pmem['turn_around_time']),
+            _refreshes_per_period=int(pmem['refreshes_per_period']),
             _ulptr=vector_string(f'&channels.at({ul_pairs.index(v)})' for v in ul_pairs if v[0] == pmem['name']),
             _config=pmem['config'],
             **pmem),
@@ -346,7 +354,13 @@ def get_instantiation_lines(cores, caches, ptws, pmem, vmem, build_id):
     )
 
     vmem_instantiation_body = (
-        'vmem{' + vmem_fmtstr.format(dram_name=pmem['name'], clock_period=global_clock_period, **vmem) + '},',
+        'vmem{',
+        vmem_fmtstr.format(
+            dram_name=pmem['name'], 
+            clock_period=global_clock_period,
+            _randomization= '{}' if (isinstance(vmem['randomization'],bool) and vmem['randomization'] == False) else int(vmem['randomization']),
+            **vmem),
+        '},',
     )
 
     ptw_instantiation_body = (

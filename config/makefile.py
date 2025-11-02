@@ -75,7 +75,7 @@ def get_makefile_lines(build_id, executable, module_info, pmem):
     exe_dirname, exe_basename = os.path.split(os.path.normpath(executable))
     exe_basename = os.path.join('$(BIN_ROOT)', exe_basename)
     yield from hard_assign_variable('BIN_ROOT', exe_dirname)
-    yield from hard_assign_variable('build_id', build_id, targets=[exe_basename])
+    yield from hard_assign_variable('build_id', build_id, targets=["compile_commands", exe_basename])
 
     mod_paths = [relroot(mod["path"]) for mod in module_info.values()]
      
@@ -85,6 +85,7 @@ def get_makefile_lines(build_id, executable, module_info, pmem):
     if legacy_paths:
         yield from append_variable('prereq_for_generated', *legacy_paths, targets=['$(generated_files)'])
 
+    yield from append_variable('build_ids', build_id)
     yield from append_variable('executable_name', exe_basename)
 
     #for generic dram_controller support

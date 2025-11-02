@@ -9,7 +9,11 @@ ChampSim is a trace-based simulator for a microarchitecture study. If you have q
 
 # Using ChampSim
 
-ChampSim is the result of academic research. To support its continued growth, please cite our work when you publish results that use ChampSim by clicking "Cite this Repository" in the sidebar.
+ChampSim is the result of academic research. If you use this software in your work, please cite it using the following reference:
+
+    Gober, N., Chacon, G., Wang, L., Gratz, P. V., Jimenez, D. A., Teran, E., Pugsley, S., & Kim, J. (2022). The Championship Simulator: Architectural Simulation for Education and Competition. https://doi.org/10.48550/arXiv.2210.14324
+
+If you use ChampSim in your work, you may submit a pull request modifying `PUBLICATIONS_USING_CHAMPSIM.bib` to have it featured in [the documentation](https://champsim.github.io/ChampSim/master/Publications-using-champsim.html).
 
 # Download dependencies
 
@@ -38,7 +42,7 @@ Storage for these traces is kindly provided by Daniel Jimenez (Texas A&M Univers
 
 Execute the binary directly.
 ```
-$ bin/champsim --warmup_instructions 200000000 --simulation_instructions 500000000 ~/path/to/traces/600.perlbench_s-210B.champsimtrace.xz
+$ bin/champsim --warmup-instructions 200000000 --simulation-instructions 500000000 ~/path/to/traces/600.perlbench_s-210B.champsimtrace.xz
 ```
 
 The number of warmup and simulation instructions given will be the number of instructions retired. Note that the statistics printed at the end of the simulation include only the simulation phase.
@@ -69,7 +73,7 @@ Note that the example prefetcher is an L2 prefetcher. You might design a prefetc
 ```
 $ ./config.sh <configuration file>
 $ make
-$ bin/champsim --warmup_instructions 200000000 --simulation_instructions 500000000 600.perlbench_s-210B.champsimtrace.xz
+$ bin/champsim --warmup-instructions 200000000 --simulation-instructions 500000000 600.perlbench_s-210B.champsimtrace.xz
 ```
 
 # How to create traces

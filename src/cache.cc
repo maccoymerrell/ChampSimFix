@@ -115,6 +115,10 @@ CACHE::mshr_type CACHE::mshr_type::merge(mshr_type predecessor, mshr_type succes
                  std::back_inserter(merged_return));
 
   mshr_type retval{(successor.type == access_type::PREFETCH) ? predecessor : successor};
+
+  // set the time enqueued to the predecessor unless its a demand into prefetch, in which case we use the successor
+  retval.time_enqueued =
+      ((successor.type != access_type::PREFETCH && predecessor.type == access_type::PREFETCH)) ? successor.time_enqueued : predecessor.time_enqueued;
   retval.instr_depend_on_me = merged_instr;
   retval.to_return = merged_return;
   retval.data_promise = predecessor.data_promise;
@@ -198,7 +202,7 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
     writeback_packet.response_requested = false;
 
     if constexpr (champsim::debug_print) {
-      fmt::print("[{}] {} evict address: {:#x} v_address: {:#x} prefetch_metadata: {}\n", NAME, __func__, writeback_packet.address, writeback_packet.v_address,
+      fmt::print("[{}] {} evict address: {} v_address: {} prefetch_metadata: {}\n", NAME, __func__, writeback_packet.address, writeback_packet.v_address,
                  fill_mshr.data_promise->pf_metadata);
     }
 
@@ -231,7 +235,9 @@ bool CACHE::handle_fill(const mshr_type& fill_mshr)
   }
 
   // COLLECT STATS
-  sim_stats.total_miss_latency_cycles += (current_time - (fill_mshr.time_enqueued + clock_period)) / clock_period;
+  if (fill_mshr.type != access_type::PREFETCH)
+    sim_stats.total_miss_latency_cycles += (current_time - (fill_mshr.time_enqueued + clock_period)) / clock_period;
+  sim_stats.mshr_return.increment(std::pair{fill_mshr.type, fill_mshr.cpu});
 
   response_type response{fill_mshr.address, fill_mshr.v_address, fill_mshr.data_promise->data, metadata_thru, fill_mshr.instr_depend_on_me};
   for (auto* ret : fill_mshr.to_return) {
@@ -337,6 +343,9 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
         ++sim_stats.pf_useful;
       }
     }
+
+    // COLLECT STATS
+    sim_stats.mshr_merge.increment(std::pair{to_allocate.type, to_allocate.cpu});
 
     *mshr_entry = mshr_type::merge(*mshr_entry, to_allocate);
   } else {
@@ -451,14 +460,29 @@ long CACHE::operate()
       champsim::transform_while_n(translation_stash, std::back_inserter(inflight_tag_check), initiate_tag_bw, is_translated, initiate_tag_check<false>());
   initiate_tag_bw.consume(stash_bandwidth_consumed);
   std::vector<long long> channels_bandwidth_consumed{};
+
+  if (std::size(upper_levels) > 1) {
+    std::rotate(upper_levels.begin(), upper_levels.begin() + 1, upper_levels.end());
+  }
+
+  // upper levels get an equal portion of the remaining bandwidth
+  champsim::bandwidth::maximum_type per_upper_bandwidth =
+      std::size(upper_levels) >= 1
+          ? (champsim::bandwidth::maximum_type)std::max((size_t)initiate_tag_bw.amount_remaining() / std::size(upper_levels), size_t{1})
+          : champsim::bandwidth::maximum_type{};
+
   for (auto* ul : upper_levels) {
     for (auto q : {std::ref(ul->WQ), std::ref(ul->RQ), std::ref(ul->PQ)}) {
+      // this needs to be in this loop, we need to ensure that for cases where bandwidth doesn't divide nicely across upstreams,
+      // we don't accidentally consume more bandwidth than expected
+      champsim::bandwidth per_upper_tag_bw{std::min(per_upper_bandwidth, champsim::bandwidth::maximum_type{initiate_tag_bw.amount_remaining()})};
       auto bandwidth_consumed =
-          champsim::transform_while_n(q.get(), std::back_inserter(inflight_tag_check), initiate_tag_bw, can_translate, initiate_tag_check<true>(ul));
+          champsim::transform_while_n(q.get(), std::back_inserter(inflight_tag_check), per_upper_tag_bw, can_translate, initiate_tag_check<true>(ul));
       channels_bandwidth_consumed.push_back(bandwidth_consumed);
       initiate_tag_bw.consume(bandwidth_consumed);
     }
   }
+
   auto pq_bandwidth_consumed =
       champsim::transform_while_n(internal_PQ, std::back_inserter(inflight_tag_check), initiate_tag_bw, can_translate, initiate_tag_check<false>());
   initiate_tag_bw.consume(pq_bandwidth_consumed);
@@ -623,12 +647,12 @@ void CACHE::finish_translation(const response_type& packet)
                  access_type_names.at(champsim::to_underlying(entry.type)), this->current_time.time_since_epoch() / this->clock_period);
     }
   };
-
+    
   // Restart stashed translations
   auto finish_begin = std::find_if_not(std::begin(translation_stash), std::end(translation_stash), [](const auto& x) { return x.is_translated; });
   auto finish_end = std::stable_partition(finish_begin, std::end(translation_stash), matches_vpage);
   std::for_each(finish_begin, finish_end, mark_translated);
-
+    
   // Find all packets that match the page of the returned packet
   for (auto& entry : inflight_tag_check) {
     if (matches_vpage(entry)) {
@@ -840,13 +864,13 @@ void CACHE::begin_phase()
 
 void CACHE::end_phase(unsigned finished_cpu)
 {
+  finished_cpu = finished_cpu;
   roi_stats.total_miss_latency_cycles = sim_stats.total_miss_latency_cycles;
 
-  for (auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION}) {
-    std::pair key{type, finished_cpu};
-    roi_stats.hits.set(key, sim_stats.hits.value_or(key, 0));
-    roi_stats.misses.set(key, sim_stats.misses.value_or(key, 0));
-  }
+  roi_stats.hits = sim_stats.hits;
+  roi_stats.misses = sim_stats.misses;
+  roi_stats.mshr_merge = sim_stats.mshr_merge;
+  roi_stats.mshr_return = sim_stats.mshr_return;
 
   roi_stats.pf_requested = sim_stats.pf_requested;
   roi_stats.pf_issued = sim_stats.pf_issued;
