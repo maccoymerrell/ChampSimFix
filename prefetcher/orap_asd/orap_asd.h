@@ -341,8 +341,8 @@ struct orap_asd : public champsim::modules::prefetcher {
     prefetch_queue_entry(champsim::address start_addr_, int length_, int stride_, champsim::address ip_, uint32_t cpu_, uint32_t metadata_in_, bool fill, bool skip, bool return_tag, bool column_prefetch_) : start_addr(start_addr_), length(length_), stride(stride_), ip(ip_), cpu(cpu_), metadata_in(metadata_in_), fill_this_level(fill), skip_tag_check(skip), return_tag_check(return_tag), column_prefetch(column_prefetch_) {}
 
     static int get_size_bits() {
-      int bits = 42 + 48; //block and ip
-      bits += 3 + 2 + 1 + 12 + 3 + 1; //cpu, prefetch id, column prefetch, length, stride, waiting for response 
+      int bits = 42; //block and ip
+      bits += 3 + 1 + 1; //cpu, column prefetch, waiting for response 
       return bits;
     }
   };
