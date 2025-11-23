@@ -6,9 +6,9 @@
 
 
 template <typename T>
-auto va_ampm_lite::page_and_offset(T addr) -> std::pair<champsim::page_number, block_in_page>
+auto va_ampm_lite::page_and_offset(T addr) -> std::pair<page, block_in_page>
 {
-  return std::pair{champsim::page_number{addr}, block_in_page{addr}};
+  return std::pair{page{addr}, block_in_page{addr}};
 }
 
 bool va_ampm_lite::check_cl_access(champsim::block_number v_addr)
