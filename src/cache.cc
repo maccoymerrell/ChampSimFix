@@ -831,6 +831,7 @@ void CACHE::manage_pq() {
                          std::back_inserter(merged_return));
           pq_m->to_return = merged_return;
           pq_m->instr_depend_on_me = merged_instr;
+          pq_m->pf_metadata = pq_it->pf_metadata;
           break;
         }
       }
