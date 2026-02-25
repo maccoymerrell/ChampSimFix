@@ -1,0 +1,8459 @@
+[{
+  "executable_name": "1C.fullBW.baseline",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "pythia"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.bertip",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.baseline_fixed",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_fixed"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "pythia"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.campm",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "ampm"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "next_column",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.sppam",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.sppam_b",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam_b"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.berti_sppam_b",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam_b"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.sppam_b_virt",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam_b"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.sppam_virt",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam_virt"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.sppamalot",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam_llc",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.sppam_bingo",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "bingo_plus",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+
+{
+  "executable_name": "1C.fullBW.sppam_rm_bingo",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_rm"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "bingo_plus",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.sppam_bingo_unified",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "bingo_plus_unified",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.sppam_pythia",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "pythia",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.ampm",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "ampm"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.bampm",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "ampm"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "bingo_plus",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.nampm",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "ampm"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "next_line",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.limitBW.baseline",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "pythia"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 6,
+    "tRCD": 6,
+    "tRP": 6,
+    "tRAS": 13,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.limitBW.baseline_fixed",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_fixed"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "pythia"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 6,
+    "tRCD": 6,
+    "tRP": 6,
+    "tRAS": 13,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.limitBW.campm",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "ampm"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "next_column",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 6,
+    "tRCD": 6,
+    "tRP": 6,
+    "tRAS": 13,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.limitBW.ampm",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "ampm"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 6,
+    "tRCD": 6,
+    "tRP": 6,
+    "tRAS": 13,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.limitBW.sppam_bingo",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "bingo_plus",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 6,
+    "tRCD": 6,
+    "tRP": 6,
+    "tRAS": 13,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.limitBW.sppam_bingo_unified",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "bingo_plus_unified",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 6,
+    "tRCD": 6,
+    "tRP": 6,
+    "tRAS": 13,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.limitBW.sppam_pythia",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "pythia",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 6,
+    "tRCD": 6,
+    "tRP": 6,
+    "tRAS": 13,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.limitBW.sppam",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 6,
+    "tRCD": 6,
+    "tRP": 6,
+    "tRAS": 13,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+
+{
+  "executable_name": "1C.limitBW.bampm",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "ampm"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "bingo_plus",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 6,
+    "tRCD": 6,
+    "tRP": 6,
+    "tRAS": 13,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.limitBW.nampm",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "ampm"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "next_line",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 6,
+    "tRCD": 6,
+    "tRP": 6,
+    "tRAS": 13,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "4C.baseline",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 4,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "pythia"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 16384,
+    "ways": 12,
+    "rq_size": 128,
+    "wq_size": 128,
+    "pq_size": 128,
+    "mshr_size": 256,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "4C.baseline_fixed",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 4,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_fixed"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "pythia"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 16384,
+    "ways": 12,
+    "rq_size": 128,
+    "wq_size": 128,
+    "pq_size": 128,
+    "mshr_size": 256,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "4C.campm",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 4,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "ampm"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 16384,
+    "ways": 12,
+    "rq_size": 128,
+    "wq_size": 128,
+    "pq_size": 128,
+    "mshr_size": 256,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "next_column",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "4C.ampm",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 4,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "ampm"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 16384,
+    "ways": 12,
+    "rq_size": 128,
+    "wq_size": 128,
+    "pq_size": 128,
+    "mshr_size": 256,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "4C.sppam",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 4,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 16384,
+    "ways": 12,
+    "rq_size": 128,
+    "wq_size": 128,
+    "pq_size": 128,
+    "mshr_size": 256,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "4C.sppam_bingo",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 4,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 16384,
+    "ways": 12,
+    "rq_size": 128,
+    "wq_size": 128,
+    "pq_size": 128,
+    "mshr_size": 256,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "bingo_plus",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "4C.sppam_bingo_rm",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 4,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_rm"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 16384,
+    "ways": 12,
+    "rq_size": 128,
+    "wq_size": 128,
+    "pq_size": 128,
+    "mshr_size": 256,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "bingo_plus",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "4C.sppam_bingo_noberti",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 4,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 16384,
+    "ways": 12,
+    "rq_size": 128,
+    "wq_size": 128,
+    "pq_size": 128,
+    "mshr_size": 256,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "bingo_plus",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "4C.sppam_bingo_load",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 4,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": true,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 16384,
+    "ways": 12,
+    "rq_size": 128,
+    "wq_size": 128,
+    "pq_size": 128,
+    "mshr_size": 256,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "bingo_plus",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "4C.sppam_bingo_unified",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 4,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 16384,
+    "ways": 12,
+    "rq_size": 128,
+    "wq_size": 128,
+    "pq_size": 128,
+    "mshr_size": 256,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "bingo_plus_unified",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "4C.sppam_pythia",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 4,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "sppam"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 16384,
+    "ways": 12,
+    "rq_size": 128,
+    "wq_size": 128,
+    "pq_size": 128,
+    "mshr_size": 256,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "pythia",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "4C.bampm",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 4,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "ampm"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 16384,
+    "ways": 12,
+    "rq_size": 128,
+    "wq_size": 128,
+    "pq_size": 128,
+    "mshr_size": 256,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "bingo_plus",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "4C.nampm",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 4,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "berti_plus"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "ampm"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 16384,
+    "ways": 12,
+    "rq_size": 128,
+    "wq_size": 128,
+    "pq_size": 128,
+    "mshr_size": 256,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "next_line",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+
+{
+  "executable_name": "1C.fullBW.nopref",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+{
+  "executable_name": "1C.fullBW.nopref.largeifb",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 192,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+{
+  "executable_name": "1C.fullBW.nopref.hugeifb",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 512,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+{
+  "executable_name": "1C.limitBW.nopref",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 1,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 4096,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 32,
+    "mshr_size": 64,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 6,
+    "tRCD": 6,
+    "tRP": 6,
+    "tRAS": 13,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+},
+{
+  "executable_name": "4C.nopref",
+  "block_size": 64,
+  "page_size": 4096,
+  "heartbeat_frequency": 100000,
+  "num_cores": 4,
+
+  "ooo_cpu": [
+    {
+      "frequency": 4000,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 288,
+      "rob_size": 576,
+      "lq_size": 240,
+      "sq_size": 112,
+      "fetch_width": 8,
+      "decode_width": 8,
+      "dispatch_width": 8,
+      "execute_width": 8,
+      "lq_width": 2,
+      "sq_width": 2,
+      "retire_width": 8,
+      "mispredict_penalty": 1,
+      "scheduler_size": 160,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "branch_predictor": "perceptron",
+      "btb": "basic_btb"
+    }
+  ],
+
+  "DIB": {
+    "window_size": 16,
+    "sets": 512,
+    "ways": 8
+  },
+
+  "L1I": {
+    "sets": 128,
+    "ways": 8,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 32,
+    "mshr_size": 8,
+    "latency": 4,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": true,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L1D": {
+    "sets": 64,
+    "ways": 12,
+    "rq_size": 64,
+    "wq_size": 64,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "L2C": {
+    "sets": 2048,
+    "ways": 16,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 16,
+    "mshr_size": 32,
+    "latency": 10,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no"
+  },
+
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  },
+
+  "LLC": {
+    "frequency": 4000,
+    "sets": 16384,
+    "ways": 12,
+    "rq_size": 128,
+    "wq_size": 128,
+    "pq_size": 128,
+    "mshr_size": 256,
+    "latency": 35,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false,
+    "virtual_prefetch": false,
+    "prefetch_activate": "LOAD,PREFETCH",
+    "prefetcher": "no",
+    "replacement": "drrip"
+  },
+
+  "physical_memory": {
+    "data_rate": 4800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 8,
+    "banks": 4,
+    "bank_rows": 262144,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 36,
+    "tRCD": 36,
+    "tRP": 36,
+    "tRAS": 78,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  },
+
+  "virtual_memory": {
+    "pte_page_size": 4096,
+    "num_levels": 5,
+    "minor_fault_penalty": 200,
+    "randomization": 1
+  }
+}
+
+]
