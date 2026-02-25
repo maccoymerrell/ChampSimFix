@@ -124,14 +124,23 @@ void orap_ampm::increase_confidence_useful(champsim::address ip, champsim::addre
   auto entry = ip_tracker_table[cpu].check_hit(it);
   if(entry.has_value()) {
 
-    if(coprefetch)
-      entry->coprefetch_confidence_useful_counter = entry->coprefetch_confidence_useful_counter + ASD_IP_COUNTER_USEFUL_INCR > ASD_IP_COUNTER_USEFUL_MAX ? ASD_IP_COUNTER_USEFUL_MAX : entry->coprefetch_confidence_useful_counter + ASD_IP_COUNTER_USEFUL_INCR;
-    else
-      entry->confidence_useful_counter = entry->confidence_useful_counter + BUFFER_IP_COUNTER_USEFUL_INCR > BUFFER_IP_COUNTER_USEFUL_MAX ? BUFFER_IP_COUNTER_USEFUL_MAX : entry->confidence_useful_counter + BUFFER_IP_COUNTER_USEFUL_INCR;
-
+    if(coprefetch) {
+      if(CONF_COUNTER_ASD_IP)
+        entry->coprefetch_confidence_useful_counter = entry->coprefetch_confidence_useful_counter + ASD_IP_COUNTER_USEFUL_INCR > ASD_IP_COUNTER_USEFUL_MAX ? ASD_IP_COUNTER_USEFUL_MAX : entry->coprefetch_confidence_useful_counter + ASD_IP_COUNTER_USEFUL_INCR;
+      else if(CONF_SAMPLE_ASD_IP)
+        entry->coprefetch_confidence_useful_counter = (entry->coprefetch_confidence_useful_counter + 1);
+    }
+    else {
+      if(CONF_COUNTER_BUFFER_IP)
+        entry->confidence_useful_counter = entry->confidence_useful_counter + BUFFER_IP_COUNTER_USEFUL_INCR > BUFFER_IP_COUNTER_USEFUL_MAX ? BUFFER_IP_COUNTER_USEFUL_MAX : entry->confidence_useful_counter + BUFFER_IP_COUNTER_USEFUL_INCR;
+      else if(CONF_SAMPLE_BUFFER_IP)
+        entry->confidence_useful_counter = (entry->confidence_useful_counter + 1);
+    }
     bool eligible_for_promote = (coprefetch && CONF_COUNTER_ASD_IP && entry->coprefetch_confidence_useful_counter >=ASD_IP_COUNTER_USEFUL_MAX);
+    eligible_for_promote |= (coprefetch && CONF_SAMPLE_ASD_IP && (entry->coprefetch_confidence_useful_counter + entry->coprefetch_confidence_issue_counter >= ASD_IP_SAMPLE_COUNT));
+    eligible_for_promote |= (!coprefetch && CONF_SAMPLE_BUFFER_IP && (entry->confidence_useful_counter + entry->confidence_issue_counter >= BUFFER_IP_SAMPLE_COUNT));
     eligible_for_promote |= (!coprefetch && CONF_COUNTER_BUFFER_IP && entry->confidence_useful_counter >= BUFFER_IP_COUNTER_USEFUL_MAX);
-    eligible_for_promote |= (coprefetch && !CONF_COUNTER_ASD_IP) || (!coprefetch && !CONF_COUNTER_BUFFER_IP);
+    eligible_for_promote |= (coprefetch && !CONF_COUNTER_ASD_IP && !CONF_SAMPLE_ASD_IP) || (!coprefetch && !CONF_COUNTER_BUFFER_IP && !CONF_SAMPLE_BUFFER_IP);
     if(!intern_->warmup && eligible_for_promote)
       conf_useful++;
 
@@ -139,11 +148,25 @@ void orap_ampm::increase_confidence_useful(champsim::address ip, champsim::addre
 
 
     if(coprefetch && eligible_for_promote) {
-      entry->coprefetch_confidence = modify_confidence(entry->coprefetch_confidence,amount_to_increase,true);
-      entry->coprefetch_confidence_useful_counter = 0;
+      if(CONF_SAMPLE_ASD_IP) {
+        entry->coprefetch_confidence = (entry->coprefetch_confidence_useful_counter /(float)ASD_IP_SAMPLE_COUNT) * CONF_MAX;
+        entry->coprefetch_confidence_useful_counter = 0;
+        entry->coprefetch_confidence_issue_counter = 0;
+      }
+      else {
+        entry->coprefetch_confidence = modify_confidence(entry->coprefetch_confidence,amount_to_increase,true);
+        entry->coprefetch_confidence_useful_counter = 0;
+      }
     } else if(eligible_for_promote) {
-      entry->confidence = modify_confidence(entry->confidence,amount_to_increase,true);
-      entry->confidence_useful_counter = 0;
+      if(CONF_SAMPLE_BUFFER_IP) {
+        entry->confidence = (entry->confidence_useful_counter /(float)BUFFER_IP_SAMPLE_COUNT) * CONF_MAX;
+        entry->confidence_useful_counter = 0;
+        entry->confidence_issue_counter = 0;
+      }
+      else {
+        entry->confidence = modify_confidence(entry->confidence,amount_to_increase,true);
+        entry->confidence_useful_counter = 0;
+      }
     }
     ip_tracker_table[cpu].fill(entry.value());
   } else if(!intern_->warmup) {
@@ -158,16 +181,32 @@ void orap_ampm::increase_confidence_useful(champsim::address ip, champsim::addre
   auto row_entry = row_walker_table[cpu].check_hit(rw);
   if(row_entry.has_value()) {
     int amount_to_increase = USEFUL_CONF_ROW - (USEFUL_NCONF*(row_entry->confidence / CONF_MAX));
-    row_entry->confidence_useful_counter = row_entry->confidence_useful_counter + BUFFER_ROW_COUNTER_USEFUL_INCR > BUFFER_ROW_COUNTER_USEFUL_MAX ? BUFFER_ROW_COUNTER_USEFUL_MAX : row_entry->confidence_useful_counter + BUFFER_ROW_COUNTER_USEFUL_INCR;
-    bool eligible_for_promote = !CONF_COUNTER_BUFFER_ROW || (row_entry->confidence_useful_counter >= BUFFER_ROW_COUNTER_USEFUL_MAX);
+    if(CONF_COUNTER_BUFFER_ROW)
+      row_entry->confidence_useful_counter = row_entry->confidence_useful_counter + BUFFER_ROW_COUNTER_USEFUL_INCR > BUFFER_ROW_COUNTER_USEFUL_MAX ? BUFFER_ROW_COUNTER_USEFUL_MAX : row_entry->confidence_useful_counter + BUFFER_ROW_COUNTER_USEFUL_INCR;
+    else if(CONF_SAMPLE_BUFFER_ROW)
+      row_entry->confidence_useful_counter = (row_entry->confidence_useful_counter + 1);
+
+    //fmt::print("Row: {:x} confidence useful counter increased to: {}\n",row,row_entry->confidence_useful_counter);
+
+    bool eligible_for_promote = (!CONF_COUNTER_BUFFER_ROW && !CONF_SAMPLE_BUFFER_ROW);
+    eligible_for_promote |= (CONF_COUNTER_BUFFER_ROW && (row_entry->confidence_useful_counter >= BUFFER_ROW_COUNTER_USEFUL_MAX));
+    eligible_for_promote |= (CONF_SAMPLE_BUFFER_ROW && (row_entry->confidence_useful_counter + row_entry->confidence_issue_counter >= BUFFER_ROW_SAMPLE_COUNT));
     if(!intern_->warmup && eligible_for_promote)
       conf_useful++;
     
     if(eligible_for_promote) {
-      row_entry->confidence = modify_confidence(row_entry->confidence,amount_to_increase,true);
-      row_entry->confidence_useful_counter = 0;
+      if(CONF_SAMPLE_BUFFER_ROW) {
+        //fmt::print("Row: {:x} confidence promoted by sampling: useful counter: {} issue counter: {} sample count: {}\n",row,row_entry->confidence_useful_counter,row_entry->confidence_issue_counter,BUFFER_ROW_SAMPLE_COUNT);
+        row_entry->confidence = (row_entry->confidence_useful_counter /(float)BUFFER_ROW_SAMPLE_COUNT) * CONF_MAX;
+        //fmt::print("New confidence: {}\n",row_entry->confidence);
+        row_entry->confidence_useful_counter = 0;
+        row_entry->confidence_issue_counter = 0;
+      }
+      else {
+        row_entry->confidence = modify_confidence(row_entry->confidence,amount_to_increase,true);
+        row_entry->confidence_useful_counter = 0;
+      }
     }
-
     row_walker_table[cpu].fill(row_entry.value());
   }
 }
@@ -214,121 +253,6 @@ void orap_ampm::increase_confidence_opened(champsim::address ip, champsim::addre
   }
 }
 
-void orap_ampm::decrease_confidence_useless(champsim::address addr, uint32_t cpu, bool coprefetch) {
-  std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
-  
-  /*
-  bool found_ip = false;
-  double conf_modifier = 1.0;
-  for(auto ip_hash : get_ip_hash_from_row(row,cpu)) {
-    //fmt::print("Increasing confidence, row: {} rb: {} col: {}\n",row,rb,col);
-    ip_tracker it{ip_hash};
-
-    auto entry = ip_tracker_table[cpu].check_hit(it);
-
-    if(entry.has_value()) {
-        found_ip = true;
-        bool eligible_for_demote = ((coprefetch && CONF_COUNTER_ASD_IP && entry->coprefetch_confidence_counter < ASD_IP_COUNTER_ACC_THRESH) || (!coprefetch && CONF_COUNTER_BUFFER_IP && entry->confidence_counter < BUFFER_IP_COUNTER_ACC_THRESH));
-        if(coprefetch && !CONF_COUNTER_ASD_IP)
-          eligible_for_demote = true;
-        if(!coprefetch && !CONF_COUNTER_BUFFER_IP)
-          eligible_for_demote = true;
-        if(coprefetch)
-          entry->coprefetch_confidence_counter = 0;
-        else
-          entry->confidence_counter = 0;
-
-        if(!intern_->warmup && eligible_for_demote)
-          conf_useless++;
-        if(coprefetch && eligible_for_demote)
-          if(MULT_DECREASE_ASD_IP)
-            entry->coprefetch_confidence = modify_confidence(entry->coprefetch_confidence,USELESS_NCONF_FACTOR*conf_modifier);
-          else
-            entry->coprefetch_confidence = modify_confidence(entry->coprefetch_confidence,USELESS_NCONF*conf_modifier,false);
-        else if(eligible_for_demote)
-          if(MULT_DECREASE_BUFFER_IP)
-            entry->confidence = modify_confidence(entry->confidence,USELESS_NCONF_FACTOR*conf_modifier);
-          else
-            entry->confidence = modify_confidence(entry->confidence,USELESS_NCONF*conf_modifier,false);
-        ip_tracker_table[cpu].fill(entry.value());
-    }
-
-    conf_modifier *= USELESS_NCONF_DEPTH_MOD;
-  }
-  if(!found_ip && !intern_->warmup)
-    orphaned_row_lookups++;
-
-  //decrease confidence on row
-  row_walker rw{row};
-
-  auto row_entry = row_walker_table[cpu].check_hit(rw);
-  if(row_entry.has_value()) {
-    bool eligible_for_demote = !CONF_COUNTER_BUFFER_ROW || (row_entry->confidence_counter < BUFFER_ROW_COUNTER_ACC_THRESH);
-    row_entry->confidence_counter = 0;
-    if(!intern_->warmup && eligible_for_demote)
-      conf_useless++;
-    if(MULT_DECREASE_BUFFER_ROW && eligible_for_demote)
-      row_entry->confidence = modify_confidence(row_entry->confidence,USELESS_NCONF_FACTOR);
-    else if(eligible_for_demote)
-      row_entry->confidence = modify_confidence(row_entry->confidence,USELESS_NCONF,false);
-    row_walker_table[cpu].fill(row_entry.value());
-  }*/
-
-}
-
-void orap_ampm::decrease_confidence_conflict(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch) {
-  std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
-  /*
-  uint16_t ip_hash = get_hash(ip.to<uint64_t>());
-  ip_tracker it{ip_hash};
-  auto entry = ip_tracker_table[cpu].check_hit(it);
-
-  if(entry.has_value()) {
-
-      bool eligible_for_demote = ((coprefetch && CONF_COUNTER_ASD_IP && entry->coprefetch_confidence_counter < ASD_IP_COUNTER_ACC_THRESH) || (!coprefetch && CONF_COUNTER_BUFFER_IP && entry->confidence_counter < BUFFER_IP_COUNTER_ACC_THRESH));
-      if(coprefetch && !CONF_COUNTER_ASD_IP)
-        eligible_for_demote = true;
-      if(!coprefetch && !CONF_COUNTER_BUFFER_IP)
-        eligible_for_demote = true;
-      if(coprefetch)
-        entry->coprefetch_confidence_counter = 0;
-      else
-        entry->confidence_counter = 0;
-      
-      if(eligible_for_demote && !intern_->warmup)
-        conf_conflict++; 
-
-      if(coprefetch && eligible_for_demote)
-        if(MULT_DECREASE_ASD_IP)
-          entry->coprefetch_confidence = modify_confidence(entry->coprefetch_confidence,CONFLICT_NCONF_FACTOR);
-        else
-          entry->coprefetch_confidence = modify_confidence(entry->coprefetch_confidence,CONFLICT_NCONF,false);
-      else if(eligible_for_demote)
-        if(MULT_DECREASE_BUFFER_IP)
-          entry->confidence = modify_confidence(entry->confidence,CONFLICT_NCONF_FACTOR);
-        else
-          entry->confidence = modify_confidence(entry->confidence,CONFLICT_NCONF,false);
-      ip_tracker_table[cpu].fill(entry.value());
-  }
-
-  //decrease confidence on row
-  row_walker rw{row};
-
-  auto row_entry = row_walker_table[cpu].check_hit(rw);
-  if(row_entry.has_value()) {
-    bool eligible_for_demote = !CONF_COUNTER_BUFFER_ROW || (row_entry->confidence_counter < BUFFER_ROW_COUNTER_ACC_THRESH);
-
-    if(!intern_->warmup && eligible_for_demote)
-      conf_conflict++;
-    row_entry->confidence_counter = 0;
-    if(MULT_DECREASE_BUFFER_ROW && eligible_for_demote)
-      row_entry->confidence = modify_confidence(row_entry->confidence,CONFLICT_NCONF_FACTOR);
-    else if(eligible_for_demote)
-      row_entry->confidence = modify_confidence(row_entry->confidence,CONFLICT_NCONF,false);
-    row_walker_table[cpu].fill(row_entry.value());
-  }
-  */
-}
 
 void orap_ampm::decrease_confidence_fill(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch) {
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
@@ -341,32 +265,56 @@ void orap_ampm::decrease_confidence_fill(champsim::address ip, champsim::address
   if(entry.has_value()) {
 
 
-    if(coprefetch)
-      entry->coprefetch_confidence_issue_counter = entry->coprefetch_confidence_issue_counter + ASD_IP_COUNTER_ISSUE_DECR > ASD_IP_COUNTER_ISSUE_MAX ? ASD_IP_COUNTER_ISSUE_MAX : entry->coprefetch_confidence_issue_counter + ASD_IP_COUNTER_ISSUE_DECR;
-    else
-      entry->confidence_issue_counter = entry->confidence_issue_counter + BUFFER_IP_COUNTER_ISSUE_DECR > BUFFER_IP_COUNTER_ISSUE_MAX ? BUFFER_IP_COUNTER_ISSUE_MAX : entry->confidence_issue_counter + BUFFER_IP_COUNTER_ISSUE_DECR;
+    if(coprefetch) {
+      if(CONF_COUNTER_ASD_IP)
+        entry->coprefetch_confidence_issue_counter = entry->coprefetch_confidence_issue_counter + ASD_IP_COUNTER_ISSUE_DECR > ASD_IP_COUNTER_ISSUE_MAX ? ASD_IP_COUNTER_ISSUE_MAX : entry->coprefetch_confidence_issue_counter + ASD_IP_COUNTER_ISSUE_DECR;
+      else if(CONF_SAMPLE_ASD_IP)
+        entry->coprefetch_confidence_issue_counter = (entry->coprefetch_confidence_issue_counter + 1);
+    }
+    else {
+      if(CONF_COUNTER_BUFFER_IP)
+        entry->confidence_issue_counter =  entry->confidence_issue_counter + BUFFER_IP_COUNTER_ISSUE_DECR > BUFFER_IP_COUNTER_ISSUE_MAX ? BUFFER_IP_COUNTER_ISSUE_MAX : entry->confidence_issue_counter + BUFFER_IP_COUNTER_ISSUE_DECR;
+      else if(CONF_SAMPLE_BUFFER_IP)
+        entry->confidence_issue_counter = entry->confidence_issue_counter + 1;
+    }
 
 
     bool eligible_for_demote = (coprefetch && CONF_COUNTER_ASD_IP && entry->coprefetch_confidence_issue_counter >=ASD_IP_COUNTER_ISSUE_MAX);
     eligible_for_demote |= (!coprefetch && CONF_COUNTER_BUFFER_IP && entry->confidence_issue_counter >= BUFFER_IP_COUNTER_ISSUE_MAX);
-    eligible_for_demote |= (coprefetch && !CONF_COUNTER_ASD_IP) || (!coprefetch && !CONF_COUNTER_BUFFER_IP);
+    eligible_for_demote |= (coprefetch && CONF_SAMPLE_ASD_IP && (entry->coprefetch_confidence_issue_counter + entry->coprefetch_confidence_useful_counter >= ASD_IP_SAMPLE_COUNT));
+    eligible_for_demote |= (!coprefetch && CONF_SAMPLE_BUFFER_IP && (entry->confidence_issue_counter + entry->confidence_useful_counter >= BUFFER_IP_SAMPLE_COUNT));
+    eligible_for_demote |= (coprefetch && !CONF_COUNTER_ASD_IP && !CONF_SAMPLE_ASD_IP) || (!coprefetch && !CONF_COUNTER_BUFFER_IP && !CONF_SAMPLE_BUFFER_IP);
 
     if(!intern_->warmup && eligible_for_demote)
       conf_fill++;
     //amount to increase should be dependent on current entry confidence
     if(coprefetch && eligible_for_demote) {
-      if(MULT_DECREASE_ASD_IP)
-        entry->coprefetch_confidence = modify_confidence(entry->coprefetch_confidence,FILL_NCONF_FACTOR);
-      else
-        entry->coprefetch_confidence = modify_confidence(entry->coprefetch_confidence,FILL_NCONF_IP,false);
-      entry->coprefetch_confidence_issue_counter = 0;
+      if(CONF_SAMPLE_ASD_IP) {
+        entry->coprefetch_confidence = (entry->coprefetch_confidence_useful_counter /(float)ASD_IP_SAMPLE_COUNT) * CONF_MAX;
+        entry->coprefetch_confidence_useful_counter = 0;
+        entry->coprefetch_confidence_issue_counter = 0;
+      }
+      else {
+        if(MULT_DECREASE_ASD_IP)
+          entry->coprefetch_confidence = modify_confidence(entry->coprefetch_confidence,FILL_NCONF_FACTOR);
+        else
+          entry->coprefetch_confidence = modify_confidence(entry->coprefetch_confidence,FILL_NCONF_IP,false);
+        entry->coprefetch_confidence_issue_counter = 0;
+      }
     }
     else if(eligible_for_demote) {
-      if(MULT_DECREASE_BUFFER_IP)
-        entry->confidence = modify_confidence(entry->confidence,FILL_NCONF_FACTOR);
-      else
-        entry->confidence = modify_confidence(entry->confidence,FILL_NCONF_IP,false);
-      entry->confidence_issue_counter = 0;
+      if(CONF_SAMPLE_BUFFER_IP) {
+        entry->confidence = (entry->confidence_useful_counter /(float)BUFFER_IP_SAMPLE_COUNT) * CONF_MAX;
+        entry->confidence_useful_counter = 0;
+        entry->confidence_issue_counter = 0;
+      }
+      else {
+        if(MULT_DECREASE_BUFFER_IP)
+          entry->confidence = modify_confidence(entry->confidence,FILL_NCONF_FACTOR);
+        else
+          entry->confidence = modify_confidence(entry->confidence,FILL_NCONF_IP,false);
+        entry->confidence_issue_counter = 0;
+      }
     }
     ip_tracker_table[cpu].fill(entry.value());
   }
@@ -375,18 +323,33 @@ void orap_ampm::decrease_confidence_fill(champsim::address ip, champsim::address
   auto row_entry = row_walker_table[cpu].check_hit(rw);
   if(row_entry.has_value()) {
 
-
+    if(CONF_COUNTER_BUFFER_ROW)
     row_entry->confidence_issue_counter = row_entry->confidence_issue_counter + BUFFER_ROW_COUNTER_ISSUE_DECR > BUFFER_ROW_COUNTER_ISSUE_MAX ? BUFFER_ROW_COUNTER_ISSUE_MAX : row_entry->confidence_issue_counter + BUFFER_ROW_COUNTER_ISSUE_DECR;
+    else if(CONF_SAMPLE_BUFFER_ROW)
+      row_entry->confidence_issue_counter = (row_entry->confidence_issue_counter + 1);
+
+    //fmt::print("Row: {:x} confidence issue counter increased to: {}\n",row,row_entry->confidence_issue_counter);
+
     bool eligible_for_demote = CONF_COUNTER_BUFFER_ROW && row_entry->confidence_issue_counter >= BUFFER_ROW_COUNTER_ISSUE_MAX;
-    eligible_for_demote |= !CONF_COUNTER_BUFFER_ROW;
+    eligible_for_demote |= CONF_SAMPLE_BUFFER_ROW && (row_entry->confidence_issue_counter + row_entry->confidence_useful_counter >= BUFFER_ROW_SAMPLE_COUNT);
+    eligible_for_demote |= !CONF_COUNTER_BUFFER_ROW && !CONF_SAMPLE_BUFFER_ROW;
     if(!intern_->warmup && eligible_for_demote)
       conf_fill++;
     if(eligible_for_demote) {
-      if(MULT_DECREASE_BUFFER_ROW)
-        row_entry->confidence = modify_confidence(row_entry->confidence,FILL_NCONF_FACTOR);
-      else
-        row_entry->confidence = modify_confidence(row_entry->confidence,FILL_NCONF_ROW,false);
-      row_entry->confidence_issue_counter = 0;
+      if(CONF_SAMPLE_BUFFER_ROW) {
+        //fmt::print("Row: {:x} confidence demoted by sampling: useful counter: {} issue counter: {} sample count: {}\n",row,row_entry->confidence_useful_counter,row_entry->confidence_issue_counter,BUFFER_ROW_SAMPLE_COUNT);
+        row_entry->confidence = (row_entry->confidence_useful_counter /(float)BUFFER_ROW_SAMPLE_COUNT) * CONF_MAX;
+        //fmt::print("New confidence: {}\n",row_entry->confidence);
+        row_entry->confidence_useful_counter = 0;
+        row_entry->confidence_issue_counter = 0;
+      }
+      else {
+        if(MULT_DECREASE_BUFFER_ROW)
+          row_entry->confidence = modify_confidence(row_entry->confidence,FILL_NCONF_FACTOR);
+        else
+          row_entry->confidence = modify_confidence(row_entry->confidence,FILL_NCONF_ROW,false);
+        row_entry->confidence_issue_counter = 0;
+      }
     }
     row_walker_table[cpu].fill(row_entry.value());
   }
@@ -652,13 +615,24 @@ void orap_ampm::prefetcher_initialize() {
 uint32_t orap_ampm::prefetcher_cache_fill(champsim::address addr, champsim::address ip, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in, uint32_t metadata_evict, uint32_t cpu_evict)
 {
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
-  if(metadata_in == BUFFER_ID && evicted_addr != champsim::address{}) {
-    decrease_confidence_fill(ip,addr,cpu,false);
-    //fmt::print("Decreasing confidence, ORAP Fill\n");
-  }
-  else if(metadata_in == ASD_ID && evicted_addr != champsim::address{}) {
-    decrease_confidence_fill(ip,addr,cpu,true);
-    //fmt::print("Decreasing confidence, AMPM Fill\n");
+  if(!FILL_OR_USELESS) {
+    if(metadata_in == BUFFER_ID && evicted_addr != champsim::address{}) {
+      decrease_confidence_fill(ip,addr,cpu,false);
+      //fmt::print("Decreasing confidence, ORAP Fill\n");
+    }
+    else if(metadata_in == ASD_ID && evicted_addr != champsim::address{}) {
+      decrease_confidence_fill(ip,addr,cpu,true);
+      //fmt::print("Decreasing confidence, AMPM Fill\n");
+    }
+  } else {
+    if(useless && metadata_in == BUFFER_ID && evicted_addr != champsim::address{}) {
+      decrease_confidence_fill(ip,addr,cpu,false);
+      //fmt::print("Decreasing confidence, ORAP Useless\n");
+    }
+    else if (useless && metadata_in == ASD_ID && evicted_addr != champsim::address{}) {
+      decrease_confidence_fill(ip,addr,cpu,true);
+      //fmt::print("Decreasing confidence, AMPM Useless\n");
+    }
   }
     
   if(prefetch)
@@ -682,11 +656,6 @@ uint32_t orap_ampm::prefetcher_cache_fill(champsim::address addr, champsim::addr
       //conflict happened here
       //champsim::address ip = get_ip(addr, cpu);
       update_ip_blacklist(IP_BLACKLIST_HARMFUL,ip,cpu,cpu_evict,metadata_in,metadata_evict);
-      decrease_confidence_conflict(ip,addr,cpu,metadata_in == ASD_ID);
-  } else if(useless) //useless
-  {
-    //not a conflict, but still useless
-    decrease_confidence_useless(evicted_addr,cpu_evict,metadata_evict == ASD_ID);
   }
 
 
@@ -699,10 +668,10 @@ uint32_t orap_ampm::prefetcher_cache_fill(champsim::address addr, champsim::addr
       global_useless_asd[cpu_evict]++;
   }
   
-  if(evicted_addr != champsim::address{}) {
+  if(evicted_addr != champsim::address{} && !useless) {
     for(int i = 0; i < NUM_CPUS; i++) {
       ASD_Modules.at(i).remove_from_pagemap(evicted_addr,true);
-      ASD_Modules.at(i).remove_from_pagemap(evicted_addr,false);
+      //ASD_Modules.at(i).remove_from_pagemap(evicted_addr,false);
     }
   }
 
@@ -1086,7 +1055,7 @@ void orap_ampm::add_to_pq(prefetch_queue_entry pqe) {
       temp_pqe.length = 1;
       uint8_t column = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_column(pqe.start_addr);
       temp_pqe.start_addr = pqe.column_prefetch ? compose_base_and_column(pqe.start_addr, column + i*pqe.stride) : champsim::address{champsim::block_number{pqe.start_addr}+(i*pqe.stride)};
-      if(ASD_Modules.at(pqe.cpu).check_pagemap(temp_pqe.start_addr,true) || ASD_Modules.at(pqe.cpu).check_pagemap(temp_pqe.start_addr,false) || champsim::page_number{temp_pqe.start_addr} != champsim::page_number{pqe.start_addr}) {
+      if(ASD_Modules.at(pqe.cpu).check_pagemap(temp_pqe.start_addr,true) || champsim::page_number{temp_pqe.start_addr} != champsim::page_number{pqe.start_addr}) {
         if(!intern_->warmup)
           prefetches_filtered++;
         continue;

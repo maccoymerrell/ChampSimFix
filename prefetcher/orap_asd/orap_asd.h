@@ -31,7 +31,7 @@ struct orap_asd : public champsim::modules::prefetcher {
   }
 
   constexpr static std::size_t RW_WAYS = 8;
-  constexpr static std::size_t RW_SETS = 128;
+  constexpr static std::size_t RW_SETS = 512;
   constexpr static std::size_t RW_IP_HASHES = 4;
 
   constexpr static bool ENABLE_IP_BLACKLIST = false;
@@ -60,7 +60,7 @@ struct orap_asd : public champsim::modules::prefetcher {
   constexpr static std::size_t MIN_PREFETCH_GANG_ISSUE = 0;
 
   constexpr static std::size_t IP_TRACKER_WAYS = 8;
-  constexpr static std::size_t IP_TRACKER_SETS = 128;
+  constexpr static std::size_t IP_TRACKER_SETS = 16;
 
   constexpr static std::size_t CONF_MAX = 255;
   constexpr static std::size_t CONF_DROP_THRESH = 0;
@@ -75,13 +75,13 @@ struct orap_asd : public champsim::modules::prefetcher {
 
   //todo, redo this to do absolute depth, since column bits cause variation in how deep each of these are
   //constexpr static std::array<uint8_t,25> DEPTHS = {1,1,1,1,1,1,1,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9};
-  constexpr static std::array<uint8_t,25> DEPTHS = {1,1,1,1,1,1,1,1,1,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8};
+  //constexpr static std::array<uint8_t,25> DEPTHS = {1,1,1,1,1,1,1,1,1,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8};
 
   //deep
   //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,0,0,0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8};
 
   //shallow
-  //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,0,0,0,0,0,0,1,1,1,1,1,2,2,2,2,2,3,3,3,3,4,4};
+  constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,0,0,0,0,0,0,1,1,1,1,1,2,2,2,2,2,3,3,3,3,4,4};
 
   //depths should indicate how many clusters deep the prefetcher should go
 
@@ -104,14 +104,14 @@ struct orap_asd : public champsim::modules::prefetcher {
   //this means we should lose 9 count when issuing N prefetches, and regain 10 when N useful prefetches come back
 
   //16/19 is 84.21% for net confidence gain
-  constexpr static uint8_t ASD_IP_COUNTER_ISSUE_MAX = 3;
-  constexpr static uint8_t ASD_IP_COUNTER_USEFUL_MAX = 2;
+  constexpr static uint8_t ASD_IP_COUNTER_ISSUE_MAX = 5;
+  constexpr static uint8_t ASD_IP_COUNTER_USEFUL_MAX = 4;
   constexpr static uint8_t ASD_IP_COUNTER_ISSUE_DECR = 1;
   constexpr static uint8_t ASD_IP_COUNTER_USEFUL_INCR = 1;
   constexpr static bool MULT_DECREASE_BUFFER_IP = false;
   constexpr static bool CONF_COUNTER_BUFFER_IP = true;
-  constexpr static uint8_t BUFFER_IP_COUNTER_ISSUE_MAX = 3;
-  constexpr static uint8_t BUFFER_IP_COUNTER_USEFUL_MAX = 2;
+  constexpr static uint8_t BUFFER_IP_COUNTER_ISSUE_MAX = 5;
+  constexpr static uint8_t BUFFER_IP_COUNTER_USEFUL_MAX = 4;
   constexpr static uint8_t BUFFER_IP_COUNTER_ISSUE_DECR = 1;
   constexpr static uint8_t BUFFER_IP_COUNTER_USEFUL_INCR = 1;
   constexpr static bool MULT_DECREASE_BUFFER_ROW = false;
@@ -123,7 +123,8 @@ struct orap_asd : public champsim::modules::prefetcher {
 
   constexpr static int STARTING_CONF = 180;
   constexpr static int STARTING_CONF_COPREFETCH = 255;
-  constexpr static int USEFUL_CONF = 1;
+  constexpr static int USEFUL_CONF_ROW = 1;
+  constexpr static int USEFUL_CONF_IP = 4;
   constexpr static int USEFUL_NCONF = 0; //slowly ramps as we approach max confidence, reducing the effect of useful prefetches on confidence (max, 7/8 prefetches must be good to gain confidence, 6/8 to lose confidence)
   constexpr static int USELESS_NCONF = 0;
   constexpr static double USELESS_NCONF_FACTOR = 0.9; //if we use multiplicative decrease, this is the decrease factor

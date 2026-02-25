@@ -31,7 +31,7 @@ struct orap_ampm : public champsim::modules::prefetcher {
   }
 
   constexpr static std::size_t RW_WAYS = 8;
-  constexpr static std::size_t RW_SETS = 128;
+  constexpr static std::size_t RW_SETS = 512;
   constexpr static std::size_t RW_IP_HASHES = 4;
 
   constexpr static bool ENABLE_IP_BLACKLIST = false;
@@ -60,7 +60,7 @@ struct orap_ampm : public champsim::modules::prefetcher {
   constexpr static std::size_t MIN_PREFETCH_GANG_ISSUE = 0;
 
   constexpr static std::size_t IP_TRACKER_WAYS = 8;
-  constexpr static std::size_t IP_TRACKER_SETS = 128;
+  constexpr static std::size_t IP_TRACKER_SETS = 16;
 
   constexpr static std::size_t CONF_MAX = 255;
   constexpr static std::size_t CONF_DROP_THRESH = 0;
@@ -101,6 +101,7 @@ struct orap_ampm : public champsim::modules::prefetcher {
 
   constexpr static bool MULT_DECREASE_ASD_IP = false;
   constexpr static bool CONF_COUNTER_ASD_IP = true;
+  constexpr static bool CONF_SAMPLE_ASD_IP = false;
 
   //how do we get 90% accuracy?
   //one useless should net us 9x the loss of confidence as one useful will gain us
@@ -111,14 +112,19 @@ struct orap_ampm : public champsim::modules::prefetcher {
   constexpr static uint8_t ASD_IP_COUNTER_USEFUL_MAX = 4;
   constexpr static uint8_t ASD_IP_COUNTER_ISSUE_DECR = 1;
   constexpr static uint8_t ASD_IP_COUNTER_USEFUL_INCR = 1;
+  constexpr static uint16_t ASD_IP_SAMPLE_COUNT = 63;
   constexpr static bool MULT_DECREASE_BUFFER_IP = false;
   constexpr static bool CONF_COUNTER_BUFFER_IP = true;
+  constexpr static bool CONF_SAMPLE_BUFFER_IP = false;
   constexpr static uint8_t BUFFER_IP_COUNTER_ISSUE_MAX = 5;
   constexpr static uint8_t BUFFER_IP_COUNTER_USEFUL_MAX = 4;
   constexpr static uint8_t BUFFER_IP_COUNTER_ISSUE_DECR = 1;
   constexpr static uint8_t BUFFER_IP_COUNTER_USEFUL_INCR = 1;
+  constexpr static uint16_t BUFFER_IP_SAMPLE_COUNT = 63;
   constexpr static bool MULT_DECREASE_BUFFER_ROW = false;
   constexpr static bool CONF_COUNTER_BUFFER_ROW = true;
+  constexpr static bool CONF_SAMPLE_BUFFER_ROW = false;
+  constexpr static uint16_t BUFFER_ROW_SAMPLE_COUNT = 63;
   constexpr static uint8_t BUFFER_ROW_COUNTER_ISSUE_MAX = 5;
   constexpr static uint8_t BUFFER_ROW_COUNTER_USEFUL_MAX = 4;
   constexpr static uint8_t BUFFER_ROW_COUNTER_ISSUE_DECR = 1;
@@ -139,6 +145,8 @@ struct orap_ampm : public champsim::modules::prefetcher {
   constexpr static double FILL_NCONF_FACTOR = 0.9;
   constexpr static int ACT_CONF = 0;
   constexpr static int MAX_ACT_CONF_LEVEL = 255;
+
+  constexpr static bool FILL_OR_USELESS = false;
 
   //constexpr static int STARTING_CONF = 40;
   //constexpr static int USEFUL_CONF = 10;
@@ -393,8 +401,6 @@ struct orap_ampm : public champsim::modules::prefetcher {
   void update_walker(champsim::address addr, uint32_t cpu, champsim::address ip, bool is_blacklisted);
   void increase_confidence_useful(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch);
   void increase_confidence_opened(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch);
-  void decrease_confidence_useless(champsim::address addr, uint32_t cpu, bool coprefetch);
-  void decrease_confidence_conflict(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch);
   void decrease_confidence_fill(champsim::address ip, champsim::address addr, uint32_t cpu, bool coprefetch);
   uint8_t modify_confidence(uint8_t conf, uint8_t amnt, bool increment);
   uint8_t modify_confidence(uint8_t conf, double factor);

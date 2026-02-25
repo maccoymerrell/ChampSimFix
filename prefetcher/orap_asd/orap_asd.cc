@@ -177,7 +177,7 @@ void orap_asd::increase_confidence_useful(champsim::address ip, champsim::addres
     if(!intern_->warmup && eligible_for_promote)
       conf_useful++;
 
-    int amount_to_increase = USEFUL_CONF - (USEFUL_NCONF*(entry->confidence / CONF_MAX));
+    int amount_to_increase = USEFUL_CONF_IP - (USEFUL_NCONF*(entry->confidence / CONF_MAX));
 
 
     if(coprefetch && eligible_for_promote) {
@@ -199,7 +199,7 @@ void orap_asd::increase_confidence_useful(champsim::address ip, champsim::addres
 
   auto row_entry = row_walker_table[cpu].check_hit(rw);
   if(row_entry.has_value()) {
-    int amount_to_increase = USEFUL_CONF - (USEFUL_NCONF*(row_entry->confidence / CONF_MAX));
+    int amount_to_increase = USEFUL_CONF_ROW - (USEFUL_NCONF*(row_entry->confidence / CONF_MAX));
     row_entry->confidence_useful_counter = row_entry->confidence_useful_counter + BUFFER_ROW_COUNTER_USEFUL_INCR > BUFFER_ROW_COUNTER_USEFUL_MAX ? BUFFER_ROW_COUNTER_USEFUL_MAX : row_entry->confidence_useful_counter + BUFFER_ROW_COUNTER_USEFUL_INCR;
     bool eligible_for_promote = !CONF_COUNTER_BUFFER_ROW || (row_entry->confidence_useful_counter >= BUFFER_ROW_COUNTER_USEFUL_MAX);
     if(!intern_->warmup && eligible_for_promote)
@@ -708,7 +708,7 @@ uint32_t orap_asd::prefetcher_cache_fill(champsim::address addr, champsim::addre
       global_useless_asd[cpu_evict]++;
   }
   
-  if(evicted_addr != champsim::address{}) {
+  if(evicted_addr != champsim::address{} && !useless) {
     for(int i = 0; i < NUM_CPUS; i++)
       ASD_Modules.at(i).remove_from_pagemap(evicted_addr);
   }
