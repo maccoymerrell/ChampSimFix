@@ -50,13 +50,8 @@
 class CACHE : public champsim::operable
 {
   enum [[deprecated(
-      "Prefetchers may not specify arbitrary fill levels. Use CACHE::prefetch_line(pf_addr, fill_this_level, prefetch_metadata) instead.")]] FILL_LEVEL {
-    FILL_L1 = 1,
-    FILL_L2 = 2,
-    FILL_LLC = 4,
-    FILL_DRC = 8,
-    FILL_DRAM = 16
-  };
+      "Prefetchers may not specify arbitrary fill levels. Use CACHE::prefetch_line(pf_addr, fill_this_level, prefetch_metadata) instead.")]] FILL_LEVEL{
+      FILL_L1 = 1, FILL_L2 = 2, FILL_LLC = 4, FILL_DRC = 8, FILL_DRAM = 16};
 
   using channel_type = champsim::channel;
   using request_type = typename channel_type::request_type;
@@ -165,6 +160,7 @@ public:
   channel_type* lower_translate;
 
   uint32_t cpu = 0;
+  champsim::address ip = champsim::address{0};
   std::string NAME;
   uint32_t NUM_SET, NUM_WAY, MSHR_SIZE;
   std::size_t PQ_SIZE;

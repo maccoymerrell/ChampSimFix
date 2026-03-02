@@ -601,7 +601,7 @@ void sppam_b::Sppam_b_Module::do_prefetch(champsim::address addr, champsim::addr
   if(!region.has_value())
     return;
   //enforce limit on prefetches issued per page (depth)
-  current_pf_degree = std::min(region->avail_prefetches,PREFETCH_DEGREE);
+  current_pf_degree = std::min(region->avail_prefetches,(int64_t)PREFETCH_DEGREE);
 
   int pf_issued = 0;
   int lookaheads = 0;
@@ -628,22 +628,22 @@ void sppam_b::Sppam_b_Module::do_prefetch(champsim::address addr, champsim::addr
     double prediction_conf = prediction_pack.second;
 
     champsim::address pos_step_addr = champsim::address{champsim::block_number{pf_base_addr} + (direction ? 1 : -1)};
-    
+    bool to_l2c = pf_issued >= free_space || (region->avail_prefetches - pf_issued) < L1D_REGION_BUDGET;
     if(prediction) {
       add_to_debugmap(pos_step_addr);
       if(!check_pagemap(champsim::address{pos_step_addr},true)) {
-        if(bool prefetch_success = intern_->prefetch_line(pos_step_addr, pf_issued < free_space, metadata_in); prefetch_success) {
+        if(bool prefetch_success = intern_->prefetch_line(pos_step_addr, !to_l2c, metadata_in); prefetch_success) {
             if((!in_warmup) && DO_DEBUG)
-              fmt::print("\t\t\tPrefetched: {} LLC: {}\n",pos_step_addr, pf_issued < free_space);
-            if(pf_issued < int(current_pf_degree))
+              fmt::print("\t\t\tPrefetched: {} L2C: {}\n",pos_step_addr, !to_l2c);
+            if(!to_l2c)
               add_to_pagemap(pos_step_addr,true);
             pf_issued++;
             prefetches_issued++;
-            if(pf_issued < free_space)
+            if(!to_l2c)
               track_ip(pos_step_addr, ip);
         } else {
           if((!in_warmup) && DO_DEBUG)
-            fmt::print("\t\t\tPrefetch failed: {} LLC: {}\n",pos_step_addr, pf_issued < free_space);
+            fmt::print("\t\t\tPrefetch failed: {} L2C: {}\n",pos_step_addr, !to_l2c);
         }
       } else {
         if((!in_warmup) && DO_DEBUG)

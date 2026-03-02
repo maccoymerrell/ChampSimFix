@@ -62,7 +62,8 @@ class sppam_b : public champsim::modules::prefetcher
 
       //max pf degree
       static constexpr std::size_t PREFETCH_DEGREE = 8;
-      static constexpr std::size_t REGION_BUDGET = 22;
+      static constexpr std::size_t REGION_BUDGET = 64;
+      static constexpr std::size_t L1D_REGION_BUDGET = 8;
 
       static constexpr unsigned int SPPAM_B_PAGE_BITS = 12;
 
@@ -148,7 +149,7 @@ class sppam_b : public champsim::modules::prefetcher
         uint64_t hits = 0;
 
         uint64_t budget = 0;
-        uint64_t avail_prefetches = 0;
+        int64_t avail_prefetches = 0;
         uint64_t last_cycle = 0;
 
         uint64_t useless = 0;
