@@ -15,6 +15,52 @@ ChampSim is the result of academic research. If you use this software in your wo
 
 If you use ChampSim in your work, you may submit a pull request modifying `PUBLICATIONS_USING_CHAMPSIM.bib` to have it featured in [the documentation](https://champsim.github.io/ChampSim/master/Publications-using-champsim.html).
 
+# Documentation
+
+Comprehensive documentation for ChampSim is available and covers:
+- Module system (branch predictors, prefetchers, replacement policies)
+- Configuration file creation
+- Address operations and byte sizes
+- Core and cache models
+- Module support library
+
+## View Documentation Online
+
+The full documentation is automatically published to GitHub Pages and can be accessed at:
+**[https://maccoymerrell.github.io/ChampSimFix/](https://maccoymerrell.github.io/ChampSimFix/)**
+
+## Build Documentation Locally
+
+To build and view the documentation on your local machine:
+
+1. Install the required dependencies:
+```bash
+python3 -m pip install -r docs/requirements.txt
+sudo apt-get install doxygen  # or use your system's package manager
+```
+
+2. Generate the documentation:
+```bash
+cd docs
+doxygen Doxyfile
+cd ..
+sphinx-build -c docs docs/src _build/html
+```
+
+3. Open the generated documentation:
+```bash
+# On Linux
+xdg-open _build/html/index.html
+
+# On macOS
+open _build/html/index.html
+
+# On Windows
+start _build/html/index.html
+```
+
+The documentation is built using Doxygen and Sphinx. See `docs/README.txt` for more information about contributing to the documentation.
+
 # Download dependencies
 
 ChampSim uses [vcpkg](https://vcpkg.io) to manage its dependencies. In this repository, vcpkg is included as a submodule. You can download the dependencies with
