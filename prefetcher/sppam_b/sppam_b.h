@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 #include <optional>
+#include <map>
 
 #include "champsim.h"
 #include "modules.h"
@@ -15,6 +16,7 @@
 
 #include "branch_predictor.h"
 #include "gshare/gshare.h"
+#include "hashed_perceptron/hashed_perceptron.h"
 
 class sppam_b : public champsim::modules::prefetcher
 {
@@ -22,7 +24,8 @@ class sppam_b : public champsim::modules::prefetcher
   public:
     enum GLOBAL_HISTORY_TYPE {
       OFFSET_HISTORY, //the history of this offset in the last N regions
-      RECENT_SEGMENT_HISTORY, //the history of the most recent segment in the last N regions
+      UNIQUE_RECENT_SEGMENT_HISTORY, //the history of the most recent segment in the last N regions
+      ORDERED_RECENT_SEGMENT_HISTORY, //the history of the most recent segment in the last N regions, ordered by last-access time and including repeats as long as they are non-consecutive
       RECENT_XOR_HISTORY, //the local histories of the last N regions XORed together
     };
     enum IP_TYPE {
@@ -33,35 +36,47 @@ class sppam_b : public champsim::modules::prefetcher
       SMS_SUB, //branch predictor is fed SMS-style tag (page offset substitute ip)
       SMS_APP, //branch predictor is fed SMS-style tag (page offset appended to ip)
       SMS_BACK, //branch predictor is fed SMS-style tag (page offset append to end of ip rather than front)
+      DELTA, //branch predictor is fed the delta between the current access and the predicted access
+      DELTA_HISTORY, //branch predictor is fed the recent delta history pattern
       NONE //branch predictor is fed all 0's
+    };
+    enum BP_TYPE {
+      HASHED_PERCEPTRON,
+      GSHARE
     };
     struct Sppam_b_Module {
       CACHE* intern_;
 
-      static constexpr std::size_t REGION_SETS = 2048;
-      static constexpr std::size_t REGION_WAYS = 1;
+      static constexpr std::size_t REGION_SETS = 64;
+      static constexpr std::size_t REGION_WAYS = 4;
       static constexpr bool CLEAR_ACCESS_MAP_ON_EVICT = false;
 
       //IP tracking table (for usefulness)
       static constexpr std::size_t IP_TRACK_TABLE_SIZE = 128;
-      static constexpr uint64_t IP_TRACK_TABLE_TIMEOUT = 10000;
+      static constexpr uint64_t IP_TRACK_TABLE_TIMEOUT = 50000;
+      static constexpr bool USELESS_ON_TIMEOUT = false;
 
-      static constexpr bool USE_REGION_IP_FOR_LEARNING = true;
-      static constexpr bool USE_REGION_ADDR_FOR_GLOBAL_HIST_LEARNING = true;
+      static constexpr bool USE_REGION_IP_FOR_LEARNING = false;
+      static constexpr bool USE_REGION_ADDR_FOR_GLOBAL_HIST_LEARNING = false;
 
       static constexpr std::size_t IP_CONF_TABLE_SETS = 128;
       static constexpr std::size_t IP_CONF_TABLE_WAYS = 16;
       //samples for establishing IP usefulness
       static constexpr std::size_t IP_CONF_TABLE_SAMPLES = 64;
+      static constexpr bool USE_IP_CONF = true;
 
       //probability to fill into the ip tracking table
       static constexpr std::size_t TEMPORAL_SAMPLE_RATE = 1; //sample every N accesses for usefulness learning
 
       //direction sampler
       static constexpr int64_t DIRECTION_SAMPLE_MAX = 4;
+      static constexpr std::size_t DELTA_HISTORY_LENGTH = 3;
+      static constexpr uint64_t DELTA_HISTORY_MASK = 0xfff; //up to +/- 2k blocks
+      static constexpr uint64_t DELTA_HISTORY_BITS = 8;
 
       //max pf degree
-      static constexpr std::size_t PREFETCH_DEGREE = 8;
+      static constexpr int64_t PREFETCH_DEGREE = 8;
+      static constexpr bool    IP_PREFETCH_DEGREE = false;
       static constexpr std::size_t REGION_BUDGET = 64;
       static constexpr std::size_t L1D_REGION_BUDGET = 8;
 
@@ -69,8 +84,11 @@ class sppam_b : public champsim::modules::prefetcher
 
       //lookahead limits
       static constexpr bool DO_LOOKAHEAD = true;
-      static constexpr double MIN_LOOKAHEAD_CONF = 0.0;
-      static constexpr uint64_t MAX_LOOKAHEAD = 22;
+      static constexpr double MIN_LOOKAHEAD_CONF = 0.2;
+      static constexpr double MIN_L1D_CONF = 0.9;
+      static constexpr int64_t MAX_LOOKAHEAD = 64;
+      static constexpr bool IP_LOOKAHEAD = false;
+      static constexpr bool PROB_DROP = false;
 
       static constexpr double TIMELINESS_CYCLE = 10000; 
 
@@ -79,11 +97,13 @@ class sppam_b : public champsim::modules::prefetcher
       static constexpr bool CROSS_PAGE = false;
 
       //bp stuff
-      static constexpr IP_TYPE ip_style = IP_TYPE::IP; //set IP type
-      static constexpr GLOBAL_HISTORY_TYPE global_type = GLOBAL_HISTORY_TYPE::RECENT_SEGMENT_HISTORY; //set global history type
+      static constexpr IP_TYPE ip_style = IP_TYPE::DELTA; //set IP type
+      static constexpr GLOBAL_HISTORY_TYPE global_type = GLOBAL_HISTORY_TYPE::ORDERED_RECENT_SEGMENT_HISTORY; //set global history type
+      static constexpr BP_TYPE bp_type = BP_TYPE::HASHED_PERCEPTRON; //set branch predictor type
       
       std::array<double,16> PREFETCH_DEGREES_BW = {1.00,1.00,1.00,1.00,0.90,0.90,0.90,0.90,0.80,0.80,0.80,0.75,0.75,0.50,0.50,0.50}; //normal
       std::array<double,16> PREFETCH_ISSUE_CHANCE = {0.0315,0.056,0.134,0.134,0.36,0.607,0.90,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0}; //normal
+      std::array<double,16> REISSUE_CHANCE = {0.00,0.00,0.00,0.03,0.03,0.06,0.06,0.06,0.125,0.125,0.125,0.125,0.25,0.25,0.25,0.25}; //normal
       //static constexpr std::array<double,16> PREFETCH_REGION_BUDGET = {2,2,3,3,3,3,4,4,4,4,8,12,16,16,32,32}; //normal
       //std::array<double,16> PREFETCH_ISSUE_CHANCE = {0.3,0.4,0.5,0.6,0.7,0.8,0.90,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0}; //normal
       std::size_t GLOBAL_USEFULNESS_SAMPLE = 1024;
@@ -106,10 +126,12 @@ class sppam_b : public champsim::modules::prefetcher
       uint64_t prefetches_filtered = 0;
       uint64_t prefetches_full_pq = 0;
       uint64_t prefetches_dropped = 0;
-      uint64_t prefetches_scanned_forward = 0;
-      uint64_t prefetches_scanned_backward = 0;
-      uint64_t direction_global = 0;
-      uint64_t direction_local = 0;
+      uint64_t pf_reissued = 0;
+      uint64_t pf_l2c = 0;
+      uint64_t pf_degree_limited = 0;
+
+      uint64_t pend_cycles = 0;
+      uint64_t resolutions = 0;
 
       //uint64_t global_usefulness_counter = MAX_USEFULNESS_COUNTER >> 1;
       double global_conf = 1.0;
@@ -141,6 +163,7 @@ class sppam_b : public champsim::modules::prefetcher
         page vpn;
         std::bitset< (1 << SPPAM_B_PAGE_BITS) / 64> access_map;
         std::bitset< (1 << SPPAM_B_PAGE_BITS) / 64> prefetch_map;
+        std::bitset< (1 << SPPAM_B_PAGE_BITS) / 64> ll_map;
         std::bitset< (1 << SPPAM_B_PAGE_BITS) / 64> prefetch_debug_map;
         uint64_t last_block = 0;
         //std::vector<champsim::address> last_ip = std::vector<champsim::address>(champsim::lg2(MAX_HISTORY_SIZE) - champsim::lg2(MIN_HISTORY_SIZE) + 1,champsim::address{});
@@ -168,7 +191,7 @@ class sppam_b : public champsim::modules::prefetcher
       };
 
       struct ip_track_entry {
-        champsim::address addr;
+        champsim::block_number addr;
         champsim::address ip;
         uint64_t last_cycle = 0;
       };
@@ -177,8 +200,11 @@ class sppam_b : public champsim::modules::prefetcher
         champsim::address ip;
         double conf = 1.0;
         int64_t dir_counter = DIRECTION_SAMPLE_MAX / 2; //same for direction
+        int64_t lookahead_depth = MAX_LOOKAHEAD;
+        int64_t pf_degree = PREFETCH_DEGREE;
         uint64_t useful = 0;
         uint64_t useless = 0;
+        uint64_t lifetime_samples = 0;
         ip_conf_entry() : ip_conf_entry(champsim::address{}) {}
         explicit ip_conf_entry(champsim::address allocate_ip)
           : ip(allocate_ip) {}
@@ -189,14 +215,17 @@ class sppam_b : public champsim::modules::prefetcher
       };
 
       struct sppam_b_indexer {
-        auto operator()(const region_type& entry) const { return entry.vpn; }
+        page operator()(const region_type& entry) const { return entry.vpn; }
       };
       sppam_b_util::msl::lru_table<region_type,sppam_b_indexer,sppam_b_indexer> regions{REGION_SETS,REGION_WAYS};
       std::array<ip_track_entry,IP_TRACK_TABLE_SIZE> ip_track_table;
       sppam_b_util::msl::lru_table<ip_conf_entry,ip_conf_indexer,ip_conf_indexer> ip_conf_table{IP_CONF_TABLE_SETS,IP_CONF_TABLE_WAYS};
 
 
-    champsim::address get_bp_ip(champsim::address addr, champsim::address ip);
+    void update_delta_history(std::vector<uint64_t>& delta_history, int64_t delta);
+    void update_recency_stack(std::vector<recency_stack_type>& recency_stack, champsim::address addr, champsim::address ip);
+
+    champsim::address get_bp_ip(champsim::address addr, champsim::address pf_addr, champsim::address ip, std::vector<uint64_t> delta_history_temp);
 
     void update_local_history(std::bitset<BP_LOCAL_BITS>& history, champsim::address addr, bool taken, bool direction);
     void update_global_history(std::bitset<BP_GLOBAL_BITS>& history, champsim::address addr, bool taken, bool direction);
@@ -208,22 +237,26 @@ class sppam_b : public champsim::modules::prefetcher
     //std::vector<region_type> get_temp_region_stack(champsim::address addr, champsim::address ip);
     void add_to_pagemap(champsim::address addr, bool prefetch, bool useful = false);
     void add_to_debugmap(champsim::address addr);
+    void add_to_llmap(champsim::address addr);
     bool check_pagemap(champsim::address addr, bool prefetch);
+    bool check_llmap(champsim::address addr);
     void remove_from_pagemap(champsim::address addr, bool prefetch);
 
     double convert_to_conf(double predict_conf);
 
     double get_bw_conf();
 
-    double get_conf();
+    double get_conf(champsim::address ip);
+    std::size_t get_lookahead(champsim::address ip);
+    std::size_t get_pf_degree(champsim::address ip);
 
-    bool get_direction(champsim::address addr, champsim::address ip);
+    bool get_direction(champsim::address ip);
 
     double should_issue(double conf);
+    double should_reissue(double conf);
 
     std::bitset<BP_LOCAL_BITS> get_local_history(champsim::address addr, champsim::address ip, bool direction);
     std::bitset<BP_GLOBAL_BITS> get_global_history(champsim::address addr, champsim::address ip, bool direction);
-    void update_history_metadata(std::bitset<BP_GLOBAL_BITS>& global_hist, champsim::address addr, champsim::address ip);
 
     void update_local_and_global_contexts(champsim::address addr, champsim::address ip);
 
@@ -245,7 +278,7 @@ class sppam_b : public champsim::modules::prefetcher
 
     void update_ip_conf(champsim::address ip, bool useful);
     void track_ip(champsim::address addr, champsim::address ip);
-    void resolve_ip(champsim::address addr, bool useful);
+    void resolve_ip(champsim::block_number addr, bool useful);
     void track_direction(champsim::address addr, champsim::address ip, bool direction);
 
     std::vector<recency_stack_type> recency_stack;
@@ -254,6 +287,9 @@ class sppam_b : public champsim::modules::prefetcher
     champsim::address last_addr{};
     std::bitset<BP_GLOBAL_BITS> global_history_reg;
     std::vector<champsim::address> ip_history;
+    std::vector<uint64_t> delta_history;
+    std::map<int64_t,int64_t> delta_freq;
+    std::map<uint64_t,uint64_t> lookahead_freq;
     branch_predictor* predictor;
     uint64_t last_cycle = 0;
 

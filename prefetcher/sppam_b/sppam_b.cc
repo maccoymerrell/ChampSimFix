@@ -13,61 +13,38 @@ auto sppam_b::Sppam_b_Module::page_and_offset(T addr) -> std::pair<page, block_i
   return std::pair{page{addr}, block_in_page{addr}};
 }
 
-void sppam_b::Sppam_b_Module::update_history_metadata(std::bitset<BP_GLOBAL_BITS>& global_hist, champsim::address addr, champsim::address ip) {
-  
-  auto [pn, page_offset] = page_and_offset(addr);
-  auto region = regions.check_hit(region_type{pn});
-  auto recency_stack_entry = recency_stack_type{pn};
-  if(region.has_value()) {
-    recency_stack_entry.recent_segments = get_segment_access_window(addr, ip, BP_ALIGNMENT_FACTOR, get_direction(addr,ip));
-    recency_stack_entry.direction = get_direction(addr,ip);
-    auto it = std::find(recency_stack.begin(), recency_stack.end(), recency_stack_entry);
-      if (it != recency_stack.end()) {
-          // Move existing element to front
-          recency_stack.erase(it);
-          recency_stack.insert(recency_stack.begin(),recency_stack_entry);
-      } else {
-          // Shift everything right and insert new int at front
-          recency_stack.pop_back();
-          recency_stack.insert(recency_stack.begin(),recency_stack_entry);
-      }
-  }
-  /*
-  if(global_type == GLOBAL_HISTORY_TYPE::FIXED_JUMP_WINDOW) {
-    auto [pn, page_offset] = page_and_offset(addr);
-    auto region = regions.check_hit(region_type{pn});
-    if(region.has_value()) {
-      auto window = get_access_window(addr, ip, BP_ALIGNMENT_FACTOR);
-      //update the global history with this window
-      for(int i = 0; i < BP_GLOBAL_SEGMENT_BITS; i++) {
-        global_hist <<= 1;
-        global_hist.set(0,window.test(i));
-      }
-    }
-  } else if(global_type == GLOBAL_HISTORY_TYPE::FIXED_LOCAL_SEGMENT) {
-    //this area needs to keep a vector of recent regions and construct the global history dynamically in lru order
-    //first, find this region in the global region vector
-    //now that this is updated, construct the global history
-    int current_seg = 0;
-    for(auto &reg: recency_stack) {
-      auto region = regions.check_hit(region_type{reg});
-      if(region.has_value()) {
-        auto window = get_access_window(champsim::address{champsim::block_number{reg} + region->last_block}, ip, BP_ALIGNMENT_FACTOR);
-        for(int i = 0; i < BP_GLOBAL_SEGMENT_BITS; i++) {
-          if(current_seg*BP_GLOBAL_SEGMENT_BITS + i < BP_GLOBAL_BITS)
-            global_hist.set(current_seg*BP_GLOBAL_SEGMENT_BITS + i,window.test(i));
-        }
-      } else {
-        for(int i = 0; i < BP_GLOBAL_SEGMENT_BITS; i++) {
-          if(current_seg*BP_GLOBAL_SEGMENT_BITS + i < BP_GLOBAL_BITS)
-            global_hist.set(current_seg*BP_GLOBAL_SEGMENT_BITS + i,0);
-        }
-      }
-      current_seg++;
-    }
-  }*/
+void sppam_b::Sppam_b_Module::update_delta_history(std::vector<uint64_t>& delta_history, int64_t delta) {
+  delta_history.insert(delta_history.begin(),delta & DELTA_HISTORY_MASK);
+  delta_history.pop_back();
 }
 
+void sppam_b::Sppam_b_Module::update_recency_stack(std::vector<recency_stack_type>& recency_stack_temp, champsim::address addr, champsim::address ip) {
+  auto [pn, page_offset] = page_and_offset(addr);
+  auto recency_stack_entry = recency_stack_type{pn};
+  auto region = regions.check_hit(region_type{pn});
+  if(region.has_value()) {
+    recency_stack_entry.recent_segments = get_segment_access_window(addr, ip, BP_ALIGNMENT_FACTOR, get_direction(ip));
+    recency_stack_entry.direction = get_direction(ip);
+    if(global_type == GLOBAL_HISTORY_TYPE::UNIQUE_RECENT_SEGMENT_HISTORY) {
+      auto it = std::find(recency_stack_temp.begin(), recency_stack_temp.end(), recency_stack_entry);
+      if (it != recency_stack_temp.end()) {
+          // Move existing element to front
+          recency_stack_temp.erase(it);
+          recency_stack_temp.insert(recency_stack_temp.begin(),recency_stack_entry);
+      } else {
+          // Shift everything right and insert new int at front
+          recency_stack_temp.pop_back();
+          recency_stack_temp.insert(recency_stack_temp.begin(),recency_stack_entry);
+      }
+    } else {
+      //as long as this region is not the top of the stack, append and pop the oldest entry
+      if(recency_stack_temp.front().vpn != pn) {
+        recency_stack_temp.pop_back();
+        recency_stack_temp.insert(recency_stack_temp.begin(),recency_stack_entry);
+      }
+    }
+  }
+}
 void sppam_b::Sppam_b_Module::update_local_and_global_contexts(champsim::address addr, champsim::address ip) {
   auto[pn, page_offset] = page_and_offset(addr);
   auto region = regions.check_hit(region_type{pn});
@@ -76,8 +53,14 @@ void sppam_b::Sppam_b_Module::update_local_and_global_contexts(champsim::address
       region->last_ip = ip;
       regions.fill(region.value());
   }
+
+  //update delta stack
+  auto last_delta = champsim::block_number{addr}.to<int64_t>() - champsim::block_number{last_addr}.to<int64_t>();
+  update_delta_history(delta_history, last_delta);
   last_ip = ip;
   last_addr = addr;
+
+  update_recency_stack(recency_stack, addr, ip);
 }
 
 std::bitset<BP_LOCAL_BITS> sppam_b::Sppam_b_Module::get_local_access_window(champsim::address addr, champsim::address ip, int offset, bool direction) {
@@ -193,7 +176,7 @@ std::bitset<BP_GLOBAL_BITS> sppam_b::Sppam_b_Module::get_global_access_window(ch
       }
     }
     return history;
-  } else if(global_type == GLOBAL_HISTORY_TYPE::RECENT_SEGMENT_HISTORY) {
+  } else if(global_type == GLOBAL_HISTORY_TYPE::UNIQUE_RECENT_SEGMENT_HISTORY || global_type == GLOBAL_HISTORY_TYPE::ORDERED_RECENT_SEGMENT_HISTORY) {
     //first grab our segment using get_segment_access_window
     auto [pn, page_offset] = page_and_offset(addr);
     auto segment_history = get_segment_access_window(addr, ip, offset, direction);
@@ -217,21 +200,30 @@ std::bitset<BP_GLOBAL_BITS> sppam_b::Sppam_b_Module::get_global_access_window(ch
     return history;
 
   } else if(global_type == GLOBAL_HISTORY_TYPE::RECENT_XOR_HISTORY) {
-    std::bitset<BP_GLOBAL_BITS> history = get_local_access_window(addr, ip, offset, direction);
+    std::bitset<BP_LOCAL_BITS> local_hist = get_local_access_window(addr, ip, offset, direction);
+    std::bitset<BP_GLOBAL_BITS> history;
     //xor together the local histories of the recent regions in the recency stack
     for(int i = i; i < recency_stack.size(); i++) {
       auto region = regions.check_hit(region_type{recency_stack.at(i).vpn});
       if(region.has_value()) {
         auto region_addr = champsim::address{champsim::block_number{recency_stack.at(i).vpn} + region->last_block};
         auto temp_local = get_local_access_window(region_addr, ip, offset, recency_stack.at(i).direction);
-        history ^= temp_local;
+        local_hist ^= temp_local;
       }
+    }
+    //copy the local history to the global history
+    for(int i = 0; i < BP_LOCAL_BITS; i++) {
+      history.set(i,local_hist.test(i));
     }
     return history;
   }
   else {
     //default global history is just the local history of the current region
-    return get_local_access_window(addr, ip, offset, direction);
+    auto local_hist = get_local_access_window(addr, ip, offset, direction);
+    std::bitset<BP_GLOBAL_BITS> history;
+    for(int i = 0; i < BP_LOCAL_BITS; i++)
+      history.set(i,local_hist.test(i));
+    return history;
   }
 }
 
@@ -257,9 +249,14 @@ bool sppam_b::Sppam_b_Module::check_pagemap(champsim::address addr, bool prefetc
 
 void sppam_b::Sppam_b_Module::initialize(CACHE* cache) {
   intern_ = cache;
-  predictor = new sppam_bp::gshare;
+
+  if(bp_type == BP_TYPE::HASHED_PERCEPTRON)
+    predictor = new sppam_bp::hashed_perceptron;
+  else if(bp_type == BP_TYPE::GSHARE)
+    predictor = new sppam_bp::gshare;
 
   recency_stack = std::vector<recency_stack_type>((BP_GLOBAL_BITS/BP_SEGMENT_BITS) + 1,recency_stack_type{});
+  delta_history = std::vector<uint64_t>(DELTA_HISTORY_LENGTH,0);
   
   uint64_t total_state = get_state_bits();
   champsim::data::bytes total_bytes = champsim::data::bytes{(total_state/8) + 1};
@@ -267,7 +264,7 @@ void sppam_b::Sppam_b_Module::initialize(CACHE* cache) {
 }
 
 //get our equivalent to ip
-champsim::address sppam_b::Sppam_b_Module::get_bp_ip(champsim::address addr, champsim::address ip) {
+champsim::address sppam_b::Sppam_b_Module::get_bp_ip(champsim::address addr, champsim::address pf_addr, champsim::address ip, std::vector<uint64_t> delta_history_temp) {
   //lets just use the page num for now
   auto [pn, page_offset] = page_and_offset(addr);
 
@@ -303,6 +300,26 @@ champsim::address sppam_b::Sppam_b_Module::get_bp_ip(champsim::address addr, cha
     uint64_t base_ip = ip.to<uint64_t>();
     base_ip ^= page_offset.to<uint64_t>() << (SPPAM_B_PAGE_BITS - LOG2_BLOCK_SIZE);
     return champsim::address{base_ip};
+  } else if(ip_style == IP_TYPE::DELTA) {
+    int64_t delta = champsim::block_number{pf_addr}.to<int64_t>() - (champsim::block_number{addr}.to<int64_t>());
+    //xor the delta to extend it to its upper bits
+    int64_t delta_trunc = delta & DELTA_HISTORY_MASK;
+    delta ^= (delta_trunc) << 8;
+    delta ^= (delta_trunc) << 16;
+    delta ^= (delta_trunc) << 24;
+    delta ^= (delta_trunc) << 32;
+    delta ^= (delta_trunc) << 40;
+    delta ^= (delta_trunc) << 48;
+    delta ^= (delta_trunc) << 56;
+    return champsim::address{delta};
+  } else if(ip_style == IP_TYPE::DELTA_HISTORY) {
+    //pack the recent delta history into the address, with the most recent delta in the least significant bits
+    uint64_t base_val = (champsim::block_number{pf_addr}.to<int64_t>() - (champsim::block_number{addr}.to<int64_t>())) & DELTA_HISTORY_MASK; //include the most recent delta in the base value
+    for(int i = 0; i < DELTA_HISTORY_LENGTH; i++) {
+      uint64_t delta = delta_history_temp.at(i);
+      base_val ^= (delta << ((i+1)*DELTA_HISTORY_BITS)); //shift the delta to its position and xor it to the base value. We start at (i+1) because the most recent delta is already included in the base value
+    }
+    return champsim::address{base_val};
   }
   else if(ip_style == IP_TYPE::NONE)
     return champsim::address{};
@@ -330,6 +347,8 @@ void sppam_b::Sppam_b_Module::add_to_pagemap(champsim::address addr, bool prefet
     if(prefetch) {
       if(!demand_region->prefetch_map.test(page_offset.to<std::size_t>()))
         was_miss = true;
+      else
+        pf_reissued++;
       demand_region->prefetch_map.set(page_offset.to<std::size_t>(), true);
       //demand_region->prefetch_debug_map.set(page_offset.to<std::size_t>(), true);
     }
@@ -379,17 +398,40 @@ void sppam_b::Sppam_b_Module::add_to_debugmap(champsim::address addr) {
   }
 }
 
+void sppam_b::Sppam_b_Module::add_to_llmap(champsim::address addr) {
+  auto [current_pn, page_offset] = page_and_offset(addr);
+  auto temp_region = region_type{current_pn};
+  auto demand_region = regions.check_hit(temp_region);
+
+  if(demand_region.has_value()) {
+    demand_region->ll_map.set(page_offset.to<std::size_t>(), true);
+    regions.fill(demand_region.value());
+  }
+}
+
 void sppam_b::Sppam_b_Module::remove_from_pagemap(champsim::address addr, bool prefetch) {
   auto [current_pn, page_offset] = page_and_offset(addr);
   auto demand_region = regions.check_hit(region_type{current_pn});
 
   if(demand_region.has_value()) {
-    if(prefetch)
+    if(prefetch) {
+      demand_region->ll_map.set(page_offset.to<std::size_t>(), false);
       demand_region->prefetch_map.set(page_offset.to<std::size_t>(), false);
+    }
     else
       demand_region->access_map.set(page_offset.to<std::size_t>(), false);
     regions.fill(demand_region.value());
   }
+}
+
+bool sppam_b::Sppam_b_Module::check_llmap(champsim::address addr) {
+  auto [current_pn, page_offset] = page_and_offset(addr);
+  auto demand_region = regions.check_hit(region_type{current_pn});
+
+  if(demand_region.has_value()) {
+    return demand_region->ll_map.test(page_offset.to<std::size_t>());
+  }
+  return false;
 }
 
 void sppam_b::Sppam_b_Module::update_local_history(std::bitset<BP_LOCAL_BITS>& history, champsim::address addr, bool taken, bool direction) {
@@ -409,7 +451,7 @@ void sppam_b::Sppam_b_Module::update_global_history(std::bitset<BP_GLOBAL_BITS>&
   if(global_type == GLOBAL_HISTORY_TYPE::OFFSET_HISTORY) {
     history <<= 1;
     history.set(0,taken);
-  } else if(global_type == GLOBAL_HISTORY_TYPE::RECENT_SEGMENT_HISTORY) {
+  } else if(global_type == GLOBAL_HISTORY_TYPE::UNIQUE_RECENT_SEGMENT_HISTORY || global_type == GLOBAL_HISTORY_TYPE::ORDERED_RECENT_SEGMENT_HISTORY) {
     //only slide the current segment history (front BP_SEGMENT_BITS) of the global history
     std::bitset<BP_SEGMENT_BITS> current_segment_history;
     for(int i = 0; i < BP_SEGMENT_BITS; i++) {
@@ -423,9 +465,9 @@ void sppam_b::Sppam_b_Module::update_global_history(std::bitset<BP_GLOBAL_BITS>&
     }
   } else if(global_type == GLOBAL_HISTORY_TYPE::RECENT_XOR_HISTORY) {
     //reconstruct the global history based on the recency stack, but with the updated current local history
-    std::bitset<BP_GLOBAL_BITS> new_history = get_local_access_window(addr, champsim::address{}, BP_ALIGNMENT_FACTOR, direction);
+    std::bitset<BP_LOCAL_BITS> new_history = get_local_access_window(addr, champsim::address{}, BP_ALIGNMENT_FACTOR, direction);
     //xor together the local histories of the recent regions in the recency stack
-    for(int i = i; i < recency_stack.size(); i++) {
+    for(int i = 0; i < recency_stack.size(); i++) {
       auto region = regions.check_hit(region_type{recency_stack.at(i).vpn});
       if(region.has_value()) {
         auto region_addr = champsim::address{champsim::block_number{recency_stack.at(i).vpn} + region->last_block};
@@ -433,7 +475,9 @@ void sppam_b::Sppam_b_Module::update_global_history(std::bitset<BP_GLOBAL_BITS>&
         new_history ^= temp_local;
       }
     }
-    history = new_history;
+    for(int i = 0; i < BP_LOCAL_BITS; i++) {
+      history.set(i,new_history.test(i));
+    }
   }
 }
 
@@ -481,9 +525,9 @@ void sppam_b::Sppam_b_Module::tally_useless(champsim::address addr) {
 
 uint32_t sppam_b::prefetcher_cache_operate(champsim::address addr, champsim::address ip, bool cache_hit, bool useful_prefetch, access_type type, uint32_t metadata_in)
 {
+  engine.resolve_ip(champsim::block_number{addr},true);
   if(useful_prefetch) {
     engine.tally_useful(addr);
-    engine.resolve_ip(addr,true);
   }
 
   engine.log_outcome(addr,ip);
@@ -494,7 +538,6 @@ uint32_t sppam_b::prefetcher_cache_operate(champsim::address addr, champsim::add
 
   //global history
   engine.update_local_and_global_contexts(addr,ip);
-  engine.update_history_metadata(engine.global_history_reg, addr, ip);
 
   //do predictions
   engine.do_prefetch(addr,ip,cache_hit,useful_prefetch,type,metadata_in);
@@ -517,7 +560,7 @@ uint32_t sppam_b::prefetcher_cache_fill(champsim::address addr, long set, long w
       engine.remove_from_pagemap(evicted_addr,false);
   }
   if(useless)
-    engine.resolve_ip(evicted_addr,false);
+    engine.resolve_ip(champsim::block_number{evicted_addr},false);
 
 
   return metadata_in;
@@ -525,7 +568,6 @@ uint32_t sppam_b::prefetcher_cache_fill(champsim::address addr, long set, long w
 
 
 void sppam_b::Sppam_b_Module::log_outcome(champsim::address addr, champsim::address ip) {
-  //learn from locally stored information
   //learning
   //1. find the region that was just accessed
   //2. For each bit gap between the last block access < current access
@@ -543,12 +585,14 @@ void sppam_b::Sppam_b_Module::log_outcome(champsim::address addr, champsim::addr
       auto start = region->last_block;
       auto end = page_offset.to<uint64_t>();
       track_direction(champsim::address{champsim::block_number{pn} + start}, region->last_ip, local_direction);
+      auto global_hist = get_global_history(USE_REGION_ADDR_FOR_GLOBAL_HIST_LEARNING ? champsim::address{champsim::block_number{pn} + start} : last_addr,ip_to_use,local_direction);
+      auto local_hist = get_local_history(champsim::address{champsim::block_number{pn} + start},region->last_ip,local_direction);
       for(int i = start; (local_direction ? i < end : i > end); (local_direction ? i++ : i--)) {
         auto outcome = (i == end - (local_direction ? 1 : -1)) && (intern_->current_cycle() - region->last_cycle < TIMELINESS_CYCLE);
         auto last_access_addr_temp = champsim::address{champsim::block_number{pn} + i};
-        auto local_hist = get_local_history(last_access_addr_temp,region->last_ip,local_direction);
-        auto global_hist = get_global_history(USE_REGION_ADDR_FOR_GLOBAL_HIST_LEARNING ? last_access_addr_temp : last_addr,ip_to_use,local_direction);
-        predictor->last_branch_result(get_bp_ip(last_access_addr_temp,ip_to_use),global_hist, local_hist,outcome);
+        //auto local_hist = get_local_history(last_access_addr_temp,region->last_ip,local_direction);
+        //auto global_hist = get_global_history(USE_REGION_ADDR_FOR_GLOBAL_HIST_LEARNING ? last_access_addr_temp : last_addr,ip_to_use,local_direction);
+        predictor->last_branch_result(get_bp_ip(champsim::address{champsim::block_number{pn} + start},last_access_addr_temp,ip_to_use,delta_history),global_hist, local_hist,outcome);
       }
   }
   if(region.has_value() && pn == (page{last_addr} + 1)) {
@@ -558,12 +602,14 @@ void sppam_b::Sppam_b_Module::log_outcome(champsim::address addr, champsim::addr
       auto start = champsim::block_number{last_addr};
       auto end = champsim::block_number{pn} +page_offset.to<uint64_t>();
       track_direction(last_addr, last_ip, local_direction);
+      auto global_hist = get_global_history(USE_REGION_ADDR_FOR_GLOBAL_HIST_LEARNING ? last_addr : last_addr,ip_to_use,local_direction);
+      auto local_hist = get_local_history(last_addr,last_ip,local_direction);
       for(auto i = start; (local_direction ? i < end : i > end); (local_direction ? i++ : i--)) {
         auto last_access_addr_temp =  champsim::address{i};
         auto outcome = (i == end - (local_direction ? 1 : -1)) && (intern_->current_cycle() - last_cycle < TIMELINESS_CYCLE);
-        auto local_hist = get_local_history(last_access_addr_temp,last_ip,local_direction);
-        auto global_hist = get_global_history(USE_REGION_ADDR_FOR_GLOBAL_HIST_LEARNING ? last_access_addr_temp : last_addr,ip_to_use,local_direction);
-        predictor->last_branch_result(get_bp_ip(last_access_addr_temp,ip_to_use),global_hist, local_hist,outcome);
+        //auto local_hist = get_local_history(last_access_addr_temp,last_ip,local_direction);
+        //auto global_hist = get_global_history(USE_REGION_ADDR_FOR_GLOBAL_HIST_LEARNING ? last_access_addr_temp : last_addr,ip_to_use,local_direction);
+        predictor->last_branch_result(get_bp_ip(last_addr,last_access_addr_temp,ip_to_use,delta_history),global_hist, local_hist,outcome);
       }
    }
    if(region.has_value() && pn == (page{last_addr} - 1)) {
@@ -573,17 +619,19 @@ void sppam_b::Sppam_b_Module::log_outcome(champsim::address addr, champsim::addr
       auto start = champsim::block_number{last_addr};
       auto end = champsim::block_number{pn} + page_offset.to<uint64_t>();
       track_direction(last_addr, last_ip, local_direction);
+      auto local_hist = get_local_history(last_addr,last_ip,local_direction);
+      auto global_hist = get_global_history(USE_REGION_ADDR_FOR_GLOBAL_HIST_LEARNING ? last_addr : last_addr,ip_to_use,local_direction);
       for(auto i = start; (local_direction ? i < end : i > end); (local_direction ? i++ : i--)) {
         auto last_access_addr_temp =  champsim::address{i};
         auto outcome = (i == end - (local_direction ? 1 : -1)) && (intern_->current_cycle() - last_cycle < TIMELINESS_CYCLE);
-        auto local_hist = get_local_history(last_access_addr_temp,last_ip,local_direction);
-        auto global_hist = get_global_history(USE_REGION_ADDR_FOR_GLOBAL_HIST_LEARNING ? last_access_addr_temp : last_addr,ip_to_use,local_direction);
-        predictor->last_branch_result(get_bp_ip(last_access_addr_temp,ip_to_use),global_hist, local_hist,outcome);
+        //auto local_hist = get_local_history(last_access_addr_temp,last_ip,local_direction);
+        //auto global_hist = get_global_history(USE_REGION_ADDR_FOR_GLOBAL_HIST_LEARNING ? last_access_addr_temp : last_addr,ip_to_use,local_direction);
+        predictor->last_branch_result(get_bp_ip(last_addr,last_access_addr_temp,ip_to_use,delta_history),global_hist, local_hist,outcome);
       }
    }
 }
 
-bool sppam_b::Sppam_b_Module::get_direction(champsim::address addr, champsim::address ip) {
+bool sppam_b::Sppam_b_Module::get_direction(champsim::address ip) {
   //return true;
   auto entry = ip_conf_table.check_hit(ip_conf_entry{ip});
   if(entry.has_value()) {
@@ -600,50 +648,69 @@ void sppam_b::Sppam_b_Module::do_prefetch(champsim::address addr, champsim::addr
   auto region = regions.check_hit(region_type{page{addr}});
   if(!region.has_value())
     return;
+
+  auto recency_stack_temp = recency_stack;
+  
+  auto delta_history_temp = delta_history;
   //enforce limit on prefetches issued per page (depth)
-  current_pf_degree = std::min(region->avail_prefetches,(int64_t)PREFETCH_DEGREE);
+  auto ip_pf_degree = IP_PREFETCH_DEGREE ? get_pf_degree(ip) : PREFETCH_DEGREE;
+  current_pf_degree = std::min(region->avail_prefetches,(int64_t)ip_pf_degree);
+  if(current_pf_degree == region->avail_prefetches)
+    pf_degree_limited++;
 
   int pf_issued = 0;
   int lookaheads = 0;
   int lookahead_offset = 0;
   std::vector<champsim::address> ip_predict = ip_history;
-  auto global_hist = get_global_history(addr,ip,get_direction(addr,ip));
-  auto local_hist = get_local_history(addr,ip,get_direction(addr,ip));
+   bool direction = get_direction(ip);
+  auto global_hist = get_global_history(addr,ip,direction);
+  auto local_hist = get_local_history(addr,ip,direction);
+  auto predict_global_hist = global_hist;
+  auto predict_local_hist = local_hist;
+  auto predict_addr = addr;
+  auto pf_conf = get_conf(ip) * get_bw_conf();
+  if(!should_issue(pf_conf) && PROB_DROP)
+    return;
+  auto ip_max_lookahead = IP_LOOKAHEAD ? get_lookahead(ip) : MAX_LOOKAHEAD;
 
-  auto pf_conf = get_conf() * get_bw_conf();
+  int64_t current_delta = direction ? 1 : -1;
 
   if((!in_warmup) && DO_DEBUG)
     fmt::print("Doing prefetch for address: {} free space: {}\n",addr,free_space);
   //usefulness must remain above threshold to continue scan
   //get negative and positive patterns, set base location for the scan
   champsim::address pf_base_addr = addr;
-  while(pf_issued < current_pf_degree && lookaheads < MAX_LOOKAHEAD) {
-    bool direction = get_direction(pf_base_addr,ip);
+  while(pf_issued < current_pf_degree && lookaheads <= ip_max_lookahead) {
+   
     std::pair<bool, double> prediction_pack;
-
+    champsim::address pos_step_addr = champsim::address{champsim::block_number{pf_base_addr} + (direction ? 1 : -1)};
     //make prediction using local or global history based on configuration
-    prediction_pack = predictor->predict_branch(get_bp_ip(pf_base_addr,ip),global_hist,local_hist);
+    prediction_pack = predictor->predict_branch(get_bp_ip(predict_addr, pf_base_addr, ip, delta_history_temp),predict_global_hist,predict_local_hist);
     
     bool prediction = prediction_pack.first;
     double prediction_conf = prediction_pack.second;
 
-    champsim::address pos_step_addr = champsim::address{champsim::block_number{pf_base_addr} + (direction ? 1 : -1)};
-    bool to_l2c = pf_issued >= free_space || (region->avail_prefetches - pf_issued) < L1D_REGION_BUDGET;
+    
+    bool to_l2c = pf_issued >= free_space || (pf_conf < MIN_L1D_CONF);
     if(prediction) {
+      delta_freq[current_delta]++;
       add_to_debugmap(pos_step_addr);
-      if(!check_pagemap(champsim::address{pos_step_addr},true)) {
+      if(!check_pagemap(champsim::address{pos_step_addr},true) && !(to_l2c && check_llmap(pos_step_addr))) {
         if(bool prefetch_success = intern_->prefetch_line(pos_step_addr, !to_l2c, metadata_in); prefetch_success) {
             if((!in_warmup) && DO_DEBUG)
-              fmt::print("\t\t\tPrefetched: {} L2C: {}\n",pos_step_addr, !to_l2c);
+              fmt::print("\t\t\tPrefetched: {} L2C: {}\n",pos_step_addr, to_l2c);
             if(!to_l2c)
               add_to_pagemap(pos_step_addr,true);
+            else {
+              pf_l2c++;
+              add_to_llmap(pos_step_addr);
+            }
             pf_issued++;
             prefetches_issued++;
-            if(!to_l2c)
-              track_ip(pos_step_addr, ip);
+            track_ip(pos_step_addr, ip);
         } else {
           if((!in_warmup) && DO_DEBUG)
-            fmt::print("\t\t\tPrefetch failed: {} L2C: {}\n",pos_step_addr, !to_l2c);
+            fmt::print("\t\t\tPrefetch failed: {} L2C: {}\n",pos_step_addr, to_l2c);
         }
       } else {
         if((!in_warmup) && DO_DEBUG)
@@ -656,18 +723,38 @@ void sppam_b::Sppam_b_Module::do_prefetch(champsim::address addr, champsim::addr
       if((!in_warmup) && DO_DEBUG)
         fmt::print("\t\t\tLookahead stopped due to low confidence: {}%\n",(int)(pf_conf*100));
 
+      if(page{pf_base_addr} != page{pos_step_addr}) {
+        update_recency_stack(recency_stack,pos_step_addr,ip);
+      }
       pf_base_addr = pos_step_addr;
 
       //update histories
       update_global_history(global_hist,pf_base_addr,prediction,direction);
       update_local_history(local_hist,pf_base_addr,prediction,direction);
 
+      if(prediction) {
+        //only update the predict history if we actually took the prefetch, otherwise we are just learning from a negative pattern which is less useful for future predictions
+        predict_global_hist = global_hist;
+        predict_local_hist = local_hist;
+        predict_addr = pf_base_addr;
+        update_delta_history(delta_history_temp, current_delta);
+        current_delta = direction ? 1 : -1;
+        pf_conf *= get_conf(ip);
+      } else {
+        current_delta = current_delta + (direction ? 1 : -1);
+      }
       lookaheads++;
       total_lookaheads++;
+
+
+      
     } else {
       break;
     }
   }
+  lookahead_freq[lookaheads]++;
+  //roll back recency stack
+  recency_stack = recency_stack_temp;
 }
 
 void sppam_b::Sppam_b_Module::track_ip(champsim::address addr, champsim::address ip) {
@@ -676,12 +763,16 @@ void sppam_b::Sppam_b_Module::track_ip(champsim::address addr, champsim::address
   if((intern_->current_cycle() % TEMPORAL_SAMPLE_RATE) != 0)
     return; //only track on certain samples to save space and focus on temporal patterns
 
-  if(ip_track_table[index].addr == addr)
+  if(ip_track_table[index].addr == champsim::block_number{addr})
     return; //already tracking this IP
   
-  if(ip_track_table[index].addr == champsim::address{} || ip_track_table[index].last_cycle + IP_TRACK_TABLE_TIMEOUT < intern_->current_cycle()) {
+  if(ip_track_table[index].addr == champsim::block_number{} || (ip_track_table[index].last_cycle + IP_TRACK_TABLE_TIMEOUT < intern_->current_cycle())) {
     //we are evicting an IP
-    ip_track_table[index].addr = addr;
+    if(ip_track_table[index].addr != champsim::block_number{} && USELESS_ON_TIMEOUT) {
+      //resolve the evicted IP as useless since we never got to confirm it as useful
+      resolve_ip(ip_track_table[index].addr, false);
+    }
+    ip_track_table[index].addr = champsim::block_number{addr};
     ip_track_table[index].ip = ip;
     ip_track_table[index].last_cycle = intern_->current_cycle();
   }
@@ -697,13 +788,15 @@ void sppam_b::Sppam_b_Module::track_direction(champsim::address addr, champsim::
   }
 }
 
-void sppam_b::Sppam_b_Module::resolve_ip(champsim::address addr, bool useful) {
+void sppam_b::Sppam_b_Module::resolve_ip(champsim::block_number addr, bool useful) {
   //resolve ip for useful/useless
-  auto index = champsim::block_number{addr}.to<uint64_t>() % IP_TRACK_TABLE_SIZE;
+  auto index = addr.to<uint64_t>() % IP_TRACK_TABLE_SIZE;
   if(ip_track_table[index].addr != addr)
     return; //not tracking this IP
+  pend_cycles += intern_->current_cycle() - ip_track_table[index].last_cycle;
+  resolutions++;
   auto ip = ip_track_table[index].ip;
-  ip_track_table[index].addr = champsim::address{};
+  ip_track_table[index].addr = champsim::block_number{};
   update_ip_conf(ip, useful);
 }
 
@@ -720,6 +813,10 @@ void sppam_b::Sppam_b_Module::update_ip_conf(champsim::address ip, bool useful) 
       entry->useful = 0;
       entry->useless = 0;
     }
+    entry->lifetime_samples++;
+
+    entry->lookahead_depth = useful ? std::min(entry->lookahead_depth + 1, MAX_LOOKAHEAD) : std::max(entry->lookahead_depth - 1, int64_t{0}); 
+    entry->pf_degree = useful ? std::min(entry->pf_degree + 1, PREFETCH_DEGREE) : std::max(entry->pf_degree - 1, int64_t{1});
 
     ip_conf_table.fill(entry.value());
   } else {
@@ -753,9 +850,25 @@ void sppam_b::Sppam_b_Module::print_patterns() {
   for(auto& entry : ip_conf_table.get_blocks()) {
     if(entry.data.ip == champsim::address{})
       continue;
-    ip_conf_file << fmt::format("IP: {:x} Conf: {} Useful: {} Useless: {} Direction: {}\n",entry.data.ip.to<uint64_t>(),entry.data.conf,entry.data.useful,entry.data.useless,entry.data.dir_counter);
+    ip_conf_file << fmt::format("IP: {:x} Conf: {} Useful: {} Useless: {} Direction: {} Lifetime Samples: {} Lookahead Depth: {} PF Degree: {}\n",entry.data.ip.to<uint64_t>(),entry.data.conf,entry.data.useful,entry.data.useless,entry.data.dir_counter,entry.data.lifetime_samples,entry.data.lookahead_depth,entry.data.pf_degree);
   }
   ip_conf_file.close();
+
+  //delta frequencies
+  std::ofstream delta_file;
+  delta_file.open("sppam_b_delta_freq.txt",std::ios::out | std::ios::trunc);
+  for(auto& entry : delta_freq) {
+    delta_file << fmt::format("Delta: {} Frequency: {}\n",entry.first,entry.second);
+  }
+  delta_file.close();
+
+  //lookahead frequencies
+  std::ofstream lookahead_file;
+  lookahead_file.open("sppam_b_lookahead_freq.txt",std::ios::out | std::ios::trunc);
+  for(auto& entry : lookahead_freq) {
+    lookahead_file << fmt::format("Lookaheads: {} Frequency: {}\n",entry.first,entry.second);
+  }
+  lookahead_file.close();
 }
 
 uint64_t sppam_b::Sppam_b_Module::get_state_bits() {
@@ -764,7 +877,7 @@ uint64_t sppam_b::Sppam_b_Module::get_state_bits() {
   uint64_t total_bits = 0;
 
   //start with region table
-  uint64_t region_table_bits = (48 - champsim::lg2(SPPAM_B_PAGE_BITS) - champsim::lg2(REGION_SETS)) + (48 - champsim::lg2(SPPAM_B_PAGE_BITS))*2; //page nums
+  uint64_t region_table_bits = (48 - champsim::lg2(SPPAM_B_PAGE_BITS) - champsim::lg2(REGION_SETS)); //page num
   region_table_bits += ((1 << SPPAM_B_PAGE_BITS) / BLOCK_SIZE)*2; //bitmaps
   //region_table_bits += 4 //momentum (DISABLED)
   //region_table_bits += champsim::lg2(((1 << SPPAM_B_PAGE_BITS) / BLOCK_SIZE)); //last block
@@ -784,7 +897,6 @@ void sppam_b::prefetcher_cycle_operate() {
     fmt::print("[{}] SPPAM_B\n",intern_->NAME);
     fmt::print("\tBandwidth utilization: {} - {}%\n",(100/16.0)*get_dram_bw(),(100/16.0)*(get_dram_bw()+1));
     fmt::print("\tGlobal Confidence: {}\n",engine.global_conf);
-    fmt::print("\tDirection Global: {} Local: {}\n",engine.direction_global,engine.direction_local);
     engine.predictor->print_heartbeat();
   }
   //reset stats when exiting warmup
@@ -797,10 +909,11 @@ void sppam_b::prefetcher_cycle_operate() {
     engine.prefetches_filtered = 0;
     engine.prefetches_full_pq = 0;
     engine.prefetches_dropped = 0;
-    engine.prefetches_scanned_forward = 0;
-    engine.prefetches_scanned_backward = 0;
-    engine.direction_global = 0;
-    engine.direction_local = 0;
+    engine.pf_reissued = 0;
+    engine.pf_l2c = 0;
+    engine.pend_cycles = 0;
+    engine.resolutions = 0;
+    engine.pf_degree_limited = 0;
   }
 }
 
@@ -808,10 +921,37 @@ double sppam_b::Sppam_b_Module::get_bw_conf() {
   return PREFETCH_DEGREES_BW.at(current_bw_utilization);
 }
 
-double sppam_b::Sppam_b_Module::get_conf() {
+double sppam_b::Sppam_b_Module::get_conf(champsim::address ip) {
   //fmt::print("Getting usefulness for pattern: {:b}\n",pattern);
   //check ip confidence table
-  return global_conf;
+  if(USE_IP_CONF) {
+    auto entry = ip_conf_table.check_hit(ip_conf_entry{ip});
+    if(entry.has_value()) {
+      return entry->conf;
+    } else {
+      return global_conf;
+    }
+  }
+  else
+    return global_conf;
+}
+
+std::size_t sppam_b::Sppam_b_Module::get_lookahead(champsim::address ip) {
+  auto entry = ip_conf_table.check_hit(ip_conf_entry{ip});
+  if(entry.has_value()) {
+    return entry->lookahead_depth;
+  } else {
+    return MAX_LOOKAHEAD;
+  }
+}
+
+std::size_t sppam_b::Sppam_b_Module::get_pf_degree(champsim::address ip) {
+  auto entry = ip_conf_table.check_hit(ip_conf_entry{ip});
+  if(entry.has_value()) {
+    return entry->pf_degree;
+  } else {
+    return PREFETCH_DEGREE;
+  }
 }
 
 double sppam_b::Sppam_b_Module::should_issue(double conf) {
@@ -822,15 +962,20 @@ double sppam_b::Sppam_b_Module::should_issue(double conf) {
   return (intern_->current_cycle() % 128) < index;
 }
 
+double sppam_b::Sppam_b_Module::should_reissue(double conf) {
+  int index = REISSUE_CHANCE.size() * conf;
+  index = REISSUE_CHANCE.at(std::min(15,index)) * 128;
+
+  return (rand() % 128) < index;
+}
+
 double sppam_b::Sppam_b_Module::convert_to_conf(double predict_conf) {
   return predict_conf;
 }
 
 void sppam_b::prefetcher_final_stats() {
-  fmt::print("[{}] SPPAM_B Total Prefetches Issued: {} By Scan: {},{} Filtered: {} Full PQ: {} Total Lookaheads: {}\n",intern_->NAME,engine.prefetches_issued,engine.prefetches_scanned_forward,engine.prefetches_scanned_backward,engine.prefetches_filtered,engine.prefetches_full_pq, engine.total_lookaheads);
-  fmt::print("\tAverage Lookahead Depth: {} Dropped: {}\n",(engine.total_lookaheads/(float)engine.prefetch_triggers) + 1,engine.prefetches_dropped);
-  fmt::print("\tDirection Global: {} Local: {}\n",engine.direction_global,engine.direction_local);
-  fmt::print("\tIP History Correct: {} Wrong: {} Accuracy: {}\n",engine.ip_history_correct,engine.ip_history_wrong,engine.ip_history_correct / (double)(engine.ip_history_correct + engine.ip_history_wrong));
+  fmt::print("[{}] SPPAM_B Total Prefetches Issued: {} Filtered: {} Full PQ: {} Total Lookaheads: {}\n",intern_->NAME,engine.prefetches_issued,engine.prefetches_filtered,engine.prefetches_full_pq, engine.total_lookaheads);
+  fmt::print("\tAverage Lookahead Depth: {} Dropped: {} Reissued: {} To L2C: {} Avg. Time-to-use: {} Limited PF Degree: {}\n",(engine.total_lookaheads/(float)engine.prefetch_triggers) + 1,engine.prefetches_dropped,engine.pf_reissued,engine.pf_l2c,engine.pend_cycles /(double)(engine.resolutions == 0 ? 1 : engine.resolutions),engine.pf_degree_limited);
   engine.print_patterns();
   engine.predictor->print_stats();
 }
