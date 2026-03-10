@@ -696,7 +696,7 @@ uint32_t orap_ampm::prefetcher_cache_fill(champsim::address addr, champsim::addr
       global_useless_asd[cpu_evict]++;
   }
   
-  if(evicted_addr != champsim::address{}) {
+  if(evicted_addr != champsim::address{} && !useless) {
     for(int i = 0; i < NUM_CPUS; i++) {
       ASD_Modules.at(i).remove_from_pagemap(evicted_addr,true);
       //ASD_Modules.at(i).remove_from_pagemap(evicted_addr,false);

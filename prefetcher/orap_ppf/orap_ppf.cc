@@ -1,7 +1,14 @@
 #include "orap_ppf.h"
 
+namespace {
+bool is_ppf_metadata(uint32_t metadata)
+{
+  return metadata == orap_ppf::PPF_ID || metadata == spp_ppf_4kb::SPP_L2C_TARGET_ID || metadata == spp_ppf_4kb::SPP_LLC_TARGET_ID;
+}
+}
+
 void orap_ppf::add_to_regionmap(champsim::address addr, uint32_t cpu) {
-  uint64_t page_num = addr.to<uint64_t>() >> 12;
+  uint64_t page_num = addr.to<uint64_t>() >> (champsim::lg2(PAGE_MAP_SIZE) + LOG2_BLOCK_SIZE);
   uint64_t offset = (addr.to<uint64_t>() >> LOG2_BLOCK_SIZE) & (PAGE_MAP_SIZE - 1);
   page_map pm{page_num};
   auto entry = region_maps.at(cpu).check_hit(pm);
@@ -15,7 +22,7 @@ void orap_ppf::add_to_regionmap(champsim::address addr, uint32_t cpu) {
 }
 
 bool orap_ppf::check_regionmap(champsim::address addr, uint32_t cpu) {
-  uint64_t page_num = addr.to<uint64_t>() >> 12;
+  uint64_t page_num = addr.to<uint64_t>() >> (champsim::lg2(PAGE_MAP_SIZE) + LOG2_BLOCK_SIZE);
   uint64_t offset = (addr.to<uint64_t>() >> LOG2_BLOCK_SIZE) & (PAGE_MAP_SIZE - 1);
   page_map pm{page_num};
   auto entry = region_maps.at(cpu).check_hit(pm);
@@ -26,7 +33,7 @@ bool orap_ppf::check_regionmap(champsim::address addr, uint32_t cpu) {
 }
 
 void orap_ppf::remove_from_regionmap(champsim::address addr, uint32_t cpu) {
-  uint64_t page_num = addr.to<uint64_t>() >> 12;
+  uint64_t page_num = addr.to<uint64_t>() >> (champsim::lg2(PAGE_MAP_SIZE) + LOG2_BLOCK_SIZE);
   uint64_t offset = (addr.to<uint64_t>() >> LOG2_BLOCK_SIZE) & (PAGE_MAP_SIZE - 1);
   page_map pm{page_num};
   auto entry = region_maps.at(cpu).check_hit(pm);
@@ -46,10 +53,10 @@ uint32_t orap_ppf::prefetcher_cache_operate(champsim::address addr, champsim::ad
   if(cache_hit != 0)
     clear_from_pq(addr,cpu);
   
-  if(cache_hit == 0 && type == access_type::PREFETCH && (metadata_in == PPF_ID || metadata_in == BUFFER_ID))
+  if(cache_hit == 0 && type == access_type::PREFETCH && (is_ppf_metadata(metadata_in) || metadata_in == BUFFER_ID))
     pf_issued_to_dram_last_epoch[cpu]++;
 
-  if(cache_hit == 0 && type == access_type::PREFETCH && (metadata_in == PPF_ID || metadata_in == BUFFER_ID)) {
+  if(cache_hit == 0 && type == access_type::PREFETCH && (is_ppf_metadata(metadata_in) || metadata_in == BUFFER_ID)) {
     //shouldn't need to check demand table, 
     prefetch_sample_table.fill(sample_table_entry{addr,intern_->current_cycle()});
   } else if(cache_hit == 0 && (type == access_type::LOAD || type == access_type::PREFETCH)) {
@@ -64,7 +71,7 @@ uint32_t orap_ppf::prefetcher_cache_operate(champsim::address addr, champsim::ad
   if(useful_prefetch) {
     update_ip_blacklist(IP_BLACKLIST_USEFUL,ip,cpu,0,0,0);
 
-    if(metadata_hit == PPF_ID) {
+    if(is_ppf_metadata(metadata_hit)) {
         global_useful_ppf[cpu]++;
     }
     else if (metadata_hit == BUFFER_ID)
@@ -74,7 +81,7 @@ uint32_t orap_ppf::prefetcher_cache_operate(champsim::address addr, champsim::ad
       increase_confidence_useful(ip,addr,cpu,false);
       if(!intern_->warmup)
         useful_tallied += 1;
-    } else if(metadata_hit == PPF_ID) {
+    } else if(is_ppf_metadata(metadata_hit)) {
       increase_confidence_useful(ip,addr,cpu,true);
     }
   }
@@ -95,8 +102,11 @@ uint32_t orap_ppf::prefetcher_cache_operate(champsim::address addr, champsim::ad
     return metadata_in;
 
   //next line x4 if we have the MSHR capacity
-  if(metadata_in != PPF_ID && !DISABLE_PPF) {
-    PPF_Modules.at(cpu).do_prefetch(addr, ip, cpu, cache_hit, useful_prefetch, type, PPF_ID);
+  if(!is_ppf_metadata(metadata_in) && !DISABLE_PPF) {
+    uint8_t coprefetch_conf = get_confidence_from_ip_hash(get_hash(ip.to<uint64_t>()),cpu,true);
+    double confidence_modifier = coprefetch_conf / static_cast<double>(CONF_MAX);
+    //only do two-level prefetching if not in the LLC
+    PPF_Modules.at(cpu).do_prefetch(addr, ip, cpu, cache_hit, useful_prefetch, type, PPF_ID, confidence_modifier, intern_->NAME.find("LLC") == std::string::npos, true);
   }
   
   return metadata_in;
@@ -689,7 +699,7 @@ uint32_t orap_ppf::prefetcher_cache_fill(champsim::address addr, champsim::addre
   std::size_t row = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_row(addr);
   if(prefetch && metadata_in == BUFFER_ID && evicted_addr != champsim::address{})
     decrease_confidence_fill(ip,addr,cpu,false);
-  else if(prefetch && metadata_in == PPF_ID && evicted_addr != champsim::address{})
+  else if(prefetch && is_ppf_metadata(metadata_in) && evicted_addr != champsim::address{})
     decrease_confidence_fill(ip,addr,cpu,true);
     
   if(prefetch)
@@ -713,20 +723,20 @@ uint32_t orap_ppf::prefetcher_cache_fill(champsim::address addr, champsim::addre
       //conflict happened here
       //champsim::address ip = get_ip(addr, cpu);
       update_ip_blacklist(IP_BLACKLIST_HARMFUL,ip,cpu,cpu_evict,metadata_in,metadata_evict);
-      decrease_confidence_conflict(ip,addr,cpu,metadata_in == PPF_ID);
+      decrease_confidence_conflict(ip,addr,cpu,is_ppf_metadata(metadata_in));
   } else if(useless) //useless
   {
     //not a conflict, but still useless
-    decrease_confidence_useless(evicted_addr,cpu_evict,metadata_evict == PPF_ID);
+    decrease_confidence_useless(evicted_addr,cpu_evict,is_ppf_metadata(metadata_evict));
   }
 
 
   if(metadata_evict == BUFFER_ID && useless && cpu_evict != NUM_CPUS)
     global_useless_buffer[cpu_evict]++;
-  else if (metadata_evict == PPF_ID && useless && metadata_in == BUFFER_ID) {
+  else if (is_ppf_metadata(metadata_evict) && useless && metadata_in == BUFFER_ID) {
     global_useless_buffer[cpu]++;
   }
-  else if(metadata_evict == PPF_ID && useless && cpu_evict != NUM_CPUS) {
+  else if(is_ppf_metadata(metadata_evict) && useless && cpu_evict != NUM_CPUS) {
       global_useless_ppf[cpu_evict]++;
   }
   
@@ -736,7 +746,7 @@ uint32_t orap_ppf::prefetcher_cache_fill(champsim::address addr, champsim::addre
   }
 
   //sample stuff
-  if(prefetch && (metadata_in == PPF_ID || metadata_in == BUFFER_ID)) {
+  if(prefetch && (is_ppf_metadata(metadata_in) || metadata_in == BUFFER_ID)) {
     auto entry = prefetch_sample_table.check_hit(sample_table_entry{addr,0});
     if(entry.has_value()) {
       if(evicted_addr != champsim::address{}) {
@@ -760,9 +770,8 @@ uint32_t orap_ppf::prefetcher_cache_fill(champsim::address addr, champsim::addre
   //close out pf queue
   clear_from_pq(addr,cpu);
 
-
-  for(int i = 0; i < NUM_CPUS; i++) {
-    PPF_Modules.at(i).handle_fill(addr, cpu, useless, set, way, prefetch, evicted_addr, metadata_in);
+  if(is_ppf_metadata(metadata_evict) && cpu < NUM_CPUS) {
+    PPF_Modules.at(cpu).handle_fill(addr, cpu, useless, set, way, prefetch, evicted_addr, metadata_in);
   }
   return metadata_in;
 }

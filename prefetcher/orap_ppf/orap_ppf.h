@@ -9,8 +9,8 @@
 #include "modules.h"
 #include "cache.h"
 #include "dram_controller.h"
-#include "../spp_ppf/spp_ppf.h"
-#include "../hasd/hasd.h"
+#include "../spp_ppf_4kb/spp_ppf_4kb.h"
+#include "fmt/ranges.h"
 
 struct orap_ppf : public champsim::modules::prefetcher {
 
@@ -431,7 +431,7 @@ struct orap_ppf : public champsim::modules::prefetcher {
   void remove_from_regionmap(champsim::address addr, uint32_t cpu);
 
   // PPF modules using the new spp_ppf::PPF_Module wrapper pattern
-  std::vector<spp_ppf::PPF_Module> PPF_Modules;
+  std::vector<spp_ppf_4kb::PPF_Module> PPF_Modules;
 
   std::vector<Histogram> mshr_hist_new;
   std::vector<Histogram> mshr_hist_old;

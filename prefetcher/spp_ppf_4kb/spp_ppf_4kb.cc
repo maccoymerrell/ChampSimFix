@@ -31,7 +31,7 @@ void spp_ppf_4kb::prefetcher_initialize()
 }
 
 void spp_ppf_4kb::PPF_Module::do_prefetch(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
-										uint32_t metadata_in)
+                                        uint32_t metadata_in, double confidence_modifier, bool two_level, bool return_status)
 {
 
     page_type page{addr};
@@ -45,7 +45,12 @@ void spp_ppf_4kb::PPF_Module::do_prefetch(champsim::address addr, champsim::addr
     std::vector<int32_t> perc_sum_q(100*cache_->get_mshr_size(),0);
     typename offset_type::difference_type  delta = 0;
 
-    confidence_q[0] = 100;
+    double bounded_modifier = confidence_modifier;
+    if (bounded_modifier < 0.0)
+        bounded_modifier = 0.0;
+    if (bounded_modifier > 1.0)
+        bounded_modifier = 1.0;
+    confidence_q[0] = std::max(1u, static_cast<uint32_t>(std::round(100.0 * bounded_modifier)));
     GHR.global_accuracy = GHR.pf_issued ? ((100 * GHR.pf_useful) / GHR.pf_issued)  : 0;
    	
 	for (int i = PAGES_TRACKED-1; i>0; i--) { // N down to 1
@@ -121,7 +126,7 @@ void spp_ppf_4kb::PPF_Module::do_prefetch(champsim::address addr, champsim::addr
                 if(SPP_DEBUG_PRINT) std::cout << "[ChampSim] State of features: \nTrain addr: " << train_addr << "\tCurr IP: " << curr_ip << "\tIP_1: " << GHR.ip_1 << "\tIP_2: " << GHR.ip_2 << "\tIP_3: " << GHR.ip_3 << "\tDelta: " << train_delta + delta_q[i] << "\t:LastSig " << last_sig << "\t:CurrSig " << curr_sig << "\t:Conf " << confidence_q[i] << "\t:Depth " << depth << "\tSUM: "<< perc_sum  << std::endl;
                 FILTER_REQUEST fill_level = (perc_sum >= PERC_THRESHOLD_HI) ? SPP_L2C_PREFETCH : SPP_LLC_PREFETCH;
                 
-                if (champsim::page_number{addr} == champsim::page_number{pf_addr}) { // Prefetch request is in the same physical page
+                if (champsim::page_number{addr} == champsim::page_number{pf_addr} && (two_level || fill_level == SPP_L2C_PREFETCH)) { // Prefetch request is in the same physical page
                     
                     // Pre-filter: check optional region map before perceptron filter
                     if (region_map_check_ && region_map_check_(pf_addr)) {
@@ -138,7 +143,7 @@ void spp_ppf_4kb::PPF_Module::do_prefetch(champsim::address addr, champsim::addr
                             int32_t hist_index = perc_sum_shifted / 10;
                             FILTER.hist_tots[hist_index]++;
                             //[DO NOT TOUCH]:	
-                            cache_->prefetch_line(pf_addr, (fill_level == SPP_L2C_PREFETCH),cpu,ip,fill_level == SPP_L2C_PREFETCH ? SPP_L2C_TARGET_ID : SPP_LLC_TARGET_ID,false,false); // Use addr (not base_addr) to obey the same physical page boundary
+                            cache_->prefetch_line(pf_addr, (fill_level == SPP_L2C_PREFETCH),cpu,ip,fill_level == SPP_L2C_PREFETCH ? SPP_L2C_TARGET_ID : SPP_LLC_TARGET_ID,false,return_status); // Use addr (not base_addr) to obey the same physical page boundary
                             num_pf++;
 
                             // Only for stats

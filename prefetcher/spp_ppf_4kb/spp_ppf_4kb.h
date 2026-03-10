@@ -341,7 +341,8 @@ struct spp_ppf_4kb : public champsim::modules::prefetcher {
 		void get_perc_index(champsim::address base_addr, champsim::address ip, champsim::address ip_1,champsim::address ip_2, champsim::address ip_3, champsim::block_number::difference_type cur_delta, uint32_t last_sig, uint32_t curr_sig, uint32_t confidence, uint32_t depth, uint64_t* perc_set);
 
 		void init(CACHE* cache);
-		void do_prefetch(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type, uint32_t metadata_in);
+		void do_prefetch(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type, uint32_t metadata_in,
+		                 double confidence_modifier = 1.0, bool two_level = true, bool return_status = false);
 		void handle_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in);
 		void final_stats();
 

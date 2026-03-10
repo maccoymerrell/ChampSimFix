@@ -31,7 +31,7 @@ void spp_ppf::prefetcher_initialize()
 }
 
 void spp_ppf::PPF_Module::do_prefetch(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
-										uint32_t metadata_in)
+                                        uint32_t metadata_in, double confidence_modifier)
 {
 
     champsim::page_number page{addr};
@@ -45,7 +45,12 @@ void spp_ppf::PPF_Module::do_prefetch(champsim::address addr, champsim::address 
     std::vector<int32_t> perc_sum_q(100*cache_->get_mshr_size(),0);
     typename offset_type::difference_type  delta = 0;
 
-    confidence_q[0] = 100;
+    double bounded_modifier = confidence_modifier;
+    if (bounded_modifier < 0.0)
+        bounded_modifier = 0.0;
+    if (bounded_modifier > 1.0)
+        bounded_modifier = 1.0;
+    confidence_q[0] = std::max(1u, static_cast<uint32_t>(std::round(100.0 * bounded_modifier)));
     GHR.global_accuracy = GHR.pf_issued ? ((100 * GHR.pf_useful) / GHR.pf_issued)  : 0;
    	
 	for (int i = PAGES_TRACKED-1; i>0; i--) { // N down to 1
