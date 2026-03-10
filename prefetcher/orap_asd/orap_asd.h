@@ -9,6 +9,7 @@
 #include "cache.h"
 #include "dram_controller.h"
 #include "../hasd/hasd.h"
+#include "fmt/ranges.h"
 
 struct orap_asd : public champsim::modules::prefetcher {
 

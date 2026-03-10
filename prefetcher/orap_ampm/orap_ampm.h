@@ -9,6 +9,7 @@
 #include "cache.h"
 #include "dram_controller.h"
 #include "../ampm/ampm.h"
+#include "fmt/ranges.h"
 
 struct orap_ampm : public champsim::modules::prefetcher {
 

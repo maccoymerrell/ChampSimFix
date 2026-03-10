@@ -34,7 +34,7 @@ option(YAML_BUILD_SHARED_LIBS "Build yaml-cpp as a shared library" OFF)
 FetchContent_Declare(
   yaml-cpp                             
   GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-  GIT_TAG        yaml-cpp-0.7.0                        
+  GIT_TAG        0.8.0                        
   SOURCE_DIR     ${CMAKE_SOURCE_DIR}/ext/yaml-cpp
 )
 FetchContent_MakeAvailable(yaml-cpp)
@@ -45,7 +45,7 @@ message("Configuring spdlog...")
 FetchContent_Declare(
   spdlog                             
   GIT_REPOSITORY https://github.com/gabime/spdlog.git
-  GIT_TAG        v1.11.0     
+  GIT_TAG        v1.16.0     
   SOURCE_DIR     ${CMAKE_SOURCE_DIR}/ext/spdlog
 )
 FetchContent_MakeAvailable(spdlog)

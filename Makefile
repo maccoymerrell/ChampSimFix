@@ -21,16 +21,12 @@ override RAMULATOR_ROOT:= $(ROOT_DIR)/ramulator2
 
 # vcpkg and ramulator integration
 TRIPLET_DIR = $(patsubst %/,%,$(firstword $(filter-out $(ROOT_DIR)/vcpkg_installed/vcpkg/, $(wildcard $(ROOT_DIR)/vcpkg_installed/*/))))
-override CPPFLAGS += -O3 -flto=4 -fno-strict-aliasing -I$(OBJ_ROOT) -I$(DRAM_CONTROLLER_ROOT) -I$(RAMULATOR_ROOT)/src
+override CPPFLAGS += -g3 -flto=4 -fno-strict-aliasing -I$(OBJ_ROOT) -I$(DRAM_CONTROLLER_ROOT) -I$(RAMULATOR_ROOT)/src
 override LDFLAGS  += -flto=4 -L$(TRIPLET_DIR)/lib -L$(TRIPLET_DIR)/lib/manual-link  -fno-strict-aliasing
-override LDLIBS   += -llzma -lz -lbz2 -lfmt
+override LDLIBS   += -lCLI11 -llzma -lz -lbz2 -lfmt
 
 # find vcpkg's local copy of cmake for building ramulator if it was installed
-ifneq ($(wildcard $(ROOT_DIR)/vcpkg/downloads/tools/cmake*),)
-CMAKE_EXE:= $(wildcard $(ROOT_DIR)/vcpkg/downloads/tools/cmake*/cmake*/bin)/cmake
-else
 CMAKE_EXE:= cmake
-endif
 
 .PHONY: all clean configclean test pytest maketest
 
@@ -324,7 +320,7 @@ ramulator-test-exec: $(test_main_name)
 
 #For building executable with ramulator
 ramulator-exec: override LDFLAGS += -L$(RAMULATOR_ROOT)/build
-ramulator-exec: override LDLIBS += -lspdlog -Wl,--whole-archive -lramulator -Wl,--no-whole-archive -lyaml-cpp
+ramulator-exec: override LDLIBS +=  -Wl,--whole-archive -lramulator -Wl,--no-whole-archive -lspdlog -lyaml-cpp
 ramulator-exec: $(executable_name)
 
 # Associate objects with executables

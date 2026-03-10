@@ -1,5 +1,6 @@
 #include "orap.h"
 #include "../spp_ppf/spp_ppf.h"
+#include "fmt/ranges.h"
 
 uint32_t orap::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                              uint32_t metadata_in, uint32_t metadata_hit)
