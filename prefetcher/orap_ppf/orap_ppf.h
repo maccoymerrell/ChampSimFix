@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <array>
+#include <functional>
 
 #include "address.h"
 #include "modules.h"
@@ -398,58 +399,39 @@ struct orap_ppf : public champsim::modules::prefetcher {
   //row state table
   std::vector<row_open_table_entry> row_open_table;
 
-  // PPF_Module: encapsulates spp_ppf as a subclass for use by orap
-  class PPF_Module : public spp_ppf {
-  public:
-    // Page map for filtering redundant prefetches
-    static constexpr std::size_t PM_SETS = 64;
-    static constexpr std::size_t PM_WAYS = 4;
-    static constexpr std::size_t PAGE_MAP_SIZE = 64;
+  // ORAP-managed region map for filtering both PPF and ORAP prefetches
+  static constexpr std::size_t PM_SETS = 64;
+  static constexpr std::size_t PM_WAYS = 4;
+  static constexpr std::size_t PAGE_MAP_SIZE = 64;
 
-    struct page_map {
-      uint64_t page_num;
-      constexpr static std::size_t PM_BASE = 100;
-      std::array<uint8_t,PAGE_MAP_SIZE> bits;
+  struct page_map {
+    uint64_t page_num;
+    constexpr static std::size_t PM_BASE = 100;
+    std::array<uint8_t,PAGE_MAP_SIZE> bits;
 
-      page_map() : page_map(0) {}
-      explicit page_map(uint64_t page_num_) : page_num(page_num_) {
-        for(std::size_t i = 0; i < PAGE_MAP_SIZE; i++)
-          bits.at(i) = 0;
-      }
-    };
-
-    struct page_map_set {
-      auto operator()(const page_map& entry) const { return entry.page_num; }
-    };
-    struct page_map_way {
-      auto operator()(const page_map& entry) const { return entry.page_num; }
-    };
-
-    champsim::msl::lru_table<page_map,page_map_set,page_map_way> page_map_table{PM_SETS,PM_WAYS};
-    uint64_t filtered_prefetches = 0;
-
-    PPF_Module(CACHE* cache) : spp_ppf(cache) {}
-
-    void add_to_pagemap(champsim::address addr);
-    bool check_pagemap(champsim::address addr);
-    void remove_from_pagemap(champsim::address addr);
-
-    // Invoke PPF prefetching (delegates to spp_ppf::prefetcher_cache_operate)
-    void do_prefetch(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type, uint32_t metadata_in) {
-      prefetcher_cache_operate(addr, ip, cpu, cache_hit, useful_prefetch, type, metadata_in);
-    }
-
-    // Handle cache fill events (delegates to spp_ppf::prefetcher_cache_fill)
-    void handle_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in) {
-      prefetcher_cache_fill(addr, cpu, useless, set, way, prefetch, evicted_addr, metadata_in);
-    }
-
-    void init() {
-      prefetcher_initialize();
+    page_map() : page_map(0) {}
+    explicit page_map(uint64_t page_num_) : page_num(page_num_) {
+      for(std::size_t i = 0; i < PAGE_MAP_SIZE; i++)
+        bits.at(i) = 0;
     }
   };
 
-  std::vector<PPF_Module> PPF_Modules;
+  struct page_map_set {
+    auto operator()(const page_map& entry) const { return entry.page_num; }
+  };
+  struct page_map_way {
+    auto operator()(const page_map& entry) const { return entry.page_num; }
+  };
+
+  // Per-CPU region maps managed by ORAP
+  std::vector<champsim::msl::lru_table<page_map,page_map_set,page_map_way>> region_maps;
+
+  void add_to_regionmap(champsim::address addr, uint32_t cpu);
+  bool check_regionmap(champsim::address addr, uint32_t cpu);
+  void remove_from_regionmap(champsim::address addr, uint32_t cpu);
+
+  // PPF modules using the new spp_ppf::PPF_Module wrapper pattern
+  std::vector<spp_ppf::PPF_Module> PPF_Modules;
 
   std::vector<Histogram> mshr_hist_new;
   std::vector<Histogram> mshr_hist_old;

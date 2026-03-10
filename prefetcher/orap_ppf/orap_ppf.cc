@@ -1,38 +1,38 @@
 #include "orap_ppf.h"
 
-void orap_ppf::PPF_Module::add_to_pagemap(champsim::address addr) {
+void orap_ppf::add_to_regionmap(champsim::address addr, uint32_t cpu) {
   uint64_t page_num = addr.to<uint64_t>() >> 12;
   uint64_t offset = (addr.to<uint64_t>() >> LOG2_BLOCK_SIZE) & (PAGE_MAP_SIZE - 1);
   page_map pm{page_num};
-  auto entry = page_map_table.check_hit(pm);
+  auto entry = region_maps.at(cpu).check_hit(pm);
   if(entry.has_value()) {
     entry->bits.at(offset) = 1;
-    page_map_table.fill(entry.value());
+    region_maps.at(cpu).fill(entry.value());
   } else {
     pm.bits.at(offset) = 1;
-    page_map_table.fill(pm);
+    region_maps.at(cpu).fill(pm);
   }
 }
 
-bool orap_ppf::PPF_Module::check_pagemap(champsim::address addr) {
+bool orap_ppf::check_regionmap(champsim::address addr, uint32_t cpu) {
   uint64_t page_num = addr.to<uint64_t>() >> 12;
   uint64_t offset = (addr.to<uint64_t>() >> LOG2_BLOCK_SIZE) & (PAGE_MAP_SIZE - 1);
   page_map pm{page_num};
-  auto entry = page_map_table.check_hit(pm);
+  auto entry = region_maps.at(cpu).check_hit(pm);
   if(entry.has_value()) {
     return entry->bits.at(offset) != 0;
   }
   return false;
 }
 
-void orap_ppf::PPF_Module::remove_from_pagemap(champsim::address addr) {
+void orap_ppf::remove_from_regionmap(champsim::address addr, uint32_t cpu) {
   uint64_t page_num = addr.to<uint64_t>() >> 12;
   uint64_t offset = (addr.to<uint64_t>() >> LOG2_BLOCK_SIZE) & (PAGE_MAP_SIZE - 1);
   page_map pm{page_num};
-  auto entry = page_map_table.check_hit(pm);
+  auto entry = region_maps.at(cpu).check_hit(pm);
   if(entry.has_value()) {
     entry->bits.at(offset) = 0;
-    page_map_table.fill(entry.value());
+    region_maps.at(cpu).fill(entry.value());
   }
 }
 
@@ -84,7 +84,7 @@ uint32_t orap_ppf::prefetcher_cache_operate(champsim::address addr, champsim::ad
     conflict_filters += 1;
 
   //prevent prefetchers from grabbing a recently accessed entry
-  PPF_Modules.at(cpu).add_to_pagemap(addr);
+  add_to_regionmap(addr, cpu);
 
   if(cache_hit == 0 || !TRIGGER_BUFFER_ON_MISS)
     update_walker(addr,cpu,ip,is_blacklisted);
@@ -548,12 +548,12 @@ void orap_ppf::update_walker(champsim::address addr, uint32_t cpu, champsim::add
   else {
     for(int i = col + col_stride; (col_stride > 0 ? (i < (1 << (column_bits.size())) && i <= (int)col + amount_to_prefetch) : (i >= 0 && i >= (int)col - amount_to_prefetch)); i += col_stride) {
       bool success = true;
-      bool pm = PPF_Modules.at(cpu).check_pagemap(compose_base_and_column(addr,i));
+      bool pm = check_regionmap(compose_base_and_column(addr,i), cpu);
       if(!pm) {
           success = prefetch_line(compose_base_and_column(addr,i),true,cpu,ip,BUFFER_ID,SKIP_TAG_CHECK_BUFFER,true);
           if(success) {
             pf_issued_last_epoch[cpu]++;
-            PPF_Modules.at(cpu).add_to_pagemap(compose_base_and_column(addr,i));
+            add_to_regionmap(compose_base_and_column(addr,i), cpu);
             //rw.confidence = modify_confidence(rw.confidence,1,false);
           } else if (!intern_->warmup) {
             prefetches_rejected++;
@@ -649,10 +649,19 @@ void orap_ppf::prefetcher_initialize() {
     fmt::print("\tSize of IP Blacklist Table(s): {}\n",champsim::data::kibibytes{champsim::data::bytes{size_of_ip_table/8}});
 
   for(int i = 0; i < NUM_CPUS; i++) {
-    PPF_Modules.emplace_back(PPF_Module(intern_));
+    PPF_Modules.emplace_back();
   }
   for(int i = 0; i < NUM_CPUS; i++) {
-    PPF_Modules.at(i).init();
+    PPF_Modules.at(i).init(intern_);
+    // Set the ORAP region map as the pre-perceptron filter for PPF
+    PPF_Modules.at(i).set_region_map([this, i](champsim::address addr) -> bool {
+      return this->check_regionmap(addr, i);
+    });
+  }
+
+  // Initialize per-CPU region maps
+  for(int i = 0; i < NUM_CPUS; i++) {
+    region_maps.emplace_back(champsim::msl::lru_table<page_map,page_map_set,page_map_way>{PM_SETS,PM_WAYS});
   }
 
   for(int i = 0; i < NUM_CPUS; i++) {
@@ -723,7 +732,7 @@ uint32_t orap_ppf::prefetcher_cache_fill(champsim::address addr, champsim::addre
   
   if(evicted_addr != champsim::address{} && !useless) {
     for(int i = 0; i < NUM_CPUS; i++)
-      PPF_Modules.at(i).remove_from_pagemap(evicted_addr);
+      remove_from_regionmap(evicted_addr, i);
   }
 
   //sample stuff
@@ -1105,7 +1114,7 @@ void orap_ppf::add_to_pq(prefetch_queue_entry pqe) {
         continue;
       }
       temp_pqe.start_addr = pqe.column_prefetch ? compose_base_and_column(pqe.start_addr, column) : champsim::address{champsim::block_number{pqe.start_addr}+(i*pqe.stride)};
-      if(PPF_Modules.at(pqe.cpu).check_pagemap(temp_pqe.start_addr) || champsim::page_number{temp_pqe.start_addr} != champsim::page_number{pqe.start_addr}) {
+      if(check_regionmap(temp_pqe.start_addr, pqe.cpu) || champsim::page_number{temp_pqe.start_addr} != champsim::page_number{pqe.start_addr}) {
         if(!intern_->warmup)
           prefetches_filtered++;
         continue;
@@ -1123,7 +1132,7 @@ void orap_ppf::add_to_pq(prefetch_queue_entry pqe) {
           return;
 
         //we found an entry to remove, update pagemap and erase the old entry from the queue
-        PPF_Modules.at(pqe.cpu).remove_from_pagemap(pf_queue[cpu_to_use][rb][entry_pos].start_addr);
+        remove_from_regionmap(pf_queue[cpu_to_use][rb][entry_pos].start_addr, pqe.cpu);
         pf_queue[cpu_to_use][rb].erase(std::next(pf_queue[cpu_to_use][rb].begin(),entry_pos));
         if(!intern_->warmup)
           prefetches_discarded_old++;
@@ -1131,7 +1140,7 @@ void orap_ppf::add_to_pq(prefetch_queue_entry pqe) {
       if(pf_queue[cpu_to_use][rb].size() >= MIN_PREFETCH_GANG_ISSUE)
         temp_pqe.has_company = true;
       pf_queue[cpu_to_use][rb].push_back(temp_pqe);
-      PPF_Modules.at(pqe.cpu).add_to_pagemap(temp_pqe.start_addr);
+      add_to_regionmap(temp_pqe.start_addr, pqe.cpu);
     }
 }
 

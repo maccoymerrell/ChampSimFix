@@ -123,6 +123,11 @@ void spp_ppf::PPF_Module::do_prefetch(champsim::address addr, champsim::address 
                 
                 if (champsim::page_number{addr} == champsim::page_number{pf_addr}) { // Prefetch request is in the same physical page
                     
+                    // Pre-filter: check optional region map before perceptron filter
+                    if (region_map_check_ && region_map_check_(pf_addr)) {
+                        continue; // Already in region map, skip this prefetch
+                    }
+
                     // Filter checks for redundancy and returns FALSE if redundant
                     // Else it returns TRUE and logs the features for future retrieval 
                     if ( num_pf < ceil(((cache_->get_pq_size().back())/distinct_pages)) ) {					
