@@ -1,5 +1,41 @@
 #include "orap_ppf.h"
 
+void orap_ppf::PPF_Module::add_to_pagemap(champsim::address addr) {
+  uint64_t page_num = addr.to<uint64_t>() >> 12;
+  uint64_t offset = (addr.to<uint64_t>() >> LOG2_BLOCK_SIZE) & (PAGE_MAP_SIZE - 1);
+  page_map pm{page_num};
+  auto entry = page_map_table.check_hit(pm);
+  if(entry.has_value()) {
+    entry->bits.at(offset) = 1;
+    page_map_table.fill(entry.value());
+  } else {
+    pm.bits.at(offset) = 1;
+    page_map_table.fill(pm);
+  }
+}
+
+bool orap_ppf::PPF_Module::check_pagemap(champsim::address addr) {
+  uint64_t page_num = addr.to<uint64_t>() >> 12;
+  uint64_t offset = (addr.to<uint64_t>() >> LOG2_BLOCK_SIZE) & (PAGE_MAP_SIZE - 1);
+  page_map pm{page_num};
+  auto entry = page_map_table.check_hit(pm);
+  if(entry.has_value()) {
+    return entry->bits.at(offset) != 0;
+  }
+  return false;
+}
+
+void orap_ppf::PPF_Module::remove_from_pagemap(champsim::address addr) {
+  uint64_t page_num = addr.to<uint64_t>() >> 12;
+  uint64_t offset = (addr.to<uint64_t>() >> LOG2_BLOCK_SIZE) & (PAGE_MAP_SIZE - 1);
+  page_map pm{page_num};
+  auto entry = page_map_table.check_hit(pm);
+  if(entry.has_value()) {
+    entry->bits.at(offset) = 0;
+    page_map_table.fill(entry.value());
+  }
+}
+
 uint32_t orap_ppf::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                              uint32_t metadata_in, uint32_t metadata_hit)
 {
