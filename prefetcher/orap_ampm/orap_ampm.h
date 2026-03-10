@@ -314,8 +314,10 @@ struct orap_ampm : public champsim::modules::prefetcher {
     uint8_t confidence = 0;
     uint8_t confidence_issue_counter = 0;
     uint8_t confidence_useful_counter = 0;
+    int8_t last_col = -1;
+    int8_t col_stride = 1;
     row_walker() : row_walker(0) {}
-    explicit row_walker(uint64_t row) : row(row), confidence(STARTING_CONF) {
+    explicit row_walker(uint64_t row) : row(row), confidence(STARTING_CONF), last_col(-1), col_stride(1) {
       //ip_hashes.fill(get_hash(ip.to<uint64_t>()));
     }
     static int get_size_bits() {

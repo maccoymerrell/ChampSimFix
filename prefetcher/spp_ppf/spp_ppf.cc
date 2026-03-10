@@ -11,8 +11,9 @@
 
 
 
-void spp_ppf::prefetcher_initialize() 
+void spp_ppf::PPF_Module::init(CACHE* cache)
 {
+    cache_ = cache;
 	for(int a = 0; a < 30; a++)
 		depth_track[a] = 0;
 
@@ -24,19 +25,24 @@ void spp_ppf::prefetcher_initialize()
 
 }
 
-uint32_t spp_ppf::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
+void spp_ppf::prefetcher_initialize() 
+{
+    module_.init(intern_);
+}
+
+void spp_ppf::PPF_Module::do_prefetch(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
 										uint32_t metadata_in)
 {
 
     champsim::page_number page{addr};
     offset_type page_offset{addr};
-    std::vector<uint32_t> confidence_q(100*intern_->get_mshr_size(),0);
+    std::vector<uint32_t> confidence_q(100*cache_->get_mshr_size(),0);
     uint32_t last_sig = 0,
              curr_sig = 0,
              depth = 0;
 
-    std::vector<typename offset_type::difference_type> delta_q(100*intern_->get_mshr_size(),0);
-    std::vector<int32_t> perc_sum_q(100*intern_->get_mshr_size(),0);
+    std::vector<typename offset_type::difference_type> delta_q(100*cache_->get_mshr_size(),0);
+    std::vector<int32_t> perc_sum_q(100*cache_->get_mshr_size(),0);
     typename offset_type::difference_type  delta = 0;
 
     confidence_q[0] = 100;
@@ -104,7 +110,7 @@ uint32_t spp_ppf::prefetcher_cache_operate(champsim::address addr, champsim::add
             // Remembering the original addr here and accumulating the deltas in lookahead stages
             
             // Read the PT. Also passing info required for perceptron inferencing as PT calls perc_predict()
-            PT.read_pattern(curr_sig, delta_q, confidence_q, perc_sum_q, lookahead_way, lookahead_conf, pf_q_tail, depth, addr, base_addr, train_addr, curr_ip, train_delta, last_sig, intern_->get_pq_occupancy().back(), intern_->get_pq_size().back(), intern_->get_mshr_occupancy(), intern_->get_mshr_size());
+            PT.read_pattern(curr_sig, delta_q, confidence_q, perc_sum_q, lookahead_way, lookahead_conf, pf_q_tail, depth, addr, base_addr, train_addr, curr_ip, train_delta, last_sig, cache_->get_pq_occupancy().back(), cache_->get_pq_size().back(), cache_->get_mshr_occupancy(), cache_->get_mshr_size());
 
             do_lookahead = 0;
             for (uint32_t i = pf_q_head; i < pf_q_tail; i++) {
@@ -117,9 +123,14 @@ uint32_t spp_ppf::prefetcher_cache_operate(champsim::address addr, champsim::add
                 
                 if (champsim::page_number{addr} == champsim::page_number{pf_addr}) { // Prefetch request is in the same physical page
                     
+                    // Pre-filter: check optional region map before perceptron filter
+                    if (region_map_check_ && region_map_check_(pf_addr)) {
+                        continue; // Already in region map, skip this prefetch
+                    }
+
                     // Filter checks for redundancy and returns FALSE if redundant
                     // Else it returns TRUE and logs the features for future retrieval 
-                    if ( num_pf < ceil(((intern_->get_pq_size().back())/distinct_pages)) ) {					
+                    if ( num_pf < ceil(((cache_->get_pq_size().back())/distinct_pages)) ) {					
                         if (FILTER.check(pf_addr, train_addr, curr_ip, fill_level, train_delta + delta_q[i], last_sig, curr_sig, confidence_q[i], perc_sum, (depth-1))) {
 
                             // Histogramming Idea
@@ -127,7 +138,7 @@ uint32_t spp_ppf::prefetcher_cache_operate(champsim::address addr, champsim::add
                             int32_t hist_index = perc_sum_shifted / 10;
                             FILTER.hist_tots[hist_index]++;
                             //[DO NOT TOUCH]:	
-                            prefetch_line(pf_addr, (fill_level == SPP_L2C_PREFETCH),cpu,ip,fill_level == SPP_L2C_PREFETCH ? SPP_L2C_TARGET_ID : SPP_LLC_TARGET_ID,false,false); // Use addr (not base_addr) to obey the same physical page boundary
+                            cache_->prefetch_line(pf_addr, (fill_level == SPP_L2C_PREFETCH),cpu,ip,fill_level == SPP_L2C_PREFETCH ? SPP_L2C_TARGET_ID : SPP_LLC_TARGET_ID,false,false); // Use addr (not base_addr) to obey the same physical page boundary
                             num_pf++;
 
                             // Only for stats
@@ -192,16 +203,22 @@ uint32_t spp_ppf::prefetcher_cache_operate(champsim::address addr, champsim::add
 	}
     if(depth < 30)
 	    depth_track[depth]++;
-	return metadata_in;
 }
 
-uint32_t spp_ppf::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
+uint32_t spp_ppf::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
+										uint32_t metadata_in)
+{
+    module_.do_prefetch(addr, ip, cpu, cache_hit, useful_prefetch, type, metadata_in);
+    return metadata_in;
+}
+
+void spp_ppf::PPF_Module::handle_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
 
     //prefetch dropped
-    if(way == intern_->NUM_WAY && evicted_addr == champsim::address{}) {
+    if(way == cache_->NUM_WAY && evicted_addr == champsim::address{}) {
         FILTER.check(addr, champsim::address{}, champsim::address{}, L2C_EVICT, 0, 0, 0, 0, 0, 0);
-        return metadata_in;
+        return;
     }
 
     if(FILTER_ON) {
@@ -210,11 +227,15 @@ uint32_t spp_ppf::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bo
         }
         FILTER.check(evicted_addr, champsim::address{}, champsim::address{}, L2C_EVICT, 0, 0, 0, 0, 0, 0);
     }
-
-	return metadata_in;
 }
 
-void spp_ppf::prefetcher_final_stats()
+uint32_t spp_ppf::prefetcher_cache_fill(champsim::address addr, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
+{
+    module_.handle_fill(addr, cpu, useless, set, way, prefetch, evicted_addr, metadata_in);
+    return metadata_in;
+}
+
+void spp_ppf::PPF_Module::final_stats()
 {
 	if(SPP_DEBUG_PRINT) {
 		// fmt::print("\nAvg Lookahead Depth: {}\t\n",GHR.depth_sum / GHR.depth_num); 
@@ -266,7 +287,7 @@ void spp_ppf::prefetcher_final_stats()
 
 	int tot = 0;
     fmt::print("------------------\n");
-    fmt::print("{} Depth Distribution\n", intern_->NAME);
+    fmt::print("{} Depth Distribution\n", cache_->NAME);
     fmt::print("------------------\n");
 
 	for(int a = 0; a < 30; a++){
@@ -276,6 +297,11 @@ void spp_ppf::prefetcher_final_stats()
     fmt::print("Total: {}\n",tot);
 	fmt::print("------------------\n");
 
+}
+
+void spp_ppf::prefetcher_final_stats()
+{
+    module_.final_stats();
 }
 
 // TODO: Find a good 64-bit hash function
@@ -297,7 +323,7 @@ uint64_t spp_ppf::get_hash(uint64_t key)
     return key;
 }
 
-void spp_ppf::SIGNATURE_TABLE::read_and_update_sig(champsim::page_number page, offset_type page_offset, uint32_t &last_sig, uint32_t &curr_sig, typename offset_type::difference_type &delta)
+void spp_ppf::PPF_Module::SIGNATURE_TABLE::read_and_update_sig(champsim::page_number page, offset_type page_offset, uint32_t &last_sig, uint32_t &curr_sig, typename offset_type::difference_type &delta)
 {
     uint32_t set = spp_ppf::get_hash(page.to<uint64_t>()) % ST_SET, match = ST_WAY;
     tag_type partial_page{champsim::address{page}};
@@ -412,7 +438,7 @@ void spp_ppf::SIGNATURE_TABLE::read_and_update_sig(champsim::page_number page, o
     lru[set][match] = 0; // Promote to the MRU position
 }
 
-void spp_ppf::PATTERN_TABLE::update_pattern(uint32_t last_sig, typename offset_type::difference_type curr_delta)
+void spp_ppf::PPF_Module::PATTERN_TABLE::update_pattern(uint32_t last_sig, typename offset_type::difference_type curr_delta)
 {
     // Update (sig, delta) correlation
     uint32_t set = spp_ppf::get_hash(last_sig) % PT_SET,
@@ -474,7 +500,7 @@ void spp_ppf::PATTERN_TABLE::update_pattern(uint32_t last_sig, typename offset_t
     }
 }
 
-void spp_ppf::PATTERN_TABLE::read_pattern(uint32_t curr_sig, std::vector<typename offset_type::difference_type>& delta_q, std::vector<uint32_t>& confidence_q, std::vector<int32_t>& perc_sum_q, uint32_t &lookahead_way, uint32_t &lookahead_conf, uint32_t &pf_q_tail, uint32_t &depth, champsim::address addr, champsim::address base_addr, champsim::address train_addr, champsim::address curr_ip, typename offset_type::difference_type train_delta, uint32_t last_sig, uint32_t pq_occupancy, uint32_t pq_SIZE, uint32_t mshr_occupancy, uint32_t mshr_SIZE)
+void spp_ppf::PPF_Module::PATTERN_TABLE::read_pattern(uint32_t curr_sig, std::vector<typename offset_type::difference_type>& delta_q, std::vector<uint32_t>& confidence_q, std::vector<int32_t>& perc_sum_q, uint32_t &lookahead_way, uint32_t &lookahead_conf, uint32_t &pf_q_tail, uint32_t &depth, champsim::address addr, champsim::address base_addr, champsim::address train_addr, champsim::address curr_ip, typename offset_type::difference_type train_delta, uint32_t last_sig, uint32_t pq_occupancy, uint32_t pq_SIZE, uint32_t mshr_occupancy, uint32_t mshr_SIZE)
 {
     // Update (sig, delta) correlation
     uint32_t set = spp_ppf::get_hash(curr_sig) % PT_SET,
@@ -532,7 +558,7 @@ void spp_ppf::PATTERN_TABLE::read_pattern(uint32_t curr_sig, std::vector<typenam
             }
 
 			// Recording Perc negatives
-            if (pf_conf && pf_q_tail < parent_->intern_->get_mshr_size() && (perc_sum < PERC_THRESHOLD_HI) ) {
+            if (pf_conf && pf_q_tail < parent_->cache_->get_mshr_size() && (perc_sum < PERC_THRESHOLD_HI) ) {
 				// Note: Using PERC_THRESHOLD_HI as the decising factor for negative case
 				// Because 'trueness' of a prefetch is decisded based on the feedback from L2C
 				// So even though LLC prefetches go through, they are treated as false wrt L2C in this case
@@ -552,7 +578,7 @@ void spp_ppf::PATTERN_TABLE::read_pattern(uint32_t curr_sig, std::vector<typenam
     } else confidence_q[pf_q_tail] = 0;
 }
 
-bool spp_ppf::PREFETCH_FILTER::check(champsim::address check_addr, champsim::address base_addr, champsim::address ip, FILTER_REQUEST filter_request, typename offset_type::difference_type cur_delta, uint32_t last_sig, uint32_t curr_sig, uint32_t conf, int32_t sum, uint32_t depth)
+bool spp_ppf::PPF_Module::PREFETCH_FILTER::check(champsim::address check_addr, champsim::address base_addr, champsim::address ip, FILTER_REQUEST filter_request, typename offset_type::difference_type cur_delta, uint32_t last_sig, uint32_t curr_sig, uint32_t conf, int32_t sum, uint32_t depth)
 {
     champsim::block_number cache_line{check_addr};
     uint64_t hash = spp_ppf::get_hash(cache_line.to<uint64_t>());
@@ -751,7 +777,7 @@ bool spp_ppf::PREFETCH_FILTER::check(champsim::address check_addr, champsim::add
     return true;
 }
 
-void spp_ppf::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confidence, offset_type pf_offset, typename offset_type::difference_type pf_delta) 
+void spp_ppf::PPF_Module::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confidence, offset_type pf_offset, typename offset_type::difference_type pf_delta) 
 {
     // NOTE: GHR implementation is slightly different from the original paper
     // Instead of matching (last_offset + delta), GHR simply stores and matches the pf_offset
@@ -804,7 +830,7 @@ void spp_ppf::GLOBAL_REGISTER::update_entry(uint32_t pf_sig, uint32_t pf_confide
     delta[victim_way] = pf_delta;
 }
 
-uint32_t spp_ppf::GLOBAL_REGISTER::check_entry(offset_type page_offset)
+uint32_t spp_ppf::PPF_Module::GLOBAL_REGISTER::check_entry(offset_type page_offset)
 {
     uint32_t max_conf = 0,
              max_conf_way = MAX_GHR_ENTRY;
@@ -819,7 +845,7 @@ uint32_t spp_ppf::GLOBAL_REGISTER::check_entry(offset_type page_offset)
     return max_conf_way;
 }
 
-void spp_ppf::get_perc_index(champsim::address base_addr, champsim::address ip, champsim::address ip_1, champsim::address ip_2, champsim::address ip_3, typename offset_type::difference_type cur_delta, uint32_t last_sig, uint32_t curr_sig, uint32_t confidence, uint32_t depth, uint64_t* perc_set)
+void spp_ppf::PPF_Module::get_perc_index(champsim::address base_addr, champsim::address ip, champsim::address ip_1, champsim::address ip_2, champsim::address ip_3, typename offset_type::difference_type cur_delta, uint32_t last_sig, uint32_t curr_sig, uint32_t confidence, uint32_t depth, uint64_t* perc_set)
 {
 	// Returns the imdexes for the perceptron tables
     champsim::block_number cache_line{base_addr};
@@ -845,7 +871,7 @@ void spp_ppf::get_perc_index(champsim::address base_addr, champsim::address ip, 
 	if(SPP_DEBUG_PRINT) std::cout << std::endl;	
 }
 
-int32_t	spp_ppf::PERCEPTRON::perc_predict(champsim::address base_addr, champsim::address ip, champsim::address ip_1, champsim::address ip_2, champsim::address ip_3, typename offset_type::difference_type cur_delta, uint32_t last_sig, uint32_t curr_sig, uint32_t confidence, uint32_t depth)
+int32_t	spp_ppf::PPF_Module::PERCEPTRON::perc_predict(champsim::address base_addr, champsim::address ip, champsim::address ip_1, champsim::address ip_2, champsim::address ip_3, typename offset_type::difference_type cur_delta, uint32_t last_sig, uint32_t curr_sig, uint32_t confidence, uint32_t depth)
 {
 	if(SPP_DEBUG_PRINT) {
 		int sig_delta = (cur_delta < 0) ? (((-1) * cur_delta) + (1 << (SIG_DELTA_BIT - 1))) : cur_delta;
@@ -869,7 +895,7 @@ int32_t	spp_ppf::PERCEPTRON::perc_predict(champsim::address base_addr, champsim:
 	return sum;
 }
 
-void spp_ppf::PERCEPTRON::perc_update(champsim::address base_addr, champsim::address ip, champsim::address ip_1, champsim::address ip_2, champsim::address ip_3, typename offset_type::difference_type cur_delta, uint32_t last_sig, uint32_t curr_sig, uint32_t confidence, uint32_t depth, bool direction, int32_t perc_sum)
+void spp_ppf::PPF_Module::PERCEPTRON::perc_update(champsim::address base_addr, champsim::address ip, champsim::address ip_1, champsim::address ip_2, champsim::address ip_3, typename offset_type::difference_type cur_delta, uint32_t last_sig, uint32_t curr_sig, uint32_t confidence, uint32_t depth, bool direction, int32_t perc_sum)
 {
 	if(SPP_DEBUG_PRINT) {
 		int sig_delta = (cur_delta < 0) ? (((-1) * cur_delta) + (1 << (SIG_DELTA_BIT - 1))) : cur_delta;

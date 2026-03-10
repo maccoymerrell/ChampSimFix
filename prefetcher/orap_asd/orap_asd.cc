@@ -490,6 +490,27 @@ void orap_asd::update_walker(champsim::address addr, uint32_t cpu, champsim::add
   if(was_opened)
     increase_confidence_opened(ip,addr,cpu,false);
 
+  //determine column stride direction from row_walker history
+  int col_stride = 1; //default forward
+  {
+    row_walker rw_lookup{row};
+    auto rw_entry = row_walker_table[cpu].check_hit(rw_lookup);
+    if(rw_entry.has_value() && rw_entry->last_col >= 0) {
+      if((int)col > rw_entry->last_col)
+        col_stride = 1;
+      else if((int)col < rw_entry->last_col)
+        col_stride = -1;
+      else
+        col_stride = rw_entry->col_stride; //same column, keep previous direction
+      rw_entry->last_col = (int8_t)col;
+      rw_entry->col_stride = col_stride;
+      row_walker_table[cpu].fill(rw_entry.value());
+    } else if(rw_entry.has_value()) {
+      rw_entry->last_col = (int8_t)col;
+      row_walker_table[cpu].fill(rw_entry.value());
+    }
+  }
+
   //average confidence of row and ip
   uint8_t confidence = USE_ROW_CONF && USE_IP_CONF ? (std::max(get_confidence_from_ip_hash(ip_hash,cpu,false),get_confidence_from_row(addr,cpu))) :
                        USE_ROW_CONF                ? get_confidence_from_row(addr,cpu) :
@@ -499,7 +520,11 @@ void orap_asd::update_walker(champsim::address addr, uint32_t cpu, champsim::add
   //number of clusters to prefetch
   std::size_t depth = get_depth(confidence,cpu);
   //we need to fetch that many clusters in addition to the present one
-  std::size_t remaining_columns_in_cluster = column_cluster_size - (col%column_cluster_size) - 1;
+  std::size_t remaining_columns_in_cluster;
+  if(col_stride > 0)
+    remaining_columns_in_cluster = column_cluster_size - (col%column_cluster_size) - 1;
+  else
+    remaining_columns_in_cluster = (col%column_cluster_size);
   depth = depth*column_cluster_size + remaining_columns_in_cluster;
 
   uint8_t squash_chance = get_squash_chance(confidence,cpu);
@@ -521,20 +546,23 @@ void orap_asd::update_walker(champsim::address addr, uint32_t cpu, champsim::add
   int prefetched_so_far = 0;
 
   if(USE_PREFETCH_QUEUE) {
-    if(amount_to_prefetch != 0)
-      add_to_pq(prefetch_queue_entry(compose_base_and_column(addr,col+1),
-                                    amount_to_prefetch,
-                                    1,
-                                    ip,
-                                    cpu,
-                                    BUFFER_ID,
-                                    true,
-                                    SKIP_TAG_CHECK_BUFFER,
-                                    true,
-                                    true));
+    if(amount_to_prefetch != 0) {
+      int next_col = (int)col + col_stride;
+      if(next_col >= 0 && next_col < (1 << (column_bits.size())))
+        add_to_pq(prefetch_queue_entry(compose_base_and_column(addr,next_col),
+                                      amount_to_prefetch,
+                                      col_stride,
+                                      ip,
+                                      cpu,
+                                      BUFFER_ID,
+                                      true,
+                                      SKIP_TAG_CHECK_BUFFER,
+                                      true,
+                                      true));
+    }
   }
   else {
-    for(int i = col + 1; i < (1 << (column_bits.size())) && i <= col + amount_to_prefetch; i++) {
+    for(int i = col + col_stride; (col_stride > 0 ? (i < (1 << (column_bits.size())) && i <= (int)col + amount_to_prefetch) : (i >= 0 && i >= (int)col - amount_to_prefetch)); i += col_stride) {
       bool success = true;
       bool pm = ASD_Modules.at(cpu).check_pagemap(compose_base_and_column(addr,i));
       if(!pm) {
@@ -1084,8 +1112,11 @@ void orap_asd::add_to_pq(prefetch_queue_entry pqe) {
       prefetch_queue_entry temp_pqe = pqe;
       temp_pqe.sent_so_far = 0;
       temp_pqe.length = 1;
-      uint8_t column = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_column(pqe.start_addr);
-      temp_pqe.start_addr = pqe.column_prefetch ? compose_base_and_column(pqe.start_addr, column + i*pqe.stride) : champsim::address{champsim::block_number{pqe.start_addr}+(i*pqe.stride)};
+      int column = (int)MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_column(pqe.start_addr) + i*pqe.stride;
+      if(pqe.column_prefetch && (column < 0 || column >= 64)) {
+        continue;
+      }
+      temp_pqe.start_addr = pqe.column_prefetch ? compose_base_and_column(pqe.start_addr, column) : champsim::address{champsim::block_number{pqe.start_addr}+(i*pqe.stride)};
       if(ASD_Modules.at(pqe.cpu).check_pagemap(temp_pqe.start_addr) || champsim::page_number{temp_pqe.start_addr} != champsim::page_number{pqe.start_addr}) {
         if(!intern_->warmup)
           prefetches_filtered++;
@@ -1161,10 +1192,10 @@ void orap_asd::issue_from_pq() {
         bool issued_any = false;
         bool should_pop = true;
         for(int l = entry.sent_so_far; l <  entry.length; l++) {
-          uint8_t column = MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_column(entry.start_addr) + (l*entry.stride);
+          int column = (int)MEMORY_CONTROLLER::DRAM_CONTROLLER.value()->dram_get_column(entry.start_addr) + (l*entry.stride);
 
           //make sure column doesn't leave rowbuffer
-          if(column >= 64 && entry.column_prefetch) {
+          if((column >= 64 || column < 0) && entry.column_prefetch) {
             break;
           }
           champsim::address to_pf = entry.column_prefetch ? compose_base_and_column(entry.start_addr,column) : champsim::address{champsim::block_number{entry.start_addr} + (l*entry.stride)};

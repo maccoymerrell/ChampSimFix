@@ -1,17 +1,18 @@
-#ifndef PREFETCHER_ORAP_ASD_H
-#define PREFETCHER_ORAP_ASD_H
+#ifndef PREFETCHER_ORAP_PPF_H
+#define PREFETCHER_ORAP_PPF_H
 
 #include <cstdint>
 #include <array>
+#include <functional>
 
 #include "address.h"
 #include "modules.h"
 #include "cache.h"
 #include "dram_controller.h"
+#include "../spp_ppf/spp_ppf.h"
 #include "../hasd/hasd.h"
-#include "fmt/ranges.h"
 
-struct orap_asd : public champsim::modules::prefetcher {
+struct orap_ppf : public champsim::modules::prefetcher {
 
   static uint64_t get_hash(uint64_t key)
   {
@@ -46,8 +47,6 @@ struct orap_asd : public champsim::modules::prefetcher {
   constexpr static std::size_t SAMPLE_TABLE_WAYS = 4;
   constexpr static std::size_t SAMPLE_TABLE_SETS = 64;
 
-  //constexpr static std::size_t IP_TRACKING_SETS = 64;
-  //constexpr static std::size_t IP_TRACKING_WAYS = 8;
   constexpr static bool USE_PREFETCH_QUEUE = true;
   constexpr static bool UNIFIED_PREFETCH_QUEUE = true;
   constexpr static bool DELAY_PREFETCH_QUEUE_ISSUE = false;
@@ -66,28 +65,14 @@ struct orap_asd : public champsim::modules::prefetcher {
   constexpr static std::size_t CONF_MAX = 255;
   constexpr static std::size_t CONF_DROP_THRESH = 0;
 
-  constexpr static uint32_t ASD_ID = 1;
+  constexpr static uint32_t PPF_ID = 1;
   constexpr static uint32_t BUFFER_ID = 2;
 
   constexpr static double ASD_THRESH = 0.5;
 
-  //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22};
-  //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11};
-
-  //todo, redo this to do absolute depth, since column bits cause variation in how deep each of these are
-  //constexpr static std::array<uint8_t,25> DEPTHS = {1,1,1,1,1,1,1,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9};
-  //constexpr static std::array<uint8_t,25> DEPTHS = {1,1,1,1,1,1,1,1,1,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8};
-
-  //deep
-  //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,0,0,0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8};
-
-  //shallow
   constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,0,0,0,0,0,0,1,1,1,1,1,2,2,2,2,2,3,3,3,3,4,4};
 
-  //depths should indicate how many clusters deep the prefetcher should go
-
-  constexpr static std::array<uint8_t,25> CHANCE = {1,12,24,36,48,60,72,84,96,108,120,127,127,127,127,127,127,127,127,127,127,127,127,127,127}; //chance to issue prefetch stream at given depth out of 127
-  //constexpr static std::array<uint8_t,25> DEPTHS = {0,0,0,1,1,1,1,1,2,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5};
+  constexpr static std::array<uint8_t,25> CHANCE = {1,12,24,36,48,60,72,84,96,108,120,127,127,127,127,127,127,127,127,127,127,127,127,127,127};
   constexpr static std::array<double,25> ASD_DEPTHS = {1.0,1.0,1.0,1.0,1.0,1.1,1.2,1.2,1.3,1.3,1.4,1.4,1.5,1.5,1.6,1.6,1.7,1.7,1.8,1.8,1.9,1.9,2,2,2};
   constexpr static std::array<uint8_t,25> THRESH = {10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200,210,220,230,240,250};
 
@@ -100,11 +85,6 @@ struct orap_asd : public champsim::modules::prefetcher {
   constexpr static bool MULT_DECREASE_ASD_IP = false;
   constexpr static bool CONF_COUNTER_ASD_IP = true;
 
-  //how do we get 90% accuracy?
-  //one useless should net us 9x the loss of confidence as one useful will gain us
-  //this means we should lose 9 count when issuing N prefetches, and regain 10 when N useful prefetches come back
-
-  //16/19 is 84.21% for net confidence gain
   constexpr static uint8_t ASD_IP_COUNTER_ISSUE_MAX = 5;
   constexpr static uint8_t ASD_IP_COUNTER_USEFUL_MAX = 4;
   constexpr static uint8_t ASD_IP_COUNTER_ISSUE_DECR = 1;
@@ -126,29 +106,23 @@ struct orap_asd : public champsim::modules::prefetcher {
   constexpr static int STARTING_CONF_COPREFETCH = 255;
   constexpr static int USEFUL_CONF_ROW = 1;
   constexpr static int USEFUL_CONF_IP = 4;
-  constexpr static int USEFUL_NCONF = 0; //slowly ramps as we approach max confidence, reducing the effect of useful prefetches on confidence (max, 7/8 prefetches must be good to gain confidence, 6/8 to lose confidence)
+  constexpr static int USEFUL_NCONF = 0;
   constexpr static int USELESS_NCONF = 0;
-  constexpr static double USELESS_NCONF_FACTOR = 0.9; //if we use multiplicative decrease, this is the decrease factor
-  constexpr static double USELESS_NCONF_DEPTH_MOD = 0.0; //how much of this useless conf to carry on to other ips
+  constexpr static double USELESS_NCONF_FACTOR = 0.9;
+  constexpr static double USELESS_NCONF_DEPTH_MOD = 0.0;
   constexpr static int CONFLICT_NCONF = 0;
-  constexpr static double CONFLICT_NCONF_FACTOR = 0.9; //if we use multiplicative decrease, this is the decrease factor
+  constexpr static double CONFLICT_NCONF_FACTOR = 0.9;
   constexpr static int FILL_NCONF = 1;
   constexpr static double FILL_NCONF_FACTOR = 0.9;
   constexpr static int ACT_CONF = 0;
   constexpr static int MAX_ACT_CONF_LEVEL = 255;
-
-  //constexpr static int STARTING_CONF = 40;
-  //constexpr static int USEFUL_CONF = 10;
-  //constexpr static int USEFUL_NCONF = 7;
-  //constexpr static int USELESS_NCONF = 20;
-  //constexpr static int ACT_CONF = 10;
 
   constexpr static double ASD_MAX_THRESH = 2.0;
   constexpr static double ASD_MIN_THRESH = 2.0;
   constexpr static double ASD_THRESH_STEP = 0.1;
 
   constexpr static bool SKIP_TAG_CHECK_BUFFER = false;
-  constexpr static bool SKIP_TAG_CHECK_ASD = false;
+  constexpr static bool SKIP_TAG_CHECK_PPF = false;
 
   constexpr static bool TRIGGER_BUFFER_ON_MISS = true;
 
@@ -156,8 +130,8 @@ struct orap_asd : public champsim::modules::prefetcher {
   constexpr static int32_t BUFFER_MIN_NCONF = 0;
   constexpr static std::size_t BUFFER_NCONF_STEP = 10;
 
-  constexpr static bool DISABLE_ASD = false;
-  constexpr static float TARGET_ASD_ACCURACY = 0.75; //keep global confidence modifier for asd, there isn't any usefulness feedback
+  constexpr static bool DISABLE_PPF = false;
+  constexpr static float TARGET_PPF_ACCURACY = 0.75;
   constexpr static float TARGET_BUFFER_ACCURACY = 0.75; 
 
   constexpr static std::size_t usefulness_measure_epoch = 8192;
@@ -165,7 +139,6 @@ struct orap_asd : public champsim::modules::prefetcher {
 
   constexpr static std::size_t blacklist_reset_interval =  10000000;
 
-  //interval in which if a core doesn't do a prefetch, increase global confidence modifiers
   constexpr static std::size_t prefetch_watchdog_interval = 65565;
   std::vector<std::size_t> watchdog_counter;
 
@@ -205,11 +178,11 @@ struct orap_asd : public champsim::modules::prefetcher {
   std::size_t column_cluster_size;
 
   std::vector<std::size_t> global_useful_buffer;
-  std::vector<std::size_t> global_useful_asd;
+  std::vector<std::size_t> global_useful_ppf;
   std::vector<std::size_t> global_useless_buffer;
-  std::vector<std::size_t> global_useless_asd;
+  std::vector<std::size_t> global_useless_ppf;
 
-  std::vector<double> global_usefulness_asd;
+  std::vector<double> global_usefulness_ppf;
   std::vector<double> global_usefulness_buffer;
 
   std::vector<double> pf_issued_last_epoch;
@@ -251,7 +224,7 @@ struct orap_asd : public champsim::modules::prefetcher {
     uint64_t global_count = 0;
     uint64_t bin_range = 0;
 
-    double histogram_factor = 2.0; //can vary between 1 and n to set aggression (1 is 100% chance, 2 is 50%, 3 is 33%, and so on)
+    double histogram_factor = 2.0;
 
     Histogram(std::size_t range, std::size_t bins) {
       bin_range = std::ceil(range/(double)bins);
@@ -262,7 +235,6 @@ struct orap_asd : public champsim::modules::prefetcher {
     }
 
     void tally(std::size_t val, std::size_t val_count) {
-      //hist.at(b_pos - 1) += (b_pos / stride);
       hist.at(val/bin_range) += val_count;
       hist_count.at(val/bin_range)++;
       global_count += val_count;
@@ -305,12 +277,8 @@ struct orap_asd : public champsim::modules::prefetcher {
     int8_t last_col = -1;
     int8_t col_stride = 1;
     row_walker() : row_walker(0) {}
-    explicit row_walker(uint64_t row) : row(row), confidence(STARTING_CONF), last_col(-1), col_stride(1) {
-      //ip_hashes.fill(get_hash(ip.to<uint64_t>()));
-    }
+    explicit row_walker(uint64_t row) : row(row), confidence(STARTING_CONF), last_col(-1), col_stride(1) {}
     static int get_size_bits() {
-      //size of each entry in table + lru overhead + row
-      //int bits = (RW_IP_HASHES * 16) + (champsim::lg2(RW_IP_HASHES)) + 16;
       int bits = 16;
       if(USE_ROW_CONF)
         bits += 8;
@@ -327,15 +295,14 @@ struct orap_asd : public champsim::modules::prefetcher {
   };
 
   struct prefetch_queue_entry {
-    champsim::address start_addr; //trigger address
-    //champsim::address addr; //address of prefetch
-    champsim::address ip; //ip of trigger
-    uint32_t cpu; //cpu of trigger
-    uint32_t metadata_in; //metadata of prefetch
-    bool fill_this_level; //fill this level of the cache
-    bool skip_tag_check; //skip tag check in the cache
-    bool return_tag_check; //return tag check status to the prefetcher
-    bool column_prefetch; //is this a column prefetch
+    champsim::address start_addr;
+    champsim::address ip;
+    uint32_t cpu;
+    uint32_t metadata_in;
+    bool fill_this_level;
+    bool skip_tag_check;
+    bool return_tag_check;
+    bool column_prefetch;
     int length;
     int stride;
     int sent_so_far = 0;
@@ -345,8 +312,8 @@ struct orap_asd : public champsim::modules::prefetcher {
     prefetch_queue_entry(champsim::address start_addr_, int length_, int stride_, champsim::address ip_, uint32_t cpu_, uint32_t metadata_in_, bool fill, bool skip, bool return_tag, bool column_prefetch_) : start_addr(start_addr_), length(length_), stride(stride_), ip(ip_), cpu(cpu_), metadata_in(metadata_in_), fill_this_level(fill), skip_tag_check(skip), return_tag_check(return_tag), column_prefetch(column_prefetch_) {}
 
     static int get_size_bits() {
-      int bits = 42; //block and ip
-      bits += 3 + 1 + 1; //cpu, column prefetch, waiting for response 
+      int bits = 42;
+      bits += 3 + 1 + 1;
       return bits;
     }
   };
@@ -371,7 +338,6 @@ struct orap_asd : public champsim::modules::prefetcher {
     explicit ip_tracker(champsim::address ip_) : ip_hash(get_hash(ip_.to<uint64_t>())), confidence(STARTING_CONF) {}
     explicit ip_tracker(uint16_t ip_) : ip_hash(ip_), confidence(STARTING_CONF), coprefetch_confidence(STARTING_CONF_COPREFETCH) {}
     static int get_size_bits() {
-      //ip_hash + confidence + coprefetch confidence
       int bits = 16 + 8 + 8;
       if(CONF_COUNTER_ASD_IP)
         bits += champsim::lg2(ASD_IP_COUNTER_USEFUL_MAX) + champsim::lg2(ASD_IP_COUNTER_ISSUE_MAX);
@@ -417,7 +383,6 @@ struct orap_asd : public champsim::modules::prefetcher {
     ip_blacklist_counter() : ip_blacklist_counter(champsim::address{}) {}
     explicit ip_blacklist_counter(champsim::address ip_) : ip(ip_) {}
     static int get_size_bits() {
-      //ip + counter
       return (48) + champsim::next_pow2(IP_BLACKLIST_THRESH);
     }
   };
@@ -434,11 +399,39 @@ struct orap_asd : public champsim::modules::prefetcher {
   //row state table
   std::vector<row_open_table_entry> row_open_table;
 
-  //double global_usefulness_buffer = 1.0;
-  //double global_usefulness_asd = 1.0;
+  // ORAP-managed region map for filtering both PPF and ORAP prefetches
+  static constexpr std::size_t PM_SETS = 64;
+  static constexpr std::size_t PM_WAYS = 4;
+  static constexpr std::size_t PAGE_MAP_SIZE = 64;
 
-  std::size_t num_bins;
-  std::vector<hasd::ASD_Module> ASD_Modules;
+  struct page_map {
+    uint64_t page_num;
+    constexpr static std::size_t PM_BASE = 100;
+    std::array<uint8_t,PAGE_MAP_SIZE> bits;
+
+    page_map() : page_map(0) {}
+    explicit page_map(uint64_t page_num_) : page_num(page_num_) {
+      for(std::size_t i = 0; i < PAGE_MAP_SIZE; i++)
+        bits.at(i) = 0;
+    }
+  };
+
+  struct page_map_set {
+    auto operator()(const page_map& entry) const { return entry.page_num; }
+  };
+  struct page_map_way {
+    auto operator()(const page_map& entry) const { return entry.page_num; }
+  };
+
+  // Per-CPU region maps managed by ORAP
+  std::vector<champsim::msl::lru_table<page_map,page_map_set,page_map_way>> region_maps;
+
+  void add_to_regionmap(champsim::address addr, uint32_t cpu);
+  bool check_regionmap(champsim::address addr, uint32_t cpu);
+  void remove_from_regionmap(champsim::address addr, uint32_t cpu);
+
+  // PPF modules using the new spp_ppf::PPF_Module wrapper pattern
+  std::vector<spp_ppf::PPF_Module> PPF_Modules;
 
   std::vector<Histogram> mshr_hist_new;
   std::vector<Histogram> mshr_hist_old;
@@ -462,7 +455,6 @@ struct orap_asd : public champsim::modules::prefetcher {
                                     uint32_t metadata_in, uint32_t metadata_hit);
   uint32_t prefetcher_cache_fill(champsim::address addr, champsim::address ip, uint32_t cpu, bool useless, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in, uint32_t metadata_evict, uint32_t cpu_evict);
   void prefetcher_initialize();
-  // void prefetcher_branch_operate(champsim::address ip, uint8_t branch_type, champsim::address branch_target) {}
   void prefetcher_cycle_operate();
   void prefetcher_final_stats();
 
