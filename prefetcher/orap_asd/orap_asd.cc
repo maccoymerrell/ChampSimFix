@@ -490,24 +490,29 @@ void orap_asd::update_walker(champsim::address addr, uint32_t cpu, champsim::add
   if(was_opened)
     increase_confidence_opened(ip,addr,cpu,false);
 
-  //determine column stride direction from row_walker history
+  //determine stride direction from per-IP 16KiB-region block history
   int col_stride = 1; //default forward
   {
-    row_walker rw_lookup{row};
-    auto rw_entry = row_walker_table[cpu].check_hit(rw_lookup);
-    if(rw_entry.has_value() && rw_entry->last_col >= 0) {
-      if((int)col > rw_entry->last_col)
-        col_stride = 1;
-      else if((int)col < rw_entry->last_col)
-        col_stride = -1;
-      else
-        col_stride = rw_entry->col_stride; //same column, keep previous direction
-      rw_entry->last_col = (int8_t)col;
-      rw_entry->col_stride = col_stride;
-      row_walker_table[cpu].fill(rw_entry.value());
-    } else if(rw_entry.has_value()) {
-      rw_entry->last_col = (int8_t)col;
-      row_walker_table[cpu].fill(rw_entry.value());
+    uint8_t current_region_block = static_cast<uint8_t>(champsim::block_number{addr}.to<uint64_t>() & 0xff);
+    ip_tracker it{ip_hash};
+    auto it_entry = ip_tracker_table[cpu].check_hit(it);
+    if(it_entry.has_value()) {
+      if(it_entry->has_last_region_block) {
+        if(current_region_block > it_entry->last_region_block) {
+          it_entry->direction_counter = std::min<uint8_t>(3, it_entry->direction_counter + 1);
+        } else if(current_region_block < it_entry->last_region_block) {
+          it_entry->direction_counter = (it_entry->direction_counter == 0) ? 0 : (it_entry->direction_counter - 1);
+        }
+      }
+      col_stride = it_entry->direction_counter >= 2 ? 1 : -1;
+      it_entry->last_region_block = current_region_block;
+      it_entry->has_last_region_block = true;
+      ip_tracker_table[cpu].fill(it_entry.value());
+    } else {
+      it.last_region_block = current_region_block;
+      it.has_last_region_block = true;
+      it.direction_counter = 2;
+      ip_tracker_table[cpu].fill(it);
     }
   }
 

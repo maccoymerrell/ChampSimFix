@@ -314,10 +314,8 @@ struct orap_ampm : public champsim::modules::prefetcher {
     uint8_t confidence = 0;
     uint8_t confidence_issue_counter = 0;
     uint8_t confidence_useful_counter = 0;
-    int8_t last_col = -1;
-    int8_t col_stride = 1;
     row_walker() : row_walker(0) {}
-    explicit row_walker(uint64_t row) : row(row), confidence(STARTING_CONF), last_col(-1), col_stride(1) {
+    explicit row_walker(uint64_t row) : row(row), confidence(STARTING_CONF) {
       //ip_hashes.fill(get_hash(ip.to<uint64_t>()));
     }
     static int get_size_bits() {
@@ -379,12 +377,16 @@ struct orap_ampm : public champsim::modules::prefetcher {
     uint8_t coprefetch_confidence;
     uint8_t coprefetch_confidence_issue_counter;
     uint8_t coprefetch_confidence_useful_counter;
+    uint8_t last_region_block;
+    bool has_last_region_block;
+    uint8_t direction_counter;
     ip_tracker() : ip_tracker(champsim::address{}) {}
-    explicit ip_tracker(champsim::address ip_) : ip_hash(get_hash(ip_.to<uint64_t>())), confidence(STARTING_CONF) {}
-    explicit ip_tracker(uint16_t ip_) : ip_hash(ip_), confidence(STARTING_CONF), coprefetch_confidence(STARTING_CONF_COPREFETCH) {}
+    explicit ip_tracker(champsim::address ip_) : ip_hash(get_hash(ip_.to<uint64_t>())), confidence(STARTING_CONF), coprefetch_confidence(STARTING_CONF_COPREFETCH), last_region_block(0), has_last_region_block(false), direction_counter(2) {}
+    explicit ip_tracker(uint16_t ip_) : ip_hash(ip_), confidence(STARTING_CONF), coprefetch_confidence(STARTING_CONF_COPREFETCH), last_region_block(0), has_last_region_block(false), direction_counter(2) {}
     static int get_size_bits() {
       //ip_hash + confidence + coprefetch confidence
       int bits = 16 + 8 + 8;
+      bits += 8 + 1 + 2;
       if(CONF_COUNTER_ASD_IP)
         bits += champsim::lg2(ASD_IP_COUNTER_USEFUL_MAX) + champsim::lg2(ASD_IP_COUNTER_ISSUE_MAX);
       if(CONF_COUNTER_BUFFER_IP)
