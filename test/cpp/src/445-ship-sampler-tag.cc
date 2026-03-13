@@ -2,7 +2,6 @@
 
 #include "../replacement/ship/ship.h"
 #include "defaults.hpp"
-#include "mocks.hpp"
 
 TEST_CASE("SHIP sampler matches at cache block granularity")
 {
@@ -19,20 +18,10 @@ TEST_CASE("SHIP sampler matches at cache block granularity")
    * the same cache line as different entries.
    */
 
-  do_nothing_MRC mock_ll;
-  to_rq_MRP mock_ul;
-
   CACHE cache{champsim::cache_builder{champsim::defaults::default_l1d}
                   .name("445-ship-tag-test")
                   .sets(8)
-                  .ways(8)
-                  .upper_levels({&mock_ul.queues})
-                  .lower_level(&mock_ll.queues)
-                  .replacement<lru>()};
-
-  cache.initialize();
-  cache.warmup = false;
-  cache.begin_phase();
+                  .ways(8)};
 
   ship uut{&cache};
 
