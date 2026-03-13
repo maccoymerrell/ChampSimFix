@@ -49,7 +49,7 @@ void ship::update_replacement_state(uint32_t triggering_cpu, long set, long way,
 
     // check hit
     auto match = std::find_if(s_set_begin, s_set_end,
-                              [addr = full_addr, shamt = champsim::data::bits{champsim::lg2(champsim::msl::get_num_samples(NUM_SET)) + champsim::lg2(NUM_WAY)}](
+                              [addr = full_addr, shamt = champsim::data::bits{champsim::lg2(champsim::msl::get_num_samples(NUM_SET))}](
                                   auto x) { return x.valid && x.address.slice_upper(shamt) == addr.slice_upper(shamt); });
     if (match != s_set_end) {
       auto SHCT_idx = match->ip.slice_lower<32_b>().to<std::size_t>() % SHCT_PRIME;
