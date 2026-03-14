@@ -213,7 +213,7 @@ void spp_ppf_4kb::PPF_Module::do_prefetch(champsim::address addr, champsim::addr
 uint32_t spp_ppf_4kb::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint32_t cpu, uint8_t cache_hit, bool useful_prefetch, access_type type,
 										uint32_t metadata_in)
 {
-    module_.do_prefetch(addr, ip, cpu, cache_hit, useful_prefetch, type, metadata_in);
+    module_.do_prefetch(addr, ip, cpu, cache_hit, useful_prefetch, type, metadata_in, 1.0, intern_->NAME.find("L2") != std::string::npos, false);
     return metadata_in;
 }
 
