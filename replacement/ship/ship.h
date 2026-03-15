@@ -36,8 +36,8 @@ public:
   // sampler
   std::vector<SAMPLER_class> sampler;
   std::vector<int> rrpv_values;
-
   champsim::msl::categorizer<long> set_categorizer;
+  champsim::data::bits sampler_tag_bits;
 
   // prediction table structure
   std::vector<std::array<champsim::msl::fwcounter<champsim::msl::lg2(SHCT_MAX + 1)>, SHCT_SIZE>> SHCT;
