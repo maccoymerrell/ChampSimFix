@@ -644,13 +644,20 @@ void orap_ppf::prefetcher_initialize() {
   //determine column cluster size
   column_cluster_size = 1;
   int prev_column_bit = column_bits.at(0);
+  bool all_columns_consec = true;
   for(int i = 1; i < column_bits.size(); i++) {
-    if(column_bits.at(i) > prev_column_bit + 1)
+    if(column_bits.at(i) > prev_column_bit + 1) {
+      all_columns_consec = false;
       break;
+    }
     prev_column_bit = column_bits.at(i);
     column_cluster_size++;
   }
-  column_cluster_size = 1 << column_cluster_size;
+  if(all_columns_consec)
+    column_cluster_size = 1;
+  else
+    column_cluster_size = 1 << column_cluster_size;
+  
   fmt::print("[{}] Column Cluster Size: {}\n",intern_->NAME,column_cluster_size);
   fmt::print("[{}] Initialized Buffer-PPF IP, Column Bits are: {} Conflict Filtering: {}\n",intern_->NAME,fmt::join(column_bits, ","),ENABLE_IP_BLACKLIST);
   int size_of_rw_table = RW_SETS * RW_WAYS * NUM_CPUS * row_walker::get_size_bits();
