@@ -15,14 +15,14 @@ SCENARIO("The issued steps incur appropriate latencies")
     constexpr std::size_t vmem_levels = 5;
     champsim::address access_address{0xdeadbeef};
     constexpr std::chrono::nanoseconds penalty{640};
-    MEMORY_CONTROLLER dram{champsim::modules::ModuleBuilder{"dram", "DEFAULT_MEMORY_CONTROLLER", champsim::defaults::default_memory_controller()}};
-    VirtualMemory vmem{champsim::modules::ModuleBuilder{"vmem", "DEFAULT_VMEM", champsim::defaults::default_vmem()}
+    MEMORY_CONTROLLER dram{champsim::modules::ModuleBuilder{"dram", "default_memory_controller", champsim::defaults::default_memory_controller()}};
+    VirtualMemory vmem{champsim::modules::ModuleBuilder{"vmem", "default_vmem", champsim::defaults::default_vmem()}
         .add_parameter("page_table_levels", static_cast<std::size_t>(vmem_levels))
         .add_parameter("minor_fault_penalty", champsim::chrono::picoseconds{penalty})
         .add_parameter("dram", static_cast<champsim::modules::memory_controller_module*>(&dram))};
     do_nothing_MRC mock_ll;
     to_rq_MRP mock_ul;
-    PageTableWalker uut{champsim::modules::ModuleBuilder{"uut_ptw", "DEFAULT_PTW", champsim::defaults::default_ptw()}
+    PageTableWalker uut{champsim::modules::ModuleBuilder{"uut_ptw", "default_ptw", champsim::defaults::default_ptw()}
                             .add_parameter("clock_period", champsim::chrono::picoseconds{3200})
                             .add_parameter("upper_levels", std::vector<champsim::modules::channel_module*>{&mock_ul.queues})
                             .add_parameter("lower_level", static_cast<champsim::modules::channel_module*>(&mock_ll.queues))

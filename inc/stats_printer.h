@@ -19,7 +19,6 @@
 #include <vector>
 
 #include "phase_info.h"
-#include "modules.h"
 
 namespace champsim
 {
@@ -32,9 +31,6 @@ public:
   void print(phase_stats& stats);
   void print(std::vector<phase_stats>& stats);
 
-  static std::vector<std::string> format(champsim::modules::core_module::stats_type stats);
-  static std::vector<std::string> format(champsim::modules::cache_module::stats_type stats);
-  static std::vector<std::string> format(champsim::modules::memory_controller_module::stats_type stats);
   static std::vector<std::string> format(phase_stats& stats);
 };
 

@@ -3,6 +3,11 @@
 #include "address.h"
 #include "champsim.h"
 
+// Extent constructors use the deprecated globals because extents are part of the
+// address infrastructure and are constructed globally before any environment exists.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 champsim::page_number_extent::page_number_extent() : dynamic_extent(champsim::address::bits, champsim::data::bits{LOG2_PAGE_SIZE}) {}
 
 champsim::page_offset_extent::page_offset_extent() : dynamic_extent(champsim::data::bits{LOG2_PAGE_SIZE}, champsim::data::bits{}) {}
@@ -10,6 +15,8 @@ champsim::page_offset_extent::page_offset_extent() : dynamic_extent(champsim::da
 champsim::block_number_extent::block_number_extent() : dynamic_extent(champsim::address::bits, champsim::data::bits{LOG2_BLOCK_SIZE}) {}
 
 champsim::block_offset_extent::block_offset_extent() : dynamic_extent(champsim::data::bits{LOG2_BLOCK_SIZE}, champsim::data::bits{}) {}
+
+#pragma GCC diagnostic pop
 
 namespace
 {

@@ -1,0 +1,152 @@
+/*
+ * Built-in type converter registrations for the JSON type registry.
+ *
+ * Each registration maps a JSON type-key string (used as the sole key in a
+ * typed JSON object, e.g. {"frequency": "4G"}) to a function that parses the
+ * JSON value and returns a correctly-typed std::any.
+ *
+ * Modules may register additional converters by defining their own static
+ * champsim::type_registry::register_type_helper objects.
+ */
+
+#include "type_registry.h"
+
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <fmt/core.h>
+
+#include "access_type.h"
+#include "bandwidth.h"
+#include "chrono.h"
+#include "modules.h"
+#include "util/units.h"
+
+using json = nlohmann::json;
+
+namespace {
+
+// ====== Shared parsing helpers ======
+
+std::pair<double, std::string> parse_number_and_suffix(const std::string& s) {
+  std::size_t pos = 0;
+  double value = std::stod(s, &pos);
+  return {value, s.substr(pos)};
+}
+
+// ====== Individual type parsers ======
+
+// "frequency": "4G"  →  champsim::chrono::picoseconds (period)
+std::any parse_frequency(const json& val) {
+  auto s = val.get<std::string>();
+  auto [value, suffix] = parse_number_and_suffix(s);
+  double multiplier = 1.0;
+  if (suffix.empty())      multiplier = 1.0;
+  else if (suffix == "K")  multiplier = 1e3;
+  else if (suffix == "M")  multiplier = 1e6;
+  else if (suffix == "G")  multiplier = 1e9;
+  else if (suffix == "T")  multiplier = 1e12;
+  else {
+    fmt::print("[TYPE_REGISTRY] ERROR: unknown frequency suffix '{}' in '{}'\n", suffix, s);
+    std::exit(-1);
+  }
+  auto ps = static_cast<int64_t>(std::round(1e12 / (value * multiplier)));
+  return champsim::chrono::picoseconds{ps};
+}
+
+// "time": "200n"  →  champsim::chrono::{pico,nano,micro,milli,}seconds
+std::any parse_time(const json& val) {
+  auto s = val.get<std::string>();
+  auto [value, suffix] = parse_number_and_suffix(s);
+  auto int_val = static_cast<int64_t>(std::round(value));
+  if (suffix.empty() || suffix == "p")
+    return champsim::chrono::picoseconds{int_val};
+  else if (suffix == "n")
+    return champsim::chrono::nanoseconds{int_val};
+  else if (suffix == "u")
+    return champsim::chrono::microseconds{int_val};
+  else if (suffix == "m")
+    return champsim::chrono::milliseconds{int_val};
+  else if (suffix == "s")
+    return champsim::chrono::seconds{int_val};
+  fmt::print("[TYPE_REGISTRY] ERROR: unknown time suffix '{}' in '{}'\n", suffix, s);
+  std::exit(-1);
+}
+
+// "bytes": "2Mi"  →  champsim::data::bytes (always stored as bytes base unit)
+std::any parse_bytes(const json& val) {
+  auto s = val.get<std::string>();
+  auto [value, suffix] = parse_number_and_suffix(s);
+  auto int_val = static_cast<long long>(std::round(value));
+  if (suffix.empty())
+    return champsim::data::bytes{int_val};
+  if (suffix == "Ki") return champsim::data::bytes{champsim::data::kibibytes{int_val}};
+  if (suffix == "Mi") return champsim::data::bytes{champsim::data::mebibytes{int_val}};
+  if (suffix == "Gi") return champsim::data::bytes{champsim::data::gibibytes{int_val}};
+  if (suffix == "Ti") return champsim::data::bytes{champsim::data::tebibytes{int_val}};
+  if (suffix == "K") return champsim::data::bytes{int_val * 1000LL};
+  if (suffix == "M") return champsim::data::bytes{int_val * 1000000LL};
+  if (suffix == "G") return champsim::data::bytes{int_val * 1000000000LL};
+  if (suffix == "T") return champsim::data::bytes{int_val * 1000000000000LL};
+  fmt::print("[TYPE_REGISTRY] ERROR: unknown bytes suffix '{}' in '{}'\n", suffix, s);
+  std::exit(-1);
+}
+
+// "bits": "64"  →  champsim::data::bits
+std::any parse_bits(const json& val) {
+  auto s = val.get<std::string>();
+  auto [value, suffix] = parse_number_and_suffix(s);
+  auto int_val = static_cast<unsigned long long>(std::round(value));
+  if (suffix.empty()) return champsim::data::bits{int_val};
+  if (suffix == "K")  return champsim::data::bits{int_val * 1000ULL};
+  if (suffix == "M")  return champsim::data::bits{int_val * 1000000ULL};
+  if (suffix == "G")  return champsim::data::bits{int_val * 1000000000ULL};
+  fmt::print("[TYPE_REGISTRY] ERROR: unknown bits suffix '{}' in '{}'\n", suffix, s);
+  std::exit(-1);
+}
+
+// "bandwidth": 2  →  champsim::bandwidth::maximum_type
+std::any parse_bandwidth(const json& val) {
+  return champsim::bandwidth::maximum_type{val.get<long long>()};
+}
+
+// "optional_uint64": 42 | null  →  std::optional<uint64_t>
+std::any parse_optional_uint64(const json& val) {
+  if (val.is_null()) return std::optional<uint64_t>{};
+  return std::optional<uint64_t>{val.get<uint64_t>()};
+}
+
+// "null": "channel"  →  typed null pointer via interface_registry
+std::any parse_null_pointer(const json& val) {
+  return champsim::modules::interface_registry::make_null_pointer(val.get<std::string>());
+}
+
+// "access_types": ["LOAD", "PREFETCH"]  →  std::vector<access_type>
+std::any parse_access_types(const json& val) {
+  std::vector<access_type> result;
+  for (auto& elem : val) {
+    auto at = access_type_from_string(elem.get<std::string>());
+    if (at != access_type::NUM_TYPES)
+      result.push_back(at);
+  }
+  return result;
+}
+
+} // anonymous namespace
+
+// ====== Static registrations ======
+// These run before main(), guaranteeing availability when any environment parses its config.
+
+static champsim::type_registry::register_type_helper reg_frequency("frequency", parse_frequency);
+static champsim::type_registry::register_type_helper reg_time("time", parse_time);
+static champsim::type_registry::register_type_helper reg_bytes("bytes", parse_bytes);
+static champsim::type_registry::register_type_helper reg_bits("bits", parse_bits);
+static champsim::type_registry::register_type_helper reg_bandwidth("bandwidth", parse_bandwidth);
+static champsim::type_registry::register_type_helper reg_optional_uint64("optional_uint64", parse_optional_uint64);
+static champsim::type_registry::register_type_helper reg_null("null", parse_null_pointer);
+static champsim::type_registry::register_type_helper reg_access_types("access_types", parse_access_types);

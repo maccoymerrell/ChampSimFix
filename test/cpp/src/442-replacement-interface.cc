@@ -54,7 +54,7 @@ SCENARIO("The replacement policy is triggered on a miss, not on a fill") {
     constexpr uint64_t fill_latency = 2;
     release_MRC mock_ll;
     to_rq_MRP mock_ul;
-    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l1d()}
+    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l1d()}
       .add_parameter("mshr_size", static_cast<uint32_t>(8))
       .add_parameter("num_sets", static_cast<uint32_t>(1))
       .add_parameter("num_ways", static_cast<uint32_t>(1))
@@ -133,7 +133,7 @@ SCENARIO("The replacement policy is triggered on a hit")
     constexpr uint64_t fill_latency = 2;
     do_nothing_MRC mock_ll;
     to_rq_MRP mock_ul;
-    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l2c()}
+    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l2c()}
       .add_parameter("mshr_size", static_cast<uint32_t>(8))
       .add_parameter("num_sets", static_cast<uint32_t>(1))
       .add_parameter("num_ways", static_cast<uint32_t>(1))
@@ -205,7 +205,7 @@ SCENARIO("The replacement policy notes the correct eviction information")
     do_nothing_MRC mock_ll;
     to_wq_MRP mock_ul_seed;
     to_rq_MRP mock_ul_test;
-    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l2c()}
+    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l2c()}
       .add_parameter("mshr_size", static_cast<uint32_t>(8))
       .add_parameter("num_sets", static_cast<uint32_t>(1))
       .add_parameter("num_ways", static_cast<uint32_t>(1))

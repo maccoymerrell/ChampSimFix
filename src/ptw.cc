@@ -241,4 +241,4 @@ void PageTableWalker::print_deadlock()
 }
 // LCOV_EXCL_STOP
 
-champsim::modules::page_table_walker_module::register_module<PageTableWalker> ptw_module("DEFAULT_PTW");
+champsim::modules::page_table_walker_module::register_module<PageTableWalker> ptw_module("default_ptw");

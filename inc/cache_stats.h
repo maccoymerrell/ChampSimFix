@@ -3,10 +3,8 @@
 
 #include <cstdint>
 #include <string>
-#include <type_traits>
 #include <utility>
 
-#include "champsim.h"
 #include "event_counter.h"
 #include "access_type.h"
 
@@ -19,10 +17,10 @@ struct cache_stats {
   uint64_t pf_useless = 0;
   uint64_t pf_fill = 0;
 
-  champsim::stats::event_counter<std::pair<access_type, std::remove_cv_t<decltype(NUM_CPUS)>>> hits = {};
-  champsim::stats::event_counter<std::pair<access_type, std::remove_cv_t<decltype(NUM_CPUS)>>> misses = {};
-  champsim::stats::event_counter<std::pair<access_type, std::remove_cv_t<decltype(NUM_CPUS)>>> miss_merge = {};
-  champsim::stats::event_counter<std::pair<access_type, std::remove_cv_t<decltype(NUM_CPUS)>>> fill = {};
+  champsim::stats::event_counter<std::pair<access_type, std::size_t>> hits = {};
+  champsim::stats::event_counter<std::pair<access_type, std::size_t>> misses = {};
+  champsim::stats::event_counter<std::pair<access_type, std::size_t>> miss_merge = {};
+  champsim::stats::event_counter<std::pair<access_type, std::size_t>> fill = {};
 
   long total_miss_latency_cycles{};
 };

@@ -18,21 +18,21 @@ json minimal_explicit_config() {
     "block_size": 64,
     "page_size": 4096,
     "children": [
-      {"name": "ch_ptw_l1d",  "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 8, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
-      {"name": "ch_llc_dram", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 64, "wq_size": 64, "pq_size": 64, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
-      {"name": "ch_dtlb_stlb","module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
-      {"name": "ch_itlb_stlb","module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
-      {"name": "ch_l1d_l2c",  "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 16, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
-      {"name": "ch_l1d_dtlb", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 16, "wq_size": 16, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": true},
-      {"name": "ch_l1i_l2c",  "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 16, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
-      {"name": "ch_l1i_itlb", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 16, "wq_size": 16, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": true},
-      {"name": "ch_l2c_llc",  "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 32, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
-      {"name": "ch_l2c_stlb", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
-      {"name": "ch_stlb_ptw", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 16, "wq_size": 0, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
-      {"name": "ch_core_l1i", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 64, "wq_size": 64, "pq_size": 32, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
-      {"name": "ch_core_l1d", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 64, "wq_size": 64, "pq_size": 8, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
+      {"name": "ch_ptw_l1d",  "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 8, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
+      {"name": "ch_llc_dram", "module": "channel", "model": "default_channel", "rq_size": 64, "wq_size": 64, "pq_size": 64, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
+      {"name": "ch_dtlb_stlb","module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
+      {"name": "ch_itlb_stlb","module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
+      {"name": "ch_l1d_l2c",  "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 16, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
+      {"name": "ch_l1d_dtlb", "module": "channel", "model": "default_channel", "rq_size": 16, "wq_size": 16, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": true},
+      {"name": "ch_l1i_l2c",  "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 16, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
+      {"name": "ch_l1i_itlb", "module": "channel", "model": "default_channel", "rq_size": 16, "wq_size": 16, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": true},
+      {"name": "ch_l2c_llc",  "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 32, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
+      {"name": "ch_l2c_stlb", "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
+      {"name": "ch_stlb_ptw", "module": "channel", "model": "default_channel", "rq_size": 16, "wq_size": 0, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
+      {"name": "ch_core_l1i", "module": "channel", "model": "default_channel", "rq_size": 64, "wq_size": 64, "pq_size": 32, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
+      {"name": "ch_core_l1d", "module": "channel", "model": "default_channel", "rq_size": 64, "wq_size": 64, "pq_size": 8, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
       {
-        "name": "DRAM", "module": "memory_controller", "model": "DEFAULT_MEMORY_CONTROLLER",
+        "name": "DRAM", "module": "memory_controller", "model": "default_memory_controller",
         "dbus_period": {"time": "312p"}, "mc_period": {"time": "625p"},
         "n_rp": 24, "n_rcd": 24, "n_cas": 24, "n_ras": 52,
         "refresh_period": {"time": "32000u"},
@@ -42,21 +42,21 @@ json minimal_explicit_config() {
         "ul_channels": ["@ch_llc_dram"]
       },
       {
-        "name": "VMEM", "module": "vmem", "model": "DEFAULT_VMEM",
+        "name": "VMEM", "module": "vmem", "model": "default_vmem",
         "page_table_page_size": {"bytes": "4Ki"}, "page_table_levels": 5,
         "minor_fault_penalty": {"time": "50000p"},
         "randomization_seed": {"optional_uint64": 1},
         "dram": "@DRAM"
       },
       {
-        "name": "cpu0_PTW", "module": "page_table_walker", "model": "DEFAULT_PTW",
+        "name": "cpu0_PTW", "module": "page_table_walker", "model": "default_ptw",
         "clock_period": {"time": "250p"}, "cpu": 0, "mshr_size": 5, "latency": 0,
         "max_tag_check": {"bandwidth": 2}, "max_fill": {"bandwidth": 2},
         "upper_levels": ["@ch_stlb_ptw"], "lower_level": "@ch_ptw_l1d",
         "vmem": "@VMEM", "pscl_dims": [[5, 1, 2], [4, 1, 4], [3, 2, 4], [2, 4, 8]]
       },
       {
-        "name": "LLC", "module": "cache", "model": "DEFAULT_CACHE",
+        "name": "LLC", "module": "cache", "model": "default_cache",
         "clock_period": {"time": "250p"}, "num_sets": 2048, "num_ways": 16, "pq_size": 32,
         "mshr_size": 64, "hit_latency": 10, "fill_latency": 10,
         "offset_bits": {"bits": "6"}, "max_tag_bandwidth": {"bandwidth": 1}, "max_fill_bandwidth": {"bandwidth": 1},
@@ -69,7 +69,7 @@ json minimal_explicit_config() {
         ]
       },
       {
-        "name": "cpu0_DTLB", "module": "cache", "model": "DEFAULT_CACHE",
+        "name": "cpu0_DTLB", "module": "cache", "model": "default_cache",
         "clock_period": {"time": "250p"}, "num_sets": 16, "num_ways": 4, "pq_size": 0,
         "mshr_size": 8, "hit_latency": 1, "fill_latency": 1,
         "offset_bits": {"bits": "12"}, "max_tag_bandwidth": {"bandwidth": 2}, "max_fill_bandwidth": {"bandwidth": 2},
@@ -82,7 +82,7 @@ json minimal_explicit_config() {
         ]
       },
       {
-        "name": "cpu0_ITLB", "module": "cache", "model": "DEFAULT_CACHE",
+        "name": "cpu0_ITLB", "module": "cache", "model": "default_cache",
         "clock_period": {"time": "250p"}, "num_sets": 16, "num_ways": 4, "pq_size": 0,
         "mshr_size": 8, "hit_latency": 1, "fill_latency": 1,
         "offset_bits": {"bits": "12"}, "max_tag_bandwidth": {"bandwidth": 2}, "max_fill_bandwidth": {"bandwidth": 2},
@@ -95,7 +95,7 @@ json minimal_explicit_config() {
         ]
       },
       {
-        "name": "cpu0_L1D", "module": "cache", "model": "DEFAULT_CACHE",
+        "name": "cpu0_L1D", "module": "cache", "model": "default_cache",
         "clock_period": {"time": "250p"}, "num_sets": 64, "num_ways": 12, "pq_size": 8,
         "mshr_size": 16, "hit_latency": 2, "fill_latency": 3,
         "offset_bits": {"bits": "6"}, "max_tag_bandwidth": {"bandwidth": 2}, "max_fill_bandwidth": {"bandwidth": 2},
@@ -109,7 +109,7 @@ json minimal_explicit_config() {
         ]
       },
       {
-        "name": "cpu0_L1I", "module": "cache", "model": "DEFAULT_CACHE",
+        "name": "cpu0_L1I", "module": "cache", "model": "default_cache",
         "clock_period": {"time": "250p"}, "num_sets": 64, "num_ways": 8, "pq_size": 32,
         "mshr_size": 8, "hit_latency": 2, "fill_latency": 2,
         "offset_bits": {"bits": "6"}, "max_tag_bandwidth": {"bandwidth": 2}, "max_fill_bandwidth": {"bandwidth": 2},
@@ -123,7 +123,7 @@ json minimal_explicit_config() {
         ]
       },
       {
-        "name": "cpu0_L2C", "module": "cache", "model": "DEFAULT_CACHE",
+        "name": "cpu0_L2C", "module": "cache", "model": "default_cache",
         "clock_period": {"time": "250p"}, "num_sets": 1024, "num_ways": 8, "pq_size": 16,
         "mshr_size": 32, "hit_latency": 5, "fill_latency": 5,
         "offset_bits": {"bits": "6"}, "max_tag_bandwidth": {"bandwidth": 1}, "max_fill_bandwidth": {"bandwidth": 1},
@@ -137,7 +137,7 @@ json minimal_explicit_config() {
         ]
       },
       {
-        "name": "cpu0_STLB", "module": "cache", "model": "DEFAULT_CACHE",
+        "name": "cpu0_STLB", "module": "cache", "model": "default_cache",
         "clock_period": {"time": "250p"}, "num_sets": 128, "num_ways": 12, "pq_size": 0,
         "mshr_size": 16, "hit_latency": 4, "fill_latency": 4,
         "offset_bits": {"bits": "12"}, "max_tag_bandwidth": {"bandwidth": 1}, "max_fill_bandwidth": {"bandwidth": 1},
@@ -151,7 +151,7 @@ json minimal_explicit_config() {
         ]
       },
       {
-        "name": "cpu0", "module": "core", "model": "DEFAULT_CORE",
+        "name": "cpu0", "module": "core", "model": "default_core",
         "clock_period": {"time": "250p"}, "cpu": 0,
         "dib_set": 32, "dib_way": 8, "dib_window": 16,
         "dib_hit_buffer_size": 32, "dib_inorder_width": {"bandwidth": 5}, "dib_hit_latency": 1,
@@ -176,7 +176,7 @@ json minimal_explicit_config() {
 
 // Helper to build an explicit environment from a JSON config
 champsim::modules::environment_module* make_explicit_env(const json& config) {
-  auto builder = ModuleBuilder{"test_explicit_env", "EXPLICIT_ENVIRONMENT"};
+  auto builder = ModuleBuilder{"test_explicit_env", "explicit_environment"};
   builder.add_parameter("config_json", config);
   return champsim::modules::environment_module::create_instance(builder, static_cast<champsim::modules::environment_module*>(nullptr));
 }
@@ -200,7 +200,7 @@ SCENARIO("Explicit environment constructs correct topology from minimal config")
     auto* env = make_explicit_env(config);
 
     THEN("num_cpus is 1") {
-      REQUIRE(env->get_num_cpus() == 1);
+      REQUIRE(env->get_num("core") == 1);
     }
     THEN("block_size is 64") {
       REQUIRE(env->get_block_size() == 64);
@@ -428,12 +428,12 @@ SCENARIO("Explicit environment dump mode does not crash") {
     ModuleBuilder::clear_dump_log();
     ModuleBuilder::set_dump_enabled(true);
     auto config = minimal_explicit_config();
-    auto builder = ModuleBuilder{"dump_explicit_env", "EXPLICIT_ENVIRONMENT"};
+    auto builder = ModuleBuilder{"dump_explicit_env", "explicit_environment"};
     builder.add_parameter("config_json", config);
 
     THEN("Construction succeeds and dump log is non-empty") {
       auto* env = champsim::modules::environment_module::create_instance(builder, static_cast<champsim::modules::environment_module*>(nullptr));
-      REQUIRE(env->get_num_cpus() == 1);
+      REQUIRE(env->get_num("core") == 1);
       REQUIRE_FALSE(ModuleBuilder::get_dump_log().empty());
     }
 
@@ -447,7 +447,7 @@ SCENARIO("Explicit environment dump log contains expected modules and parameters
     ModuleBuilder::clear_dump_log();
     ModuleBuilder::set_dump_enabled(true);
     auto config = minimal_explicit_config();
-    auto builder = ModuleBuilder{"dump_explicit", "EXPLICIT_ENVIRONMENT"};
+    auto builder = ModuleBuilder{"dump_explicit", "explicit_environment"};
     builder.add_parameter("config_json", config);
     champsim::modules::environment_module::create_instance(builder, static_cast<champsim::modules::environment_module*>(nullptr));
     auto& log = ModuleBuilder::get_dump_log();
@@ -517,35 +517,35 @@ SCENARIO("Explicit environment supports multi-core via explicit module declarati
       "block_size": 64,
       "page_size": 4096,
       "children": [
-        {"name": "ch0_ptw_l1d",  "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 8, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
-        {"name": "ch0_llc_dram", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 64, "wq_size": 64, "pq_size": 64, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
-        {"name": "ch0_dtlb_stlb","module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
-        {"name": "ch0_itlb_stlb","module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
-        {"name": "ch0_l1d_l2c",  "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 16, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
-        {"name": "ch0_l1d_dtlb", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 16, "wq_size": 16, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": true},
-        {"name": "ch0_l1i_l2c",  "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 16, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
-        {"name": "ch0_l1i_itlb", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 16, "wq_size": 16, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": true},
-        {"name": "ch0_l2c_llc",  "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 32, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
-        {"name": "ch0_l2c_stlb", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
-        {"name": "ch0_stlb_ptw", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 16, "wq_size": 0, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
-        {"name": "ch0_core_l1i", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 64, "wq_size": 64, "pq_size": 32, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
-        {"name": "ch0_core_l1d", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 64, "wq_size": 64, "pq_size": 8, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
+        {"name": "ch0_ptw_l1d",  "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 8, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
+        {"name": "ch0_llc_dram", "module": "channel", "model": "default_channel", "rq_size": 64, "wq_size": 64, "pq_size": 64, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
+        {"name": "ch0_dtlb_stlb","module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
+        {"name": "ch0_itlb_stlb","module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
+        {"name": "ch0_l1d_l2c",  "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 16, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
+        {"name": "ch0_l1d_dtlb", "module": "channel", "model": "default_channel", "rq_size": 16, "wq_size": 16, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": true},
+        {"name": "ch0_l1i_l2c",  "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 16, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
+        {"name": "ch0_l1i_itlb", "module": "channel", "model": "default_channel", "rq_size": 16, "wq_size": 16, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": true},
+        {"name": "ch0_l2c_llc",  "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 32, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
+        {"name": "ch0_l2c_stlb", "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
+        {"name": "ch0_stlb_ptw", "module": "channel", "model": "default_channel", "rq_size": 16, "wq_size": 0, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
+        {"name": "ch0_core_l1i", "module": "channel", "model": "default_channel", "rq_size": 64, "wq_size": 64, "pq_size": 32, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
+        {"name": "ch0_core_l1d", "module": "channel", "model": "default_channel", "rq_size": 64, "wq_size": 64, "pq_size": 8, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
 
-        {"name": "ch1_ptw_l1d",  "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 8, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
-        {"name": "ch1_dtlb_stlb","module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
-        {"name": "ch1_itlb_stlb","module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
-        {"name": "ch1_l1d_l2c",  "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 16, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
-        {"name": "ch1_l1d_dtlb", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 16, "wq_size": 16, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": true},
-        {"name": "ch1_l1i_l2c",  "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 16, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
-        {"name": "ch1_l1i_itlb", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 16, "wq_size": 16, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": true},
-        {"name": "ch1_l2c_llc",  "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 32, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
-        {"name": "ch1_l2c_stlb", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
-        {"name": "ch1_stlb_ptw", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 16, "wq_size": 0, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
-        {"name": "ch1_core_l1i", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 64, "wq_size": 64, "pq_size": 32, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
-        {"name": "ch1_core_l1d", "module": "channel", "model": "DEFAULT_CHANNEL", "rq_size": 64, "wq_size": 64, "pq_size": 8, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
+        {"name": "ch1_ptw_l1d",  "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 8, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
+        {"name": "ch1_dtlb_stlb","module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
+        {"name": "ch1_itlb_stlb","module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
+        {"name": "ch1_l1d_l2c",  "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 16, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
+        {"name": "ch1_l1d_dtlb", "module": "channel", "model": "default_channel", "rq_size": 16, "wq_size": 16, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": true},
+        {"name": "ch1_l1i_l2c",  "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 16, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
+        {"name": "ch1_l1i_itlb", "module": "channel", "model": "default_channel", "rq_size": 16, "wq_size": 16, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": true},
+        {"name": "ch1_l2c_llc",  "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 32, "offset_bits": {"bits": "6"}, "match_offset_bits": false},
+        {"name": "ch1_l2c_stlb", "module": "channel", "model": "default_channel", "rq_size": 32, "wq_size": 32, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
+        {"name": "ch1_stlb_ptw", "module": "channel", "model": "default_channel", "rq_size": 16, "wq_size": 0, "pq_size": 0, "offset_bits": {"bits": "12"}, "match_offset_bits": false},
+        {"name": "ch1_core_l1i", "module": "channel", "model": "default_channel", "rq_size": 64, "wq_size": 64, "pq_size": 32, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
+        {"name": "ch1_core_l1d", "module": "channel", "model": "default_channel", "rq_size": 64, "wq_size": 64, "pq_size": 8, "offset_bits": {"bits": "6"}, "match_offset_bits": true},
 
         {
-          "name": "DRAM", "module": "memory_controller", "model": "DEFAULT_MEMORY_CONTROLLER",
+          "name": "DRAM", "module": "memory_controller", "model": "default_memory_controller",
           "dbus_period": {"time": "312p"}, "mc_period": {"time": "625p"},
           "n_rp": 24, "n_rcd": 24, "n_cas": 24, "n_ras": 52,
           "refresh_period": {"time": "32000u"},
@@ -555,19 +555,19 @@ SCENARIO("Explicit environment supports multi-core via explicit module declarati
           "ul_channels": ["@ch0_llc_dram"]
         },
         {
-          "name": "VMEM", "module": "vmem", "model": "DEFAULT_VMEM",
+          "name": "VMEM", "module": "vmem", "model": "default_vmem",
           "page_table_page_size": {"bytes": "4Ki"}, "page_table_levels": 5,
           "minor_fault_penalty": {"time": "50000p"},
           "randomization_seed": {"optional_uint64": 1},
           "dram": "@DRAM"
         },
 
-        {"name": "cpu0_PTW", "module": "page_table_walker", "model": "DEFAULT_PTW",
+        {"name": "cpu0_PTW", "module": "page_table_walker", "model": "default_ptw",
          "clock_period": {"time": "250p"}, "cpu": 0, "mshr_size": 5, "latency": 0,
          "max_tag_check": {"bandwidth": 2}, "max_fill": {"bandwidth": 2},
          "upper_levels": ["@ch0_stlb_ptw"], "lower_level": "@ch0_ptw_l1d",
          "vmem": "@VMEM", "pscl_dims": [[5, 1, 2], [4, 1, 4], [3, 2, 4], [2, 4, 8]]},
-        {"name": "cpu1_PTW", "module": "page_table_walker", "model": "DEFAULT_PTW",
+        {"name": "cpu1_PTW", "module": "page_table_walker", "model": "default_ptw",
          "clock_period": {"time": "250p"}, "cpu": 1, "mshr_size": 5, "latency": 0,
          "max_tag_check": {"bandwidth": 2}, "max_fill": {"bandwidth": 2},
          "upper_levels": ["@ch1_stlb_ptw"], "lower_level": "@ch1_ptw_l1d",
@@ -584,7 +584,7 @@ SCENARIO("Explicit environment supports multi-core via explicit module declarati
                          const json& ul, const std::string& ll, const json& lt,
                          const std::string& pf_model, const std::string& repl_model,
                          const std::string& pf_name, const std::string& repl_name) {
-      json c = {{"name", name}, {"module", "cache"}, {"model", "DEFAULT_CACHE"},
+      json c = {{"name", name}, {"module", "cache"}, {"model", "default_cache"},
         {"clock_period", {{"time", "250p"}}}, {"num_sets", sets}, {"num_ways", ways},
         {"pq_size", pq}, {"mshr_size", mshr}, {"hit_latency", hit_lat}, {"fill_latency", fill_lat},
         {"offset_bits", {{"bits", std::to_string(offset_bits)}}},
@@ -640,7 +640,7 @@ SCENARIO("Explicit environment supports multi-core via explicit module declarati
                         const std::string& l1i, const std::string& fetch_ch, const std::string& data_ch,
                         const std::string& bp_model, const std::string& btb_model,
                         const std::string& bp_name, const std::string& btb_name) {
-      ch.push_back({{"name", name}, {"module", "core"}, {"model", "DEFAULT_CORE"},
+      ch.push_back({{"name", name}, {"module", "core"}, {"model", "default_core"},
         {"clock_period", {{"time", "250p"}}}, {"cpu", cpu_id},
         {"dib_set", 32}, {"dib_way", 8}, {"dib_window", 16},
         {"dib_hit_buffer_size", 32}, {"dib_inorder_width", {{"bandwidth", 5}}}, {"dib_hit_latency", 1},
@@ -667,7 +667,7 @@ SCENARIO("Explicit environment supports multi-core via explicit module declarati
     auto* env = make_explicit_env(config);
 
     THEN("num_cpus is 2") {
-      REQUIRE(env->get_num_cpus() == 2);
+      REQUIRE(env->get_num("core") == 2);
     }
     THEN("cpu_view has 2 cores") {
       REQUIRE(env->typed_view<champsim::modules::core_module>("core").size() == 2);

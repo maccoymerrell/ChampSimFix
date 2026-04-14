@@ -1,7 +1,7 @@
 #include <catch.hpp>
 
 #include "cache_stats.h"
-#include "stats_printer.h"
+#include "modules.h"
 
 TEST_CASE("An empty cache stat block prints nothing")
 {
@@ -10,7 +10,7 @@ TEST_CASE("An empty cache stat block prints nothing")
 
   std::vector<std::string> expected{};
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::cache_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("Hits increment the hit and access counts")
@@ -38,7 +38,7 @@ TEST_CASE("Hits increment the hit and access counts")
                                     "cpu0->test_cache AVERAGE MISS LATENCY: - cycles"};
   expected.at(line_index) = expected_line;
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::cache_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("Misses increment the miss and access counts")
@@ -66,7 +66,7 @@ TEST_CASE("Misses increment the miss and access counts")
                                     "cpu0->test_cache AVERAGE MISS LATENCY: - cycles"};
   expected.at(line_index) = expected_line;
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::cache_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("Returning misses increment the AMAT")
@@ -101,7 +101,7 @@ TEST_CASE("Returning misses increment the AMAT")
   expected.push_back("cpu0->test_cache AVERAGE MISS LATENCY: " + std::to_string(miss_return_latency) + " cycles");
   expected.at(line_index) = expected_line;
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::cache_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("Prefetch requests increase the count")
@@ -120,7 +120,7 @@ TEST_CASE("Prefetch requests increase the count")
                                     "cpu0->test_cache PREFETCH REQUESTED:          1 ISSUED:          0 USEFUL:          0 USELESS:          0",
                                     "cpu0->test_cache AVERAGE MISS LATENCY: - cycles"};
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::cache_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("Prefetch issues increase the count")
@@ -139,7 +139,7 @@ TEST_CASE("Prefetch issues increase the count")
                                     "cpu0->test_cache PREFETCH REQUESTED:          0 ISSUED:          1 USEFUL:          0 USELESS:          0",
                                     "cpu0->test_cache AVERAGE MISS LATENCY: - cycles"};
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::cache_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("Prefetch useful increases the count")
@@ -158,7 +158,7 @@ TEST_CASE("Prefetch useful increases the count")
                                     "cpu0->test_cache PREFETCH REQUESTED:          0 ISSUED:          0 USEFUL:          1 USELESS:          0",
                                     "cpu0->test_cache AVERAGE MISS LATENCY: - cycles"};
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::cache_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("Prefetch useless increases the count")
@@ -177,7 +177,7 @@ TEST_CASE("Prefetch useless increases the count")
                                     "cpu0->test_cache PREFETCH REQUESTED:          0 ISSUED:          0 USEFUL:          0 USELESS:          1",
                                     "cpu0->test_cache AVERAGE MISS LATENCY: - cycles"};
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::cache_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("Multicore stats are tracked separately")
@@ -223,5 +223,5 @@ TEST_CASE("Multicore stats are tracked separately")
   expected.at(line_index_cpu0) = expected_line_cpu0;
   expected.at(line_index_cpu1) = expected_line_cpu1;
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::cache_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }

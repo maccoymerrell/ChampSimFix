@@ -12,7 +12,7 @@ TEST_CASE("Tag checks do not break when translation misses back up")
   to_rq_MRP mock_ul{[](auto x, auto y) {
     return x.v_address == y.v_address;
   }};
-  CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l2c()}
+  CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l2c()}
                 .add_parameter("mshr_size", static_cast<uint32_t>(8))
                 .add_parameter("upper_levels", std::vector<champsim::modules::channel_module*>{&mock_ul.queues})
                 .add_parameter("lower_level", static_cast<champsim::modules::channel_module*>(&mock_ll.queues))
@@ -64,7 +64,7 @@ TEST_CASE("Backed up translation misses do not prevent translated packets from a
 {
   constexpr uint64_t hit_latency = 1;
   constexpr uint64_t fill_latency = 3;
-  champsim::channel refusal_channel{champsim::modules::ModuleBuilder{"refusal_channel", "DEFAULT_CHANNEL", champsim::defaults::default_channel()}.add_parameter("rq_size", static_cast<std::size_t>(0)).add_parameter("wq_size", static_cast<std::size_t>(0)).add_parameter("pq_size", static_cast<std::size_t>(0))};
+  champsim::channel refusal_channel{champsim::modules::ModuleBuilder{"refusal_channel", "default_channel", champsim::defaults::default_channel()}.add_parameter("rq_size", static_cast<std::size_t>(0)).add_parameter("wq_size", static_cast<std::size_t>(0)).add_parameter("pq_size", static_cast<std::size_t>(0))};
   do_nothing_MRC mock_ll;
   to_rq_MRP seed_ul{[](auto x, auto y) {
     return x.v_address == y.v_address;
@@ -72,7 +72,7 @@ TEST_CASE("Backed up translation misses do not prevent translated packets from a
   to_rq_MRP mock_ul{[](auto x, auto y) {
     return x.v_address == y.v_address;
   }};
-  CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l2c()}
+  CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l2c()}
                 .add_parameter("mshr_size", static_cast<uint32_t>(8))
                 .add_parameter("upper_levels", std::vector<champsim::modules::channel_module*>{&seed_ul.queues, &mock_ul.queues})
                 .add_parameter("lower_level", static_cast<champsim::modules::channel_module*>(&mock_ll.queues))

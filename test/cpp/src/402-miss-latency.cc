@@ -18,7 +18,7 @@ SCENARIO("A cache returns a miss after the specified latency")
     constexpr auto fill_latency = 2;
     do_nothing_MRC mock_ll{miss_latency};
     to_rq_MRP mock_ul;
-    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l1d()}
+    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l1d()}
                   .add_parameter("mshr_size", static_cast<uint32_t>(8))
                   .add_parameter("upper_levels", std::vector<champsim::modules::channel_module*>{&mock_ul.queues})
                   .add_parameter("lower_level", static_cast<champsim::modules::channel_module*>(&mock_ll.queues))
@@ -109,7 +109,7 @@ SCENARIO("A cache completes a fill after the specified latency")
     constexpr auto fill_latency = 2;
     do_nothing_MRC mock_ll{miss_latency};
     to_wq_MRP mock_ul;
-    auto builder = champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l1d()}
+    auto builder = champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l1d()}
                        .add_parameter("mshr_size", static_cast<uint32_t>(8))
                        .add_parameter("upper_levels", std::vector<champsim::modules::channel_module*>{&mock_ul.queues})
                        .add_parameter("lower_level", static_cast<champsim::modules::channel_module*>(&mock_ll.queues))
@@ -194,7 +194,7 @@ SCENARIO("The MSHR bandwidth limits the number of outstanding misses")
     release_MRC mock_ll;
     to_rq_MRP mock_ul_seed;
     to_rq_MRP mock_ul_test;
-    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l1d()}
+    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l1d()}
                   .add_parameter("mshr_size", static_cast<uint32_t>(8))
                   .add_parameter("upper_levels", std::vector<champsim::modules::channel_module*>{&mock_ul_seed.queues, &mock_ul_test.queues})
                   .add_parameter("lower_level", static_cast<champsim::modules::channel_module*>(&mock_ll.queues))
@@ -257,9 +257,9 @@ SCENARIO("A lower-level queue refusal limits the number of outstanding misses")
 {
   GIVEN("An empty cache")
   {
-    champsim::channel refusal_channel{champsim::modules::ModuleBuilder{"refusal_channel", "DEFAULT_CHANNEL", champsim::defaults::default_channel()}.add_parameter("rq_size", static_cast<std::size_t>(0)).add_parameter("wq_size", static_cast<std::size_t>(0)).add_parameter("pq_size", static_cast<std::size_t>(0))}; // Refuses all packets (zero-sized queues)
+    champsim::channel refusal_channel{champsim::modules::ModuleBuilder{"refusal_channel", "default_channel", champsim::defaults::default_channel()}.add_parameter("rq_size", static_cast<std::size_t>(0)).add_parameter("wq_size", static_cast<std::size_t>(0)).add_parameter("pq_size", static_cast<std::size_t>(0))}; // Refuses all packets (zero-sized queues)
     to_rq_MRP mock_ul;
-    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l1d().add_parameter("mshr_size", static_cast<uint32_t>(8))}.add_parameter("upper_levels", std::vector<champsim::modules::channel_module*>{&mock_ul.queues}).add_parameter("lower_level", static_cast<champsim::modules::channel_module*>(&refusal_channel))};
+    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l1d().add_parameter("mshr_size", static_cast<uint32_t>(8))}.add_parameter("upper_levels", std::vector<champsim::modules::channel_module*>{&mock_ul.queues}).add_parameter("lower_level", static_cast<champsim::modules::channel_module*>(&refusal_channel))};
 
     std::array<champsim::operable*, 2> elements{{&uut, &mock_ul}};
 

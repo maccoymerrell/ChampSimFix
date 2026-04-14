@@ -51,7 +51,7 @@ SCENARIO("Prefetch metadata from an issued prefetch is seen in the lower level")
     constexpr uint64_t fill_latency = 2;
     do_nothing_MRC mock_ll;
     champsim::channel lower_queues{};
-    CACHE lower{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l1d()}
+    CACHE lower{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l1d()}
       .add_parameter("mshr_size", static_cast<uint32_t>(8))
       .add_parameter("upper_levels", std::vector<champsim::modules::channel_module*>{&lower_queues})
       .add_parameter("lower_level", static_cast<champsim::modules::channel_module*>(&mock_ll.queues))
@@ -60,7 +60,7 @@ SCENARIO("Prefetch metadata from an issued prefetch is seen in the lower level")
       .add_parameter("pref_activate_mask", std::vector<access_type>{access_type::PREFETCH})
       .add_submodule("prefetcher", champsim::modules::ModuleBuilder{"uut_cachemetadata_collector", "metadata_collector"})
     };
-    CACHE upper{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l1d()}
+    CACHE upper{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l1d()}
                     .add_parameter("num_sets", static_cast<uint32_t>(64))
                     .add_parameter("mshr_size", static_cast<uint32_t>(1))
                     .add_parameter("max_tag_bandwidth", champsim::bandwidth::maximum_type{1})
@@ -111,7 +111,7 @@ SCENARIO("Prefetch metadata from an filled block is seen in the upper level")
     champsim::channel lower_queues{};
     to_rq_MRP mock_ul;
     champsim::modules::prefetcher::register_module<metadata_fill_emitter<seed_metadata>> mfe_register("metadata_fill_emitter_seed_1");
-    CACHE lower{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l1d()}
+    CACHE lower{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l1d()}
       .add_parameter("mshr_size", static_cast<uint32_t>(8))
       .add_parameter("upper_levels", std::vector<champsim::modules::channel_module*>{&lower_queues})
       .add_parameter("lower_level", static_cast<champsim::modules::channel_module*>(&mock_ll.queues))
@@ -120,7 +120,7 @@ SCENARIO("Prefetch metadata from an filled block is seen in the upper level")
       .add_submodule("prefetcher", champsim::modules::ModuleBuilder{"uut_cachemetadata_fill_emitter_seed_1", "metadata_fill_emitter_seed_1"})
     };
 
-    CACHE upper{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l1d()}
+    CACHE upper{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l1d()}
       .add_parameter("mshr_size", static_cast<uint32_t>(8))
       .add_parameter("upper_levels", std::vector<champsim::modules::channel_module*>{&mock_ul.queues})
       .add_parameter("lower_level", static_cast<champsim::modules::channel_module*>(&lower_queues))

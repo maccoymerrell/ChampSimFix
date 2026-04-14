@@ -14,99 +14,45 @@
  * limitations under the License.
  */
 
-#include <algorithm>
-#include <utility>
+#include <any>
 #include <nlohmann/json.hpp>
 
 #include "stats_printer.h"
 
-void to_json(nlohmann::json& j, const champsim::modules::core_module::stats_type& stats)
+namespace
 {
-  constexpr std::array types{branch_type::BRANCH_DIRECT_JUMP, branch_type::BRANCH_INDIRECT,      branch_type::BRANCH_CONDITIONAL,
-                             branch_type::BRANCH_DIRECT_CALL, branch_type::BRANCH_INDIRECT_CALL, branch_type::BRANCH_RETURN};
-
-  auto total_mispredictions = std::ceil(
-      std::accumulate(std::begin(types), std::end(types), 0LL, [btm = stats.branch_type_misses](auto acc, auto next) { return acc + btm.value_or(next, 0); }));
-
-  std::map<std::string, std::size_t> mpki{};
-  for (auto type : types) {
-    mpki.emplace(branch_type_names.at(champsim::to_underlying(type)), stats.branch_type_misses.value_or(type, 0));
-  }
-
-  j = nlohmann::json{{"instructions", stats.instrs()},
-                     {"cycles", stats.cycles()},
-                     {"Avg ROB occupancy at mispredict", std::ceil(stats.total_rob_occupancy_at_branch_mispredict) / std::ceil(total_mispredictions)},
-                     {"mispredict", mpki}};
-}
-
-void to_json(nlohmann::json& j, const champsim::modules::cache_module::stats_type& stats)
+// Compile a section (sim or roi) from the interface -> [(module_name, json_any)] map.
+nlohmann::json compile_section(
+    const std::map<std::string, std::vector<std::pair<std::string, std::any>>>& entries)
 {
-  using hits_value_type = typename decltype(stats.hits)::value_type;
-  using misses_value_type = typename decltype(stats.misses)::value_type;
-  using miss_merge_value_type = typename decltype(stats.miss_merge)::value_type;
-  using fill_value_type = typename decltype(stats.fill)::value_type;
-
-  std::map<std::string, nlohmann::json> statsmap;
-  statsmap.emplace("prefetch requested", stats.pf_requested);
-  statsmap.emplace("prefetch issued", stats.pf_issued);
-  statsmap.emplace("useful prefetch", stats.pf_useful);
-  statsmap.emplace("useless prefetch", stats.pf_useless);
-
-  uint64_t total_downstream_demands = stats.fill.total();
-  for (std::size_t cpu = 0; cpu < NUM_CPUS; ++cpu)
-    total_downstream_demands -= stats.fill.value_or(std::pair{access_type::PREFETCH, cpu}, fill_value_type{});
-
-  statsmap.emplace("miss latency", std::ceil(stats.total_miss_latency_cycles) / std::ceil(total_downstream_demands));
-  for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION}) {
-    std::vector<hits_value_type> hits;
-    std::vector<misses_value_type> misses;
-    std::vector<miss_merge_value_type> miss_merges;
-
-    for (std::size_t cpu = 0; cpu < NUM_CPUS; ++cpu) {
-      hits.push_back(stats.hits.value_or(std::pair{type, cpu}, hits_value_type{}));
-      misses.push_back(stats.misses.value_or(std::pair{type, cpu}, misses_value_type{}));
-      miss_merges.push_back(stats.miss_merge.value_or(std::pair{type, cpu}, miss_merge_value_type{}));
+  nlohmann::json section = nlohmann::json::object();
+  for (const auto& [iface, modules] : entries) {
+    nlohmann::json iface_json = nlohmann::json::object();
+    for (const auto& [name, json_any] : modules) {
+      if (json_any.has_value()) {
+        iface_json[name] = std::any_cast<nlohmann::json>(json_any);
+      }
     }
-
-    statsmap.emplace(access_type_names.at(champsim::to_underlying(type)), nlohmann::json{{"hit", hits}, {"miss", misses}, {"miss_merge", miss_merges}});
+    section[iface] = iface_json;
   }
-
-  j = statsmap;
+  return section;
 }
-
-void to_json(nlohmann::json& j, const champsim::modules::memory_controller_module::stats_type stats)
-{
-  j = nlohmann::json{{"RQ ROW_BUFFER_HIT", stats.RQ_ROW_BUFFER_HIT},
-                     {"RQ ROW_BUFFER_MISS", stats.RQ_ROW_BUFFER_MISS},
-                     {"WQ ROW_BUFFER_HIT", stats.WQ_ROW_BUFFER_HIT},
-                     {"WQ ROW_BUFFER_MISS", stats.WQ_ROW_BUFFER_MISS},
-                     {"AVG DBUS CONGESTED CYCLE", (std::ceil(stats.dbus_cycle_congested) / std::ceil(stats.dbus_count_congested))},
-                     {"REFRESHES ISSUED", stats.refresh_cycles}};
-}
+} // namespace
 
 namespace champsim
 {
-void to_json(nlohmann::json& j, const champsim::phase_stats stats)
+void to_json(nlohmann::json& j, const champsim::phase_stats& stats)
 {
-  std::map<std::string, nlohmann::json> roi_stats;
-  roi_stats.emplace("cores", stats.roi_cpu_stats);
-  roi_stats.emplace("DRAM", stats.roi_dram_stats);
-  for (auto x : stats.roi_cache_stats) {
-    roi_stats.emplace(x.name, x);
-  }
-
-  std::map<std::string, nlohmann::json> sim_stats;
-  sim_stats.emplace("cores", stats.sim_cpu_stats);
-  sim_stats.emplace("DRAM", stats.sim_dram_stats);
-  for (auto x : stats.sim_cache_stats) {
-    sim_stats.emplace(x.name, x);
-  }
-
-  std::map<std::string, nlohmann::json> statsmap{{"name", stats.name}, {"traces", stats.trace_names}};
-  statsmap.emplace("roi", roi_stats);
-  statsmap.emplace("sim", sim_stats);
-  j = statsmap;
+  j = nlohmann::json{
+    {"name", stats.name},
+    {"traces", stats.trace_names},
+    {"roi", compile_section(stats.roi_json)},
+    {"sim", compile_section(stats.sim_json)}
+  };
 }
 } // namespace champsim
 
-void champsim::json_printer::print(std::vector<phase_stats>& stats) { stream << nlohmann::json::array_t{std::begin(stats), std::end(stats)}; }
+void champsim::json_printer::print(std::vector<phase_stats>& stats)
+{
+  stream << nlohmann::json::array_t{std::begin(stats), std::end(stats)};
+}

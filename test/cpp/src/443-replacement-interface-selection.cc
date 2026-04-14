@@ -87,7 +87,7 @@ SCENARIO("The simulator selects the address-based victim finder in replacement p
   {
     do_nothing_MRC mock_ll;
     to_rq_MRP mock_ul;
-    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l1d()}
+    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l1d()}
       .add_parameter("mshr_size", static_cast<uint32_t>(8))
       .add_parameter("num_sets", static_cast<uint32_t>(1))
       .add_parameter("num_ways", static_cast<uint32_t>(1))
@@ -164,7 +164,7 @@ SCENARIO("The simulator selects the address-based update function in replacement
     constexpr uint64_t fill_latency = 2;
     do_nothing_MRC mock_ll;
     to_rq_MRP mock_ul;
-    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l2c()}
+    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l2c()}
       .add_parameter("mshr_size", static_cast<uint32_t>(8))
       .add_parameter("num_sets", static_cast<uint32_t>(1))
       .add_parameter("num_ways", static_cast<uint32_t>(1))
@@ -229,7 +229,7 @@ SCENARIO("The simulator selects the cache fill function if it is available")
     constexpr uint64_t fill_latency = 10;
     do_nothing_MRC mock_ll;
     to_rq_MRP mock_ul;
-    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l2c()}
+    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l2c()}
       .add_parameter("mshr_size", static_cast<uint32_t>(8))
       .add_parameter("num_sets", static_cast<uint32_t>(1))
       .add_parameter("num_ways", static_cast<uint32_t>(1))

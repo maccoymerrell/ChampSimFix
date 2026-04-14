@@ -26,7 +26,7 @@ TEST_CASE("SHIP sampler matches at cache block granularity")
    */
   do_nothing_MRC mock_ll;
   to_rq_MRP mock_ul;
-  CACHE cache{champsim::modules::ModuleBuilder{"445-ship-tag-test", "DEFAULT_CACHE", champsim::defaults::default_l1d()}
+  CACHE cache{champsim::modules::ModuleBuilder{"445-ship-tag-test", "default_cache", champsim::defaults::default_l1d()}
     .add_parameter("mshr_size", static_cast<uint32_t>(8))
     .add_parameter("num_sets", static_cast<uint32_t>(8))
     .add_parameter("num_ways", static_cast<uint32_t>(8))

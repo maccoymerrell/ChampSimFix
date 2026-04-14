@@ -194,6 +194,7 @@ class MEMORY_CONTROLLER : public champsim::modules::memory_controller_module
   using response_type = typename channel_type::response_type;
   std::vector<channel_type*> queues;
   const champsim::data::bytes channel_width;
+  const unsigned block_size_;
 
   void initiate_requests();
   bool add_rq(const request_type& packet, champsim::modules::channel_module* ul);

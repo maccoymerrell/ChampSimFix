@@ -30,7 +30,8 @@
 MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::modules::ModuleBuilder builder)
     : champsim::modules::memory_controller_module(builder.get_parameter<champsim::chrono::picoseconds>("mc_period")), queues(std::move(builder.get_parameter<std::vector<channel_type*>>("ul_channels"))),
       channel_width(builder.get_parameter<champsim::data::bytes>("channel_width")),
-      address_mapping(channel_width, BLOCK_SIZE / channel_width.count(), builder.get_parameter<std::size_t>("channels"), builder.get_parameter<std::size_t>("bankgroups"),
+      block_size_(builder.get_parameter<unsigned>("block_size", true, 64u)),
+      address_mapping(channel_width, block_size_ / channel_width.count(), builder.get_parameter<std::size_t>("channels"), builder.get_parameter<std::size_t>("bankgroups"),
                       builder.get_parameter<std::size_t>("banks"), builder.get_parameter<std::size_t>("columns"), builder.get_parameter<std::size_t>("ranks"),
                       builder.get_parameter<std::size_t>("rows")), data_bus_period(builder.get_parameter<champsim::chrono::picoseconds>("dbus_period"))
 {
@@ -68,8 +69,8 @@ DRAM_ADDRESS_MAPPING::DRAM_ADDRESS_MAPPING(champsim::data::bytes channel_width_,
 {
   // assert prefetch size is not zero
   assert(prefetch_size != 0);
-  // assert prefetch size is multiple of block size
-  assert((channel_width_.count() * prefetch_size) % BLOCK_SIZE == 0);
+  // assert total burst size is well-formed (product of channel_width * prefetch_size is power of 2)
+  assert(champsim::is_power_of_2(channel_width_.count() * prefetch_size));
 
   // mapping sanity check
   assert(columns() >= 1 && columns() == columns_);
@@ -655,4 +656,4 @@ champsim::modules::memory_controller_module::stats_type MEMORY_CONTROLLER::get_r
   }
 }
 
-champsim::modules::memory_controller_module::register_module<MEMORY_CONTROLLER> register_memory_controller_module("DEFAULT_MEMORY_CONTROLLER");
+champsim::modules::memory_controller_module::register_module<MEMORY_CONTROLLER> register_memory_controller_module("default_memory_controller");

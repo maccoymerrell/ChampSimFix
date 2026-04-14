@@ -25,7 +25,7 @@
 #include "instruction.h"
 #include "util/to_underlying.h" // for to_underlying
 
-champsim::channel::channel() : channel(champsim::modules::ModuleBuilder{"default_channel", "DEFAULT_CHANNEL", champsim::defaults::default_channel()}) {}
+champsim::channel::channel() : channel(champsim::modules::ModuleBuilder{"default_channel", "default_channel", champsim::defaults::default_channel()}) {}
 
 champsim::channel::channel(champsim::modules::ModuleBuilder builder)
     : RQ_SIZE(builder.get_parameter<std::size_t>("rq_size", false, 0)), PQ_SIZE(builder.get_parameter<std::size_t>("pq_size", false, 0)), WQ_SIZE(builder.get_parameter<std::size_t>("wq_size", false, 0)), OFFSET_BITS(builder.get_parameter<champsim::data::bits>("offset_bits", false, champsim::data::bits{0})), match_offset_bits(builder.get_parameter<bool>("match_offset_bits", false, false))
@@ -119,4 +119,4 @@ std::size_t champsim::channel::wq_size() const { return WQ_SIZE; }
 
 std::size_t champsim::channel::pq_size() const { return PQ_SIZE; }
 
-champsim::modules::channel_module::register_module<champsim::channel> default_channel_module("DEFAULT_CHANNEL");
+champsim::modules::channel_module::register_module<champsim::channel> default_channel_module("default_channel");

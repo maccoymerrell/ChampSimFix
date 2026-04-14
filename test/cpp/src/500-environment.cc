@@ -8,10 +8,10 @@
 TEST_CASE("Caches can be built from ModuleBuilder defaults")
 {
   GIVEN("A set of ModuleBuilder defaults for different cache types") {
-    CACHE llc{champsim::modules::ModuleBuilder{"cache0", "DEFAULT_CACHE", champsim::defaults::default_llc().add_parameter("mshr_size", static_cast<uint32_t>(8))}};
-    CACHE dtlb{champsim::modules::ModuleBuilder{"cache1", "DEFAULT_CACHE", champsim::defaults::default_dtlb()}};
-    CACHE itlb{champsim::modules::ModuleBuilder{"cache2", "DEFAULT_CACHE", champsim::defaults::default_itlb().add_parameter("mshr_size", static_cast<uint32_t>(8))}};
-    CACHE l1d{champsim::modules::ModuleBuilder{"cache3", "DEFAULT_CACHE", champsim::defaults::default_l1d().add_parameter("mshr_size", static_cast<uint32_t>(8))}};
+    CACHE llc{champsim::modules::ModuleBuilder{"cache0", "default_cache", champsim::defaults::default_llc().add_parameter("mshr_size", static_cast<uint32_t>(8))}};
+    CACHE dtlb{champsim::modules::ModuleBuilder{"cache1", "default_cache", champsim::defaults::default_dtlb()}};
+    CACHE itlb{champsim::modules::ModuleBuilder{"cache2", "default_cache", champsim::defaults::default_itlb().add_parameter("mshr_size", static_cast<uint32_t>(8))}};
+    CACHE l1d{champsim::modules::ModuleBuilder{"cache3", "default_cache", champsim::defaults::default_l1d().add_parameter("mshr_size", static_cast<uint32_t>(8))}};
 
     std::vector<CACHE*> caches{&llc, &dtlb, &itlb, &l1d};
     std::vector<std::string> expected_names{"cache0", "cache1", "cache2", "cache3"};

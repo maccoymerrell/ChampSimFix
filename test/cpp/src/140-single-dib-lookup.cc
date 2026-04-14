@@ -11,7 +11,7 @@ SCENARIO("A late-added instruction does not miss the IFB")
   {
     release_MRC mock_L1I;
     do_nothing_MRC mock_L1D;
-    O3_CPU uut{champsim::modules::ModuleBuilder{"uut_core", "DEFAULT_CORE", champsim::defaults::default_core()}
+    O3_CPU uut{champsim::modules::ModuleBuilder{"uut_core", "default_core", champsim::defaults::default_core()}
                    .add_parameter("dib_window", static_cast<std::size_t>(4))
                    .add_parameter("ifetch_buffer_size", static_cast<uint32_t>(2))
                    .add_parameter("l1i_bandwidth", champsim::bandwidth::maximum_type{10})

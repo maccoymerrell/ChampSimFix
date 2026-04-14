@@ -26,8 +26,9 @@ test_main_name  := test/bin/000-test-main
 ### Source discovery
 src_sources    := $(wildcard src/*.cc)
 module_sources := $(shell find branch btb prefetcher replacement -name "*.cc" 2>/dev/null)
+generic_module_sources := $(shell find modules -name "*.cc" 2>/dev/null)
 external_module_sources := $(shell for d in $(EXTERNAL_MODULE_DIR); do find "$$d"/branch "$$d"/btb "$$d"/prefetcher "$$d"/replacement -name "*.cc" 2>/dev/null; done)
-module_source_dirs := $(sort $(dir $(module_sources) $(external_module_sources)))
+module_source_dirs := $(sort $(dir $(module_sources) $(generic_module_sources) $(external_module_sources)))
 test_sources   := $(wildcard test/cpp/src/*.cc)
 
 # External module object/dependency mapping (path-safe names)
@@ -38,8 +39,9 @@ external_module_objs := $(foreach s,$(external_module_sources),$(call ext_obj_na
 ### Object files (mirror source tree under OBJ_ROOT)
 src_objs    := $(patsubst %.cc,$(OBJ_ROOT)/%.o,$(src_sources))
 module_objs := $(patsubst %.cc,$(OBJ_ROOT)/%.o,$(module_sources))
+generic_module_objs := $(patsubst %.cc,$(OBJ_ROOT)/%.o,$(generic_module_sources))
 test_objs   := $(patsubst test/cpp/src/%.cc,$(OBJ_ROOT)/test/%.o,$(test_sources))
-all_objs    := $(src_objs) $(module_objs) $(external_module_objs) $(test_objs)
+all_objs    := $(src_objs) $(module_objs) $(generic_module_objs) $(external_module_objs) $(test_objs)
 
 ### Options files
 absolute.options:
@@ -105,6 +107,11 @@ $(OBJ_ROOT)/replacement/%.o: replacement/%.cc $(module_options) | $$(dir $$@)
 $(DEP_ROOT)/replacement/%.d: replacement/%.cc $(module_options) | $$(dir $$@)
 	$(dep_recipe)
 
+$(OBJ_ROOT)/modules/%.o: modules/%.cc $(module_options) | $$(dir $$@)
+	$(obj_recipe)
+$(DEP_ROOT)/modules/%.d: modules/%.cc $(module_options) | $$(dir $$@)
+	$(dep_recipe)
+
 ### Compilation rules - tests
 $(OBJ_ROOT)/test/%.o: test/cpp/src/%.cc $(base_options) | $$(dir $$@)
 	$(obj_recipe)
@@ -112,7 +119,7 @@ $(DEP_ROOT)/test/%.d: test/cpp/src/%.cc $(base_options) | $$(dir $$@)
 	$(dep_recipe)
 
 ### Linking
-$(executable_name): $(src_objs) $(module_objs) | $(BIN_ROOT)/
+$(executable_name): $(src_objs) $(module_objs) $(generic_module_objs) | $(BIN_ROOT)/
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LOADLIBES) $(LDLIBS)
 
 $(executable_name): $(external_module_objs)
@@ -120,7 +127,7 @@ $(executable_name): $(external_module_objs)
 # Tests exclude main.o (000-test-main.cc provides its own main and globals)
 $(test_main_name): override CXXFLAGS += -g3 -Og
 $(test_main_name): override LDLIBS += -lCatch2Main -lCatch2
-$(test_main_name): $(filter-out $(OBJ_ROOT)/src/main.o,$(src_objs)) $(test_objs) $(module_objs) | test/bin/
+$(test_main_name): $(filter-out $(OBJ_ROOT)/src/main.o,$(src_objs)) $(test_objs) $(module_objs) $(generic_module_objs) | test/bin/
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LOADLIBES) $(LDLIBS)
 
 $(test_main_name): $(external_module_objs)
@@ -133,7 +140,7 @@ test: $(test_main_name)
 	$(test_main_name) $(selected_test)
 
 ### Clean
-clean: compile_commands_clean
+clean:
 	@-find $(OBJ_ROOT) $(DEP_ROOT) -type f \( -name "*.o" -o -name "*.d" \) -delete 2>/dev/null
 	@-$(RM) $(executable_name) $(test_main_name)
 
@@ -147,7 +154,7 @@ compile_commands: absolute.options
 		--build-id "$(build_id)" \
 		--root-dir "$(ROOT_DIR)" \
 		--src "$(src_sources)" \
-		--modules $(module_sources) $(external_module_sources) \
+		--modules $(module_sources) $(generic_module_sources) $(external_module_sources) \
 		--tests "$(test_sources)"
 
 ### Auto-dependencies

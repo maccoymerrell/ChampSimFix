@@ -26,6 +26,7 @@
 #include <cassert>
 #include <any>
 #include <optional>
+#include <tuple>
 
 #include "access_type.h"
 #include "address.h"
@@ -42,6 +43,7 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include "util/type_traits.h"
+#include "phase_info.h"
 
 //class CACHE;
 //class O3_CPU;
@@ -180,6 +182,7 @@ struct ModuleBuilder {
 
   bool is_valid() const {return model != "" && module_name != "";}
 
+  bool has_parameter(const std::string& name) const { return parameters.find(name) != parameters.end(); }
   // Internal check: parent has been set to a typed pointer (not the default std::nullptr_t)
   bool has_parent() const {return parent.has_value() && parent.type() != typeid(std::nullptr_t);}
 
@@ -239,6 +242,9 @@ struct ModuleBuilder {
   }
 };
 
+// Forward declaration for mixin used in interface_info
+struct source_consumer;
+
 // Registry for module interfaces: maps interface name strings to factory functions.
 // This allows runtime lookup of which module_base specialization to use for creation.
 class interface_registry {
@@ -248,8 +254,13 @@ public:
     std::function<std::any(const std::vector<std::any>&)> make_vector;
     // Returns operable* from a typed any, or nullptr if the interface is not operable
     std::function<champsim::operable*(const std::any&)> to_operable;
+    // Returns source_consumer* from a typed any, or nullptr if the interface doesn't inherit source_consumer
+    std::function<source_consumer*(const std::any&)> to_source_consumer;
     // Creates a typed null pointer wrapped in std::any
     std::function<std::any()> make_null_pointer;
+    // Stats collection: call give_stats/give_stats_json on each module instance
+    std::function<std::vector<std::string>(const std::vector<std::any>&, bool)> collect_text;
+    std::function<std::vector<std::pair<std::string, std::any>>(const std::vector<std::any>&, bool)> collect_json;
   };
 
 private:
@@ -296,6 +307,13 @@ public:
     return it->second.to_operable;
   }
 
+  // Get the to_source_consumer converter for an interface, or nullptr if not a source_consumer
+  static std::function<source_consumer*(const std::any&)> get_to_source_consumer(const std::string& interface_name) {
+    auto it = registry().find(interface_name);
+    if (it == registry().end()) return nullptr;
+    return it->second.to_source_consumer;
+  }
+
   // Create a typed null pointer for the given interface
   static std::any make_null_pointer(const std::string& interface_name) {
     auto it = registry().find(interface_name);
@@ -304,6 +322,37 @@ public:
       exit(-1);
     }
     return it->second.make_null_pointer();
+  }
+
+  // Get all registered interface names
+  static std::vector<std::string> get_interface_names() {
+    std::vector<std::string> names;
+    for (const auto& [name, _] : registry()) {
+      names.push_back(name);
+    }
+    return names;
+  }
+
+  // Check whether an interface has stats
+  static bool has_stats(const std::string& interface_name) {
+    auto it = registry().find(interface_name);
+    return it != registry().end() && it->second.collect_text;
+  }
+
+  // Collect plaintext stat lines from all instances of an interface
+  static std::vector<std::string> collect_text(
+      const std::string& iface, const std::vector<std::any>& instances, bool is_roi) {
+    auto it = registry().find(iface);
+    if (it == registry().end() || !it->second.collect_text) return {};
+    return it->second.collect_text(instances, is_roi);
+  }
+
+  // Collect JSON stats from all instances: returns [(module_name, json_any)]
+  static std::vector<std::pair<std::string, std::any>> collect_json(
+      const std::string& iface, const std::vector<std::any>& instances, bool is_roi) {
+    auto it = registry().find(iface);
+    if (it == registry().end() || !it->second.collect_json) return {};
+    return it->second.collect_json(instances, is_roi);
   }
 };
 
@@ -395,6 +444,12 @@ struct module_base {
         }
     }
 
+    // Module stats: override to provide plaintext and JSON stats.
+    virtual std::vector<std::string> give_stats(bool /*is_roi*/) const { return {}; }
+    virtual std::any give_stats_json(bool /*is_roi*/) const { return {}; }
+
+    virtual ~module_base() = default;
+
     //register a derived type D of base type B and constructor with arguments Params with the module system
     //this is necessary to be able to create instances
     template<typename D> 
@@ -426,8 +481,38 @@ struct module_base {
             return static_cast<champsim::operable*>(std::any_cast<B*>(a));
           };
         }
+        if constexpr (std::is_base_of_v<source_consumer, B>) {
+          info.to_source_consumer = [](const std::any& a) -> source_consumer* {
+            return static_cast<source_consumer*>(std::any_cast<B*>(a));
+          };
+        }
         info.make_null_pointer = []() -> std::any {
           return static_cast<B*>(nullptr);
+        };
+        // Stats: call give_stats / give_stats_json on each module
+        info.collect_text = [](const std::vector<std::any>& instances, bool is_roi) -> std::vector<std::string> {
+          std::vector<std::string> lines;
+          for (const auto& inst : instances) {
+            B* ptr = std::any_cast<B*>(inst);
+            if (ptr) {
+              auto l = ptr->give_stats(is_roi);
+              lines.insert(lines.end(), l.begin(), l.end());
+            }
+          }
+          return lines;
+        };
+        info.collect_json = [](const std::vector<std::any>& instances, bool is_roi) -> std::vector<std::pair<std::string, std::any>> {
+          std::vector<std::pair<std::string, std::any>> result;
+          for (const auto& inst : instances) {
+            B* ptr = std::any_cast<B*>(inst);
+            if (ptr) {
+              auto j = ptr->give_stats_json(is_roi);
+              if (j.has_value()) {
+                result.emplace_back(ptr->NAME, std::move(j));
+              }
+            }
+          }
+          return result;
         };
         interface_registry::register_interface(interface_name, std::move(info));
       }
@@ -435,7 +520,29 @@ struct module_base {
 
 };
 
-  struct core_module: public module_base<core_module,environment_module>, public operable {
+  // Mixin for any module that consumes workload sources.
+  // Inherit from this to attach workload_source submodules.
+  struct source_consumer {
+    virtual ~source_consumer() = default;
+
+    // True when all attached workload sources are exhausted.
+    virtual bool source_eof() const { return true; }
+
+    // Entity index for phase tracking (-1 = not tracked as a phase entity).
+    virtual int entity_index() const { return -1; }
+
+    // Progress metric for phase completion (e.g. instructions retired).
+    // Return 0 to indicate no progress tracking (complete only on EOF).
+    virtual uint64_t sim_progress() const { return 0; }
+
+    // Called when this consumer's entity finishes a phase. Return empty to suppress.
+    virtual std::string entity_finish_message(const std::string& phase_name) const { return {}; }
+
+    // Called at the end of a phase for summary output. Return empty to suppress.
+    virtual std::string phase_complete_message(const std::string& phase_name) const { return {}; }
+  };
+
+  struct core_module: public module_base<core_module,environment_module>, public operable, public source_consumer {
     //interface for core module
     virtual void push_instruction(ooo_model_instr instr) = 0;
     virtual std::size_t instructions_requested() = 0;
@@ -450,6 +557,17 @@ struct module_base {
     virtual stats_type get_sim_stats() const = 0;
     virtual stats_type get_roi_stats() const = 0;
 
+    static std::vector<std::string> format_plaintext(const stats_type& stats);
+    static std::any make_json(const stats_type& stats);
+    std::vector<std::string> give_stats(bool is_roi) const override;
+    std::any give_stats_json(bool is_roi) const override;
+
+    // source_consumer hooks: core_module provides CPU-specific messages
+    int entity_index() const override;
+    uint64_t sim_progress() const override;
+    std::string entity_finish_message(const std::string& phase_name) const override;
+    std::string phase_complete_message(const std::string& phase_name) const override;
+
     virtual void quiet(bool enable) = 0;
   };
 
@@ -462,6 +580,11 @@ struct module_base {
     virtual champsim::bandwidth::maximum_type get_max_tag_bandwidth() const = 0;
     virtual stats_type get_sim_stats() const = 0;
     virtual stats_type get_roi_stats() const = 0;
+
+    static std::vector<std::string> format_plaintext(const stats_type& stats);
+    static std::any make_json(const stats_type& stats);
+    std::vector<std::string> give_stats(bool is_roi) const override;
+    std::any give_stats_json(bool is_roi) const override;
 
     virtual bool is_virtual_prefetch() const = 0;
     virtual bool prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t prefetch_metadata) = 0;
@@ -500,6 +623,11 @@ struct module_base {
     virtual std::size_t get_num_channels() const = 0;
     virtual stats_type get_sim_stats(std::size_t channel_no) const = 0;
     virtual stats_type get_roi_stats(std::size_t channel_no) const = 0;
+
+    static std::vector<std::string> format_plaintext(const stats_type& stats);
+    static std::any make_json(const stats_type& stats);
+    std::vector<std::string> give_stats(bool is_roi) const override;
+    std::any give_stats_json(bool is_roi) const override;
 
     virtual champsim::data::bytes size() const = 0;
   }; 
@@ -711,6 +839,56 @@ struct module_base {
     virtual std::pair<uint64_t, bool> btb_prediction([[maybe_unused]] uint64_t ip) {return std::pair<uint64_t, bool>{};}
   };
 
+  // Workload source interface - provides instructions to a source_consumer.
+  // Attach as a submodule of any module that inherits source_consumer
+  // (e.g. core_module). The default implementation (TRACE_WORKLOAD_SOURCE)
+  // wraps a tracereader. Override for execution-driven simulation or synthetic
+  // workloads.
+  struct workload_source : public module_base<workload_source, source_consumer> {
+    virtual ~workload_source() = default;
+
+    // Provide the next instruction. Called by the core when it has input queue space.
+    virtual ooo_model_instr next_instruction() = 0;
+
+    // True when the source has no more instructions to provide.
+    [[nodiscard]] virtual bool eof() const = 0;
+
+    // Execution-driven feedback hooks (no-ops by default).
+    // Called by the core at the appropriate pipeline stage.
+    virtual void retire_instruction([[maybe_unused]] const ooo_model_instr& instr) {}
+    virtual void squash_instruction([[maybe_unused]] const ooo_model_instr& instr) {}
+    virtual void branch_mispredict([[maybe_unused]] const ooo_model_instr& instr) {}
+  };
+
+  // Phase controller interface - manages phase completion and health monitoring
+  struct phase_controller : public module_base<phase_controller, environment_module> {
+    virtual ~phase_controller() = default;
+
+    enum class status { CONTINUE, COMPLETE, ABORT };
+
+    // Called at the start of a phase
+    virtual void begin_phase(const std::string& name, bool is_warmup, uint64_t length) = 0;
+
+    // Called each cycle after all operables have operated.
+    // progress: number of operations that made progress this cycle.
+    // Returns CONTINUE, COMPLETE, or ABORT.
+    virtual status advance(long progress) = 0;
+
+    // Get indices of entities that newly completed since last advance()
+    virtual std::vector<unsigned> newly_completed_entities() const = 0;
+
+    // Notify the controller that a trace reached EOF
+    virtual void notify_trace_eof() = 0;
+
+    // Called at end of phase for cleanup
+    virtual void end_phase() = 0;
+
+    // Returns the list of phases this controller wants to run.
+    // If empty, the caller (main.cc / champsim::main) defines the phases.
+    // Implement this to take full ownership of the run structure from config.
+    virtual std::vector<champsim::phase_info> get_phases() const { return {}; }
+  };
+
   // Environment module interface - the top-level module that owns/constructs the entire simulation
 
   struct environment_module : public module_base<environment_module, environment_module> {
@@ -727,9 +905,13 @@ struct module_base {
       return result;
     }
 
-    virtual std::size_t get_num_cpus() const { return 0; }
+    // Return the number of modules implementing the given interface.
+    // Example: get_num("core") returns the number of cores.
+    virtual std::size_t get_num(const std::string& interface_name) const { return view(interface_name).size(); }
     virtual unsigned get_block_size() const { return 64; }
     virtual unsigned get_page_size() const { return 4096; }
+    virtual unsigned get_log2_block_size() const { return 6; }
+    virtual unsigned get_log2_page_size() const { return 12; }
     virtual int get_deadlock_cycles() const { return 500; }
 
     // New: allow snooping of ModuleBuilder parameters by module name

@@ -11,8 +11,8 @@ SCENARIO("The virtual memory remove PA asked by PTE")
     auto page_number = GENERATE(as<champsim::page_number>{}, 0xdeadbeef, 0x12345678, 0xabcdef01, 0x55555555, 0xaaaaaaaa);
     GIVEN("A large virtual memory") {
       constexpr unsigned levels = 5;
-      MEMORY_CONTROLLER dram{champsim::modules::ModuleBuilder{"dram", "DEFAULT_MEMORY_CONTROLLER", champsim::defaults::default_memory_controller()}};
-      VirtualMemory uut{champsim::modules::ModuleBuilder{"uut", "DEFAULT_VMEM", champsim::defaults::default_vmem()}
+      MEMORY_CONTROLLER dram{champsim::modules::ModuleBuilder{"dram", "default_memory_controller", champsim::defaults::default_memory_controller()}};
+      VirtualMemory uut{champsim::modules::ModuleBuilder{"uut", "default_vmem", champsim::defaults::default_vmem()}
           .add_parameter("dram", static_cast<champsim::modules::memory_controller_module*>(&dram))
           .add_parameter("page_table_levels", static_cast<std::size_t>(levels))};
 

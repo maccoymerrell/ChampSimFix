@@ -15,7 +15,7 @@ TEMPLATE_TEST_CASE("Translation misses do not inhibit other packets from being i
     TestType mock_ul{[](auto x, auto y) {
       return x.v_address == y.v_address;
     }};
-    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "DEFAULT_CACHE", champsim::defaults::default_l1d()}
+    CACHE uut{champsim::modules::ModuleBuilder{"uut_cache", "default_cache", champsim::defaults::default_l1d()}
                   .add_parameter("mshr_size", static_cast<uint32_t>(8))
                   .add_parameter("upper_levels", std::vector<champsim::modules::channel_module*>{&mock_ul.queues})
                   .add_parameter("lower_level", static_cast<champsim::modules::channel_module*>(&mock_ll.queues))

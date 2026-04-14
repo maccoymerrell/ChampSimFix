@@ -102,7 +102,7 @@ SCENARIO("The memory controller refreshes each bank at the proper rate")
 {
   GIVEN("A random request stream to the memory controller")
   {
-    champsim::channel channel_uut{champsim::modules::ModuleBuilder{"channel_uut", "DEFAULT_CHANNEL", champsim::defaults::default_channel()}.add_parameter("rq_size", static_cast<std::size_t>(32)).add_parameter("pq_size", static_cast<std::size_t>(32)).add_parameter("wq_size", static_cast<std::size_t>(32)).add_parameter("offset_bits", champsim::data::bits{8})};
+    champsim::channel channel_uut{champsim::modules::ModuleBuilder{"channel_uut", "default_channel", champsim::defaults::default_channel()}.add_parameter("rq_size", static_cast<std::size_t>(32)).add_parameter("pq_size", static_cast<std::size_t>(32)).add_parameter("wq_size", static_cast<std::size_t>(32)).add_parameter("offset_bits", champsim::data::bits{8})};
     const std::size_t DRAM_CHANNELS = 1;
     const std::size_t DRAM_BANKS = 4;
     const std::size_t DRAM_BANKGROUPS = 8;
@@ -115,7 +115,7 @@ SCENARIO("The memory controller refreshes each bank at the proper rate")
     auto REFRESHES_PER_PERIOD = GENERATE(as<std::size_t>{}, 8192, 16384);
     const champsim::chrono::picoseconds tREF{refresh_period / REFRESHES_PER_PERIOD};
 
-    MEMORY_CONTROLLER uut{champsim::modules::ModuleBuilder{"uut", "DEFAULT_MEMORY_CONTROLLER", champsim::defaults::default_memory_controller()}
+    MEMORY_CONTROLLER uut{champsim::modules::ModuleBuilder{"uut", "default_memory_controller", champsim::defaults::default_memory_controller()}
                               .add_parameter("dbus_period", champsim::chrono::picoseconds{312})
                               .add_parameter("mc_period", champsim::chrono::picoseconds{624})
                               .add_parameter("n_rp", static_cast<std::size_t>(24))

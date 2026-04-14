@@ -47,6 +47,7 @@ long O3_CPU::operate()
 
   progress += fetch_instruction(); // fetch
   progress += check_dib();
+  fill_from_sources();
   initialize_instruction();
 
   return progress;
@@ -724,6 +725,21 @@ long O3_CPU::retire_rob()
   return retire_count;
 }
 
+void O3_CPU::fill_from_sources()
+{
+  for (auto* src : workload_source_pimpl) {
+    for (auto space = instructions_requested(); !src->eof() && space > 0; --space) {
+      push_instruction(src->next_instruction());
+    }
+  }
+}
+
+bool O3_CPU::source_eof() const
+{
+  return std::all_of(workload_source_pimpl.begin(), workload_source_pimpl.end(),
+                     [](const auto* src) { return src->eof(); });
+}
+
 void O3_CPU::impl_initialize_branch_predictor() const { std::for_each(branch_module_pimpl.begin(),branch_module_pimpl.end(),[](const auto bp){bp->initialize_branch_predictor();});}
 
 void O3_CPU::impl_last_branch_result(champsim::address ip, champsim::address target, bool taken, uint8_t branch_type) const
@@ -846,4 +862,4 @@ bool CacheBus::issue_write(request_type data_packet)
   return lower_level->add_wq(data_packet);
 }
 
-champsim::modules::core_module::register_module<O3_CPU> default_cpu_module("DEFAULT_CORE");
+champsim::modules::core_module::register_module<O3_CPU> default_cpu_module("default_core");

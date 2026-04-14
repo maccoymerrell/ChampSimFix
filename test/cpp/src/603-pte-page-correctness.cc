@@ -11,13 +11,13 @@ SCENARIO("The page table steps have correct offsets") {
   auto level = GENERATE(as<unsigned>{}, 1,2,3,4);
   GIVEN("A 5-level virtual memory") {
     constexpr std::size_t levels = 5;
-    MEMORY_CONTROLLER dram{champsim::modules::ModuleBuilder{"dram", "DEFAULT_MEMORY_CONTROLLER", champsim::defaults::default_memory_controller()}};
-    VirtualMemory vmem{champsim::modules::ModuleBuilder{"vmem", "DEFAULT_VMEM", champsim::defaults::default_vmem()}
+    MEMORY_CONTROLLER dram{champsim::modules::ModuleBuilder{"dram", "default_memory_controller", champsim::defaults::default_memory_controller()}};
+    VirtualMemory vmem{champsim::modules::ModuleBuilder{"vmem", "default_vmem", champsim::defaults::default_vmem()}
         .add_parameter("dram", static_cast<champsim::modules::memory_controller_module*>(&dram))
         .add_parameter("page_table_levels", levels)};
     do_nothing_MRC mock_ll;
     to_rq_MRP mock_ul;
-    PageTableWalker uut{champsim::modules::ModuleBuilder{"uut_ptw", "DEFAULT_PTW", champsim::defaults::default_ptw()}
+    PageTableWalker uut{champsim::modules::ModuleBuilder{"uut_ptw", "default_ptw", champsim::defaults::default_ptw()}
       .add_parameter("clock_period", champsim::chrono::picoseconds{3200})
       //.rq_size(16)
       //.add_parameter("max_tag_check", 2)

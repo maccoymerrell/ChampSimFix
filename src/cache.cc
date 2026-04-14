@@ -890,4 +890,4 @@ void CACHE::print_deadlock()
 }
 // LCOV_EXCL_STOP
 
-champsim::modules::cache_module::register_module<CACHE> default_cache_module("DEFAULT_CACHE");
+champsim::modules::cache_module::register_module<CACHE> default_cache_module("default_cache");

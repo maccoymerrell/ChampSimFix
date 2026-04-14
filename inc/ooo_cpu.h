@@ -193,6 +193,10 @@ public:
 
   std::vector<champsim::modules::branch_predictor*> branch_module_pimpl;
   std::vector<champsim::modules::btb*> btb_module_pimpl;
+  std::vector<champsim::modules::workload_source*> workload_source_pimpl;
+
+  void fill_from_sources();
+  bool source_eof() const final;
 
   // NOLINTBEGIN(readability-make-member-function-const): legacy modules use non-const hooks
   void impl_initialize_branch_predictor() const;
@@ -226,6 +230,10 @@ public:
     // Construct BTB submodules
     for (const auto& sub : builder.get_submodules("btb"))
       btb_module_pimpl.push_back(champsim::modules::btb::create_instance(sub, static_cast<champsim::modules::core_module*>(this)));
+
+    // Construct workload source submodules
+    for (const auto& sub : builder.get_submodules("workload_source"))
+      workload_source_pimpl.push_back(champsim::modules::workload_source::create_instance(sub, static_cast<champsim::modules::source_consumer*>(this)));
   }
 };
 

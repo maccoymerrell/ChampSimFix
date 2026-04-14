@@ -26,11 +26,11 @@
 #include "util/bit_enum.h"
 #include "util/ratio.h"
 
-extern std::size_t NUM_CPUS;
-extern unsigned BLOCK_SIZE;
-extern unsigned PAGE_SIZE;
-extern unsigned LOG2_BLOCK_SIZE;
-extern unsigned LOG2_PAGE_SIZE;
+[[deprecated("use environment_module::get_num(\"core\")")]] extern std::size_t NUM_CPUS;
+[[deprecated("use builder parameter 'block_size'")]]       extern unsigned BLOCK_SIZE;
+[[deprecated("use builder parameter 'page_size'")]]        extern unsigned PAGE_SIZE;
+[[deprecated("use builder parameter 'log2_block_size'")]]  extern unsigned LOG2_BLOCK_SIZE;
+[[deprecated("use builder parameter 'log2_page_size'")]]   extern unsigned LOG2_PAGE_SIZE;
 
 namespace champsim
 {
