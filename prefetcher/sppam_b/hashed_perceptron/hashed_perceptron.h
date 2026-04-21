@@ -15,10 +15,10 @@ namespace sppam_bp {
 struct hashed_perceptron : branch_predictor 
 {
   using bits = champsim::data::bits;                 // saves some typing
-  constexpr static std::size_t NTABLES = 16;         // this many tables
-  constexpr static std::size_t MAXHIST{232};                // maximum history length
+  constexpr static std::size_t NTABLES = 16;         // this many tables (max)
+  constexpr static std::size_t MAXHIST{256};                // maximum history length
   constexpr static std::size_t MINHIST{3};                  // minimum history length (for table 1; table 0 is biases)
-  constexpr static std::size_t TABLE_SIZE = 1 << 12; // 12-bit indices for the tables
+  constexpr static std::size_t TABLE_SIZE = 1 << 16; // 16-bit indices for the tables (max)
   constexpr static std::size_t TABLE_INDEX_BITS{champsim::msl::lg2(TABLE_SIZE)};
   constexpr static int THRESHOLD = 1;
 
@@ -29,6 +29,12 @@ struct hashed_perceptron : branch_predictor
       0,   MINHIST,  4,  6,  8,  10,  14,  19,
       26, 36,      49, 67, 91,   125,   170, MAXHIST}; // geometric global history lengths
 
+  // Runtime-configurable parameters (defaults = compile-time constants)
+  std::size_t rt_num_tables = NTABLES;
+  std::size_t rt_table_size = TABLE_SIZE;
+  std::size_t rt_table_index_bits = TABLE_INDEX_BITS;
+  std::array<std::size_t, NTABLES> rt_history_lengths = history_lengths;
+
   // tables of 8-bit weights
   std::array<std::array<champsim::msl::sfwcounter<8>, TABLE_SIZE>, NTABLES> tables{};
 
@@ -36,8 +42,8 @@ struct hashed_perceptron : branch_predictor
   int tc = 0; // counter for threshold setting algorithm
 
   struct perceptron_result {
-    std::array<uint64_t, std::tuple_size_v<decltype(history_lengths)>> indices = {}; // remember the indices into the tables from prediction to update
-    int yout = 0;                                                                    // perceptron sum
+    std::array<uint64_t, NTABLES> indices = {}; // remember the indices into the tables from prediction to update
+    int yout = 0;                               // perceptron sum
   };
 
   uint64_t predict_taken = 0;
@@ -45,16 +51,16 @@ struct hashed_perceptron : branch_predictor
   uint64_t outcome_taken = 0;
   uint64_t outcome_nottaken = 0;
 
-  template<std::size_t... Is>
-  perceptron_result get_perceptron_result_impl(champsim::address pc, std::bitset<BP_GLOBAL_BITS> global_hist, std::bitset<BP_LOCAL_BITS> local_hist, std::index_sequence<Is...>);
-  perceptron_result get_perceptron_result(champsim::address pc, std::bitset<BP_GLOBAL_BITS> global_hist, std::bitset<BP_LOCAL_BITS> local_hist);
+  perceptron_result get_perceptron_result(champsim::address pc, const dynamic_bitset& global_hist, const dynamic_bitset& local_hist);
+
+  void configure(unsigned int num_tables, unsigned int table_size, unsigned int min_hist, unsigned int max_hist);
 
 public:
   using branch_predictor::branch_predictor;
   virtual void initialize_branch_predictor() {};
 
-  virtual void last_branch_result(champsim::address ip, std::bitset<BP_GLOBAL_BITS> global_hist, std::bitset<BP_LOCAL_BITS> local_hist, bool taken);
-  virtual std::pair<bool,double> predict_branch(champsim::address ip, std::bitset<BP_GLOBAL_BITS> global_hist, std::bitset<BP_LOCAL_BITS> local_hist);
+  virtual void last_branch_result(champsim::address ip, const dynamic_bitset& global_hist, const dynamic_bitset& local_hist, bool taken, bp_context& ctx);
+  virtual std::pair<bool,double> predict_branch(champsim::address ip, const dynamic_bitset& global_hist, const dynamic_bitset& local_hist, const bp_context& ctx);
 
   void print_heartbeat();
   void print_stats();

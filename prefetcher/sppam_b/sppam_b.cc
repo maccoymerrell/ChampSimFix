@@ -20,10 +20,10 @@ void sppam_b::Sppam_b_Module::update_delta_history(std::vector<uint64_t>& delta_
 
 void sppam_b::Sppam_b_Module::update_recency_stack(std::vector<recency_stack_type>& recency_stack_temp, champsim::address addr, champsim::address ip) {
   auto [pn, page_offset] = page_and_offset(addr);
-  auto recency_stack_entry = recency_stack_type{pn};
+  auto recency_stack_entry = recency_stack_type{pn, segment_bits};
   auto region = regions.check_hit(region_type{pn});
   if(region.has_value()) {
-    recency_stack_entry.recent_segments = get_segment_access_window(addr, ip, BP_ALIGNMENT_FACTOR, get_direction(ip));
+    recency_stack_entry.recent_segments = get_segment_access_window(addr, ip, alignment_factor, get_direction(ip));
     recency_stack_entry.direction = get_direction(ip);
     if(global_type == GLOBAL_HISTORY_TYPE::UNIQUE_RECENT_SEGMENT_HISTORY) {
       auto it = std::find(recency_stack_temp.begin(), recency_stack_temp.end(), recency_stack_entry);
@@ -63,20 +63,20 @@ void sppam_b::Sppam_b_Module::update_local_and_global_contexts(champsim::address
   update_recency_stack(recency_stack, addr, ip);
 }
 
-std::bitset<BP_LOCAL_BITS> sppam_b::Sppam_b_Module::get_local_access_window(champsim::address addr, champsim::address ip, int offset, bool direction) {
+dynamic_bitset sppam_b::Sppam_b_Module::get_local_access_window(champsim::address addr, champsim::address ip, int offset, bool direction) {
   //get the regions at, before, and after this address
   auto [pn, page_offset] = page_and_offset(addr);
   auto region = regions.check_hit(region_type{pn});
   auto last_region = regions.check_hit(region_type{pn-1});
   auto next_region = regions.check_hit(region_type{pn+1});
-  std::bitset<BP_LOCAL_BITS> history;
+  dynamic_bitset history(local_bits);
 
   auto bitmap_size = region.has_value() ? region->access_map.size() : (last_region.has_value() ? last_region->access_map.size() : (next_region.has_value() ? next_region->access_map.size() : 0));
   //now grab the area with the given offset
   //direction == true means we take history from behind position,
   //direction == false means we take history from ahead of position
   if(direction == true) {
-    for(int i = 0; i < BP_LOCAL_BITS; i++) {
+    for(unsigned int i = 0; i < local_bits; i++) {
       if(region.has_value() && page_offset.to<uint64_t>() + offset >= i && page_offset.to<uint64_t>() + offset - i < region->access_map.size()) {
         history.set(i,region->access_map.test(page_offset.to<uint64_t>() + offset - i));
       } else if(last_region.has_value() && page_offset.to<int64_t>() + offset - i  + bitmap_size >= 0 && bitmap_size + page_offset.to<int64_t>() + offset - i < last_region->access_map.size()) {
@@ -89,7 +89,7 @@ std::bitset<BP_LOCAL_BITS> sppam_b::Sppam_b_Module::get_local_access_window(cham
     }
   } else {
     //get history as if we are traversing the opposite way
-    for(int i = 0; i < BP_LOCAL_BITS; i++) {
+    for(unsigned int i = 0; i < local_bits; i++) {
       if(region.has_value() && page_offset.to<uint64_t>() + offset + i < region->access_map.size()) {
         history.set(i,region->access_map.test(page_offset.to<uint64_t>() + offset + i));
       } else if(next_region.has_value() && page_offset.to<int64_t>() + offset + i  - bitmap_size >= 0 && page_offset.to<int64_t>() + offset + i - bitmap_size < next_region->access_map.size()) {
@@ -104,20 +104,20 @@ std::bitset<BP_LOCAL_BITS> sppam_b::Sppam_b_Module::get_local_access_window(cham
   return history;
 }
 
-std::bitset<BP_SEGMENT_BITS> sppam_b::Sppam_b_Module::get_segment_access_window(champsim::address addr, champsim::address ip, int offset, bool direction) {
+dynamic_bitset sppam_b::Sppam_b_Module::get_segment_access_window(champsim::address addr, champsim::address ip, int offset, bool direction) {
   //get the regions at, before, and after this address
   auto [pn, page_offset] = page_and_offset(addr);
   auto region = regions.check_hit(region_type{pn});
   auto last_region = regions.check_hit(region_type{pn-1});
   auto next_region = regions.check_hit(region_type{pn+1});
-  std::bitset<BP_SEGMENT_BITS> history;
+  dynamic_bitset history(segment_bits);
 
   auto bitmap_size = region.has_value() ? region->access_map.size() : (last_region.has_value() ? last_region->access_map.size() : (next_region.has_value() ? next_region->access_map.size() : 0));
   //now grab the area with the given offset
   //direction == true means we take history from behind position,
   //direction == false means we take history from ahead of position
   if(direction == true) {
-    for(int i = 0; i < BP_SEGMENT_BITS; i++) {
+    for(unsigned int i = 0; i < segment_bits; i++) {
       if(region.has_value() && page_offset.to<uint64_t>() + offset >= i && page_offset.to<uint64_t>() + offset - i < region->access_map.size()) {
         history.set(i,region->access_map.test(page_offset.to<uint64_t>() + offset - i));
       } else if(last_region.has_value() && page_offset.to<int64_t>() + offset - i  + bitmap_size >= 0 && bitmap_size + page_offset.to<int64_t>() + offset - i < last_region->access_map.size()) {
@@ -130,7 +130,7 @@ std::bitset<BP_SEGMENT_BITS> sppam_b::Sppam_b_Module::get_segment_access_window(
     }
   } else {
     //get history as if we are traversing the opposite way
-    for(int i = 0; i < BP_SEGMENT_BITS; i++) {
+    for(unsigned int i = 0; i < segment_bits; i++) {
       if(region.has_value() && page_offset.to<uint64_t>() + offset + i < region->access_map.size()) {
         history.set(i,region->access_map.test(page_offset.to<uint64_t>() + offset + i));
       } else if(next_region.has_value() && page_offset.to<int64_t>() + offset + i  - bitmap_size >= 0 && page_offset.to<int64_t>() + offset + i - bitmap_size < next_region->access_map.size()) {
@@ -145,16 +145,16 @@ std::bitset<BP_SEGMENT_BITS> sppam_b::Sppam_b_Module::get_segment_access_window(
   return history;
 }
 
-std::bitset<BP_GLOBAL_BITS> sppam_b::Sppam_b_Module::get_global_access_window(champsim::address addr, champsim::address ip, int offset, bool direction) {
+dynamic_bitset sppam_b::Sppam_b_Module::get_global_access_window(champsim::address addr, champsim::address ip, int offset, bool direction) {
 
   if(global_type == GLOBAL_HISTORY_TYPE::OFFSET_HISTORY) {
     auto [pn, page_offset] = page_and_offset(addr);
     auto region = regions.check_hit(region_type{pn});
-    std::bitset<BP_GLOBAL_BITS> history;
+    dynamic_bitset history(global_bits);
     if(region.has_value()) {
       auto temp_pn = pn;
       if(direction == true) {
-        for(int i = 0; i < BP_GLOBAL_BITS; i++) {
+        for(unsigned int i = 0; i < global_bits; i++) {
           auto temp_region = regions.check_hit(region_type{temp_pn});
           if(temp_region.has_value()) {
             history.set(i,temp_region->access_map.test(page_offset.to<uint64_t>()));
@@ -164,7 +164,7 @@ std::bitset<BP_GLOBAL_BITS> sppam_b::Sppam_b_Module::get_global_access_window(ch
           temp_pn--;
         }
       } else {
-        for(int i = 0; i < BP_GLOBAL_BITS; i++) {
+        for(unsigned int i = 0; i < global_bits; i++) {
           auto temp_region = regions.check_hit(region_type{temp_pn});
           if(temp_region.has_value()) {
             history.set(i,temp_region->access_map.test(page_offset.to<uint64_t>()));
@@ -181,29 +181,29 @@ std::bitset<BP_GLOBAL_BITS> sppam_b::Sppam_b_Module::get_global_access_window(ch
     auto [pn, page_offset] = page_and_offset(addr);
     auto segment_history = get_segment_access_window(addr, ip, offset, direction);
 
-    std::bitset<BP_GLOBAL_BITS> history;
-    //set the first bp segment bits to this segment history
-    for(int i = 0; i < BP_SEGMENT_BITS; i++) {
+    dynamic_bitset history(global_bits);
+    //set the first segment bits to this segment history
+    for(unsigned int i = 0; i < segment_bits; i++) {
       history.set(i,segment_history.test(i));
     }
     //retrieve the remaining bits from the recency stack(exclude the first entry)
-    for(int i = 1; i < recency_stack.size(); i++) {
+    for(std::size_t i = 1; i < recency_stack.size(); i++) {
       //grab the bitset
-      auto temp_segment = recency_stack.at(i).recent_segments;
+      auto& temp_segment = recency_stack.at(i).recent_segments;
       //set the bits in the global history
-      for(int j = 0; j < BP_SEGMENT_BITS; j++) {
-        if(i*BP_SEGMENT_BITS + j < BP_GLOBAL_BITS)
-          history.set(i*BP_SEGMENT_BITS + j,temp_segment.test(j));
+      for(unsigned int j = 0; j < segment_bits; j++) {
+        if(i*segment_bits + j < global_bits)
+          history.set(i*segment_bits + j,temp_segment.test(j));
       }
     }
     //return this history
     return history;
 
   } else if(global_type == GLOBAL_HISTORY_TYPE::RECENT_XOR_HISTORY) {
-    std::bitset<BP_LOCAL_BITS> local_hist = get_local_access_window(addr, ip, offset, direction);
-    std::bitset<BP_GLOBAL_BITS> history;
+    dynamic_bitset local_hist = get_local_access_window(addr, ip, offset, direction);
+    dynamic_bitset history(global_bits);
     //xor together the local histories of the recent regions in the recency stack
-    for(int i = i; i < recency_stack.size(); i++) {
+    for(std::size_t i = 1; i < recency_stack.size(); i++) {
       auto region = regions.check_hit(region_type{recency_stack.at(i).vpn});
       if(region.has_value()) {
         auto region_addr = champsim::address{champsim::block_number{recency_stack.at(i).vpn} + region->last_block};
@@ -212,7 +212,7 @@ std::bitset<BP_GLOBAL_BITS> sppam_b::Sppam_b_Module::get_global_access_window(ch
       }
     }
     //copy the local history to the global history
-    for(int i = 0; i < BP_LOCAL_BITS; i++) {
+    for(unsigned int i = 0; i < local_bits; i++) {
       history.set(i,local_hist.test(i));
     }
     return history;
@@ -220,20 +220,20 @@ std::bitset<BP_GLOBAL_BITS> sppam_b::Sppam_b_Module::get_global_access_window(ch
   else {
     //default global history is just the local history of the current region
     auto local_hist = get_local_access_window(addr, ip, offset, direction);
-    std::bitset<BP_GLOBAL_BITS> history;
-    for(int i = 0; i < BP_LOCAL_BITS; i++)
+    dynamic_bitset history(global_bits);
+    for(unsigned int i = 0; i < local_bits; i++)
       history.set(i,local_hist.test(i));
     return history;
   }
 }
 
-void sppam_b::Sppam_b_Module::scan_global_history(std::bitset<BP_GLOBAL_BITS>& history, champsim::address addr, champsim::address ip, bool direction) {
-  history = get_global_access_window(addr,ip, BP_ALIGNMENT_FACTOR, direction);
+void sppam_b::Sppam_b_Module::scan_global_history(dynamic_bitset& history, champsim::address addr, champsim::address ip, bool direction) {
+  history = get_global_access_window(addr,ip, alignment_factor, direction);
 }
 
 //get out equivalent to the local history
-void sppam_b::Sppam_b_Module::scan_local_history(std::bitset<BP_LOCAL_BITS>& history, champsim::address addr, champsim::address ip, bool direction) {
-  history = get_local_access_window(addr, ip, BP_ALIGNMENT_FACTOR, direction);
+void sppam_b::Sppam_b_Module::scan_local_history(dynamic_bitset& history, champsim::address addr, champsim::address ip, bool direction) {
+  history = get_local_access_window(addr, ip, alignment_factor, direction);
 }
 
 bool sppam_b::Sppam_b_Module::check_pagemap(champsim::address addr, bool prefetch)
@@ -250,17 +250,68 @@ bool sppam_b::Sppam_b_Module::check_pagemap(champsim::address addr, bool prefetc
 void sppam_b::Sppam_b_Module::initialize(CACHE* cache) {
   intern_ = cache;
 
-  if(bp_type == BP_TYPE::HASHED_PERCEPTRON)
-    predictor = new sppam_bp::hashed_perceptron;
-  else if(bp_type == BP_TYPE::GSHARE)
-    predictor = new sppam_bp::gshare;
+  // Load runtime configuration
+  auto cfg = sppam_b_config::load();
+  global_bits = cfg.global_bits;
+  local_bits = cfg.local_bits;
+  segment_bits = cfg.segment_bits;
+  alignment_factor = cfg.alignment_factor;
 
-  recency_stack = std::vector<recency_stack_type>((BP_GLOBAL_BITS/BP_SEGMENT_BITS) + 1,recency_stack_type{});
+  // Map string config to enums
+  if(cfg.bp_type == "hashed_perceptron") bp_type = BP_TYPE::HASHED_PERCEPTRON;
+  else if(cfg.bp_type == "gshare") bp_type = BP_TYPE::GSHARE;
+  else if(cfg.bp_type == "bimodal") bp_type = BP_TYPE::BIMODAL;
+  else if(cfg.bp_type == "mpp") bp_type = BP_TYPE::MPP;
+  else if(cfg.bp_type == "tage_sc_l") bp_type = BP_TYPE::TAGE_SC_L;
+
+  if(cfg.ip_style == "ip") ip_style = IP_TYPE::IP;
+  else if(cfg.ip_style == "region") ip_style = IP_TYPE::REGION;
+  else if(cfg.ip_style == "page_offset") ip_style = IP_TYPE::PAGE_OFFSET;
+  else if(cfg.ip_style == "sms") ip_style = IP_TYPE::SMS;
+  else if(cfg.ip_style == "sms_sub") ip_style = IP_TYPE::SMS_SUB;
+  else if(cfg.ip_style == "sms_app") ip_style = IP_TYPE::SMS_APP;
+  else if(cfg.ip_style == "sms_back") ip_style = IP_TYPE::SMS_BACK;
+  else if(cfg.ip_style == "delta") ip_style = IP_TYPE::DELTA;
+  else if(cfg.ip_style == "delta_history") ip_style = IP_TYPE::DELTA_HISTORY;
+  else if(cfg.ip_style == "none") ip_style = IP_TYPE::NONE;
+
+  if(cfg.global_type == "offset_history") global_type = GLOBAL_HISTORY_TYPE::OFFSET_HISTORY;
+  else if(cfg.global_type == "unique_recent_segment_history") global_type = GLOBAL_HISTORY_TYPE::UNIQUE_RECENT_SEGMENT_HISTORY;
+  else if(cfg.global_type == "ordered_recent_segment_history") global_type = GLOBAL_HISTORY_TYPE::ORDERED_RECENT_SEGMENT_HISTORY;
+  else if(cfg.global_type == "recent_xor_history") global_type = GLOBAL_HISTORY_TYPE::RECENT_XOR_HISTORY;
+
+  if(bp_type == BP_TYPE::HASHED_PERCEPTRON) {
+    auto* hp = new sppam_bp::hashed_perceptron;
+    hp->configure(cfg.hp_num_tables, cfg.hp_table_size, cfg.hp_min_history, cfg.hp_max_history);
+    predictor = hp;
+  } else if(bp_type == BP_TYPE::GSHARE) {
+    auto* gs = new sppam_bp::gshare;
+    gs->configure(cfg.gshare_table_size, cfg.gshare_history_length);
+    predictor = gs;
+  } else if(bp_type == BP_TYPE::BIMODAL) {
+    auto* bm = new sppam_bp::bimodal;
+    bm->configure(cfg.bimodal_table_size);
+    predictor = bm;
+  } else if(bp_type == BP_TYPE::MPP) {
+    auto* mp = new sppam_bp::mpp;
+    mp->configure(cfg.mpp_num_tables, cfg.mpp_table_size);
+    predictor = mp;
+  } else if(bp_type == BP_TYPE::TAGE_SC_L) {
+    auto* tage = new sppam_bp::tage_sc_l;
+    tage->configure(cfg.tage_logb, cfg.tage_logg, cfg.tage_minhist, cfg.tage_maxhist, cfg.tage_logl);
+    tage->initialize_branch_predictor();
+    predictor = tage;
+  }
+
+  global_history_reg = dynamic_bitset(global_bits);
+  recency_stack = std::vector<recency_stack_type>((global_bits/segment_bits) + 1, recency_stack_type{page{}, segment_bits});
   delta_history = std::vector<uint64_t>(DELTA_HISTORY_LENGTH,0);
   
   uint64_t total_state = get_state_bits();
   champsim::data::bytes total_bytes = champsim::data::bytes{(total_state/8) + 1};
-  fmt::print("[{}] SPPAM_B Initialized. Total State: {}\n",intern_->NAME,champsim::data::kibibytes{total_bytes});
+  fmt::print("[{}] SPPAM_B Initialized. bp_type={} ip_style={} global_type={} global_bits={} local_bits={} segment_bits={} Total State: {}\n",
+    intern_->NAME, cfg.bp_type, cfg.ip_style, cfg.global_type, global_bits, local_bits, segment_bits,
+    champsim::data::kibibytes{total_bytes});
 }
 
 //get our equivalent to ip
@@ -326,13 +377,13 @@ champsim::address sppam_b::Sppam_b_Module::get_bp_ip(champsim::address addr, cha
 }
 
 //get our equivalent to global history
-std::bitset<BP_GLOBAL_BITS> sppam_b::Sppam_b_Module::get_global_history(champsim::address addr, champsim::address ip, bool direction) {
-  return get_global_access_window(addr, ip, BP_ALIGNMENT_FACTOR, direction);
+dynamic_bitset sppam_b::Sppam_b_Module::get_global_history(champsim::address addr, champsim::address ip, bool direction) {
+  return get_global_access_window(addr, ip, alignment_factor, direction);
 }
 
 //get out equivalent to the local history
-std::bitset<BP_LOCAL_BITS> sppam_b::Sppam_b_Module::get_local_history(champsim::address addr, champsim::address ip, bool direction) {
-  return get_local_access_window(addr, ip, BP_ALIGNMENT_FACTOR, direction);
+dynamic_bitset sppam_b::Sppam_b_Module::get_local_history(champsim::address addr, champsim::address ip, bool direction) {
+  return get_local_access_window(addr, ip, alignment_factor, direction);
 }
 
 
@@ -415,7 +466,7 @@ void sppam_b::Sppam_b_Module::remove_from_pagemap(champsim::address addr, bool p
 
   if(demand_region.has_value()) {
     if(prefetch) {
-      demand_region->ll_map.set(page_offset.to<std::size_t>(), false);
+      //demand_region->ll_map.set(page_offset.to<std::size_t>(), false);
       demand_region->prefetch_map.set(page_offset.to<std::size_t>(), false);
     }
     else
@@ -434,9 +485,9 @@ bool sppam_b::Sppam_b_Module::check_llmap(champsim::address addr) {
   return false;
 }
 
-void sppam_b::Sppam_b_Module::update_local_history(std::bitset<BP_LOCAL_BITS>& history, champsim::address addr, bool taken, bool direction) {
+void sppam_b::Sppam_b_Module::update_local_history(dynamic_bitset& history, champsim::address addr, bool taken, bool direction) {
   //get the region access map and update the history based on that
-  auto window = get_local_access_window(addr, champsim::address{}, BP_ALIGNMENT_FACTOR, direction);
+  auto window = get_local_access_window(addr, champsim::address{}, alignment_factor, direction);
 
   //slide the history over
   history <<= 1;
@@ -444,38 +495,38 @@ void sppam_b::Sppam_b_Module::update_local_history(std::bitset<BP_LOCAL_BITS>& h
   history.set(0,window.test(0));
   
   //set the corresponding bit in the new history to taken
-  history.set(BP_ALIGNMENT_FACTOR,taken || history.test(BP_ALIGNMENT_FACTOR)); //if we have ever seen this offset taken, we want to keep it as a 1 in the local history to indicate that this is a "hot" offset, even if we see some not-taken instances later. This is because even if an offset is not taken every time, it may still be predictive if it is taken often enough, and we don't want to lose that predictive power just because of some noise in the history.
+  history.set(alignment_factor,taken || history.test(alignment_factor));
 }
 
-void sppam_b::Sppam_b_Module::update_global_history(std::bitset<BP_GLOBAL_BITS>& history, champsim::address addr, bool taken, bool direction) {
+void sppam_b::Sppam_b_Module::update_global_history(dynamic_bitset& history, champsim::address addr, bool taken, bool direction) {
   if(global_type == GLOBAL_HISTORY_TYPE::OFFSET_HISTORY) {
     history <<= 1;
     history.set(0,taken);
   } else if(global_type == GLOBAL_HISTORY_TYPE::UNIQUE_RECENT_SEGMENT_HISTORY || global_type == GLOBAL_HISTORY_TYPE::ORDERED_RECENT_SEGMENT_HISTORY) {
-    //only slide the current segment history (front BP_SEGMENT_BITS) of the global history
-    std::bitset<BP_SEGMENT_BITS> current_segment_history;
-    for(int i = 0; i < BP_SEGMENT_BITS; i++) {
+    //only slide the current segment history (front segment_bits) of the global history
+    dynamic_bitset current_segment_history(segment_bits);
+    for(unsigned int i = 0; i < segment_bits; i++) {
       current_segment_history.set(i,history.test(i));
     }
     current_segment_history <<= 1;
     current_segment_history.set(0,taken);
     //now update the global history with this new segment history
-    for(int i = 0; i < BP_SEGMENT_BITS; i++) {
+    for(unsigned int i = 0; i < segment_bits; i++) {
       history.set(i,current_segment_history.test(i));
     }
   } else if(global_type == GLOBAL_HISTORY_TYPE::RECENT_XOR_HISTORY) {
     //reconstruct the global history based on the recency stack, but with the updated current local history
-    std::bitset<BP_LOCAL_BITS> new_history = get_local_access_window(addr, champsim::address{}, BP_ALIGNMENT_FACTOR, direction);
+    dynamic_bitset new_history = get_local_access_window(addr, champsim::address{}, alignment_factor, direction);
     //xor together the local histories of the recent regions in the recency stack
-    for(int i = 0; i < recency_stack.size(); i++) {
+    for(std::size_t i = 0; i < recency_stack.size(); i++) {
       auto region = regions.check_hit(region_type{recency_stack.at(i).vpn});
       if(region.has_value()) {
         auto region_addr = champsim::address{champsim::block_number{recency_stack.at(i).vpn} + region->last_block};
-        auto temp_local = get_local_access_window(region_addr, champsim::address{}, BP_ALIGNMENT_FACTOR, direction);
+        auto temp_local = get_local_access_window(region_addr, champsim::address{}, alignment_factor, direction);
         new_history ^= temp_local;
       }
     }
-    for(int i = 0; i < BP_LOCAL_BITS; i++) {
+    for(unsigned int i = 0; i < local_bits; i++) {
       history.set(i,new_history.test(i));
     }
   }
@@ -531,6 +582,9 @@ uint32_t sppam_b::prefetcher_cache_operate(champsim::address addr, champsim::add
   }
 
   engine.log_outcome(addr,ip);
+
+  //update bp_ctx with real access (after training, before prediction)
+  engine.bp_ctx.update(engine.get_bp_ip(engine.last_addr, addr, ip, engine.delta_history).to<uint64_t>(), true);
 
   //update metadata
   //region map
@@ -590,9 +644,7 @@ void sppam_b::Sppam_b_Module::log_outcome(champsim::address addr, champsim::addr
       for(int i = start; (local_direction ? i < end : i > end); (local_direction ? i++ : i--)) {
         auto outcome = (i == end - (local_direction ? 1 : -1)) && (intern_->current_cycle() - region->last_cycle < TIMELINESS_CYCLE);
         auto last_access_addr_temp = champsim::address{champsim::block_number{pn} + i};
-        //auto local_hist = get_local_history(last_access_addr_temp,region->last_ip,local_direction);
-        //auto global_hist = get_global_history(USE_REGION_ADDR_FOR_GLOBAL_HIST_LEARNING ? last_access_addr_temp : last_addr,ip_to_use,local_direction);
-        predictor->last_branch_result(get_bp_ip(champsim::address{champsim::block_number{pn} + start},last_access_addr_temp,ip_to_use,delta_history),global_hist, local_hist,outcome);
+        predictor->last_branch_result(get_bp_ip(champsim::address{champsim::block_number{pn} + start},last_access_addr_temp,ip_to_use,delta_history),global_hist, local_hist,outcome, bp_ctx);
       }
   }
   if(region.has_value() && pn == (page{last_addr} + 1)) {
@@ -607,9 +659,7 @@ void sppam_b::Sppam_b_Module::log_outcome(champsim::address addr, champsim::addr
       for(auto i = start; (local_direction ? i < end : i > end); (local_direction ? i++ : i--)) {
         auto last_access_addr_temp =  champsim::address{i};
         auto outcome = (i == end - (local_direction ? 1 : -1)) && (intern_->current_cycle() - last_cycle < TIMELINESS_CYCLE);
-        //auto local_hist = get_local_history(last_access_addr_temp,last_ip,local_direction);
-        //auto global_hist = get_global_history(USE_REGION_ADDR_FOR_GLOBAL_HIST_LEARNING ? last_access_addr_temp : last_addr,ip_to_use,local_direction);
-        predictor->last_branch_result(get_bp_ip(last_addr,last_access_addr_temp,ip_to_use,delta_history),global_hist, local_hist,outcome);
+        predictor->last_branch_result(get_bp_ip(last_addr,last_access_addr_temp,ip_to_use,delta_history),global_hist, local_hist,outcome, bp_ctx);
       }
    }
    if(region.has_value() && pn == (page{last_addr} - 1)) {
@@ -624,9 +674,7 @@ void sppam_b::Sppam_b_Module::log_outcome(champsim::address addr, champsim::addr
       for(auto i = start; (local_direction ? i < end : i > end); (local_direction ? i++ : i--)) {
         auto last_access_addr_temp =  champsim::address{i};
         auto outcome = (i == end - (local_direction ? 1 : -1)) && (intern_->current_cycle() - last_cycle < TIMELINESS_CYCLE);
-        //auto local_hist = get_local_history(last_access_addr_temp,last_ip,local_direction);
-        //auto global_hist = get_global_history(USE_REGION_ADDR_FOR_GLOBAL_HIST_LEARNING ? last_access_addr_temp : last_addr,ip_to_use,local_direction);
-        predictor->last_branch_result(get_bp_ip(last_addr,last_access_addr_temp,ip_to_use,delta_history),global_hist, local_hist,outcome);
+        predictor->last_branch_result(get_bp_ip(last_addr,last_access_addr_temp,ip_to_use,delta_history),global_hist, local_hist,outcome, bp_ctx);
       }
    }
 }
@@ -650,6 +698,7 @@ void sppam_b::Sppam_b_Module::do_prefetch(champsim::address addr, champsim::addr
     return;
 
   auto recency_stack_temp = recency_stack;
+  auto bp_ctx_saved = bp_ctx;
   
   auto delta_history_temp = delta_history;
   //enforce limit on prefetches issued per page (depth)
@@ -685,7 +734,7 @@ void sppam_b::Sppam_b_Module::do_prefetch(champsim::address addr, champsim::addr
     std::pair<bool, double> prediction_pack;
     champsim::address pos_step_addr = champsim::address{champsim::block_number{pf_base_addr} + (direction ? 1 : -1)};
     //make prediction using local or global history based on configuration
-    prediction_pack = predictor->predict_branch(get_bp_ip(predict_addr, pf_base_addr, ip, delta_history_temp),predict_global_hist,predict_local_hist);
+    prediction_pack = predictor->predict_branch(get_bp_ip(predict_addr, pf_base_addr, ip, delta_history_temp),predict_global_hist,predict_local_hist, bp_ctx);
     
     bool prediction = prediction_pack.first;
     double prediction_conf = prediction_pack.second;
@@ -736,6 +785,7 @@ void sppam_b::Sppam_b_Module::do_prefetch(champsim::address addr, champsim::addr
         //only update the predict history if we actually took the prefetch, otherwise we are just learning from a negative pattern which is less useful for future predictions
         predict_global_hist = global_hist;
         predict_local_hist = local_hist;
+        bp_ctx.update(get_bp_ip(predict_addr, pf_base_addr, ip, delta_history_temp).to<uint64_t>(), true);
         predict_addr = pf_base_addr;
         update_delta_history(delta_history_temp, current_delta);
         current_delta = direction ? 1 : -1;
@@ -753,8 +803,9 @@ void sppam_b::Sppam_b_Module::do_prefetch(champsim::address addr, champsim::addr
     }
   }
   lookahead_freq[lookaheads]++;
-  //roll back recency stack
+  //roll back recency stack and bp_ctx
   recency_stack = recency_stack_temp;
+  bp_ctx = bp_ctx_saved;
 }
 
 void sppam_b::Sppam_b_Module::track_ip(champsim::address addr, champsim::address ip) {

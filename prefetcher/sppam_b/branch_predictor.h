@@ -3,18 +3,60 @@
 
 #include "champsim.h"
 #include "modules.h"
+#include <array>
 #include <bitset>
+#include <cstdint>
+#include <cstring>
+#include <vector>
+#include "dynamic_bitset.h"
 
-static constexpr unsigned int BP_GLOBAL_BITS = 256;
-static constexpr unsigned int BP_SEGMENT_BITS = 64;
-static constexpr unsigned int BP_LOCAL_BITS = 64;
-static constexpr int BP_ALIGNMENT_FACTOR = 0; //this is the offset from the last access provided to the bp, an alignment of 2 means we read from 2 spots ahead of the last offset when providing history
+// Context state that SPPAM owns and provides to branch predictors.
+// Predictors must NOT track these internally — SPPAM updates them
+// between calls so that burst-mode predict/train sequences stay coherent.
+struct bp_context {
+  // --- IP path / recency (used by MPP, tage_sc_l) ---
+  static constexpr int MAX_PATH_HIST = 64;
+  static constexpr int MAX_RECENCY = 32;
+  std::array<uint16_t, MAX_PATH_HIST> path_history{};
+  std::array<uint16_t, MAX_RECENCY> ip_recency{};
+
+  // --- SC-style histories (used by tage_sc_l) ---
+  static constexpr int PHISTWIDTH = 27;
+  long long phist = 0;           // IP-derived path history for TAGE index
+  // NOTE: ghist_internal, L_shist, S_slhist, T_slhist have been removed.
+  // They were redundant with the global_hist / local_hist dynamic_bitsets
+  // that SPPAM already provides as parameters to predict/train.
+
+  // --- Helper: update all streaming histories after an outcome ---
+  void update(uint64_t PC, bool outcome) {
+    // Path history (for TAGE gindex)
+    int PATH = PC ^ (PC >> 2) ^ (PC >> 4);
+    int pathbit = (PATH & 127);
+    phist = (phist << 1) ^ pathbit;
+    phist = (phist & ((1LL << PHISTWIDTH) - 1));
+
+    // IP path history (for MPP)
+    uint16_t pc2 = static_cast<uint16_t>(PC >> 2);
+    std::memmove(&path_history[1], &path_history[0], sizeof(uint16_t) * (MAX_PATH_HIST - 1));
+    path_history[0] = pc2;
+
+    // IP recency stack (LRU for MPP)
+    int found = MAX_RECENCY;
+    for (int i = 0; i < MAX_RECENCY; i++) {
+      if (ip_recency[i] == pc2) { found = i; break; }
+    }
+    if (found == MAX_RECENCY) found = MAX_RECENCY - 1;
+    uint16_t saved = ip_recency[found];
+    for (int j = found; j >= 1; j--) ip_recency[j] = ip_recency[j - 1];
+    ip_recency[0] = saved;
+  }
+};
 
 class branch_predictor {
     public:
     virtual void initialize_branch_predictor() = 0;
-    virtual void last_branch_result(champsim::address ip, std::bitset<BP_GLOBAL_BITS> global_hist, std::bitset<BP_LOCAL_BITS> local_hist, bool taken) = 0;
-    virtual std::pair<bool,double> predict_branch(champsim::address ip, std::bitset<BP_GLOBAL_BITS> global_hist, std::bitset<BP_LOCAL_BITS> local_hist) = 0;
+    virtual void last_branch_result(champsim::address ip, const dynamic_bitset& global_hist, const dynamic_bitset& local_hist, bool taken, bp_context& ctx) = 0;
+    virtual std::pair<bool,double> predict_branch(champsim::address ip, const dynamic_bitset& global_hist, const dynamic_bitset& local_hist, const bp_context& ctx) = 0;
 
     virtual void print_heartbeat() {};
     virtual void print_stats() {};

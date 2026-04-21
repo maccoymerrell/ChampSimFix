@@ -6,14 +6,17 @@
 
 namespace sppam_bp {
 struct gshare : branch_predictor {
-  static constexpr std::size_t GLOBAL_HISTORY_LENGTH = 14;
-  static constexpr std::size_t HASH_LENGTH = 14;
+  static constexpr std::size_t GLOBAL_HISTORY_LENGTH = 256;
+  static constexpr std::size_t HASH_LENGTH = 16;
   static constexpr std::size_t COUNTER_BITS = 2;
-  static constexpr std::size_t GS_HISTORY_TABLE_SIZE = 16384;
+  static constexpr std::size_t GS_HISTORY_TABLE_SIZE = 65536;
   static constexpr int COUNTER_UP = 1;
   static constexpr int COUNTER_DOWN = -1;
   static constexpr bool USE_LOCAL_HISTORY = false;
   static constexpr bool DEBUG = false;
+
+  std::size_t rt_table_size = GS_HISTORY_TABLE_SIZE;
+  std::size_t rt_history_length = GLOBAL_HISTORY_LENGTH;
 
   uint64_t predict_taken = 0;
   uint64_t predict_nottaken = 0;
@@ -28,11 +31,18 @@ struct gshare : branch_predictor {
 
   using branch_predictor::branch_predictor;
 
-  std::size_t gs_table_hash(champsim::address ip, std::bitset<GLOBAL_HISTORY_LENGTH> bh_vector, bool predict_or_outcome);
+  void configure(unsigned int table_size, unsigned int hist_len) {
+    rt_table_size = std::min(static_cast<std::size_t>(table_size), GS_HISTORY_TABLE_SIZE);
+    if (rt_table_size == 0) rt_table_size = 1;
+    rt_history_length = std::min(static_cast<std::size_t>(hist_len), GLOBAL_HISTORY_LENGTH);
+    if (rt_history_length == 0) rt_history_length = 1;
+  }
+
+  std::size_t gs_table_hash(champsim::address ip, uint64_t bh_vector, bool predict_or_outcome);
   virtual void initialize_branch_predictor() {};
 
-  virtual void last_branch_result(champsim::address ip, std::bitset<BP_GLOBAL_BITS> global_hist, std::bitset<BP_LOCAL_BITS> local_hist, bool taken);
-  virtual std::pair<bool,double> predict_branch(champsim::address ip, std::bitset<BP_GLOBAL_BITS> global_hist, std::bitset<BP_LOCAL_BITS> local_hist);
+  virtual void last_branch_result(champsim::address ip, const dynamic_bitset& global_hist, const dynamic_bitset& local_hist, bool taken, bp_context& ctx);
+  virtual std::pair<bool,double> predict_branch(champsim::address ip, const dynamic_bitset& global_hist, const dynamic_bitset& local_hist, const bp_context& ctx);
 
   void print_heartbeat();
   void print_stats();

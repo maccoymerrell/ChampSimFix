@@ -47,45 +47,53 @@ sources for you to plagiarize.
 
 #include "hashed_perceptron.h"
 
+#include <cmath>
 #include <numeric>
 
 namespace sppam_bp {
-template<std::size_t... Is>
-hashed_perceptron::perceptron_result hashed_perceptron::get_perceptron_result_impl(
-    champsim::address pc,
-    std::bitset<BP_GLOBAL_BITS> global_hist,
-    std::bitset<BP_LOCAL_BITS> local_hist,
-    std::index_sequence<Is...>
-) {
-    auto get_index = [pc_slice = pc](const auto& hist) {
-        return hist ^ std::bitset<TABLE_INDEX_BITS>(pc_slice.to<uint64_t>()).to_ullong(); // seed in the PC to spread accesses around (like gshare) XOR in the last word
-    };
-    perceptron_result result;
-    // Compile-time expansion
-    ((result.indices[Is] = USE_LOCAL_HISTORY
-        ? get_index(fold_bitset<TABLE_INDEX_BITS, history_lengths[Is]>(truncate_bitset<history_lengths[Is]>(local_hist)).to_ullong())
-         : get_index(fold_bitset<TABLE_INDEX_BITS, history_lengths[Is]>(truncate_bitset<history_lengths[Is]>(global_hist)).to_ullong())
-    ), ...);
 
-    result.yout = std::inner_product(
-        std::begin(tables), std::end(tables),
-        std::begin(result.indices), 0, std::plus<>{},
-        [](const auto& table, const auto& index) { return table.at(index).value(); }
-    );
-    return result;
+void hashed_perceptron::configure(unsigned int num_tables, unsigned int table_size, unsigned int min_hist, unsigned int max_hist) {
+    rt_num_tables = std::min(static_cast<std::size_t>(num_tables), NTABLES);
+    if (rt_num_tables == 0) rt_num_tables = 1;
+    rt_table_size = std::min(static_cast<std::size_t>(table_size), TABLE_SIZE);
+    if (rt_table_size == 0) rt_table_size = 1;
+    // compute rt_table_index_bits = floor(log2(rt_table_size))
+    rt_table_index_bits = 0;
+    for (std::size_t v = rt_table_size; v > 1; v >>= 1) rt_table_index_bits++;
+    // compute geometric history lengths from min_hist to max_hist
+    rt_history_lengths[0] = 0; // table 0 is bias
+    if (rt_num_tables > 2) {
+        for (std::size_t i = 1; i < rt_num_tables; i++) {
+            double frac = static_cast<double>(i - 1) / static_cast<double>(rt_num_tables - 2);
+            rt_history_lengths[i] = static_cast<std::size_t>(
+                min_hist * std::pow(static_cast<double>(max_hist) / min_hist, frac) + 0.5);
+        }
+        rt_history_lengths[rt_num_tables - 1] = max_hist;
+    } else if (rt_num_tables == 2) {
+        rt_history_lengths[1] = max_hist;
+    }
 }
 
 hashed_perceptron::perceptron_result hashed_perceptron::get_perceptron_result(
     champsim::address pc,
-    std::bitset<BP_GLOBAL_BITS> global_hist,
-    std::bitset<BP_LOCAL_BITS> local_hist
+    const dynamic_bitset& global_hist,
+    const dynamic_bitset& local_hist
 ) {
-    return get_perceptron_result_impl(
-        pc, global_hist, local_hist,
-        std::make_index_sequence<NTABLES>{}
-    );
+    uint64_t pc_val = pc.to<uint64_t>() & (rt_table_size - 1);
+    perceptron_result result;
+    const auto& hist = USE_LOCAL_HISTORY ? local_hist : global_hist;
+    for (std::size_t i = 0; i < rt_num_tables; i++) {
+        auto truncated = truncate_bitset(hist, rt_history_lengths[i]);
+        auto folded = fold_bitset(truncated, rt_table_index_bits);
+        result.indices[i] = (folded.to_ullong() ^ pc_val) % rt_table_size;
+    }
+    result.yout = 0;
+    for (std::size_t i = 0; i < rt_num_tables; i++) {
+        result.yout += tables[i].at(result.indices[i]).value();
+    }
+    return result;
 }
-std::pair<bool,double> hashed_perceptron::predict_branch(champsim::address pc, std::bitset<BP_GLOBAL_BITS> global_hist, std::bitset<BP_LOCAL_BITS> local_hist)
+std::pair<bool,double> hashed_perceptron::predict_branch(champsim::address pc, const dynamic_bitset& global_hist, const dynamic_bitset& local_hist, const bp_context& /*ctx*/)
 {
   perceptron_result result = get_perceptron_result(pc, global_hist, local_hist);
   if(result.yout >= THRESHOLD)
@@ -100,7 +108,7 @@ std::pair<bool,double> hashed_perceptron::predict_branch(champsim::address pc, s
   return std::make_pair(result.yout >= THRESHOLD, static_cast<double>(result.yout));
 }
 
-void hashed_perceptron::last_branch_result(champsim::address pc, std::bitset<BP_GLOBAL_BITS> global_hist, std::bitset<BP_LOCAL_BITS> local_hist, bool taken)
+void hashed_perceptron::last_branch_result(champsim::address pc, const dynamic_bitset& global_hist, const dynamic_bitset& local_hist, bool taken, bp_context& /*ctx*/)
 {
   perceptron_result result = get_perceptron_result(pc, global_hist, local_hist);
   if(taken)
@@ -111,7 +119,7 @@ void hashed_perceptron::last_branch_result(champsim::address pc, std::bitset<BP_
   bool prediction_correct = (taken == (result.yout >= THRESHOLD));
   bool prediction_weak = (std::abs(result.yout) < theta);
   if (!prediction_correct || prediction_weak) {
-    for (std::size_t i = 0; i < std::size(tables); i++)
+    for (std::size_t i = 0; i < rt_num_tables; i++)
       tables[i][result.indices[i]] += taken ? 1 : -1; // update weights
     adjust_threshold(prediction_correct);
   }

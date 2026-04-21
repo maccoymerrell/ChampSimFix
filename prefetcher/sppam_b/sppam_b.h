@@ -15,8 +15,12 @@
 #include "instruction.h"
 
 #include "branch_predictor.h"
+#include "sppam_b_config.h"
 #include "gshare/gshare.h"
 #include "hashed_perceptron/hashed_perceptron.h"
+#include "bimodal/bimodal.h"
+#include "mpp/mpp.h"
+#include "tage_sc_l/tage_sc_l.h"
 
 class sppam_b : public champsim::modules::prefetcher
 {
@@ -42,7 +46,10 @@ class sppam_b : public champsim::modules::prefetcher
     };
     enum BP_TYPE {
       HASHED_PERCEPTRON,
-      GSHARE
+      GSHARE,
+      BIMODAL,
+      MPP,
+      TAGE_SC_L
     };
     struct Sppam_b_Module {
       CACHE* intern_;
@@ -97,9 +104,15 @@ class sppam_b : public champsim::modules::prefetcher
       static constexpr bool CROSS_PAGE = false;
 
       //bp stuff
-      static constexpr IP_TYPE ip_style = IP_TYPE::DELTA; //set IP type
-      static constexpr GLOBAL_HISTORY_TYPE global_type = GLOBAL_HISTORY_TYPE::ORDERED_RECENT_SEGMENT_HISTORY; //set global history type
-      static constexpr BP_TYPE bp_type = BP_TYPE::HASHED_PERCEPTRON; //set branch predictor type
+      IP_TYPE ip_style = IP_TYPE::DELTA; //set IP type
+      GLOBAL_HISTORY_TYPE global_type = GLOBAL_HISTORY_TYPE::ORDERED_RECENT_SEGMENT_HISTORY; //set global history type
+      BP_TYPE bp_type = BP_TYPE::HASHED_PERCEPTRON; //set branch predictor type
+
+      // Runtime-configurable history sizes (loaded from config file)
+      unsigned int global_bits = 256;
+      unsigned int local_bits = 64;
+      unsigned int segment_bits = 64;
+      int alignment_factor = 0;
       
       std::array<double,16> PREFETCH_DEGREES_BW = {1.00,1.00,1.00,1.00,0.90,0.90,0.90,0.90,0.80,0.80,0.80,0.75,0.75,0.50,0.50,0.50}; //normal
       std::array<double,16> PREFETCH_ISSUE_CHANCE = {0.0315,0.056,0.134,0.134,0.36,0.607,0.90,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0}; //normal
@@ -148,14 +161,14 @@ class sppam_b : public champsim::modules::prefetcher
 
       struct recency_stack_type {
         page vpn;
-        std::bitset<BP_SEGMENT_BITS> recent_segments; //the most recent segments accessed within this page, indexed by block_in_page
+        dynamic_bitset recent_segments;
         bool direction = true;
         bool operator==(const recency_stack_type& other) const {
           return vpn == other.vpn;
         }
-        recency_stack_type() : recency_stack_type(page{}) {}
-        explicit recency_stack_type(page allocate_vpn)
-          : vpn(allocate_vpn)
+        recency_stack_type() : recency_stack_type(page{}, 64) {}
+        explicit recency_stack_type(page allocate_vpn, std::size_t seg_bits = 64)
+          : vpn(allocate_vpn), recent_segments(seg_bits)
         {
         }
       };
@@ -227,13 +240,13 @@ class sppam_b : public champsim::modules::prefetcher
 
     champsim::address get_bp_ip(champsim::address addr, champsim::address pf_addr, champsim::address ip, std::vector<uint64_t> delta_history_temp);
 
-    void update_local_history(std::bitset<BP_LOCAL_BITS>& history, champsim::address addr, bool taken, bool direction);
-    void update_global_history(std::bitset<BP_GLOBAL_BITS>& history, champsim::address addr, bool taken, bool direction);
-    void scan_global_history(std::bitset<BP_GLOBAL_BITS>& history, champsim::address addr, champsim::address ip, bool direction);
-    void scan_local_history(std::bitset<BP_LOCAL_BITS>& history,champsim::address addr, champsim::address ip, bool direction);
-    std::bitset<BP_LOCAL_BITS> get_local_access_window(champsim::address addr, champsim::address ip, int offset, bool direction);
-    std::bitset<BP_SEGMENT_BITS> get_segment_access_window(champsim::address addr, champsim::address ip, int offset, bool direction);
-    std::bitset<BP_GLOBAL_BITS> get_global_access_window(champsim::address addr, champsim::address ip, int offset, bool direction);
+    void update_local_history(dynamic_bitset& history, champsim::address addr, bool taken, bool direction);
+    void update_global_history(dynamic_bitset& history, champsim::address addr, bool taken, bool direction);
+    void scan_global_history(dynamic_bitset& history, champsim::address addr, champsim::address ip, bool direction);
+    void scan_local_history(dynamic_bitset& history,champsim::address addr, champsim::address ip, bool direction);
+    dynamic_bitset get_local_access_window(champsim::address addr, champsim::address ip, int offset, bool direction);
+    dynamic_bitset get_segment_access_window(champsim::address addr, champsim::address ip, int offset, bool direction);
+    dynamic_bitset get_global_access_window(champsim::address addr, champsim::address ip, int offset, bool direction);
     //std::vector<region_type> get_temp_region_stack(champsim::address addr, champsim::address ip);
     void add_to_pagemap(champsim::address addr, bool prefetch, bool useful = false);
     void add_to_debugmap(champsim::address addr);
@@ -255,8 +268,8 @@ class sppam_b : public champsim::modules::prefetcher
     double should_issue(double conf);
     double should_reissue(double conf);
 
-    std::bitset<BP_LOCAL_BITS> get_local_history(champsim::address addr, champsim::address ip, bool direction);
-    std::bitset<BP_GLOBAL_BITS> get_global_history(champsim::address addr, champsim::address ip, bool direction);
+    dynamic_bitset get_local_history(champsim::address addr, champsim::address ip, bool direction);
+    dynamic_bitset get_global_history(champsim::address addr, champsim::address ip, bool direction);
 
     void update_local_and_global_contexts(champsim::address addr, champsim::address ip);
 
@@ -285,12 +298,13 @@ class sppam_b : public champsim::modules::prefetcher
     page last_region{};
     champsim::address last_ip{};
     champsim::address last_addr{};
-    std::bitset<BP_GLOBAL_BITS> global_history_reg;
+    dynamic_bitset global_history_reg;
     std::vector<champsim::address> ip_history;
     std::vector<uint64_t> delta_history;
     std::map<int64_t,int64_t> delta_freq;
     std::map<uint64_t,uint64_t> lookahead_freq;
     branch_predictor* predictor;
+    bp_context bp_ctx;
     uint64_t last_cycle = 0;
 
     uint64_t ip_history_correct = 0;
