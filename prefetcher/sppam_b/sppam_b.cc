@@ -257,6 +257,21 @@ void sppam_b::Sppam_b_Module::initialize(CACHE* cache) {
   segment_bits = cfg.segment_bits;
   alignment_factor = cfg.alignment_factor;
 
+  // Throttling controls
+  USE_IP_CONF        = cfg.use_ip_conf;
+  DO_LOOKAHEAD       = cfg.do_lookahead;
+  PROB_DROP          = cfg.prob_drop;
+  IP_PREFETCH_DEGREE = cfg.ip_prefetch_degree;
+  IP_LOOKAHEAD       = cfg.ip_lookahead;
+
+  // Numeric throttle parameters
+  PREFETCH_DEGREE    = cfg.prefetch_degree;
+  MIN_LOOKAHEAD_CONF = cfg.min_lookahead_conf;
+  MIN_L1D_CONF       = cfg.min_l1d_conf;
+  MAX_LOOKAHEAD      = cfg.max_lookahead;
+  TIMELINESS_CYCLE   = cfg.timeliness_cycle;
+  current_pf_degree  = PREFETCH_DEGREE;
+
   // Map string config to enums
   if(cfg.bp_type == "hashed_perceptron") bp_type = BP_TYPE::HASHED_PERCEPTRON;
   else if(cfg.bp_type == "gshare") bp_type = BP_TYPE::GSHARE;
@@ -293,9 +308,9 @@ void sppam_b::Sppam_b_Module::initialize(CACHE* cache) {
     bm->configure(cfg.bimodal_table_size);
     predictor = bm;
   } else if(bp_type == BP_TYPE::MPP) {
-    auto* mp = new sppam_bp::mpp;
-    mp->configure(cfg.mpp_num_tables, cfg.mpp_table_size);
-    predictor = mp;
+    auto* mpp = new sppam_bp::mpp;
+    mpp->configure(cfg.mpp_num_tables, cfg.mpp_table_size);
+    predictor = mpp;
   } else if(bp_type == BP_TYPE::TAGE_SC_L) {
     auto* tage = new sppam_bp::tage_sc_l;
     tage->configure(cfg.tage_logb, cfg.tage_logg, cfg.tage_minhist, cfg.tage_maxhist, cfg.tage_logl);

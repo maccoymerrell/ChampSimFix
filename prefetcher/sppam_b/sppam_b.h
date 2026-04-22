@@ -70,7 +70,7 @@ class sppam_b : public champsim::modules::prefetcher
       static constexpr std::size_t IP_CONF_TABLE_WAYS = 16;
       //samples for establishing IP usefulness
       static constexpr std::size_t IP_CONF_TABLE_SAMPLES = 64;
-      static constexpr bool USE_IP_CONF = true;
+      bool USE_IP_CONF = true;
 
       //probability to fill into the ip tracking table
       static constexpr std::size_t TEMPORAL_SAMPLE_RATE = 1; //sample every N accesses for usefulness learning
@@ -82,22 +82,22 @@ class sppam_b : public champsim::modules::prefetcher
       static constexpr uint64_t DELTA_HISTORY_BITS = 8;
 
       //max pf degree
-      static constexpr int64_t PREFETCH_DEGREE = 8;
-      static constexpr bool    IP_PREFETCH_DEGREE = false;
+      int64_t PREFETCH_DEGREE = 8;
+      bool IP_PREFETCH_DEGREE = false;
       static constexpr std::size_t REGION_BUDGET = 64;
       static constexpr std::size_t L1D_REGION_BUDGET = 8;
 
       static constexpr unsigned int SPPAM_B_PAGE_BITS = 12;
 
       //lookahead limits
-      static constexpr bool DO_LOOKAHEAD = true;
-      static constexpr double MIN_LOOKAHEAD_CONF = 0.2;
-      static constexpr double MIN_L1D_CONF = 0.9;
-      static constexpr int64_t MAX_LOOKAHEAD = 64;
-      static constexpr bool IP_LOOKAHEAD = false;
-      static constexpr bool PROB_DROP = false;
+      bool DO_LOOKAHEAD = true;
+      double MIN_LOOKAHEAD_CONF = 0.2;
+      double MIN_L1D_CONF = 0.9;
+      int64_t MAX_LOOKAHEAD = 64;
+      bool IP_LOOKAHEAD = false;
+      bool PROB_DROP = false;
 
-      static constexpr double TIMELINESS_CYCLE = 10000; 
+      double TIMELINESS_CYCLE = 10000;
 
       //debug 
       static constexpr uint64_t DO_DEBUG = false;
@@ -213,8 +213,8 @@ class sppam_b : public champsim::modules::prefetcher
         champsim::address ip;
         double conf = 1.0;
         int64_t dir_counter = DIRECTION_SAMPLE_MAX / 2; //same for direction
-        int64_t lookahead_depth = MAX_LOOKAHEAD;
-        int64_t pf_degree = PREFETCH_DEGREE;
+        int64_t lookahead_depth = 64; // initialized to MAX_LOOKAHEAD default
+        int64_t pf_degree = 8; // initialized to PREFETCH_DEGREE default
         uint64_t useful = 0;
         uint64_t useless = 0;
         uint64_t lifetime_samples = 0;

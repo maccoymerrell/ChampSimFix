@@ -45,6 +45,20 @@ struct sppam_b_config {
   unsigned int tage_maxhist = 256;
   unsigned int tage_logl = 5;
 
+  // Throttling controls
+  bool use_ip_conf = true;       // use per-IP confidence table to gate prefetches
+  bool do_lookahead = true;      // enable lookahead prefetching beyond the first prediction
+  bool prob_drop = false;        // probabilistically drop prefetches based on confidence
+  bool ip_prefetch_degree = false; // use per-IP prefetch degree instead of global PREFETCH_DEGREE
+  bool ip_lookahead = false;     // use per-IP lookahead depth instead of global MAX_LOOKAHEAD
+
+  // Numeric throttle parameters
+  int64_t prefetch_degree = 8;       // global max prefetch degree
+  double min_lookahead_conf = 0.2;   // minimum confidence required to continue lookahead
+  double min_l1d_conf = 0.9;         // minimum confidence required to prefetch into L1D
+  int64_t max_lookahead = 64;        // maximum lookahead depth
+  double timeliness_cycle = 10000;   // cycle window for timeliness determination
+
   static std::string trim(const std::string& s) {
     auto start = s.find_first_not_of(" \t\r\n");
     if (start == std::string::npos) return "";
@@ -104,6 +118,18 @@ struct sppam_b_config {
       else if (key == "tage_minhist") cfg.tage_minhist = static_cast<unsigned int>(std::stoul(val));
       else if (key == "tage_maxhist") cfg.tage_maxhist = static_cast<unsigned int>(std::stoul(val));
       else if (key == "tage_logl") cfg.tage_logl = static_cast<unsigned int>(std::stoul(val));
+      // Throttling
+      else if (key == "use_ip_conf") cfg.use_ip_conf = (val == "true" || val == "1");
+      else if (key == "do_lookahead") cfg.do_lookahead = (val == "true" || val == "1");
+      else if (key == "prob_drop") cfg.prob_drop = (val == "true" || val == "1");
+      else if (key == "ip_prefetch_degree") cfg.ip_prefetch_degree = (val == "true" || val == "1");
+      else if (key == "ip_lookahead") cfg.ip_lookahead = (val == "true" || val == "1");
+      // Numeric throttle params
+      else if (key == "prefetch_degree") cfg.prefetch_degree = static_cast<int64_t>(std::stoll(val));
+      else if (key == "min_lookahead_conf") cfg.min_lookahead_conf = std::stod(val);
+      else if (key == "min_l1d_conf") cfg.min_l1d_conf = std::stod(val);
+      else if (key == "max_lookahead") cfg.max_lookahead = static_cast<int64_t>(std::stoll(val));
+      else if (key == "timeliness_cycle") cfg.timeliness_cycle = std::stod(val);
     }
 
     return cfg;

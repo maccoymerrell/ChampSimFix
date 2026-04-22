@@ -38,7 +38,7 @@ struct gshare : branch_predictor {
     if (rt_history_length == 0) rt_history_length = 1;
   }
 
-  std::size_t gs_table_hash(champsim::address ip, uint64_t bh_vector, bool predict_or_outcome);
+  std::size_t gs_table_hash(champsim::address ip, const dynamic_bitset& hist, bool predict_or_outcome);
   virtual void initialize_branch_predictor() {};
 
   virtual void last_branch_result(champsim::address ip, const dynamic_bitset& global_hist, const dynamic_bitset& local_hist, bool taken, bp_context& ctx);

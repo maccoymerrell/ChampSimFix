@@ -1,27 +1,30 @@
 #include "gshare.h"
 
 namespace sppam_bp {
-std::size_t gshare::gs_table_hash(champsim::address ip, uint64_t bh_vector, bool predict_or_outcome)
+std::size_t gshare::gs_table_hash(champsim::address ip, const dynamic_bitset& hist, bool predict_or_outcome)
 {
-  constexpr champsim::data::bits LOG2_HISTORY_TABLE_SIZE{champsim::lg2(GS_HISTORY_TABLE_SIZE)};
-  constexpr champsim::data::bits LENGTH{HASH_LENGTH};
+  const std::size_t log2_size = champsim::lg2(rt_table_size);
+  const uint64_t mask = (log2_size < 64) ? ((1ULL << log2_size) - 1) : ~uint64_t{0};
 
-  std::size_t hash = bh_vector;
+  uint64_t hash = fold_bitset_to_val(hist, log2_size);
+
   if(predict_or_outcome)
     gs_history_occurrences_predict[hash % rt_table_size]++;
   else
     gs_history_occurrences_outcome[hash % rt_table_size]++;
 
-  hash ^= ip.slice<LOG2_HISTORY_TABLE_SIZE, champsim::data::bits{}>().to<std::size_t>();
-  hash ^= ip.slice<LOG2_HISTORY_TABLE_SIZE + LENGTH, LENGTH>().to<std::size_t>();
-  hash ^= ip.slice<LOG2_HISTORY_TABLE_SIZE + 2 * LENGTH, 2 * LENGTH>().to<std::size_t>();
+  // XOR in IP bits above the table index width for additional entropy.
+  uint64_t ip_val = ip.to<uint64_t>();
+  hash ^= (ip_val >> log2_size) & mask;
+  hash ^= (ip_val >> (log2_size + HASH_LENGTH)) & mask;
+  hash ^= (ip_val >> (log2_size + 2 * HASH_LENGTH)) & mask;
 
   return hash % rt_table_size;
 }
 
 std::pair<bool,double> gshare::predict_branch(champsim::address ip, const dynamic_bitset& global_hist, const dynamic_bitset& local_hist, const bp_context& /*ctx*/)
 {
-  auto gs_hash = USE_LOCAL_HISTORY ? gs_table_hash(ip, truncate_bitset(local_hist, rt_history_length).to_ullong(),true) : gs_table_hash(ip, truncate_bitset(global_hist, rt_history_length).to_ullong(),true);
+  auto gs_hash = USE_LOCAL_HISTORY ? gs_table_hash(ip, truncate_bitset(local_hist, rt_history_length), true) : gs_table_hash(ip, truncate_bitset(global_hist, rt_history_length), true);
   auto value = gs_history_table[gs_hash];
   if(value.value() >= (value.maximum / 2.0))
     predict_taken++;
@@ -40,7 +43,7 @@ void gshare::last_branch_result(champsim::address ip, const dynamic_bitset& glob
   else
     outcome_nottaken++;
 
-  auto gs_hash = USE_LOCAL_HISTORY ? gs_table_hash(ip, truncate_bitset(local_hist, rt_history_length).to_ullong(),false) : gs_table_hash(ip, truncate_bitset(global_hist, rt_history_length).to_ullong(),false);
+  auto gs_hash = USE_LOCAL_HISTORY ? gs_table_hash(ip, truncate_bitset(local_hist, rt_history_length), false) : gs_table_hash(ip, truncate_bitset(global_hist, rt_history_length), false);
   gs_history_table[gs_hash] += taken ? COUNTER_UP : COUNTER_DOWN;
   gs_occurrences[gs_hash]++;
   if(DEBUG)
