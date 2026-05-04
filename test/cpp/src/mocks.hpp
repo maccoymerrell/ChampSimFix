@@ -7,12 +7,13 @@
 
 #include "cache.h"
 #include "matchers.hpp"
+#include "module_phase.h"
 #include "operable.h"
 
 /*
  * A MemoryRequestConsumer that simply returns all packets on the next cycle
  */
-class do_nothing_MRC : public champsim::operable
+class do_nothing_MRC : public champsim::operable, public champsim::module_phase
 {
   struct packet : champsim::channel::request_type {
     int event_cycle = std::numeric_limits<int>::max();
@@ -62,13 +63,15 @@ public:
     return 1; // never deadlock
   }
 
+  void begin_phase(bool, bool) override {}
+  void end_phase() override {}
   std::size_t packet_count() const { return std::size(addresses); }
 };
 
 /*
  * A MemoryRequestConsumer that returns only a particular address
  */
-class filter_MRC : public champsim::operable
+class filter_MRC : public champsim::operable, public champsim::module_phase
 {
   struct packet : champsim::channel::request_type {
     int event_cycle = std::numeric_limits<int>::max();
@@ -116,13 +119,15 @@ public:
     return 1; // never deadlock
   }
 
+  void begin_phase(bool, bool) override {}
+  void end_phase() override {}
   std::size_t packet_count() const { return mpacket_count; }
 };
 
 /*
  * A MemoryRequestConsumer that releases blocks when instructed to
  */
-class release_MRC : public champsim::operable
+class release_MRC : public champsim::operable, public champsim::module_phase
 {
   std::deque<champsim::channel::request_type> packets;
   std::size_t mpacket_count = 0;
@@ -151,6 +156,8 @@ public:
     return 1; // never deadlock
   }
 
+  void begin_phase(bool, bool) override {}
+  void end_phase() override {}
   std::size_t packet_count() const { return mpacket_count; }
 
   void release_all()
@@ -190,7 +197,7 @@ struct counting_MRP {
   }
 };
 
-struct queue_issue_MRP : public champsim::operable {
+struct queue_issue_MRP : public champsim::operable, public champsim::module_phase {
   using request_type = typename champsim::channel::request_type;
   using response_type = typename champsim::channel::response_type;
 
@@ -228,6 +235,9 @@ struct queue_issue_MRP : public champsim::operable {
 
     return 1; // never deadlock
   }
+
+  void begin_phase(bool, bool) override {}
+  void end_phase() override {}
 };
 
 namespace Catch

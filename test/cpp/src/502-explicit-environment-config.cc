@@ -42,7 +42,7 @@ SCENARIO("Explicit environment constructs correct topology from 1-core config") 
     auto* env = make_explicit_env(config);
 
     THEN("num_cpus is 1") {
-      REQUIRE(env->get_num_cpus() == 1);
+      REQUIRE(env->get_num("core") == 1);
     }
     THEN("block_size is 64") {
       REQUIRE(env->get_block_size() == 64);
@@ -273,7 +273,7 @@ SCENARIO("Explicit environment dump mode does not crash") {
 
     THEN("Construction succeeds and dump log is non-empty") {
       auto* env = champsim::modules::environment_module::create_instance(builder, static_cast<champsim::modules::environment_module*>(nullptr));
-      REQUIRE(env->get_num_cpus() == 1);
+      REQUIRE(env->get_num("core") == 1);
       REQUIRE_FALSE(ModuleBuilder::get_dump_log().empty());
     }
 
@@ -355,7 +355,7 @@ SCENARIO("Explicit environment supports multi-core via explicit module declarati
     auto* env = make_explicit_env(config);
 
     THEN("num_cpus is 2") {
-      REQUIRE(env->get_num_cpus() == 2);
+      REQUIRE(env->get_num("core") == 2);
     }
     THEN("cpu_view has 2 cores") {
       REQUIRE(env->typed_view<champsim::modules::core_module>("core").size() == 2);
@@ -380,7 +380,7 @@ SCENARIO("Explicit environment constructs with alternative module choices") {
     auto* env = make_explicit_env(config);
 
     THEN("num_cpus is 1") {
-      REQUIRE(env->get_num_cpus() == 1);
+      REQUIRE(env->get_num("core") == 1);
     }
     THEN("block_size is 64") {
       REQUIRE(env->get_block_size() == 64);

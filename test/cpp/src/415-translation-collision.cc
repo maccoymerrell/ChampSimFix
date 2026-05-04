@@ -27,8 +27,7 @@ SCENARIO("A cache keeps the address for packets that don't need translation")
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     // Create a test packet

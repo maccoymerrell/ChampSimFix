@@ -29,8 +29,7 @@ SCENARIO("The MSHR respects the fill bandwidth")
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     // Get a list of packets
@@ -104,8 +103,7 @@ SCENARIO("Writebacks respect the fill bandwidth")
     // Initialize the prefetching and replacement
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     // Get a list of packets

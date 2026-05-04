@@ -22,6 +22,23 @@
 bool champsim::modules::ModuleBuilder::global_dump_enabled_ = false;
 std::string champsim::modules::ModuleBuilder::dump_log_;
 
+// Initialize the process-wide globals builder with the system-wide defaults so
+// modules constructed without an environment (e.g. unit tests) still get sane
+// fall-through values for block_size / page_size / num_cpus / etc.
+namespace {
+struct globals_default_initializer {
+  globals_default_initializer() {
+    auto& g = champsim::modules::ModuleBuilder::globals();
+    g.add_parameter("num_cpus",        std::size_t{1});
+    g.add_parameter("block_size",      64u);
+    g.add_parameter("page_size",       4096u);
+    g.add_parameter("log2_block_size", 6u);
+    g.add_parameter("log2_page_size",  12u);
+  }
+};
+static globals_default_initializer _globals_default_init;
+} // anonymous namespace
+
 namespace champsim::modules {
 
   bool prefetcher::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t prefetch_metadata) const

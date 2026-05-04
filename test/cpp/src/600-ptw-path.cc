@@ -27,8 +27,7 @@ SCENARIO("The number of issued steps matches the virtual memory levels")
 
     std::array<champsim::operable*, 3> elements{{&mock_ul, &uut, &mock_ll}};
 
-    uut.warmup = false;
-    uut.begin_phase();
+    uut.begin_phase(false, true);
 
     WHEN("The PTW receives a request")
     {
@@ -74,8 +73,7 @@ SCENARIO("Issuing a PTW fills the PSCLs")
 
     std::array<champsim::operable*, 3> elements{{&mock_ul, &uut, &mock_ll}};
 
-    uut.warmup = false;
-    uut.begin_phase();
+    uut.begin_phase(false, true);
 
     WHEN("The PTW receives a request")
     {
@@ -123,8 +121,7 @@ SCENARIO("PSCLs can reduce the number of issued translation requests")
 
     std::array<champsim::operable*, 3> elements{{&mock_ul, &uut, &mock_ll}};
 
-    uut.warmup = false;
-    uut.begin_phase();
+    uut.begin_phase(false, true);
 
     decltype(mock_ul)::request_type seed;
     seed.address = champsim::address{0xffff'ffff'ffff'ffff};

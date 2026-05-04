@@ -44,6 +44,8 @@ public:
   const champsim::chrono::clock::duration minor_fault_penalty;
   const std::size_t pt_levels;
   const pte_entry pte_page_size; // Size of a PTE page
+  const unsigned page_size_;
+  const unsigned log2_page_size_;
 
 private:
   std::deque<champsim::page_number> ppage_free_list;

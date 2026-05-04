@@ -23,8 +23,7 @@ SCENARIO("The next line prefetcher issues prefetches")
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("A packet is issued")

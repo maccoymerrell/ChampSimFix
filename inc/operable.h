@@ -26,7 +26,6 @@ class operable
 public:
   champsim::chrono::picoseconds clock_period{};
   champsim::chrono::clock::time_point current_time{};
-  bool warmup = true;
 
   operable();
   virtual ~operable() = default;
@@ -37,8 +36,6 @@ public:
 
   virtual void initialize() {} // LCOV_EXCL_LINE
   virtual long operate() = 0;
-  virtual void begin_phase() {}                     // LCOV_EXCL_LINE
-  virtual void end_phase(unsigned /*cpu index*/) {} // LCOV_EXCL_LINE
   virtual void print_deadlock() {}                  // LCOV_EXCL_LINE
   virtual void end_simulation() {}                 // LCOV_EXCL_LINE
 

@@ -30,7 +30,8 @@
 MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::modules::ModuleBuilder builder)
     : champsim::modules::memory_controller_module(builder.get_parameter<champsim::chrono::picoseconds>("mc_period")), queues(std::move(builder.get_parameter<std::vector<channel_type*>>("ul_channels"))),
       channel_width(builder.get_parameter<champsim::data::bytes>("channel_width")),
-      address_mapping(channel_width, BLOCK_SIZE / channel_width.count(), builder.get_parameter<std::size_t>("channels"), builder.get_parameter<std::size_t>("bankgroups"),
+      block_size_(builder.get_parameter<unsigned>("block_size", true, 64u)),
+      address_mapping(channel_width, block_size_ / channel_width.count(), builder.get_parameter<std::size_t>("channels"), builder.get_parameter<std::size_t>("bankgroups"),
                       builder.get_parameter<std::size_t>("banks"), builder.get_parameter<std::size_t>("columns"), builder.get_parameter<std::size_t>("ranks"),
                       builder.get_parameter<std::size_t>("rows")), data_bus_period(builder.get_parameter<champsim::chrono::picoseconds>("dbus_period"))
 {
@@ -68,8 +69,8 @@ DRAM_ADDRESS_MAPPING::DRAM_ADDRESS_MAPPING(champsim::data::bytes channel_width_,
 {
   // assert prefetch size is not zero
   assert(prefetch_size != 0);
-  // assert prefetch size is multiple of block size
-  assert((channel_width_.count() * prefetch_size) % BLOCK_SIZE == 0);
+  // assert total burst size is well-formed (product of channel_width * prefetch_size is power of 2)
+  assert(champsim::is_power_of_2(channel_width_.count() * prefetch_size));
 
   // mapping sanity check
   assert(columns() >= 1 && columns() == columns_);
@@ -388,7 +389,7 @@ void MEMORY_CONTROLLER::initialize()
 
 void DRAM_CHANNEL::initialize() {}
 
-void MEMORY_CONTROLLER::begin_phase()
+void MEMORY_CONTROLLER::begin_phase(bool warmup, bool roi)
 {
   std::size_t chan_idx = 0;
   for (auto& chan : channels) {
@@ -396,6 +397,7 @@ void MEMORY_CONTROLLER::begin_phase()
     new_stats.name = "Channel " + std::to_string(chan_idx++);
     chan.sim_stats = new_stats;
     chan.warmup = warmup;
+    chan.roi    = roi;
   }
 
   for (auto* ul : queues) {
@@ -406,16 +408,12 @@ void MEMORY_CONTROLLER::begin_phase()
   }
 }
 
-void DRAM_CHANNEL::begin_phase() {}
-
-void MEMORY_CONTROLLER::end_phase(unsigned cpu)
+void MEMORY_CONTROLLER::end_phase()
 {
   for (auto& chan : channels) {
-    chan.end_phase(cpu);
+    chan.roi_stats = chan.sim_stats;
   }
 }
-
-void DRAM_CHANNEL::end_phase(unsigned /*cpu*/) { roi_stats = sim_stats; }
 
 bool DRAM_ADDRESS_MAPPING::is_collision(champsim::address a, champsim::address b) const
 {
@@ -652,6 +650,25 @@ champsim::modules::memory_controller_module::stats_type MEMORY_CONTROLLER::get_r
     return channels[channel_no].roi_stats;
   } else {
     throw std::out_of_range("Channel number out of range");
+  }
+}
+
+std::vector<std::string> MEMORY_CONTROLLER::print_stats(bool roi) const
+{
+  std::vector<std::string> lines;
+  for (const auto& chan : channels) {
+    auto sub = format_plaintext(roi ? chan.roi_stats : chan.sim_stats);
+    std::move(std::begin(sub), std::end(sub), std::back_inserter(lines));
+  }
+  return lines;
+}
+
+void MEMORY_CONTROLLER::json_stats(champsim::json_stat_builder& b, bool roi) const
+{
+  std::size_t i = 0;
+  for (const auto& chan : channels) {
+    auto sub = b.group("channel " + std::to_string(i++));
+    format_json(roi ? chan.roi_stats : chan.sim_stats, sub);
   }
 }
 

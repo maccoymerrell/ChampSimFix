@@ -26,11 +26,6 @@
 #include "util/bit_enum.h"
 #include "util/ratio.h"
 
-extern std::size_t NUM_CPUS;
-extern unsigned BLOCK_SIZE;
-extern unsigned PAGE_SIZE;
-extern unsigned LOG2_BLOCK_SIZE;
-extern unsigned LOG2_PAGE_SIZE;
 
 namespace champsim
 {

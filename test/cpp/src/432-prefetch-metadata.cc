@@ -85,8 +85,7 @@ SCENARIO("Prefetch metadata from an issued prefetch is seen in the lower level")
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("The upper level issues a prefetch with metadata")
@@ -145,8 +144,7 @@ SCENARIO("Prefetch metadata from an filled block is seen in the upper level")
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("The upper level experiences a miss and the lower level emits metadata on the fill")

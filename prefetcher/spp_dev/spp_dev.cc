@@ -116,7 +116,7 @@ uint32_t spp_dev::prefetcher_cache_operate(champsim::address addr, champsim::add
     // Update base_addr and curr_sig
     if (lookahead_way < PT_WAY) {
       uint32_t set = get_hash(curr_sig) % PT_SET;
-      base_addr += (PT.delta[set][lookahead_way] << LOG2_BLOCK_SIZE);
+      base_addr += (PT.delta[set][lookahead_way] << champsim::modules::ModuleBuilder::globals().get_parameter<unsigned>("log2_block_size"));
 
       // PT.delta uses a 7-bit sign magnitude representation to generate
       // sig_delta

@@ -30,7 +30,7 @@
 #include "msl/lru_table.h"
 #include "waitable.h"
 
-class PageTableWalker : public champsim::modules::page_table_walker_module
+class PageTableWalker : public champsim::modules::page_table_walker_module, public champsim::module_phase
 {
   struct pscl_entry {
     champsim::address vaddr;
@@ -93,8 +93,15 @@ public:
 
   long operate() final;
 
-  void begin_phase() final;
+  void begin_phase(bool warmup, bool roi) override;
+  void end_phase() override {}
   void print_deadlock() final;
+
+private:
+  bool warmup_ = true;
+  unsigned log2_page_size_ = 12;
+public:
+  bool is_warmup() const { return warmup_; }
 };
 
 #endif

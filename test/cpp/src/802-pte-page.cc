@@ -24,7 +24,8 @@ SCENARIO("The virtual memory issues references to blocks within a page if they a
       dist *= pte_page_size.count();
     std::vector<champsim::page_number> req_pages{};
     req_pages.push_back(champsim::page_number{0xcccc000000000});
-    for (auto i = pte_page_size; i < champsim::data::bytes{PAGE_SIZE}; i += pte_page_size)
+    const auto page_size = champsim::modules::ModuleBuilder::globals().get_parameter<unsigned>("page_size");
+    for (auto i = pte_page_size; i < champsim::data::bytes{page_size}; i += pte_page_size)
       req_pages.push_back(req_pages.back() + dist);
 
     WHEN("A full set of requests for PTE entries at level " + std::to_string(level) + " are called for")

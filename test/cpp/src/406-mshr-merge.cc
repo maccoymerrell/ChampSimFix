@@ -67,8 +67,7 @@ SCENARIO("A cache merges two requests in the MSHR")
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     // Run the uut for a few cycles

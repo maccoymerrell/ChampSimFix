@@ -23,8 +23,7 @@ SCENARIO("A prefetch can hit the cache")
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     decltype(mock_ul)::request_type seed;
@@ -72,8 +71,7 @@ SCENARIO("A prefetch not intended to fill this level that would hit the cache is
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     decltype(mock_ul)::request_type seed;

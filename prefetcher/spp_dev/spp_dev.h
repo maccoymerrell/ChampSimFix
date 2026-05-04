@@ -63,14 +63,18 @@ struct spp_dev : public champsim::modules::prefetcher {
   static uint64_t get_hash(uint64_t key);
 
   struct block_in_page_extent : champsim::dynamic_extent {
-    block_in_page_extent() : dynamic_extent(champsim::data::bits{LOG2_PAGE_SIZE}, champsim::data::bits{LOG2_BLOCK_SIZE}) {}
+    block_in_page_extent()
+      : dynamic_extent(champsim::data::bits{champsim::modules::ModuleBuilder::globals().get_parameter<unsigned>("log2_page_size")},
+                       champsim::data::bits{champsim::modules::ModuleBuilder::globals().get_parameter<unsigned>("log2_block_size")}) {}
   };
   using offset_type = champsim::address_slice<block_in_page_extent>;
 
   class SIGNATURE_TABLE
   {
     struct tag_extent : champsim::dynamic_extent {
-      tag_extent() : dynamic_extent(champsim::data::bits{ST_TAG_BIT + LOG2_PAGE_SIZE}, champsim::data::bits{LOG2_PAGE_SIZE}) {}
+      tag_extent()
+        : dynamic_extent(champsim::data::bits{ST_TAG_BIT + champsim::modules::ModuleBuilder::globals().get_parameter<unsigned>("log2_page_size")},
+                         champsim::data::bits{champsim::modules::ModuleBuilder::globals().get_parameter<unsigned>("log2_page_size")}) {}
     };
 
   public:

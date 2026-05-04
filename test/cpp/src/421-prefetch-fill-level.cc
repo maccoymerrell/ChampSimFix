@@ -22,8 +22,7 @@ SCENARIO("A prefetch fill the first level")
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("A prefetch is issued with 'fill_this_level == true'")
@@ -85,8 +84,7 @@ SCENARIO("A prefetch not fill the first level and fill the second level")
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("A prefetch is issued with 'fill_this_level == false'")

@@ -10,11 +10,12 @@ champsim::modules::replacement::register_module<ship> ship_register("ship");
 // initialize replacement state
 ship::ship(champsim::modules::ModuleBuilder builder)
     : NUM_SET(builder.get_parent<champsim::modules::cache_module>()->num_sets()), NUM_WAY(builder.get_parent<champsim::modules::cache_module>()->num_ways()),
-      sampler(champsim::msl::get_num_samples(NUM_SET) * NUM_CPUS * static_cast<std::size_t>(NUM_WAY)),
+      num_cpus_(builder.get_parameter<std::size_t>("num_cpus")),
+      sampler(champsim::msl::get_num_samples(NUM_SET) * num_cpus_ * static_cast<std::size_t>(NUM_WAY)),
       rrpv_values(static_cast<std::size_t>(NUM_SET * NUM_WAY), maxRRPV), set_categorizer(champsim::msl::get_sample_rate(NUM_SET)),
       sampler_tag_bits(builder.get_parent<champsim::modules::cache_module>()->get_offset_bits())
 {
-  std::generate_n(std::back_inserter(SHCT), NUM_CPUS, []() -> typename decltype(SHCT)::value_type { return {}; });
+  std::generate_n(std::back_inserter(SHCT), num_cpus_, []() -> typename decltype(SHCT)::value_type { return {}; });
 }
 
 int& ship::get_rrpv(long set, long way) { return rrpv_values.at(static_cast<std::size_t>(set * NUM_WAY + way)); }

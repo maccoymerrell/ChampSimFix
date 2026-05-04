@@ -17,12 +17,12 @@
 #ifndef PHASE_INFO_H
 #define PHASE_INFO_H
 
+#include <any>
 #include <cstdint>
-#include <memory>
+#include <map>
 #include <string>
-#include <string_view>
+#include <utility>
 #include <vector>
-#include "modules.h"
 
 
 namespace champsim
@@ -39,9 +39,12 @@ struct phase_info {
 struct phase_stats {
   std::string name;
   std::vector<std::string> trace_names;
-  std::vector<champsim::modules::core_module::stats_type> roi_cpu_stats, sim_cpu_stats;
-  std::vector<champsim::modules::cache_module::stats_type> roi_cache_stats, sim_cache_stats;
-  std::vector<champsim::modules::memory_controller_module::stats_type> roi_dram_stats, sim_dram_stats;
+  // Pre-collected by collect_phase_stats
+  std::vector<std::string> sim_lines;   // all sim plaintext lines
+  std::vector<std::string> roi_lines;   // all roi plaintext lines
+  // interface -> [(module_name, json_any)] for JSON compilation
+  std::map<std::string, std::vector<std::pair<std::string, std::any>>> sim_json;
+  std::map<std::string, std::vector<std::pair<std::string, std::any>>> roi_json;
 };
 
 } // namespace champsim

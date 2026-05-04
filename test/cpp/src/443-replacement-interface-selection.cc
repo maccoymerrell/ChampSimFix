@@ -94,8 +94,7 @@ SCENARIO("The simulator selects the address-based victim finder in replacement p
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("A packet is issued")
@@ -174,8 +173,7 @@ SCENARIO("The simulator selects the address-based update function in replacement
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     decltype(mock_ul)::request_type test;
@@ -239,8 +237,7 @@ SCENARIO("The simulator selects the cache fill function if it is available")
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("A packet with the is issued")

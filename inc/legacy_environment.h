@@ -23,6 +23,7 @@
 #include <any>
 
 #include "modules.h"
+#include "util/bits.h"
 
 namespace champsim {
 
@@ -46,9 +47,15 @@ public:
 
   std::vector<std::any> view(const std::string& interface_type) const override;
 
-  size_t get_num_cpus() const override { return num_cpus_; }
+  size_t get_num(const std::string& interface_name) const override {
+    auto it = modules_by_type_.find(interface_name);
+    if (it != modules_by_type_.end()) return it->second.size();
+    return 0;
+  }
   unsigned get_block_size() const override { return block_size_; }
   unsigned get_page_size() const override { return page_size_; }
+  unsigned get_log2_block_size() const override { return champsim::lg2(block_size_); }
+  unsigned get_log2_page_size() const override { return champsim::lg2(page_size_); }
   int get_deadlock_cycles() const override { return deadlock_cycles_; }
 
   // Expose builder params for test snooping

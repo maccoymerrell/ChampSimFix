@@ -269,6 +269,17 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
   std::size_t num_cores_cfg = config.value("num_cores", 1u);
   num_cpus_ = num_cores_cfg;
 
+  // Publish the system-wide parameters to the global builder so any module
+  // (top-level or nested) reads them via builder.get_parameter fall-through.
+  {
+    auto& globals = ModuleBuilder::globals();
+    globals.add_parameter("num_cpus",        num_cpus_);
+    globals.add_parameter("block_size",      block_size_);
+    globals.add_parameter("page_size",       page_size_);
+    globals.add_parameter("log2_block_size", log2_block_size);
+    globals.add_parameter("log2_page_size",  log2_page_size);
+  }
+
   // Parse cores from JSON
   auto cpu_json_array = config.value("ooo_cpu", json::array({json::object()}));
   // Duplicate to fill num_cores: CT uses repeat-each-element, then truncate
@@ -909,6 +920,16 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
         core_builder.add_submodule("btb", std::move(sub));
       }
     }
+    // Build workload source submodule from trace info passed via builder parameters
+    auto trace_names = builder.get_parameter<std::vector<std::string>>("traces", true, std::vector<std::string>{});
+    if (static_cast<std::size_t>(cc.index) < trace_names.size()) {
+      auto src_builder = ModuleBuilder{cc.name + ".trace_source", "TRACE_WORKLOAD_SOURCE"};
+      src_builder.add_parameter("trace_file", trace_names[static_cast<std::size_t>(cc.index)]);
+      src_builder.add_parameter("cpu", static_cast<uint8_t>(cc.index));
+      src_builder.add_parameter("cloudsuite", builder.get_parameter<bool>("cloudsuite", true, false));
+      src_builder.add_parameter("repeat", builder.get_parameter<bool>("repeat", true, false));
+      core_builder.add_submodule("workload_source", std::move(src_builder));
+    }
     core_builder.add_parameter("cpu", cc.index);
     core_builder.add_parameter("clock_period", champsim::chrono::picoseconds{freq_to_period(cc.frequency)});
 
@@ -992,6 +1013,19 @@ auto champsim::legacy_environment::view(const std::string& interface_type) const
       auto& vec = modules_by_type_.at(iface);
       auto idx = type_idx[iface]++;
       result.push_back(static_cast<champsim::operable*>(to_op(vec.at(idx))));
+    }
+    return result;
+  }
+
+  if (interface_type == "source_consumer") {
+    std::vector<std::any> result;
+    std::map<std::string, std::size_t> type_idx;
+    for (auto& [name, iface] : module_order_) {
+      auto to_sc = champsim::modules::interface_registry::get_to_source_consumer(iface);
+      if (!to_sc) continue;
+      auto& vec = modules_by_type_.at(iface);
+      auto idx = type_idx[iface]++;
+      result.push_back(static_cast<champsim::modules::source_consumer*>(to_sc(vec.at(idx))));
     }
     return result;
   }

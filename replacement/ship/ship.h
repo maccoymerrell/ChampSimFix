@@ -31,6 +31,7 @@ public:
   };
 
   long NUM_SET, NUM_WAY;
+  std::size_t num_cpus_;
   uint64_t access_count = 0;
 
   // sampler

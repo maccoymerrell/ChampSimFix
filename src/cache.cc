@@ -333,7 +333,7 @@ bool CACHE::handle_write(const tag_lookup_type& handle_pkt)
   }
 
   fill_type to_allocate{handle_pkt, current_time};
-  to_allocate.data_promise.ready_at(current_time + (warmup ? champsim::chrono::clock::duration{} : FILL_LATENCY));
+  to_allocate.data_promise.ready_at(current_time + (is_warmup() ? champsim::chrono::clock::duration{} : FILL_LATENCY));
   inflight_fills.push_back(to_allocate);
 
   sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.cpu});
@@ -344,7 +344,7 @@ bool CACHE::handle_write(const tag_lookup_type& handle_pkt)
 template <bool UpdateRequest>
 auto CACHE::initiate_tag_check(champsim::modules::channel_module* ul)
 {
-  return [time = current_time + (warmup ? champsim::chrono::clock::duration{} : HIT_LATENCY), ul](const auto& entry) {
+  return [time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : HIT_LATENCY), ul](const auto& entry) {
     CACHE::tag_lookup_type retval{entry};
     retval.event_cycle = time;
 
@@ -567,7 +567,7 @@ void CACHE::finish_packet(const response_type& packet)
 
   // MSHR holds the most updated information about this request
   fill_type::returned_value finished_value{packet.data, packet.pf_metadata};
-  mshr_entry->data_promise = champsim::waitable{finished_value, current_time + (warmup ? champsim::chrono::clock::duration{} : FILL_LATENCY)};
+  mshr_entry->data_promise = champsim::waitable{finished_value, current_time + (is_warmup() ? champsim::chrono::clock::duration{} : FILL_LATENCY)};
   if constexpr (champsim::debug_print) {
     fmt::print("[{}_MSHR] finish_packet instr_id: {} address: {} data: {} type: {} current: {}\n", this->NAME, mshr_entry->instr_id, mshr_entry->address,
                mshr_entry->data_promise->data, access_type_names.at(champsim::to_underlying(mshr_entry->type)), current_time.time_since_epoch() / clock_period);
@@ -800,8 +800,10 @@ void CACHE::initialize()
   impl_initialize_replacement();
 }
 
-void CACHE::begin_phase()
+void CACHE::begin_phase(bool warmup, bool roi)
 {
+  warmup_ = warmup;
+  roi_ = roi;
   stats_type new_roi_stats;
   stats_type new_sim_stats;
 
@@ -819,9 +821,8 @@ void CACHE::begin_phase()
   }
 }
 
-void CACHE::end_phase(unsigned finished_cpu)
+void CACHE::end_phase()
 {
-  finished_cpu = finished_cpu;
   roi_stats.total_miss_latency_cycles = sim_stats.total_miss_latency_cycles;
 
   roi_stats.hits = sim_stats.hits;
@@ -889,5 +890,15 @@ void CACHE::print_deadlock()
   }
 }
 // LCOV_EXCL_STOP
+
+std::vector<std::string> CACHE::print_stats(bool roi) const
+{
+  return format_plaintext(roi ? roi_stats : sim_stats);
+}
+
+void CACHE::json_stats(champsim::json_stat_builder& b, bool roi) const
+{
+  format_json(roi ? roi_stats : sim_stats, b);
+}
 
 champsim::modules::cache_module::register_module<CACHE> default_cache_module("DEFAULT_CACHE");

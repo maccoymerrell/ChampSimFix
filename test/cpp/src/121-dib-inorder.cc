@@ -66,7 +66,7 @@ SCENARIO("Instructions that hit the DIB do not reorder ahead of instructions tha
     O3_CPU uut{champsim::modules::ModuleBuilder{"t121_core", "DEFAULT_CORE", champsim::defaults::default_core()}.add_parameter("fetch_queues", static_cast<champsim::modules::channel_module*>(&mock_L1I.queues)).add_parameter("data_queues", static_cast<champsim::modules::channel_module*>(&mock_L1D.queues)).add_parameter("decode_latency", static_cast<unsigned>(10))
 
     };
-    uut.warmup = false;
+    uut.begin_phase(false, true);
 
     const champsim::page_number root_page{0xaaa1};
     const champsim::block_number seed_base_addr{num_additional_tests};

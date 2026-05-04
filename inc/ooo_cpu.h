@@ -79,7 +79,7 @@ struct LSQ_ENTRY : champsim::program_ordered<LSQ_ENTRY> {
 };
 
 // cpu
-class O3_CPU : public champsim::modules::core_module
+class O3_CPU : public champsim::modules::core_module, public champsim::module_phase, public champsim::module_stat
 {
 public:
   uint32_t cpu = 0;
@@ -146,8 +146,19 @@ public:
 
   void initialize() final;
   long operate() final;
-  void begin_phase() final;
-  void end_phase(unsigned cpu) final;
+  void begin_phase(bool warmup, bool roi) override;
+  void end_phase() override;
+
+  // module_stat
+  std::vector<std::string> print_stats(bool roi) const override;
+  void json_stats(champsim::json_stat_builder& b, bool roi) const override;
+
+private:
+  bool warmup_ = true;
+  [[maybe_unused]] bool roi_ = false;
+public:
+  bool is_warmup() const { return warmup_; }
+  bool is_roi() const    { return roi_; }
 
   void push_instruction(ooo_model_instr instr) final;
   std::size_t instructions_requested() final;
@@ -193,6 +204,10 @@ public:
 
   std::vector<champsim::modules::branch_predictor*> branch_module_pimpl;
   std::vector<champsim::modules::btb*> btb_module_pimpl;
+  std::vector<champsim::modules::workload_source*> workload_source_pimpl;
+
+  void fill_from_sources();
+  bool source_eof() const final;
 
   // NOLINTBEGIN(readability-make-member-function-const): legacy modules use non-const hooks
   void impl_initialize_branch_predictor() const;
@@ -226,6 +241,10 @@ public:
     // Construct BTB submodules
     for (const auto& sub : builder.get_submodules("btb"))
       btb_module_pimpl.push_back(champsim::modules::btb::create_instance(sub, static_cast<champsim::modules::core_module*>(this)));
+
+    // Construct workload source submodules
+    for (const auto& sub : builder.get_submodules("workload_source", true))
+      workload_source_pimpl.push_back(champsim::modules::workload_source::create_instance(sub, static_cast<champsim::modules::source_consumer*>(this)));
   }
 };
 

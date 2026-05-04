@@ -31,10 +31,9 @@ SCENARIO("The page table steps have correct offsets") {
 
     std::array<champsim::operable*, 3> elements{{&mock_ul, &uut, &mock_ll}};
 
-    uut.warmup = false;
-    uut.begin_phase();
+    uut.begin_phase(false, true);
 
-    //uint64_t addr = (0xffff'ffff'ffe0'0000 | ((3*(level+1)) << LOG2_PAGE_SIZE)) << (level * 9);
+    //uint64_t addr = (0xffff'ffff'ffe0'0000 | ((3*(level+1)) << log2_page_size)) << (level * 9);
 
     //level 1 -> 12 bits
     //level 2 -> 21 bits

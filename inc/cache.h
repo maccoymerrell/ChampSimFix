@@ -46,7 +46,7 @@
 #include "util/to_underlying.h" // for to_underlying
 #include "waitable.h"
 
-class CACHE : public champsim::modules::cache_module
+class CACHE : public champsim::modules::cache_module, public champsim::module_phase, public champsim::module_stat
 {
   enum [[deprecated(
       "Prefetchers may not specify arbitrary fill levels. Use CACHE::prefetch_line(pf_addr, fill_this_level, prefetch_metadata) instead.")]] FILL_LEVEL{
@@ -179,9 +179,21 @@ public:
 
   long operate() final;
   void initialize() final;
-  void begin_phase() final;
-  void end_phase(unsigned cpu) final;
+  void begin_phase(bool warmup, bool roi) override;
+  void end_phase() override;
   void end_simulation() final;
+
+  // module_stat
+  std::vector<std::string> print_stats(bool roi) const override;
+  void json_stats(champsim::json_stat_builder& b, bool roi) const override;
+
+private:
+  // Snapshot of the warmup/ROI flags for the current phase.
+  bool warmup_ = true;
+  [[maybe_unused]] bool roi_ = false;
+public:
+  bool is_warmup() const { return warmup_; }
+  bool is_roi() const    { return roi_; }
 
   [[deprecated]] std::size_t get_occupancy(uint8_t queue_type, champsim::address address) const;
   [[deprecated]] std::size_t get_size(uint8_t queue_type, champsim::address address) const;

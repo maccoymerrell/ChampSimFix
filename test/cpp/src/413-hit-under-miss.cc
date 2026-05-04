@@ -27,8 +27,7 @@ TEMPLATE_TEST_CASE("Translation misses do not inhibit other packets from being i
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("A packet is issued that will miss the translator")

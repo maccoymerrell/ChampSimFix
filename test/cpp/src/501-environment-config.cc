@@ -23,7 +23,7 @@ SCENARIO("Environment with default (empty) config produces correct topology") {
     auto* env = make_env(json::object());
 
     THEN("num_cpus is 1") {
-      REQUIRE(env->get_num_cpus() == 1);
+      REQUIRE(env->get_num("core") == 1);
     }
     THEN("block_size is 64") {
       REQUIRE(env->get_block_size() == 64);
@@ -53,7 +53,7 @@ SCENARIO("Environment with multi-core config") {
     auto* env = make_env(config);
 
     THEN("num_cpus is 2") {
-      REQUIRE(env->get_num_cpus() == 2);
+      REQUIRE(env->get_num("core") == 2);
     }
     THEN("cpu_view has 2 cores") {
       REQUIRE(env->typed_view<champsim::modules::core_module>("core").size() == 2);
@@ -76,7 +76,7 @@ SCENARIO("Environment with num_cores=4") {
     auto* env = make_env(config);
 
     THEN("num_cpus is 4") {
-      REQUIRE(env->get_num_cpus() == 4);
+      REQUIRE(env->get_num("core") == 4);
     }
     THEN("cpu_view has 4 cores") {
       REQUIRE(env->typed_view<champsim::modules::core_module>("core").size() == 4);
@@ -138,7 +138,7 @@ SCENARIO("Environment with explicit per-core ooo_cpu config") {
     auto* env = make_env(config);
 
     THEN("num_cpus is 2") {
-      REQUIRE(env->get_num_cpus() == 2);
+      REQUIRE(env->get_num("core") == 2);
     }
     THEN("cpu_view has 2 cores") {
       REQUIRE(env->typed_view<champsim::modules::core_module>("core").size() == 2);
@@ -155,7 +155,7 @@ SCENARIO("Environment with single ooo_cpu entry duplicated across cores") {
     auto* env = make_env(config);
 
     THEN("num_cpus is 3") {
-      REQUIRE(env->get_num_cpus() == 3);
+      REQUIRE(env->get_num("core") == 3);
     }
     THEN("All 3 cores are created") {
       REQUIRE(env->typed_view<champsim::modules::core_module>("core").size() == 3);
@@ -202,7 +202,7 @@ SCENARIO("Environment with custom virtual_memory levels") {
     auto* env = make_env(config);
 
     THEN("The environment constructs successfully with 1 core") {
-      REQUIRE(env->get_num_cpus() == 1);
+      REQUIRE(env->get_num("core") == 1);
       REQUIRE(env->typed_view<champsim::modules::core_module>("core").size() == 1);
     }
   }
@@ -217,7 +217,7 @@ SCENARIO("Environment dump mode does not crash") {
 
     THEN("Construction succeeds and dump log is non-empty") {
       auto* env = champsim::modules::environment_module::create_instance(builder, static_cast<champsim::modules::environment_module*>(nullptr));
-      REQUIRE(env->get_num_cpus() == 1);
+      REQUIRE(env->get_num("core") == 1);
       REQUIRE_FALSE(ModuleBuilder::get_dump_log().empty());
     }
 

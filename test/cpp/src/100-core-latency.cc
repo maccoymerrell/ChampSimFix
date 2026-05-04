@@ -36,7 +36,7 @@ SCENARIO("The total latency is the sum of the stage latency")
                    .add_parameter("dispatch_width", champsim::bandwidth::maximum_type{1})
                    .add_parameter("fetch_width", champsim::bandwidth::maximum_type{1})
                    .add_parameter("retire_width", champsim::bandwidth::maximum_type{1})};
-    uut.warmup = false;
+    uut.begin_phase(false, true);
     std::vector test_instructions(num_instrs, champsim::test::instruction_with_ip(1));
 
     // only decode, schedule, dispatch, execute latency appears in O3_CPU
@@ -86,7 +86,7 @@ SCENARIO("The minimum specified core latency is 1")
                    .add_parameter("dispatch_width", champsim::bandwidth::maximum_type{1})
                    .add_parameter("fetch_width", champsim::bandwidth::maximum_type{1})
                    .add_parameter("retire_width", champsim::bandwidth::maximum_type{1})};
-    uut.warmup = false;
+    uut.begin_phase(false, true);
     std::vector test_instructions(num_instrs, champsim::test::instruction_with_ip(1));
 
     auto cycle_complete_pipeline = 9u; // Fixed value for both 0 and 1

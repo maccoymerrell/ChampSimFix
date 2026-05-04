@@ -26,8 +26,7 @@ SCENARIO("The ip_stride prefetcher issues prefetches when the IP matches")
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     // Create a test packet

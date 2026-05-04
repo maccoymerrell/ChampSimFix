@@ -26,8 +26,7 @@ SCENARIO("Blocks that have been written are marked dirty")
 
     for (auto elem : elements) {
       elem->initialize();
-      elem->warmup = false;
-      elem->begin_phase();
+      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     // Run the uut for a few cycles

@@ -26,6 +26,8 @@
 #include <cassert>
 #include <any>
 #include <optional>
+#include <tuple>
+#include <utility>
 
 #include "access_type.h"
 #include "address.h"
@@ -42,6 +44,10 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include "util/type_traits.h"
+#include "phase_info.h"
+#include "module_phase.h"
+#include "module_stat.h"
+#include "json_stat_builder.h"
 
 //class CACHE;
 //class O3_CPU;
@@ -149,45 +155,62 @@ struct ModuleBuilder {
    * \param default_value The value to return when the parameter is absent and optional is true.
    * \return The parameter value, or default_value if absent and optional.
    */
+  /**
+   * Process-wide fall-through builder. Any ``get_parameter`` call that
+   * misses the local builder consults this one before failing/returning
+   * the default. Use it for system-wide settings (block_size, page_size,
+   * num_cpus, etc.) that every module should be able to read without
+   * requiring the environment to inject them everywhere.
+   */
+  static ModuleBuilder& globals() {
+    static ModuleBuilder g{"<globals>", "<globals>"};
+    return g;
+  }
+
   template<typename T>
   T get_parameter(std::string name, bool optional = false, T default_value = T{}) const {
-    if(auto it = parameters.find(name); it != parameters.end()) {
-      try {
-        auto val = std::any_cast<T>(it->second);
-        if (is_dump_enabled()) {
-          auto line = dump_line(module_name, name, val, "set");
-          dump_log_ += line;
-          fmt::print("{}", line);
-        }
-        return val;
+    if (auto val = lookup_parameter<T>(name); val.has_value()) {
+      if (is_dump_enabled()) {
+        auto line = dump_line(module_name, name, *val, "set");
+        dump_log_ += line;
+        fmt::print("{}", line);
       }
-      catch(const std::bad_any_cast&) {
-        // For arithmetic types, try converting from whatever numeric type was stored
+      return *val;
+    }
+    if (optional) {
+      if (is_dump_enabled()) {
+        auto line = dump_line(module_name, name, default_value, "default");
+        dump_log_ += line;
+        fmt::print("{}", line);
+      }
+      return default_value;
+    }
+    fmt::print("[MODULE] [{}] ERROR: parameter {} not found\n", module_name, name);
+    exit(-1);
+  }
+
+private:
+  // Find a parameter by name on this builder, with fall-through to globals().
+  template<typename T>
+  std::optional<T> lookup_parameter(const std::string& name) const {
+    auto try_cast = [&](const std::any& a) -> std::optional<T> {
+      try { return std::optional<T>{std::any_cast<T>(a)}; }
+      catch (const std::bad_any_cast&) {
         T result{};
-        if (champsim::numeric_any_cast(it->second, result)) {
-          if (is_dump_enabled()) {
-            auto line = dump_line(module_name, name, result, "set");
-            dump_log_ += line;
-            fmt::print("{}", line);
-          }
-          return result;
-        }
-        fmt::print("[MODULE] [{}] ERROR: Casting failed while retrieving parameter {}, is your parameter type correct?\n",module_name,name);
+        if (champsim::numeric_any_cast(a, result)) return std::optional<T>{std::move(result)};
+        fmt::print("[MODULE] [{}] ERROR: Casting failed while retrieving parameter {}, is your parameter type correct?\n", module_name, name);
         exit(-1);
       }
-    } else {
-      if(optional) {
-        if (is_dump_enabled()) {
-          auto line = dump_line(module_name, name, default_value, "default");
-          dump_log_ += line;
-          fmt::print("{}", line);
-        }
-        return default_value;
-      }
-      fmt::print("[MODULE] [{}] ERROR: parameter {} not found\n",module_name,name);
-      exit(-1);
+    };
+    if (auto it = parameters.find(name); it != parameters.end())
+      return try_cast(it->second);
+    if (this != &globals()) {
+      const auto& g = globals().parameters;
+      if (auto it = g.find(name); it != g.end()) return try_cast(it->second);
     }
+    return std::nullopt;
   }
+public:
 
   template<typename T>
   ModuleBuilder& add_parameter(std::string name, T value) {
@@ -222,6 +245,7 @@ struct ModuleBuilder {
 
   bool is_valid() const {return model != "" && module_name != "";}
 
+  bool has_parameter(const std::string& name) const { return parameters.find(name) != parameters.end(); }
   // Internal check: parent has been set to a typed pointer (not the default std::nullptr_t)
   bool has_parent() const {return parent.has_value() && parent.type() != typeid(std::nullptr_t);}
 
@@ -288,15 +312,29 @@ struct ModuleBuilder {
   }
 };
 
+// Forward declaration for mixin used in interface_info
+struct source_consumer;
+
 // Registry for module interfaces: maps interface name strings to factory functions.
 // This allows runtime lookup of which module_base specialization to use for creation.
 class interface_registry {
 public:
+  // Per-instance metadata: model name (e.g. "DEFAULT_CACHE") and instance NAME (e.g. "cpu0_L1D").
+  struct instance_id { std::string model; std::string name; };
+
   struct interface_info {
     std::function<std::any(ModuleBuilder, std::any)> create;
     std::function<std::any(const std::vector<std::any>&)> make_vector;
     // Returns operable* from a typed any, or nullptr if the interface is not operable
     std::function<champsim::operable*(const std::any&)> to_operable;
+    // Returns source_consumer* from a typed any, or nullptr if the interface doesn't inherit source_consumer
+    std::function<source_consumer*(const std::any&)> to_source_consumer;
+    // Returns module_phase* from a typed any, or nullptr if the impl doesn't inherit module_phase
+    std::function<champsim::module_phase*(const std::any&)> to_module_phase;
+    // Returns module_stat* from a typed any, or nullptr if the impl doesn't inherit module_stat
+    std::function<champsim::module_stat*(const std::any&)> to_module_stat;
+    // Returns the registered model name and the instance NAME for an instance any.
+    std::function<instance_id(const std::any&)> identify;
     // Creates a typed null pointer wrapped in std::any
     std::function<std::any()> make_null_pointer;
   };
@@ -345,6 +383,32 @@ public:
     return it->second.to_operable;
   }
 
+  // Get the to_source_consumer converter for an interface, or nullptr if not a source_consumer
+  static std::function<source_consumer*(const std::any&)> get_to_source_consumer(const std::string& interface_name) {
+    auto it = registry().find(interface_name);
+    if (it == registry().end()) return nullptr;
+    return it->second.to_source_consumer;
+  }
+
+  // Get the to_module_phase / to_module_stat converters for an interface
+  static std::function<champsim::module_phase*(const std::any&)> get_to_module_phase(const std::string& interface_name) {
+    auto it = registry().find(interface_name);
+    if (it == registry().end()) return nullptr;
+    return it->second.to_module_phase;
+  }
+  static std::function<champsim::module_stat*(const std::any&)> get_to_module_stat(const std::string& interface_name) {
+    auto it = registry().find(interface_name);
+    if (it == registry().end()) return nullptr;
+    return it->second.to_module_stat;
+  }
+
+  // Read instance metadata (model + name) for an instance any belonging to a known interface.
+  static instance_id identify(const std::string& interface_name, const std::any& instance) {
+    auto it = registry().find(interface_name);
+    if (it == registry().end() || !it->second.identify) return {};
+    return it->second.identify(instance);
+  }
+
   // Create a typed null pointer for the given interface
   static std::any make_null_pointer(const std::string& interface_name) {
     auto it = registry().find(interface_name);
@@ -353,6 +417,15 @@ public:
       exit(-1);
     }
     return it->second.make_null_pointer();
+  }
+
+  // Get all registered interface names
+  static std::vector<std::string> get_interface_names() {
+    std::vector<std::string> names;
+    for (const auto& [name, _] : registry()) {
+      names.push_back(name);
+    }
+    return names;
   }
 };
 
@@ -369,6 +442,7 @@ public:
 template<typename B, typename C>
 struct module_base {
     std::string NAME;
+    std::string MODEL;
     using function_type = typename std::function<std::unique_ptr<B>(ModuleBuilder builder)>;
 
     private:
@@ -409,6 +483,7 @@ struct module_base {
           B* instance_ptr = instance_map()[builder.get_name()].emplace_back(std::any_cast<std::function<std::unique_ptr<B>(ModuleBuilder builder)>>(module_map()[builder.get_model()])(builder)).get();
           //It seems sketchy for the module wrapper to be tracking these separately from the module itself, can we fix this?
           instance_ptr->NAME =  builder.get_name();
+          instance_ptr->MODEL = builder.get_model();
           instance_ptr->bind(builder.get_parent<C>());
           if (ModuleBuilder::is_dump_enabled()) {
             auto line = fmt::format("  [{}] created_module = {} (set)\n", builder.get_name(), builder.get_model());
@@ -451,6 +526,8 @@ struct module_base {
         }
     }
 
+    virtual ~module_base() = default;
+
     /**
      * Register a concrete module implementation with the module system.
      *
@@ -461,7 +538,7 @@ struct module_base {
      *
      * \tparam D The concrete module class to register.
      */
-    template<typename D> 
+    template<typename D>
     struct register_module {
       /**
        * Register the module under the given model name.
@@ -495,6 +572,24 @@ struct module_base {
             return static_cast<champsim::operable*>(std::any_cast<B*>(a));
           };
         }
+        if constexpr (std::is_base_of_v<source_consumer, B>) {
+          info.to_source_consumer = [](const std::any& a) -> source_consumer* {
+            return static_cast<source_consumer*>(std::any_cast<B*>(a));
+          };
+        }
+        // Per-instance dynamic_cast: works even when only the implementation
+        // (not the interface) inherits module_phase / module_stat.
+        info.to_module_phase = [](const std::any& a) -> champsim::module_phase* {
+          return dynamic_cast<champsim::module_phase*>(std::any_cast<B*>(a));
+        };
+        info.to_module_stat = [](const std::any& a) -> champsim::module_stat* {
+          return dynamic_cast<champsim::module_stat*>(std::any_cast<B*>(a));
+        };
+        info.identify = [](const std::any& a) -> interface_registry::instance_id {
+          B* ptr = std::any_cast<B*>(a);
+          if (!ptr) return {};
+          return interface_registry::instance_id{ptr->MODEL, ptr->NAME};
+        };
         info.make_null_pointer = []() -> std::any {
           return static_cast<B*>(nullptr);
         };
@@ -504,13 +599,35 @@ struct module_base {
 
 };
 
+  // Mixin for any module that consumes workload sources.
+  // Inherit from this to attach workload_source submodules.
+  struct source_consumer {
+    virtual ~source_consumer() = default;
+
+    // True when all attached workload sources are exhausted.
+    virtual bool source_eof() const { return true; }
+
+    // Entity index for phase tracking (-1 = not tracked as a phase entity).
+    virtual int entity_index() const { return -1; }
+
+    // Progress metric for phase completion (e.g. instructions retired).
+    // Return 0 to indicate no progress tracking (complete only on EOF).
+    virtual uint64_t sim_progress() const { return 0; }
+
+    // Called when this consumer's entity finishes a phase. Return empty to suppress.
+    virtual std::string source_finish_message(const std::string& /*phase_name*/) const { return {}; }
+
+    // Called at the end of a phase for summary output. Return empty to suppress.
+    virtual std::string phase_complete_message(const std::string& /*phase_name*/) const { return {}; }
+  };
+
   /**
    * Interface for CPU core modules.
    *
    * The default implementation is O3_CPU. Branch predictors and BTBs are
    * attached to a core_module.
    */
-  struct core_module: public module_base<core_module,environment_module>, public operable {
+  struct core_module: public module_base<core_module,environment_module>, public operable, public source_consumer {
     /** \cond INTERNAL */
     virtual void push_instruction(ooo_model_instr instr) = 0;
     virtual std::size_t instructions_requested() = 0;
@@ -532,6 +649,15 @@ struct module_base {
     virtual stats_type get_sim_stats() const = 0;
     /** Return region-of-interest statistics for this core. */
     virtual stats_type get_roi_stats() const = 0;
+
+    static std::vector<std::string> format_plaintext(const stats_type& stats);
+    static void format_json(const stats_type& stats, champsim::json_stat_builder& b);
+
+    // source_consumer hooks: core_module provides CPU-specific messages
+    int entity_index() const override;
+    uint64_t sim_progress() const override;
+    std::string source_finish_message(const std::string& phase_name) const override;
+    std::string phase_complete_message(const std::string& phase_name) const override;
   };
 
   /**
@@ -557,6 +683,9 @@ struct module_base {
     virtual stats_type get_sim_stats() const = 0;
     /** Return region-of-interest statistics for this cache. */
     virtual stats_type get_roi_stats() const = 0;
+
+    static std::vector<std::string> format_plaintext(const stats_type& stats);
+    static void format_json(const stats_type& stats, champsim::json_stat_builder& b);
 
     /** Return true if this cache uses virtual addresses for prefetching. */
     virtual bool is_virtual_prefetch() const = 0;
@@ -629,9 +758,12 @@ struct module_base {
     /** Return region-of-interest statistics for the given channel. */
     virtual stats_type get_roi_stats(std::size_t channel_no) const = 0;
 
+    static std::vector<std::string> format_plaintext(const stats_type& stats);
+    static void format_json(const stats_type& stats, champsim::json_stat_builder& b);
+
     /** Return the total DRAM size. */
     virtual champsim::data::bytes size() const = 0;
-  }; 
+  };
 
   /**
    * Interface for page table walker modules.
@@ -946,6 +1078,67 @@ struct module_base {
   };
 
   /**
+   * Workload source interface — provides instructions to a source_consumer.
+   *
+   * Attach as a submodule of any module that inherits source_consumer
+   * (e.g. core_module). The default implementation (TRACE_WORKLOAD_SOURCE)
+   * wraps a tracereader. Override for execution-driven simulation or synthetic
+   * workloads.
+   */
+  struct workload_source : public module_base<workload_source, source_consumer> {
+    virtual ~workload_source() = default;
+
+    // Provide the next instruction. Called by the core when it has input queue space.
+    virtual ooo_model_instr next_instruction() = 0;
+
+    // True when the source has no more instructions to provide.
+    [[nodiscard]] virtual bool eof() const = 0;
+
+    // Execution-driven feedback hooks (no-ops by default).
+    // Called by the core at the appropriate pipeline stage.
+    virtual void retire_instruction([[maybe_unused]] const ooo_model_instr& instr) {}
+    virtual void squash_instruction([[maybe_unused]] const ooo_model_instr& instr) {}
+    virtual void branch_mispredict([[maybe_unused]] const ooo_model_instr& instr) {}
+  };
+
+  /**
+   * Phase controller interface — manages phase completion and health monitoring.
+   *
+   * The phase controller owns the per-phase loop conditions: it observes
+   * cycle progress, drives deadlock/livelock detection, and signals when
+   * each entity (typically a CPU) has completed its share of the phase.
+   * If the controller exposes a non-empty phase list via get_phases(),
+   * the simulator runs that list instead of the default warmup+sim pair.
+   */
+  struct phase_controller : public module_base<phase_controller, environment_module> {
+    virtual ~phase_controller() = default;
+
+    enum class status { CONTINUE, COMPLETE, ABORT };
+
+    // Called at the start of a phase
+    virtual void begin_phase(const std::string& name, bool is_warmup, uint64_t length) = 0;
+
+    // Called each cycle after all operables have operated.
+    // progress: number of operations that made progress this cycle.
+    // Returns CONTINUE, COMPLETE, or ABORT.
+    virtual status advance(long progress) = 0;
+
+    // Get indices of entities that newly completed since last advance()
+    virtual std::vector<unsigned> newly_completed_entities() const = 0;
+
+    // Notify the controller that a trace reached EOF
+    virtual void notify_trace_eof() = 0;
+
+    // Called at end of phase for cleanup
+    virtual void end_phase() = 0;
+
+    // Returns the list of phases this controller wants to run.
+    // If empty, the caller (main.cc / champsim::main) defines the phases.
+    // Implement this to take full ownership of the run structure from config.
+    virtual std::vector<champsim::phase_info> get_phases() const { return {}; }
+  };
+
+  /**
    * Interface for the top-level environment module.
    *
    * The environment owns and constructs the entire simulation. It provides
@@ -965,10 +1158,14 @@ struct module_base {
       return result;
     }
 
-    virtual std::size_t get_num_cpus() const = 0;
-    virtual unsigned get_block_size() const = 0;
-    virtual unsigned get_page_size() const = 0;
-    virtual int get_deadlock_cycles() const = 0;
+    // Return the number of modules implementing the given interface.
+    // Example: get_num("core") returns the number of cores.
+    virtual std::size_t get_num(const std::string& interface_name) const { return view(interface_name).size(); }
+    virtual unsigned get_block_size() const { return 64; }
+    virtual unsigned get_page_size() const { return 4096; }
+    virtual unsigned get_log2_block_size() const { return 6; }
+    virtual unsigned get_log2_page_size() const { return 12; }
+    virtual int get_deadlock_cycles() const { return 500; }
 
     // New: allow snooping of ModuleBuilder parameters by module name
     virtual const ModuleBuilder get_builder_params(const std::string& module_name) const = 0;

@@ -2,14 +2,23 @@
 
 #include "address.h"
 #include "champsim.h"
+#include "modules.h"
 
-champsim::page_number_extent::page_number_extent() : dynamic_extent(champsim::address::bits, champsim::data::bits{LOG2_PAGE_SIZE}) {}
+champsim::page_number_extent::page_number_extent()
+  : dynamic_extent(champsim::address::bits,
+                   champsim::data::bits{champsim::modules::ModuleBuilder::globals().get_parameter<unsigned>("log2_page_size")}) {}
 
-champsim::page_offset_extent::page_offset_extent() : dynamic_extent(champsim::data::bits{LOG2_PAGE_SIZE}, champsim::data::bits{}) {}
+champsim::page_offset_extent::page_offset_extent()
+  : dynamic_extent(champsim::data::bits{champsim::modules::ModuleBuilder::globals().get_parameter<unsigned>("log2_page_size")},
+                   champsim::data::bits{}) {}
 
-champsim::block_number_extent::block_number_extent() : dynamic_extent(champsim::address::bits, champsim::data::bits{LOG2_BLOCK_SIZE}) {}
+champsim::block_number_extent::block_number_extent()
+  : dynamic_extent(champsim::address::bits,
+                   champsim::data::bits{champsim::modules::ModuleBuilder::globals().get_parameter<unsigned>("log2_block_size")}) {}
 
-champsim::block_offset_extent::block_offset_extent() : dynamic_extent(champsim::data::bits{LOG2_BLOCK_SIZE}, champsim::data::bits{}) {}
+champsim::block_offset_extent::block_offset_extent()
+  : dynamic_extent(champsim::data::bits{champsim::modules::ModuleBuilder::globals().get_parameter<unsigned>("log2_block_size")},
+                   champsim::data::bits{}) {}
 
 namespace
 {
