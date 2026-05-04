@@ -127,6 +127,10 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   // Parse config for system parameters
   std::string env_model = config_json.value("environment", std::string("LEGACY_ENVIRONMENT"));
   bool is_legacy_env = (env_model == "LEGACY_ENVIRONMENT");
+  // num_cores from the config is used purely for CLI trace-count validation
+  // when running the legacy env. The environment owns publishing all
+  // system-wide globals (block_size, page_size, log2_*, num_sources) into
+  // ModuleBuilder::globals() during its construction.
   std::size_t num_cpus = config_json.value("num_cores", 1u);
 
   // Apply heartbeat printout frequency from the config (root-level
@@ -227,13 +231,6 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     .add_parameter("cli_args", cli_args);
   champsim::modules::ModuleBuilder::set_dump_enabled(knob_dump);
   auto* gen_environment = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
-
-  // For non-legacy envs, refresh num_cpus globals entry from the actual core
-  // count now that the environment is constructed (the pre-construction value
-  // was a guess derived from num_cores in the config).
-  if (!is_legacy_env) {
-    champsim::modules::ModuleBuilder::globals().add_parameter("num_cpus", gen_environment->get_num("core"));
-  }
 
   if (knob_dump) fmt::print("=== End Module Builder Dump ===\n");
 

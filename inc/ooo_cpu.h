@@ -242,8 +242,8 @@ public:
     for (const auto& sub : builder.get_submodules("btb"))
       btb_module_pimpl.push_back(champsim::modules::btb::create_instance(sub, static_cast<champsim::modules::core_module*>(this)));
 
-    // Construct workload source submodules
-    for (const auto& sub : builder.get_submodules("workload_source", true))
+    // Cores must always have at least one workload source attached.
+    for (const auto& sub : builder.get_submodules("workload_source"))
       workload_source_pimpl.push_back(champsim::modules::workload_source::create_instance(sub, static_cast<champsim::modules::source_consumer*>(this)));
   }
 };

@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <map>
 #include <optional>
@@ -187,21 +188,46 @@ champsim::environment::environment(ModuleBuilder builder)
   block_size_ = config.value("block_size", 64u);
   page_size_ = config.value("page_size", 4096u);
 
-  // Publish the system-wide parameters to the global builder so any module
-  // (top-level or nested) reads them via builder.get_parameter fall-through.
-  auto& globals = ModuleBuilder::globals();
-  globals.add_parameter("num_cpus",        config.value("num_cores", std::size_t{1}));
-  globals.add_parameter("block_size",      block_size_);
-  globals.add_parameter("page_size",       page_size_);
-  globals.add_parameter("log2_block_size", static_cast<unsigned>(champsim::lg2(block_size_)));
-  globals.add_parameter("log2_page_size",  static_cast<unsigned>(champsim::lg2(page_size_)));
-
   if (!config.contains("children")) {
     fmt::print("[ENVIRONMENT] ERROR: config must contain a 'children' array\n");
     std::exit(-1);
   }
 
   auto& children = config["children"];
+
+  // Pre-construction: count workload_source children so we can publish
+  // num_sources to the globals before any module is constructed. Modules
+  // that need the source count (e.g. ship/drrip for per-source tables)
+  // read it via builder.get_parameter fall-through.
+  std::function<std::size_t(const json&)> count_workload_sources = [&](const json& node) -> std::size_t {
+    std::size_t n = 0;
+    if (node.contains("children")) {
+      for (const auto& sub : node["children"]) {
+        if (sub.value("module", "") == "workload_source") ++n;
+        n += count_workload_sources(sub);
+      }
+    }
+    return n;
+  };
+  std::size_t num_sources = 0;
+  for (const auto& child : children) {
+    if (child.value("module", "") == "workload_source") ++num_sources;
+    num_sources += count_workload_sources(child);
+  }
+
+  // Publish system-wide params to the globals before module construction.
+  {
+    auto& g = ModuleBuilder::globals();
+    g.add_parameter("block_size",      block_size_);
+    g.add_parameter("page_size",       page_size_);
+    g.add_parameter("log2_block_size", static_cast<unsigned>(champsim::lg2(block_size_)));
+    g.add_parameter("log2_page_size",  static_cast<unsigned>(champsim::lg2(page_size_)));
+    g.add_parameter("num_sources",     num_sources);
+  }
+  // Sync the cached address extents (page_number, block_offset, etc.) with
+  // the freshly-published globals so the hot path doesn't pay a lookup per
+  // address-slice construction.
+  champsim::refresh_address_extents();
 
   for (auto& child : children) {
     if (!child.contains("name") || !child.contains("module") || !child.contains("model")) {
@@ -215,9 +241,6 @@ champsim::environment::environment(ModuleBuilder builder)
 
     auto mod_builder = ModuleBuilder{name, model};
 
-    // Populate parameters (with full type support) and submodules (recursive).
-    // System-wide params (block_size, page_size, etc.) are read via global
-    // fall-through, so we only need to populate config-specified params here.
     populate_builder(child, mod_builder, modules_by_name_, module_interfaces_, cli_args);
 
     // Create the module via the interface registry
@@ -252,6 +275,11 @@ champsim::environment::environment(ModuleBuilder builder)
     if (min_ps < std::numeric_limits<ps_rep>::max() && min_ps > 0)
       deadlock_cycles_ = static_cast<int>(std::max((sum_ps / min_ps)*3, ps_rep{500}));
   }
+
+  // Post-construction: publish num_cpus as a deprecated alias for the actual
+  // count of source_consumers in the constructed system. New code should read
+  // num_sources instead.
+  ModuleBuilder::globals().add_parameter("num_cpus", view("source_consumer").size());
 }
 
 // ====== Generic view function ======

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <any>
 #include <fstream>
 #include <catch.hpp>
@@ -15,7 +16,30 @@ namespace {
 json load_config(const std::string& filename) {
   std::ifstream ifs(std::string{TEST_CONFIG_DIR} + filename);
   REQUIRE(ifs.is_open());
-  return json::parse(ifs);
+  auto config = json::parse(ifs);
+
+  // The shipped explicit configs declare a TRACE_WORKLOAD_SOURCE driven by
+  // CLI $trace variables (so the configurations.yml workflow can validate
+  // them via bin/champsim). 502 doesn't run main.cc, so we replace any
+  // workload_source children on cores with a NULL_WORKLOAD_SOURCE mock —
+  // satisfying the now-required submodule without depending on CLI args.
+  if (config.contains("children")) {
+    int idx = 0;
+    for (auto& child : config["children"]) {
+      if (child.value("module", "") != "core") continue;
+      if (!child.contains("children")) child["children"] = json::array();
+      auto& kids = child["children"];
+      kids.erase(std::remove_if(kids.begin(), kids.end(),
+                                [](const json& k) { return k.value("module", "") == "workload_source"; }),
+                 kids.end());
+      kids.push_back(json{
+        {"name",   "t502_null_ws_" + std::to_string(idx++)},
+        {"module", "workload_source"},
+        {"model",  "NULL_WORKLOAD_SOURCE"}
+      });
+    }
+  }
+  return config;
 }
 
 champsim::modules::environment_module* make_explicit_env(const json& config) {

@@ -12,17 +12,9 @@
 
 class va_ampm_lite : public champsim::modules::prefetcher
 {
-  // Block-within-page extent: derives its bit positions from the runtime
-  // page/block geometry (looked up via the global ModuleBuilder so a
-  // default-constructed block_in_page still gets the right widths).
-  struct block_in_page_extent : champsim::dynamic_extent {
-    block_in_page_extent()
-      : dynamic_extent(champsim::data::bits{champsim::modules::ModuleBuilder::globals().get_parameter<unsigned>("log2_page_size")},
-                       champsim::data::bits{champsim::modules::ModuleBuilder::globals().get_parameter<unsigned>("log2_block_size")}) {}
-  };
-  using block_in_page = champsim::address_slice<block_in_page_extent>;
-
 public:
+  using block_in_page = champsim::address_slice<champsim::dynamic_extent>;
+
   static constexpr std::size_t REGION_SETS = 1;
   static constexpr std::size_t REGION_WAYS = 128;
   static constexpr int MAX_DISTANCE = 256;
@@ -50,8 +42,13 @@ public:
   bool check_cl_access(champsim::block_number v_addr);
   bool check_cl_prefetch(champsim::block_number v_addr);
 
+  // Decompose an address into its virtual page number and intra-page block
+  // slice using the cached extent (no per-call globals lookup).
   template <typename T>
-  static auto page_and_offset(T addr) -> std::pair<champsim::page_number, block_in_page>;
+  std::pair<champsim::page_number, block_in_page> page_and_offset(T addr) const
+  {
+    return {champsim::page_number{addr}, block_in_page{block_in_page_extent_, addr}};
+  }
 
   uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, bool cache_hit, bool useful_prefetch, access_type type,
                                     uint32_t metadata_in) override;
@@ -60,7 +57,9 @@ public:
   va_ampm_lite(champsim::modules::ModuleBuilder builder)
     : cache_(builder.get_parent<champsim::modules::cache_module>()),
       page_size_(builder.get_parameter<unsigned>("page_size")),
-      block_size_(builder.get_parameter<unsigned>("block_size")) {}
+      block_size_(builder.get_parameter<unsigned>("block_size")),
+      block_in_page_extent_(champsim::data::bits{builder.get_parameter<unsigned>("log2_page_size")},
+                            champsim::data::bits{builder.get_parameter<unsigned>("log2_block_size")}) {}
 
   std::size_t blocks_per_page() const { return page_size_ / block_size_; }
   region_type make_region(champsim::page_number vpn) const { return region_type{vpn, blocks_per_page()}; }
@@ -73,6 +72,7 @@ public:
 private:
   unsigned page_size_;
   unsigned block_size_;
+  champsim::dynamic_extent block_in_page_extent_;
 };
 
 #endif

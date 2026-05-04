@@ -269,16 +269,20 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
   std::size_t num_cores_cfg = config.value("num_cores", 1u);
   num_cpus_ = num_cores_cfg;
 
-  // Publish the system-wide parameters to the global builder so any module
-  // (top-level or nested) reads them via builder.get_parameter fall-through.
+  // Pre-construction: publish system-wide globals so any module attached to
+  // a cache (ship/drrip etc.) can read them via builder.get_parameter
+  // fall-through. The legacy env spawns one workload_source per core, so
+  // num_sources == num_cores here.
   {
-    auto& globals = ModuleBuilder::globals();
-    globals.add_parameter("num_cpus",        num_cpus_);
-    globals.add_parameter("block_size",      block_size_);
-    globals.add_parameter("page_size",       page_size_);
-    globals.add_parameter("log2_block_size", log2_block_size);
-    globals.add_parameter("log2_page_size",  log2_page_size);
+    auto& g = ModuleBuilder::globals();
+    g.add_parameter("block_size",      block_size_);
+    g.add_parameter("page_size",       page_size_);
+    g.add_parameter("log2_block_size", log2_block_size);
+    g.add_parameter("log2_page_size",  log2_page_size);
+    g.add_parameter("num_sources",     num_cores_cfg);
   }
+  // Sync the cached address extents with the freshly-published globals.
+  champsim::refresh_address_extents();
 
   // Parse cores from JSON
   auto cpu_json_array = config.value("ooo_cpu", json::array({json::object()}));
@@ -920,16 +924,24 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
         core_builder.add_submodule("btb", std::move(sub));
       }
     }
-    // Build workload source submodule from trace info passed via builder parameters
+    // Build the core's workload_source submodule. The default model is
+    // TRACE_WORKLOAD_SOURCE (driven by the CLI traces); tests / validation
+    // runs that don't have a real trace can override the model name (e.g. to
+    // NULL_WORKLOAD_SOURCE) via the builder param ``workload_source_model``.
     auto trace_names = builder.get_parameter<std::vector<std::string>>("traces", true, std::vector<std::string>{});
-    if (static_cast<std::size_t>(cc.index) < trace_names.size()) {
-      auto src_builder = ModuleBuilder{cc.name + ".trace_source", "TRACE_WORKLOAD_SOURCE"};
+    auto ws_model = builder.get_parameter<std::string>("workload_source_model", true, std::string{"TRACE_WORKLOAD_SOURCE"});
+    auto src_builder = ModuleBuilder{cc.name + ".workload_source", ws_model};
+    src_builder.add_parameter("cpu", static_cast<uint8_t>(cc.index));
+    if (ws_model == "TRACE_WORKLOAD_SOURCE") {
+      if (static_cast<std::size_t>(cc.index) >= trace_names.size()) {
+        fmt::print(stderr, "[LEGACY_ENVIRONMENT] ERROR: no trace provided for cpu{}\n", cc.index);
+        std::exit(-1);
+      }
       src_builder.add_parameter("trace_file", trace_names[static_cast<std::size_t>(cc.index)]);
-      src_builder.add_parameter("cpu", static_cast<uint8_t>(cc.index));
       src_builder.add_parameter("cloudsuite", builder.get_parameter<bool>("cloudsuite", true, false));
       src_builder.add_parameter("repeat", builder.get_parameter<bool>("repeat", true, false));
-      core_builder.add_submodule("workload_source", std::move(src_builder));
     }
+    core_builder.add_submodule("workload_source", std::move(src_builder));
     core_builder.add_parameter("cpu", cc.index);
     core_builder.add_parameter("clock_period", champsim::chrono::picoseconds{freq_to_period(cc.frequency)});
 
@@ -997,6 +1009,10 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
     modules_by_type_["channel"].push_back(ch);
     module_order_.emplace_back(ch->NAME, "channel");
   }
+
+  // Post-construction: publish num_cpus as a deprecated alias for the actual
+  // count of source_consumers. New code should read num_sources instead.
+  ModuleBuilder::globals().add_parameter("num_cpus", view("source_consumer").size());
 }
 
 // ====== View function ======

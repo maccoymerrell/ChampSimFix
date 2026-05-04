@@ -19,7 +19,7 @@ SCENARIO("The total latency is the sum of the stage latency")
     const auto num_instrs = GENERATE(1u, 2u, 5u);
     do_nothing_MRC mock_L1I, mock_L1D;
 
-    O3_CPU uut{champsim::modules::ModuleBuilder{"t100_core_0", "DEFAULT_CORE", champsim::defaults::default_core()}
+    O3_CPU uut{champsim::modules::ModuleBuilder{"t100_core_0", "DEFAULT_CORE", test_core_defaults("t100_core_0_ws")}
                    .add_parameter("ifetch_buffer_size", static_cast<uint32_t>(16))
                    .add_parameter("decode_buffer_size", static_cast<uint32_t>(16))
                    .add_parameter("dispatch_buffer_size", static_cast<uint32_t>(16))
@@ -69,7 +69,7 @@ SCENARIO("The minimum specified core latency is 1")
     const auto num_instrs = GENERATE(1u, 2u, 5u);
     do_nothing_MRC mock_L1I, mock_L1D;
 
-    O3_CPU uut{champsim::modules::ModuleBuilder{"t100_core_1", "DEFAULT_CORE", champsim::defaults::default_core()}
+    O3_CPU uut{champsim::modules::ModuleBuilder{"t100_core_1", "DEFAULT_CORE", test_core_defaults("t100_core_1_ws")}
                    .add_parameter("ifetch_buffer_size", static_cast<uint32_t>(16))
                    .add_parameter("decode_buffer_size", static_cast<uint32_t>(16))
                    .add_parameter("dispatch_buffer_size", static_cast<uint32_t>(16))

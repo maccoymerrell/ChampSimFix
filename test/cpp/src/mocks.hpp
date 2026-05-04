@@ -6,9 +6,29 @@
 #include <catch2/matchers/catch_matchers_templated.hpp>
 
 #include "cache.h"
+#include "defaults.hpp"
+#include "instruction.h"
 #include "matchers.hpp"
 #include "module_phase.h"
+#include "modules.h"
 #include "operable.h"
+
+// Test-only no-op workload source registered as "NULL_WORKLOAD_SOURCE" (see
+// test/cpp/src/null_workload_source_mock.cc). Tests that build a core
+// (which requires a workload_source submodule) but feed instructions through
+// IFETCH_BUFFER directly attach this mock under that model name.
+
+// Returns the standard default_core builder with a uniquely-named
+// NULL_WORKLOAD_SOURCE submodule attached, satisfying the core's required
+// workload_source. Pass a per-test mock name so trace messages identify which
+// test scenario constructed the source.
+inline champsim::modules::ModuleBuilder test_core_defaults(const std::string& ws_name)
+{
+  auto b = champsim::defaults::default_core();
+  b.add_submodule("workload_source",
+                  champsim::modules::ModuleBuilder{ws_name, "NULL_WORKLOAD_SOURCE"});
+  return b;
+}
 
 /*
  * A MemoryRequestConsumer that simply returns all packets on the next cycle

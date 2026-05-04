@@ -10,11 +10,15 @@
 champsim::modules::replacement::register_module<drrip> drrip_register("drrip");
 
 drrip::drrip(champsim::modules::ModuleBuilder builder)
-    : NUM_SET(builder.get_parent<champsim::modules::cache_module>()->num_sets()), NUM_WAY(builder.get_parent<champsim::modules::cache_module>()->num_ways()), rrpv(static_cast<std::size_t>(NUM_SET * NUM_WAY)),
-      PSEL(builder.get_parameter<std::size_t>("num_cpus"),
+    : NUM_SET(builder.get_parent<champsim::modules::cache_module>()->num_sets()),
+      NUM_WAY(builder.get_parent<champsim::modules::cache_module>()->num_ways()),
+      rrpv(static_cast<std::size_t>(NUM_SET * NUM_WAY)),
+      PSEL(builder.get_parameter<std::size_t>("num_sources", true, std::size_t{1}),
            champsim::msl::dscounter<long, PSEL_WIDTH>(champsim::msl::get_sample_rate(NUM_SET)))
 {
 }
+
+void drrip::initialize_replacement() {}
 
 unsigned& drrip::get_rrpv(long set, long way) { return rrpv.at(static_cast<std::size_t>(set * NUM_WAY + way)); }
 

@@ -7,16 +7,21 @@
 #include "champsim.h"
 champsim::modules::replacement::register_module<ship> ship_register("ship");
 
-// initialize replacement state
+// initialize replacement state. num_sources is the number of workload
+// sources in the system — published to the globals builder by the env
+// before module construction. Falls back to 1 for tests that build a
+// CACHE / ship pair directly without an env.
 ship::ship(champsim::modules::ModuleBuilder builder)
     : NUM_SET(builder.get_parent<champsim::modules::cache_module>()->num_sets()), NUM_WAY(builder.get_parent<champsim::modules::cache_module>()->num_ways()),
-      num_cpus_(builder.get_parameter<std::size_t>("num_cpus")),
-      sampler(champsim::msl::get_num_samples(NUM_SET) * num_cpus_ * static_cast<std::size_t>(NUM_WAY)),
+      num_sources_(builder.get_parameter<std::size_t>("num_sources", true, std::size_t{1})),
+      sampler(champsim::msl::get_num_samples(NUM_SET) * num_sources_ * static_cast<std::size_t>(NUM_WAY)),
       rrpv_values(static_cast<std::size_t>(NUM_SET * NUM_WAY), maxRRPV), set_categorizer(champsim::msl::get_sample_rate(NUM_SET)),
       sampler_tag_bits(builder.get_parent<champsim::modules::cache_module>()->get_offset_bits())
 {
-  std::generate_n(std::back_inserter(SHCT), num_cpus_, []() -> typename decltype(SHCT)::value_type { return {}; });
+  std::generate_n(std::back_inserter(SHCT), num_sources_, []() -> typename decltype(SHCT)::value_type { return {}; });
 }
+
+void ship::initialize_replacement() {}
 
 int& ship::get_rrpv(long set, long way) { return rrpv_values.at(static_cast<std::size_t>(set * NUM_WAY + way)); }
 

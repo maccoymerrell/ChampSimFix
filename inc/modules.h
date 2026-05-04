@@ -169,16 +169,20 @@ struct ModuleBuilder {
 
   template<typename T>
   T get_parameter(std::string name, bool optional = false, T default_value = T{}) const {
-    if (auto val = lookup_parameter<T>(name); val.has_value()) {
-      if (is_dump_enabled()) {
-        auto line = dump_line(module_name, name, *val, "set");
+    // Globals lookups (either direct or via fall-through) are completely
+    // suppressed in dump output to avoid per-module spam of system params.
+    const bool suppress_dump = (this == &globals());
+    auto found = lookup_parameter<T>(name);
+    if (found.value.has_value()) {
+      if (is_dump_enabled() && !suppress_dump && !found.from_globals) {
+        auto line = dump_line(module_name, name, *found.value, "set");
         dump_log_ += line;
         fmt::print("{}", line);
       }
-      return *val;
+      return *found.value;
     }
     if (optional) {
-      if (is_dump_enabled()) {
+      if (is_dump_enabled() && !suppress_dump) {
         auto line = dump_line(module_name, name, default_value, "default");
         dump_log_ += line;
         fmt::print("{}", line);
@@ -190,9 +194,12 @@ struct ModuleBuilder {
   }
 
 private:
+  template<typename T>
+  struct lookup_result { std::optional<T> value; bool from_globals = false; };
+
   // Find a parameter by name on this builder, with fall-through to globals().
   template<typename T>
-  std::optional<T> lookup_parameter(const std::string& name) const {
+  lookup_result<T> lookup_parameter(const std::string& name) const {
     auto try_cast = [&](const std::any& a) -> std::optional<T> {
       try { return std::optional<T>{std::any_cast<T>(a)}; }
       catch (const std::bad_any_cast&) {
@@ -203,12 +210,12 @@ private:
       }
     };
     if (auto it = parameters.find(name); it != parameters.end())
-      return try_cast(it->second);
+      return {try_cast(it->second), false};
     if (this != &globals()) {
       const auto& g = globals().parameters;
-      if (auto it = g.find(name); it != g.end()) return try_cast(it->second);
+      if (auto it = g.find(name); it != g.end()) return {try_cast(it->second), true};
     }
-    return std::nullopt;
+    return {std::nullopt, false};
   }
 public:
 

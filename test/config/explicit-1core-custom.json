@@ -1,4 +1,5 @@
 {
+  "environment": "ENVIRONMENT",
   "_comment": "1-core explicit config with custom block/page size for test 502",
   "block_size": 128,
   "page_size": 8192,
@@ -678,6 +679,13 @@
           "name": "cpu0_btb",
           "module": "btb",
           "model": "basic_btb"
+        },
+        {
+          "name": "cpu0_trace_source",
+          "module": "workload_source",
+          "model": "TRACE_WORKLOAD_SOURCE",
+          "trace_file": "$trace0",
+          "cpu": 0
         }
       ]
     }

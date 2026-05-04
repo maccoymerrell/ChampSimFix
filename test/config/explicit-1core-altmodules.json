@@ -1,4 +1,5 @@
 {
+  "environment": "ENVIRONMENT",
   "_comment": "Minimal 1-core config with ip_stride prefetcher and srrip replacement for test 502",
   "block_size": 64,
   "page_size": 4096,
@@ -152,7 +153,9 @@
       "fetch_queues": "@ch_core_l1i", "data_queues": "@ch_core_l1d",
       "children": [
         {"name": "cpu0_bp", "module": "branch_predictor", "model": "hashed_perceptron"},
-        {"name": "cpu0_btb", "module": "btb", "model": "basic_btb"}
+        {"name": "cpu0_btb", "module": "btb", "model": "basic_btb"},
+        {"name": "cpu0_trace_source", "module": "workload_source", "model": "TRACE_WORKLOAD_SOURCE",
+         "trace_file": "$trace0", "cpu": 0}
       ]
     }
   ]

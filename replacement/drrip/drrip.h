@@ -28,7 +28,7 @@ public:
 
   drrip(champsim::modules::ModuleBuilder builder);
 
-  void initialize_replacement() override {}
+  void initialize_replacement() override;
   long find_victim(uint32_t triggering_cpu, uint64_t instr_id, long set, const champsim::cache_block* current_set, champsim::address ip,
                    champsim::address full_addr, access_type type) override;
   void replacement_cache_fill(uint32_t triggering_cpu, long set, long way, champsim::address full_addr, champsim::address ip, champsim::address victim_addr,

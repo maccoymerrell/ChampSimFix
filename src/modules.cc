@@ -29,7 +29,6 @@ namespace {
 struct globals_default_initializer {
   globals_default_initializer() {
     auto& g = champsim::modules::ModuleBuilder::globals();
-    g.add_parameter("num_cpus",        std::size_t{1});
     g.add_parameter("block_size",      64u);
     g.add_parameter("page_size",       4096u);
     g.add_parameter("log2_block_size", 6u);
