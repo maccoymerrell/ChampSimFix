@@ -30,3 +30,5 @@ compile_commands.json
 
 .vscode/
 **/.DS_Store
+
+temp_extraced_trace*

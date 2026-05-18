@@ -58,7 +58,7 @@ using repeatable_reader_t = champsim::repeatable<champsim::bulk_tracereader<T, S
 champsim::tracereader get_tracereader(const std::string& fname, uint8_t cpu, bool is_cloudsuite, bool repeat, bool wrong_path_trace)
 {
   if (wrong_path_trace) {
-    return champsim::get_tracereader_for_type<champsim::wrong_path_tracereader, input_instr>(fname, cpu);
+    return champsim::tracereader{champsim::wrong_path_tracereader(fname, cpu)};
   }
 
   if (is_cloudsuite && repeat) {
