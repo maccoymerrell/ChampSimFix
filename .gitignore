@@ -32,3 +32,4 @@ compile_commands.json
 **/.DS_Store
 
 temp_extraced_trace*
+temp_extracted_trace*/*
