@@ -113,6 +113,7 @@ class wrong_path_tracereader
       } prolog;
 
       // TODO: Add header encodings structure
+
       // TODO: Add header template structure
 
     public:
@@ -127,6 +128,7 @@ class wrong_path_tracereader
       HeaderCompressedType header_file;
       std::array<char, 256> decompressed_buffer;  // This buffer temporarily the decompressed bytes
       typename decltype(decompressed_buffer)::iterator buffer_iter = decompressed_buffer.end();
+      uint64_t total_bytes_read = 0;  // Number of bytes read from the stream so far
 
       // Returns the next byte from the input stream
       std::optional<char> decompress()
@@ -140,6 +142,7 @@ class wrong_path_tracereader
         {
           char front = *buffer_iter;
           buffer_iter++;
+          total_bytes_read++;
           return {front};
         }
 
@@ -150,43 +153,55 @@ class wrong_path_tracereader
         // Return the next byte
         char front = *buffer_iter;
         buffer_iter++;
+        total_bytes_read++;
         return {front};
       }
 
-      void parse_fixed_size_prolog()
+      std::vector<char> read_bytes(std::size_t num_bytes)
       {
-        std::optional<char> next_byte = decompress();
+        std::vector<char> retvec;
+        auto next_byte = decompress();
+        std::size_t bytes_read = 1;
         if(!next_byte)
         {
-          fmt::print(stderr, "[ERROR] Can't parse header\n");
+          fmt::print(stderr, "[ERROR] Incomplete header file detected\n");
           std::exit(-1);
         }
 
-        const std::size_t bytes_to_read = sizeof(prolog.fixed_size.magic_bytes) +
-          sizeof(prolog.fixed_size.isa) + sizeof(prolog.fixed_size.flags);
-        std::vector<char> buffer;
-        buffer.push_back(next_byte.value());
-        std::size_t bytes_read = 1;
-        for(; bytes_read != bytes_to_read; bytes_read++)
+        retvec.push_back(next_byte.value());
+        for(; bytes_read != num_bytes; bytes_read++)
         {
           next_byte = decompress();
           if(!next_byte)
             break;
-          buffer.push_back(next_byte.value());
+          retvec.push_back(next_byte.value());
         }
-        if(bytes_read != bytes_to_read)
+        if(bytes_read != num_bytes)
         {
-          fmt::print(stderr, "[ERROR] Can't parse header\n");
+          fmt::print(stderr, "[ERROR] Incomplete header file detected\n");
           std::exit(-1);
         }
 
-        std::memcpy(&(prolog.fixed_size), std::data(buffer), bytes_read);
+        return retvec;
+      }
 
-        // TODO: Verify the magic
+      void parse_fixed_size_prolog()
+      {
+        const std::size_t bytes_to_read = sizeof(prolog.fixed_size.magic_bytes) +
+          sizeof(prolog.fixed_size.isa) + sizeof(prolog.fixed_size.flags);
+
+        auto buffer = read_bytes(bytes_to_read);
+        std::memcpy(&(prolog.fixed_size), std::data(buffer), bytes_to_read);
 
         fmt::print("Magic = {:X}\nISA = {:X}\nFlags = {:#b}\n",
             prolog.fixed_size.magic_bytes, prolog.fixed_size.isa,
             prolog.fixed_size.flags);
+
+        if(prolog.fixed_size.magic_bytes != 0x1C545343)
+        {
+          fmt::print(stderr, "[ERROR] Can't verify header integrity. Magic bytes don't match\n");
+          std::exit(-1);
+        }
       }
 
       uint64_t parse_uleb()
@@ -201,7 +216,7 @@ class wrong_path_tracereader
 
         if(chunks.size() > 9)
         {
-          fmt::print(stderr, "[ERROR] Can't parse header\n");
+          fmt::print(stderr, "[ERROR] ULEB of more than 8 bytes detected\n");
           std::exit(-1);
         }
 
@@ -248,16 +263,41 @@ class wrong_path_tracereader
 
       void parse_encoding_maps()
       {
-        uint64_t encoding_size = parse_uleb();
-        fmt::print("Reading encodings of size {} bytes\n", encoding_size);
+        const uint64_t encoding_size = parse_uleb();
+        const auto initial_bytes_read = total_bytes_read;
 
-        // TODO: Finish this
+        const uint64_t n_maps = parse_uleb();
+        fmt::print("Reading {} maps\n", n_maps);
+        for(uint64_t i = 0; i < n_maps; i++)
+        {
+          const std::string map_name = parse_string();
+          const uint64_t n_entries = parse_uleb();
 
+          fmt::print("Reading {} values from {}\n", n_entries, map_name);
+          for(uint64_t j = 0; j < n_entries; j++)
+          {
+            const uint64_t value = parse_uleb();
+            const std::string name = parse_string();
+            fmt::print("{}->{}\n", value, name);
+          }
+        }
+
+        if(total_bytes_read - initial_bytes_read != encoding_size)
+        {
+          fmt::print(stderr, "[ERROR] Encoding section overflowed its size\n");
+          std::exit(-1);
+        }
+
+        // TODO: Populate encoding structures
+        // TODO: Verify integrity
       }
 
       void parse_templates()
       {
-        // TODO" Finish this
+        const uint64_t num_templates = parse_uleb();
+        fmt::print("Reading {} templates\n", num_templates);
+
+        // TODO: Populate template structures
       }
 
     public:
