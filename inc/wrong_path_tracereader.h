@@ -32,6 +32,7 @@
 #include "inf_stream.h"
 #include "instruction.h"
 #include "util/detect.h"
+#include "wrong_path_tracereader_econdings.h"
 
 namespace champsim
 {
@@ -69,8 +70,8 @@ uint64_t uleb_decoder(std::vector<char>& chunks)
 
 class wrong_path_tracereader
 {
-  uint8_t cpu;
-  std::string trace_file;
+  const uint8_t cpu;
+  const std::string trace_file;
   std::filesystem::path trace_extract_dir;
 
   void parse_trace();
@@ -176,7 +177,7 @@ class wrong_path_tracereader
       stream_reader<HeaderCompressedType> compressed_header_stream;
 
       // Reads a chunk of bytes from the header stream
-      std::vector<char> read_bytes(std::size_t num_bytes)
+      std::vector<char> read_bytes(const std::size_t num_bytes)
       {
         std::vector<char> retvec;
         auto next_byte = compressed_header_stream.decompress();
@@ -262,7 +263,7 @@ class wrong_path_tracereader
 
       std::string parse_string()
       {
-        std::size_t string_size = static_cast<std::size_t>(parse_uleb());
+        const std::size_t string_size = static_cast<std::size_t>(parse_uleb());
         std::string retval = "";
         for(std::size_t i = 0; i < string_size; i++)
           retval += compressed_header_stream.decompress().value();
@@ -287,16 +288,43 @@ class wrong_path_tracereader
 
         const uint64_t n_maps = parse_uleb();
         fmt::print("Reading {} maps\n", n_maps);
+        if(expected_encodings.size() != n_maps)
+        {
+          fmt::print(stderr, "[ERROR] Header encodings are incorrect\n");
+          std::exit(-1);
+        }
+
         for(uint64_t i = 0; i < n_maps; i++)
         {
           const std::string map_name = parse_string();
           const uint64_t n_entries = parse_uleb();
+          if(expected_encodings.find(map_name) == expected_encodings.end())
+          {
+            fmt::print(stderr, "[ERROR] Detected unexpected encoding map: {}\n", map_name);
+            std::exit(-1);
+          }
+          if(expected_encodings.find(map_name)->second.size() != n_entries)
+          {
+            fmt::print(stderr, "[ERROR] Encoding map {} has incorrect number of entries\n", map_name);
+            std::exit(-1);
+          }
 
           fmt::print("Reading {} values from {}\n", n_entries, map_name);
           for(uint64_t j = 0; j < n_entries; j++)
           {
             const uint64_t value = parse_uleb();
             const std::string name = parse_string();
+            if(expected_encodings.find(map_name)->second.find(value) == expected_encodings.find(map_name)->second.end())
+            {
+              fmt::print(stderr, "[ERROR] Encoding map {} doesn't not have a mapping for {}\n", map_name, value);
+              std::exit(-1);
+            }
+            if(expected_encodings.find(map_name)->second.find(value)->second != name)
+            {
+              fmt::print(stderr, "[ERROR] Encoding map {} doesn't not have a mapping for {} -> {}\n", map_name, value, name);
+              std::exit(-1);
+            }
+
             fmt::print("{}->{}\n", value, name);
           }
         }
@@ -306,9 +334,6 @@ class wrong_path_tracereader
           fmt::print(stderr, "[ERROR] Encoding section overflowed its size\n");
           std::exit(-1);
         }
-
-        // TODO: Populate encoding structures
-        // TODO: Verify integrity
       }
 
       void parse_templates()
@@ -347,7 +372,7 @@ class wrong_path_tracereader
   class body_parser: public body_wrapper
   {
     private:
-      uint8_t cpu;
+      const uint8_t cpu;
       stream_reader<BodyCompressedType> compressed_body_stream;
 
       // TODO: Declare the body structure here
@@ -415,7 +440,7 @@ class wrong_path_tracereader
 public:
   ooo_model_instr operator()() { return body_stream->read(); }
 
-  wrong_path_tracereader(const std::string& tf, uint8_t cpu_idx) : cpu(cpu_idx), trace_file(tf) { parse_trace(); }
+  wrong_path_tracereader(const std::string& tf, const uint8_t cpu_idx) : cpu(cpu_idx), trace_file(tf) { parse_trace(); }
   wrong_path_tracereader(champsim::wrong_path_tracereader&& other):
     cpu(other.cpu), trace_file(std::move(other.trace_file)),
     header_stream(std::move(other.header_stream)), body_stream(std::move(other.body_stream)) {}
@@ -456,7 +481,7 @@ std::filesystem::path wrong_path_tracereader::create_extract_dir()
     extract_dir += std::to_string(suffix);
   }
   fmt::print("New dir: {}\n", extract_dir.string());
-  bool success = std::filesystem::create_directory(extract_dir);
+  const bool success = std::filesystem::create_directory(extract_dir);
   if(!success)
   {
     fmt::print(stderr, "[ERROR] Could not create the directory to extract the wrong path trace. Exiting...\n");
@@ -467,7 +492,7 @@ std::filesystem::path wrong_path_tracereader::create_extract_dir()
 
 void wrong_path_tracereader::extract_trace(const std::string& trace_file_name) const
 {
-  std::string command = "tar -xf " + trace_file_name + " -C " + trace_extract_dir.string();
+  const std::string command = "tar -xf " + trace_file_name + " -C " + trace_extract_dir.string();
   if(std::system(command.c_str()) != 0)
   {
     fmt::print(stderr, "[ERROR] Could not extract the wrong path trace. Exiting...\n");
@@ -499,14 +524,14 @@ std::filesystem::path wrong_path_tracereader::get_body_path() const
 
 void wrong_path_tracereader::construct_header_stream()
 {
-  std::string header_file_name = get_header_path().string();
-  if (bool is_gzip_compressed = (header_file_name.substr(std::size(header_file_name) - 2) == "gz"); is_gzip_compressed) {
+  const std::string header_file_name = get_header_path().string();
+  if (const bool is_gzip_compressed = (header_file_name.substr(std::size(header_file_name) - 2) == "gz"); is_gzip_compressed) {
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::gzip_tag_t<>>>(header_file_name));
   }
-  else if (bool is_lzma_compressed = (header_file_name.substr(std::size(header_file_name) - 2) == "xz"); is_lzma_compressed) {
+  else if (const bool is_lzma_compressed = (header_file_name.substr(std::size(header_file_name) - 2) == "xz"); is_lzma_compressed) {
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::lzma_tag_t<>>>(header_file_name));
   }
-  else if (bool is_bzip2_compressed = (header_file_name.substr(std::size(header_file_name) - 3) == "bz2"); is_bzip2_compressed) {
+  else if (const bool is_bzip2_compressed = (header_file_name.substr(std::size(header_file_name) - 3) == "bz2"); is_bzip2_compressed) {
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::bzip2_tag_t>>(header_file_name));
   }
   else {
@@ -517,16 +542,16 @@ void wrong_path_tracereader::construct_header_stream()
 
 void wrong_path_tracereader::construct_body_stream()
 {
-  std::string body_file_name = get_body_path().string();
-  if (bool is_gzip_compressed = (body_file_name.substr(std::size(body_file_name) - 2) == "gz"); is_gzip_compressed) {
+  const std::string body_file_name = get_body_path().string();
+  if (const bool is_gzip_compressed = (body_file_name.substr(std::size(body_file_name) - 2) == "gz"); is_gzip_compressed) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::gzip_tag_t<>>>(cpu, body_file_name));
     return;
   }
-  else if (bool is_lzma_compressed = (body_file_name.substr(std::size(body_file_name) - 2) == "xz"); is_lzma_compressed) {
+  else if (const bool is_lzma_compressed = (body_file_name.substr(std::size(body_file_name) - 2) == "xz"); is_lzma_compressed) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::lzma_tag_t<>>>(cpu, body_file_name));
     return;
   }
-  else if (bool is_bzip2_compressed = (body_file_name.substr(std::size(body_file_name) - 3) == "bz2"); is_bzip2_compressed) {
+  else if (const bool is_bzip2_compressed = (body_file_name.substr(std::size(body_file_name) - 3) == "bz2"); is_bzip2_compressed) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::bzip2_tag_t>>(cpu, body_file_name));
     return;
   }
