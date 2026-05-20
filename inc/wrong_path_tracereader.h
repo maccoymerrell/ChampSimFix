@@ -161,7 +161,34 @@ class wrong_path_tracereader
         std::string target_name;
       } prolog;
 
-      // TODO: Add header template structure
+      // TODO: Add dependency structure
+      struct Dependency
+      {
+      };
+
+      // TODO: Add instructions structure
+      struct Instruction
+      {
+      };
+
+      // TODO: Add profile structure
+      struct Profile
+      {
+      };
+
+      struct Template
+      {
+        uint64_t start_pc;
+        uint64_t num_instr;
+        uint64_t fall_through_pc;
+        uint64_t num_targets;
+        std::vector<uint64_t> targets;
+        std::string symbol_name;
+        std::vector<Instruction> instructions;
+        Profile profile;
+      };
+
+      std::map<uint32_t, Template> templates;
 
     public:
       virtual void parse() = 0;
@@ -334,12 +361,44 @@ class wrong_path_tracereader
         }
       }
 
+      Dependency parse_dependency()
+      {
+        // TODO: Finish this
+      }
+
+      Instruction parse_instruction()
+      {
+        // TODO: Finish this
+      }
+
+      Profile parse_profile()
+      {
+        // TODO: Finish this
+      }
+
+      void parse_one_template()
+      {
+        const uint64_t template_id = parse_uleb();
+
+        templates[template_id].start_pc = parse_uleb();
+        templates[template_id].num_instr = parse_uleb();
+        templates[template_id].fall_through_pc = parse_uleb();
+        templates[template_id].num_targets = parse_uleb();
+        for(auto i = 0; i < templates[template_id].num_targets; i++)
+          templates[template_id].targets.push_back(parse_uleb());
+        templates[template_id].symbol_name = parse_string();
+        for(auto i = 0; i < templates[template_id].num_instr; i++)
+          templates[template_id].instructions.emplace_back(parse_instruction());
+        templates[template_id].profile = parse_profile();
+      }
+
       void parse_templates()
       {
         const uint64_t num_templates = parse_uleb();
         fmt::print("Reading {} templates\n", num_templates);
 
-        // TODO: Populate template structures
+//         for(auto i = 0; i < num_templates; i++)
+//           parse_one_template();
       }
 
     public:
