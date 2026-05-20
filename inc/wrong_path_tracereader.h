@@ -22,7 +22,6 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
-#include <deque>
 #include <filesystem>
 #include <memory>
 #include <numeric>
@@ -74,10 +73,6 @@ class wrong_path_tracereader
   std::string trace_file;
   std::filesystem::path trace_extract_dir;
 
-  constexpr static std::size_t buffer_size = 128;
-  constexpr static std::size_t refresh_thresh = 1;
-  std::deque<ooo_model_instr> instr_buffer;
-
   void parse_trace();
   std::filesystem::path create_extract_dir();
   void extract_trace(const std::string& trace_file_name) const;
@@ -85,6 +80,59 @@ class wrong_path_tracereader
   std::filesystem::path get_body_path() const;
   void construct_header_stream();
   void construct_body_stream();
+
+  // This class is responsible for decompressing the compressed streams and returning
+  // decompressed data byte-by-byte
+  template<typename CompressedStreamType, std::size_t buffer_size = 4096>
+  class stream_reader
+  {
+    CompressedStreamType stream;
+    std::array<char, buffer_size> decompressed_buffer;  // This buffer temporarily the decompressed bytes
+    decltype(decompressed_buffer.end()) buffer_iter = decompressed_buffer.end();
+    decltype(decompressed_buffer.end()) max_buffer_iter = decompressed_buffer.end();
+
+    public:
+      uint64_t total_bytes_read = 0;  // Number of bytes read from the stream so far
+      bool eof = false;               // Set to true if no more bytes can be returned
+      stream_reader(const std::string& stream_name): stream(stream_name) {}
+
+      // Returns the next byte from the input stream
+      std::optional<char> decompress()
+      {
+        // No more bytes left
+        if((buffer_iter >= decompressed_buffer.end()) && stream.eof())
+        {
+          eof = true;
+          return {};
+        }
+
+        // No need to decompress more. We can return from the buffer
+        if(buffer_iter != max_buffer_iter)
+        {
+          char front = *buffer_iter;
+          buffer_iter++;
+          total_bytes_read++;
+          return {front};
+        }
+
+        // The buffer is empty. Re-fill the buffer
+        stream.read(std::data(decompressed_buffer), decompressed_buffer.size());
+        const auto bytes_read = static_cast<std::size_t>(stream.gcount());
+        if(bytes_read == 0)
+        {
+          eof = true;
+          return {};
+        }
+        buffer_iter = decompressed_buffer.begin();
+        max_buffer_iter = buffer_iter + bytes_read;
+
+        // Return the next byte
+        char front = *buffer_iter;
+        buffer_iter++;
+        total_bytes_read++;
+        return {front};
+      }
+  };
 
   // Type erased wrapper for parsing the header. Type erasure is necessary since the concrete type depends on the compression
   // format which is only known at runtime
@@ -125,42 +173,13 @@ class wrong_path_tracereader
   class header_parser: public header_wrapper
   {
     private:
-      HeaderCompressedType header_file;
-      std::array<char, 256> decompressed_buffer;  // This buffer temporarily the decompressed bytes
-      typename decltype(decompressed_buffer)::iterator buffer_iter = decompressed_buffer.end();
-      uint64_t total_bytes_read = 0;  // Number of bytes read from the stream so far
+      stream_reader<HeaderCompressedType> compressed_header_stream;
 
-      // Returns the next byte from the input stream
-      std::optional<char> decompress()
-      {
-        // No more bytes left
-        if((buffer_iter >= decompressed_buffer.end()) && header_file.eof())
-          return {};
-
-        // No need to decompress more. We can return from the buffer
-        if(buffer_iter != decompressed_buffer.end())
-        {
-          char front = *buffer_iter;
-          buffer_iter++;
-          total_bytes_read++;
-          return {front};
-        }
-
-        // The buffer is empty. Re-fill the buffer
-        header_file.read(std::data(decompressed_buffer), decompressed_buffer.size());
-        buffer_iter = decompressed_buffer.begin();
-
-        // Return the next byte
-        char front = *buffer_iter;
-        buffer_iter++;
-        total_bytes_read++;
-        return {front};
-      }
-
+      // Reads a chunk of bytes from the header stream
       std::vector<char> read_bytes(std::size_t num_bytes)
       {
         std::vector<char> retvec;
-        auto next_byte = decompress();
+        auto next_byte = compressed_header_stream.decompress();
         std::size_t bytes_read = 1;
         if(!next_byte)
         {
@@ -171,7 +190,7 @@ class wrong_path_tracereader
         retvec.push_back(next_byte.value());
         for(; bytes_read != num_bytes; bytes_read++)
         {
-          next_byte = decompress();
+          next_byte = compressed_header_stream.decompress();
           if(!next_byte)
             break;
           retvec.push_back(next_byte.value());
@@ -207,7 +226,7 @@ class wrong_path_tracereader
       uint64_t parse_uleb()
       {
         std::vector<char> chunks;
-        while(auto byte = decompress())
+        while(auto byte = compressed_header_stream.decompress())
         {
           chunks.push_back(byte.value());
           if(!(byte.value() & 0x80))
@@ -246,7 +265,7 @@ class wrong_path_tracereader
         std::size_t string_size = static_cast<std::size_t>(parse_uleb());
         std::string retval = "";
         for(std::size_t i = 0; i < string_size; i++)
-          retval += decompress().value();
+          retval += compressed_header_stream.decompress().value();
         return retval;
       }
 
@@ -264,7 +283,7 @@ class wrong_path_tracereader
       void parse_encoding_maps()
       {
         const uint64_t encoding_size = parse_uleb();
-        const auto initial_bytes_read = total_bytes_read;
+        const auto initial_bytes_read = compressed_header_stream.total_bytes_read;
 
         const uint64_t n_maps = parse_uleb();
         fmt::print("Reading {} maps\n", n_maps);
@@ -282,7 +301,7 @@ class wrong_path_tracereader
           }
         }
 
-        if(total_bytes_read - initial_bytes_read != encoding_size)
+        if(compressed_header_stream.total_bytes_read - initial_bytes_read != encoding_size)
         {
           fmt::print(stderr, "[ERROR] Encoding section overflowed its size\n");
           std::exit(-1);
@@ -301,7 +320,8 @@ class wrong_path_tracereader
       }
 
     public:
-      header_parser(const std::string& header_file_): header_file(header_file_) {}
+      header_parser(const std::string& header_file):
+        compressed_header_stream(header_file) {}
       void parse() override
       {
         parse_prolog();
@@ -327,33 +347,31 @@ class wrong_path_tracereader
   class body_parser: public body_wrapper
   {
     private:
-      std::array<char, 64> raw_buf;
       uint8_t cpu;
-      bool eof_ = false;
-      BodyCompressedType body_file;
+      stream_reader<BodyCompressedType> compressed_body_stream;
 
       // TODO: Declare the body structure here
 
     public:
-      body_parser(uint8_t cpu_idx, const std::string& body_file_): cpu(cpu_idx), body_file(body_file_) {}
+      body_parser(uint8_t cpu_idx, const std::string& body_file):
+        cpu(cpu_idx), compressed_body_stream(body_file) {}
 
       ooo_model_instr read() override
       {
         // TODO: Read the trace instruction by instruction and emit ooo_model_instr
         std::size_t bytes_read = 0;
 
-        while(!eof_ && bytes_read <= 512)
+        fmt::print("Reading from the body file\n");
+        while(bytes_read <= 64)
         {
-          // Read from trace file
-          body_file.read(std::data(raw_buf), std::size(raw_buf));
-          bytes_read += static_cast<std::size_t>(body_file.gcount());
-          eof_ = body_file.eof();
+          std::optional<char> byte = compressed_body_stream.decompress();
+          if(!byte)
+            break;
 
-          for(const auto& byte: raw_buf)
-            fmt::print("{:02x}", std::byte(byte));
-          fmt::print("\n");
+          fmt::print("{:02x}", byte.value());
+          bytes_read++;
         }
-        eof_ = true;
+        fmt::print("\n");
 
         // if (std::size(instr_buffer) <= refresh_thresh) {
         //   std::array<T, buffer_size - refresh_thresh> trace_read_buf;
@@ -385,7 +403,7 @@ class wrong_path_tracereader
 
       bool eof() const override
       {
-        return eof_;
+        return compressed_body_stream.eof;
       }
 
       ~body_parser() override = default;
