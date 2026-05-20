@@ -164,16 +164,47 @@ class wrong_path_tracereader
       // TODO: Add dependency structure
       struct Dependency
       {
+        uint8_t dep_block_flags;
+        std::vector<uint64_t> dst_dep;
+        std::vector<uint64_t> store_data_dep;
+        std::vector<uint64_t> load_addr_dep;
+        std::vector<uint64_t> store_addr_dep;
       };
 
       // TODO: Add instructions structure
       struct Instruction
       {
+        uint64_t pc_delta;
+        uint8_t opcode;
+        uint8_t branch_type;
+        uint8_t flags;
+        uint8_t n_src;
+        uint8_t n_dst;
+        std::vector<uint8_t> src_regs;
+        std::vector<uint8_t> dst_regs;
+        uint8_t max_dep_loads;
+        uint8_t max_dep_stores;
+        std::optional<int8_t> immidiate;
+        uint8_t instr_size;
+        std::vector<char> instr_bytes;
       };
 
       // TODO: Add profile structure
       struct Profile
       {
+        uint64_t exec_cp;
+        uint64_t exec_wp;
+        std::vector<uint64_t> taken_cp;
+        std::vector<uint64_t> nottaken_cp;
+        std::vector<uint64_t> taken_wp;
+        std::vector<uint64_t> nottaken_wp;
+        std::vector<uint64_t> memops_cp;
+        std::vector<uint64_t> memops_wp;
+        std::vector<uint64_t> pat_flags; 
+        std::vector<uint64_t> lo_addr_cp;
+        std::vector<uint64_t> hi_addr_cp;
+        std::vector<uint64_t> lo_addr_wp;
+        std::vector<uint64_t> hi_addr_wp;
       };
 
       struct Template
