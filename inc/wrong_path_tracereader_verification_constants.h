@@ -6,7 +6,8 @@
 
 namespace champsim
 {
-  const std::map<std::string, std::map<uint64_t, std::string>> expected_encodings
+  const uint32_t magic_bytes = 0x1c545343;
+  const std::map<std::string, std::map<uint64_t, std::string>> encodings
   {
     {"opcode", {
                  {0, "GEN_OP_UNKNOWN"},

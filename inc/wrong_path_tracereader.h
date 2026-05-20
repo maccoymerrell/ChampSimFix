@@ -32,7 +32,7 @@
 #include "inf_stream.h"
 #include "instruction.h"
 #include "util/detect.h"
-#include "wrong_path_tracereader_econdings.h"
+#include "wrong_path_tracereader_verification_constants.h"
 
 namespace champsim
 {
@@ -161,8 +161,6 @@ class wrong_path_tracereader
         std::string target_name;
       } prolog;
 
-      // TODO: Add header encodings structure
-
       // TODO: Add header template structure
 
     public:
@@ -217,7 +215,7 @@ class wrong_path_tracereader
             prolog.fixed_size.magic_bytes, prolog.fixed_size.isa,
             prolog.fixed_size.flags);
 
-        if(prolog.fixed_size.magic_bytes != 0x1C545343)
+        if(prolog.fixed_size.magic_bytes != magic_bytes)
         {
           fmt::print(stderr, "[ERROR] Can't verify header integrity. Magic bytes don't match\n");
           std::exit(-1);
@@ -288,7 +286,7 @@ class wrong_path_tracereader
 
         const uint64_t n_maps = parse_uleb();
         fmt::print("Reading {} maps\n", n_maps);
-        if(expected_encodings.size() != n_maps)
+        if(encodings.size() != n_maps)
         {
           fmt::print(stderr, "[ERROR] Header encodings are incorrect\n");
           std::exit(-1);
@@ -298,12 +296,12 @@ class wrong_path_tracereader
         {
           const std::string map_name = parse_string();
           const uint64_t n_entries = parse_uleb();
-          if(expected_encodings.find(map_name) == expected_encodings.end())
+          if(encodings.find(map_name) == encodings.end())
           {
             fmt::print(stderr, "[ERROR] Detected unexpected encoding map: {}\n", map_name);
             std::exit(-1);
           }
-          if(expected_encodings.find(map_name)->second.size() != n_entries)
+          if(encodings.find(map_name)->second.size() != n_entries)
           {
             fmt::print(stderr, "[ERROR] Encoding map {} has incorrect number of entries\n", map_name);
             std::exit(-1);
@@ -314,12 +312,12 @@ class wrong_path_tracereader
           {
             const uint64_t value = parse_uleb();
             const std::string name = parse_string();
-            if(expected_encodings.find(map_name)->second.find(value) == expected_encodings.find(map_name)->second.end())
+            if(encodings.find(map_name)->second.find(value) == encodings.find(map_name)->second.end())
             {
               fmt::print(stderr, "[ERROR] Encoding map {} doesn't not have a mapping for {}\n", map_name, value);
               std::exit(-1);
             }
-            if(expected_encodings.find(map_name)->second.find(value)->second != name)
+            if(encodings.find(map_name)->second.find(value)->second != name)
             {
               fmt::print(stderr, "[ERROR] Encoding map {} doesn't not have a mapping for {} -> {}\n", map_name, value, name);
               std::exit(-1);
@@ -384,6 +382,8 @@ class wrong_path_tracereader
       ooo_model_instr read() override
       {
         // TODO: Read the trace instruction by instruction and emit ooo_model_instr
+        // `encodings` are globally accessible
+        // The template maps in header_stream should be accessible since body_wrapper is friend of header_wrapper
         std::size_t bytes_read = 0;
 
         fmt::print("Reading from the body file\n");
@@ -471,7 +471,7 @@ void wrong_path_tracereader::parse_trace()
 
 std::filesystem::path wrong_path_tracereader::create_extract_dir()
 {
-  std::filesystem::path base_extract_dir("temp_extracted_trace");
+  std::filesystem::path base_extract_dir(".temp_extracted_trace");
   std::filesystem::path extract_dir = base_extract_dir;
   uint64_t suffix = 0;
   while(std::filesystem::is_directory(extract_dir))
@@ -492,6 +492,8 @@ std::filesystem::path wrong_path_tracereader::create_extract_dir()
 
 void wrong_path_tracereader::extract_trace(const std::string& trace_file_name) const
 {
+  // TODO: Untar the trace using C++ instead of calling `tar`
+
   const std::string command = "tar -xf " + trace_file_name + " -C " + trace_extract_dir.string();
   if(std::system(command.c_str()) != 0)
   {
@@ -524,6 +526,10 @@ std::filesystem::path wrong_path_tracereader::get_body_path() const
 
 void wrong_path_tracereader::construct_header_stream()
 {
+  // TODO: Detect file type using magic bytes instead of file name
+  // TODO: Add support for zst and lz4 compression formats
+  // TODO: Add support for uncompressed trace format
+
   const std::string header_file_name = get_header_path().string();
   if (const bool is_gzip_compressed = (header_file_name.substr(std::size(header_file_name) - 2) == "gz"); is_gzip_compressed) {
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::gzip_tag_t<>>>(header_file_name));
@@ -542,6 +548,10 @@ void wrong_path_tracereader::construct_header_stream()
 
 void wrong_path_tracereader::construct_body_stream()
 {
+  // TODO: Detect file type using magic bytes instead of file name
+  // TODO: Add support for zst and lz4 compression formats
+  // TODO: Add support for uncompressed trace format
+
   const std::string body_file_name = get_body_path().string();
   if (const bool is_gzip_compressed = (body_file_name.substr(std::size(body_file_name) - 2) == "gz"); is_gzip_compressed) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::gzip_tag_t<>>>(cpu, body_file_name));
