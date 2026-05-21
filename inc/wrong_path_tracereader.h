@@ -36,38 +36,6 @@
 
 namespace champsim
 {
-
-int64_t sleb_decoder(std::vector<char>& chunks)
-{
-  int64_t retval = 0;
-  uint64_t chunk_id = 0;
-  for(char& byte: chunks)
-  {
-    byte &= 0x7f;                                 // The MSB is used for encoding and is not part of the payload
-    int64_t chunk = 0;
-    std::memcpy(&chunk, &byte, sizeof(char));  // Safely type cast. Copy over the bits without sign extension
-    chunk <<= chunk_id * 7;                       // Shift the chunk bits into their right place
-    retval |= chunk;                              // Add the bits to the decoded value
-    chunk_id++;
-  }
-  return retval;
-}
-
-uint64_t uleb_decoder(std::vector<char>& chunks)
-{
-  uint64_t retval = 0;
-  uint64_t chunk_id = 0;
-  for(char& byte: chunks)
-  {
-    byte &= 0x7f;                                 // The MSB is used for encoding and is not part of the payload
-    uint64_t chunk = static_cast<uint64_t>(byte);
-    chunk <<= chunk_id * 7;                       // Shift the chunk bits into their right place
-    retval |= chunk;                              // Add the bits to the decoded value
-    chunk_id++;
-  }
-  return retval;
-}
-
 class wrong_path_tracereader
 {
   const uint8_t cpu;
@@ -84,6 +52,7 @@ class wrong_path_tracereader
 
   // This class is responsible for decompressing the compressed streams and returning
   // decompressed data byte-by-byte
+  // This class also provides functions for decoding ULEBs and strings
   template<typename CompressedStreamType, std::size_t buffer_size = 4096>
   class stream_reader
   {
@@ -91,6 +60,38 @@ class wrong_path_tracereader
     std::array<char, buffer_size> decompressed_buffer;  // This buffer temporarily the decompressed bytes
     decltype(decompressed_buffer.end()) buffer_iter = decompressed_buffer.end();
     decltype(decompressed_buffer.end()) max_buffer_iter = decompressed_buffer.end();
+
+    uint64_t uleb_decoder(std::vector<char>& chunks)
+    {
+      uint64_t retval = 0;
+      uint64_t chunk_id = 0;
+      for(char& byte: chunks)
+      {
+        byte &= 0x7f;                                 // The MSB is used for encoding and is not part of the payload
+        uint64_t chunk = static_cast<uint64_t>(byte);
+        chunk <<= chunk_id * 7;                       // Shift the chunk bits into their right place
+        retval |= chunk;                              // Add the bits to the decoded value
+        chunk_id++;
+      }
+      return retval;
+    }
+
+    int64_t sleb_decoder(std::vector<char>& chunks)
+    {
+      int64_t retval = 0;
+      uint64_t chunk_id = 0;
+      for(char& byte: chunks)
+      {
+        byte &= 0x7f;                               // The MSB is used for encoding and is not part of the payload
+        int64_t chunk = 0;
+        std::memcpy(&chunk, &byte, sizeof(char));   // Safely type cast. Copy over the bits without sign extension
+        chunk <<= chunk_id * 7;                     // Shift the chunk bits into their right place
+        retval |= chunk;                            // Add the bits to the decoded value
+        chunk_id++;
+      }
+      return retval;
+    }
+
 
     public:
       uint64_t total_bytes_read = 0;  // Number of bytes read from the stream so far
@@ -132,6 +133,85 @@ class wrong_path_tracereader
         buffer_iter++;
         total_bytes_read++;
         return {front};
+      }
+
+      // Reads a ULEB from the stream
+      uint64_t parse_uleb()
+      {
+        std::vector<char> chunks;
+        while(auto byte = decompress())
+        {
+          chunks.push_back(byte.value());
+          if(!(byte.value() & 0x80))
+            break;
+        }
+
+        if(chunks.size() > 9)
+        {
+          fmt::print(stderr, "[ERROR] ULEB of more than 8 bytes detected\n");
+          std::exit(-1);
+        }
+
+        return uleb_decoder(chunks);
+      }
+
+      // Reads a SLEB from the stream
+      uint64_t parse_sleb()
+      {
+        std::vector<char> chunks;
+        while(auto byte = decompress())
+        {
+          chunks.push_back(byte.value());
+          if(!(byte.value() & 0x80))
+            break;
+        }
+
+        if(chunks.size() > 9)
+        {
+          fmt::print(stderr, "[ERROR] SLEB of more than 8 bytes detected\n");
+          std::exit(-1);
+        }
+
+        return sleb_decoder(chunks);
+      }
+
+      // Reads a string from the stream
+      std::string parse_string()
+      {
+        const std::size_t string_size = static_cast<std::size_t>(parse_uleb());
+        std::string retval = "";
+        for(std::size_t i = 0; i < string_size; i++)
+          retval += decompress().value();
+        return retval;
+      }
+
+      // Reads a chunk of bytes from the stream
+      std::vector<char> read_bytes(const std::size_t num_bytes)
+      {
+        std::vector<char> retvec;
+        auto next_byte = decompress();
+        std::size_t bytes_read = 1;
+        if(!next_byte)
+        {
+          fmt::print(stderr, "[ERROR] Incomplete compressed stream detected\n");
+          std::exit(-1);
+        }
+
+        retvec.push_back(next_byte.value());
+        for(; bytes_read != num_bytes; bytes_read++)
+        {
+          next_byte = decompress();
+          if(!next_byte)
+            break;
+          retvec.push_back(next_byte.value());
+        }
+        if(bytes_read != num_bytes)
+        {
+          fmt::print(stderr, "[ERROR] Incomplete compressed stream detected\n");
+          std::exit(-1);
+        }
+
+        return retvec;
       }
   };
 
@@ -200,7 +280,7 @@ class wrong_path_tracereader
         std::vector<uint64_t> nottaken_wp;
         std::vector<uint64_t> memops_cp;
         std::vector<uint64_t> memops_wp;
-        std::vector<uint64_t> pat_flags; 
+        std::vector<uint64_t> pat_flags;
         std::vector<uint64_t> lo_addr_cp;
         std::vector<uint64_t> hi_addr_cp;
         std::vector<uint64_t> lo_addr_wp;
@@ -232,41 +312,12 @@ class wrong_path_tracereader
     private:
       stream_reader<HeaderCompressedType> compressed_header_stream;
 
-      // Reads a chunk of bytes from the header stream
-      std::vector<char> read_bytes(const std::size_t num_bytes)
-      {
-        std::vector<char> retvec;
-        auto next_byte = compressed_header_stream.decompress();
-        std::size_t bytes_read = 1;
-        if(!next_byte)
-        {
-          fmt::print(stderr, "[ERROR] Incomplete header file detected\n");
-          std::exit(-1);
-        }
-
-        retvec.push_back(next_byte.value());
-        for(; bytes_read != num_bytes; bytes_read++)
-        {
-          next_byte = compressed_header_stream.decompress();
-          if(!next_byte)
-            break;
-          retvec.push_back(next_byte.value());
-        }
-        if(bytes_read != num_bytes)
-        {
-          fmt::print(stderr, "[ERROR] Incomplete header file detected\n");
-          std::exit(-1);
-        }
-
-        return retvec;
-      }
-
       void parse_fixed_size_prolog()
       {
         const std::size_t bytes_to_read = sizeof(prolog.fixed_size.magic_bytes) +
           sizeof(prolog.fixed_size.isa) + sizeof(prolog.fixed_size.flags);
 
-        auto buffer = read_bytes(bytes_to_read);
+        auto buffer = compressed_header_stream.read_bytes(bytes_to_read);
         std::memcpy(&(prolog.fixed_size), std::data(buffer), bytes_to_read);
 
         fmt::print("Magic = {:X}\nISA = {:X}\nFlags = {:#b}\n",
@@ -280,30 +331,11 @@ class wrong_path_tracereader
         }
       }
 
-      uint64_t parse_uleb()
-      {
-        std::vector<char> chunks;
-        while(auto byte = compressed_header_stream.decompress())
-        {
-          chunks.push_back(byte.value());
-          if(!(byte.value() & 0x80))
-            break;
-        }
-
-        if(chunks.size() > 9)
-        {
-          fmt::print(stderr, "[ERROR] ULEB of more than 8 bytes detected\n");
-          std::exit(-1);
-        }
-
-        return uleb_decoder(chunks);
-      }
-
       void parse_variable_size_prolog()
       {
-        prolog.start_instructions = parse_uleb();
-        prolog.warmup_instructions = parse_uleb();
-        prolog.total_target_instructions = parse_uleb();
+        prolog.start_instructions = compressed_header_stream.parse_uleb();
+        prolog.warmup_instructions = compressed_header_stream.parse_uleb();
+        prolog.total_target_instructions = compressed_header_stream.parse_uleb();
 
         fmt::print("Start Instructions = {}\nWarmup Instructions = {}\n"
             "Total Target Instructions = {}\n",
@@ -317,21 +349,12 @@ class wrong_path_tracereader
         parse_variable_size_prolog();
       }
 
-      std::string parse_string()
-      {
-        const std::size_t string_size = static_cast<std::size_t>(parse_uleb());
-        std::string retval = "";
-        for(std::size_t i = 0; i < string_size; i++)
-          retval += compressed_header_stream.decompress().value();
-        return retval;
-      }
-
       void parse_prolog_strings()
       {
-        prolog.command = parse_string();
-        prolog.datetime = parse_string();
-        prolog.comment = parse_string();
-        prolog.target_name = parse_string();
+        prolog.command = compressed_header_stream.parse_string();
+        prolog.datetime = compressed_header_stream.parse_string();
+        prolog.comment = compressed_header_stream.parse_string();
+        prolog.target_name = compressed_header_stream.parse_string();
 
         fmt::print("Command = {}\nDatetime = {}\nComment = {}\nTarget Name = {}\n",
             prolog.command, prolog.datetime, prolog.comment, prolog.target_name);
@@ -339,10 +362,10 @@ class wrong_path_tracereader
 
       void parse_encoding_maps()
       {
-        const uint64_t encoding_size = parse_uleb();
+        const uint64_t encoding_size = compressed_header_stream.parse_uleb();
         const auto initial_bytes_read = compressed_header_stream.total_bytes_read;
 
-        const uint64_t n_maps = parse_uleb();
+        const uint64_t n_maps = compressed_header_stream.parse_uleb();
         fmt::print("Reading {} maps\n", n_maps);
         if(encodings.size() != n_maps)
         {
@@ -352,14 +375,14 @@ class wrong_path_tracereader
 
         for(uint64_t i = 0; i < n_maps; i++)
         {
-          const std::string map_name = parse_string();
-          const uint64_t n_entries = parse_uleb();
+          const std::string map_name = compressed_header_stream.parse_string();
+          const uint64_t n_entries = compressed_header_stream.parse_uleb();
           if(encodings.find(map_name) == encodings.end())
           {
             fmt::print(stderr, "[ERROR] Detected unexpected encoding map: {}\n", map_name);
             std::exit(-1);
           }
-          if(encodings.find(map_name)->second.size() != n_entries)
+          if(encodings.at(map_name).size() != n_entries)
           {
             fmt::print(stderr, "[ERROR] Encoding map {} has incorrect number of entries\n", map_name);
             std::exit(-1);
@@ -368,14 +391,14 @@ class wrong_path_tracereader
           fmt::print("Reading {} values from {}\n", n_entries, map_name);
           for(uint64_t j = 0; j < n_entries; j++)
           {
-            const uint64_t value = parse_uleb();
-            const std::string name = parse_string();
-            if(encodings.find(map_name)->second.find(value) == encodings.find(map_name)->second.end())
+            const uint64_t value = compressed_header_stream.parse_uleb();
+            const std::string name = compressed_header_stream.parse_string();
+            if(encodings.at(map_name).find(value) == encodings.at(map_name).end())
             {
               fmt::print(stderr, "[ERROR] Encoding map {} doesn't not have a mapping for {}\n", map_name, value);
               std::exit(-1);
             }
-            if(encodings.find(map_name)->second.find(value)->second != name)
+            if(encodings.at(map_name).at(value) != name)
             {
               fmt::print(stderr, "[ERROR] Encoding map {} doesn't not have a mapping for {} -> {}\n", map_name, value, name);
               std::exit(-1);
@@ -409,23 +432,32 @@ class wrong_path_tracereader
 
       void parse_one_template()
       {
-        const uint64_t template_id = parse_uleb();
+        const uint64_t template_length = compressed_header_stream.parse_uleb();
+        const uint64_t bytes_read =  compressed_header_stream.total_bytes_read;
 
-        templates[template_id].start_pc = parse_uleb();
-        templates[template_id].num_instr = parse_uleb();
-        templates[template_id].fall_through_pc = parse_uleb();
-        templates[template_id].num_targets = parse_uleb();
+        const uint64_t template_id = compressed_header_stream.parse_uleb();
+
+        templates[template_id].start_pc = compressed_header_stream.parse_uleb();
+        templates[template_id].num_instr = compressed_header_stream.parse_uleb();
+        templates[template_id].fall_through_pc = compressed_header_stream.parse_uleb();
+        templates[template_id].num_targets = compressed_header_stream.parse_uleb();
         for(auto i = 0; i < templates[template_id].num_targets; i++)
-          templates[template_id].targets.push_back(parse_uleb());
-        templates[template_id].symbol_name = parse_string();
+          templates[template_id].targets.push_back(compressed_header_stream.parse_uleb());
+        templates[template_id].symbol_name = compressed_header_stream.parse_string();
         for(auto i = 0; i < templates[template_id].num_instr; i++)
           templates[template_id].instructions.emplace_back(parse_instruction());
         templates[template_id].profile = parse_profile();
+
+        if(compressed_header_stream.total_bytes_read - bytes_read != template_length)
+        {
+          fmt::print(stderr, "[ERROR] Template of incorrect size detected\n");
+          std::exit(-1);
+        }
       }
 
       void parse_templates()
       {
-        const uint64_t num_templates = parse_uleb();
+        const uint64_t num_templates = compressed_header_stream.parse_uleb();
         fmt::print("Reading {} templates\n", num_templates);
 
 //         for(auto i = 0; i < num_templates; i++)
