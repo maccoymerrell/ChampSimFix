@@ -33,3 +33,5 @@ compile_commands.json
 
 temp_extraced_trace*
 temp_extracted_trace*/*
+.temp_extraced_trace*
+.temp_extracted_trace*/*

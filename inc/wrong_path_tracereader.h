@@ -628,7 +628,7 @@ std::filesystem::path wrong_path_tracereader::get_header_path() const
 {
   for(const auto& entry: std::filesystem::directory_iterator(trace_extract_dir))
   {
-    if(entry.path().string().find("header") != std::string::npos)
+    if(entry.path().filename().string().find("header.cst") == 0)
       return entry.path();
   }
   fmt::print(stderr, "[ERROR] The trace has no header. Exiting...\n");
@@ -639,7 +639,7 @@ std::filesystem::path wrong_path_tracereader::get_body_path() const
 {
   for(const auto& entry: std::filesystem::directory_iterator(trace_extract_dir))
   {
-    if(entry.path().string().find("body") != std::string::npos)
+    if(entry.path().filename().string().find("body.cst") != 0)
       return entry.path();
   }
   fmt::print(stderr, "[ERROR] The trace has no body. Exiting...\n");
