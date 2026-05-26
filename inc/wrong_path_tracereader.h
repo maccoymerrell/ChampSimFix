@@ -18,6 +18,8 @@
 #define WRONG_PATH_TRACEREADER_H
 
 #include <fmt/core.h>
+#include <array>
+#include <bitset>
 #include <cstring>
 #include <cstddef>
 #include <cstdio>
@@ -76,8 +78,27 @@ class wrong_path_tracereader
       return retval;
     }
 
+    // Parses a ULEB_WIDE into std::bitset
+    // TODO: Verify correctness
+    std::bitset<512> uleb_wide_decoder(std::vector<char>& chunks)
+    {
+      fmt::print(stderr, "[WARNING] ULEB_WIDE decoder is unverified. Use at your own risk.\n");
+      std::bitset<512> parsed_bits;
+      parsed_bits.reset();
+      for(auto i = chunks.rbegin(); i != chunks.rend(); i++)
+      {
+        uint8_t chunk = static_cast<uint8_t>(*i & 0x7f);
+        parsed_bits |= chunk;
+        parsed_bits <<= 7;
+      }
+
+      return parsed_bits;
+    }
+
+    // TODO: Verify Correctness
     int64_t sleb_decoder(std::vector<char>& chunks)
     {
+      fmt::print(stderr, "[WARNING] SLEB decoder is unverified. Use at your own risk.\n");
       int64_t retval = 0;
       uint64_t chunk_id = 0;
       for(char& byte: chunks)
@@ -92,6 +113,28 @@ class wrong_path_tracereader
       return retval;
     }
 
+    // Parses a SLEB_WIDE into std::bitset
+    // TODO: Verify correctness
+    std::bitset<512> sleb_wide_decoder(std::vector<char>& chunks)
+    {
+      fmt::print(stderr, "[WARNING] SLEB_WIDE decoder is unverified. Use at your own risk.\n");
+      std::size_t bit_idx = 0;
+      bool msb = static_cast<bool>(chunks.back() & 0x40);
+
+      std::bitset<512> parsed_bits;
+      parsed_bits.reset();
+      for(auto i = chunks.rbegin(); i != chunks.rend(); i++)
+      {
+        uint8_t chunk = static_cast<uint8_t>(*i & 0x7f);
+        parsed_bits |= chunk;
+        parsed_bits <<= 7;
+
+        bit_idx += 7;
+      }
+      while(bit_idx < 512) parsed_bits[bit_idx++] = msb;  // Sign extension
+
+      return parsed_bits;
+    }
 
     public:
       uint64_t total_bytes_read = 0;  // Number of bytes read from the stream so far
@@ -234,6 +277,7 @@ class wrong_path_tracereader
         uint64_t start_instructions;
         uint64_t warmup_instructions;
         uint64_t total_target_instructions;
+        double simpoint_weight;
 
         std::string command;
         std::string datetime;
@@ -299,6 +343,7 @@ class wrong_path_tracereader
         Profile profile;
       };
 
+      std::map<std::string, std::map<std::string, uint64_t>> ids;
       std::map<uint32_t, Template> templates;
 
     public:
@@ -324,6 +369,7 @@ class wrong_path_tracereader
             prolog.fixed_size.magic_bytes, prolog.fixed_size.isa,
             prolog.fixed_size.flags);
 
+        using namespace wrong_path_trace_constants;
         if(prolog.fixed_size.magic_bytes != magic_bytes)
         {
           fmt::print(stderr, "[ERROR] Can't verify header integrity. Magic bytes don't match\n");
@@ -337,10 +383,14 @@ class wrong_path_tracereader
         prolog.warmup_instructions = compressed_header_stream.parse_uleb();
         prolog.total_target_instructions = compressed_header_stream.parse_uleb();
 
+        // Parse Simpoint Weight
+        auto bytes = compressed_header_stream.read_bytes(8);
+        std::memcpy(&(prolog.simpoint_weight), bytes.data(), 8);
+
         fmt::print("Start Instructions = {}\nWarmup Instructions = {}\n"
-            "Total Target Instructions = {}\n",
+            "Total Target Instructions = {}\nSimPoint Weight = {}\n",
             prolog.start_instructions, prolog.warmup_instructions,
-            prolog.total_target_instructions);
+            prolog.total_target_instructions, prolog.simpoint_weight);
       }
 
       void parse_prolog()
@@ -366,45 +416,39 @@ class wrong_path_tracereader
         const auto initial_bytes_read = compressed_header_stream.total_bytes_read;
 
         const uint64_t n_maps = compressed_header_stream.parse_uleb();
-        fmt::print("Reading {} maps\n", n_maps);
-        if(encodings.size() != n_maps)
-        {
-          fmt::print(stderr, "[ERROR] Header encodings are incorrect\n");
-          std::exit(-1);
-        }
-
+        fmt::print("Reading {} maps of size {} bytes\n", n_maps, encoding_size);
         for(uint64_t i = 0; i < n_maps; i++)
         {
           const std::string map_name = compressed_header_stream.parse_string();
           const uint64_t n_entries = compressed_header_stream.parse_uleb();
-          if(encodings.find(map_name) == encodings.end())
-          {
-            fmt::print(stderr, "[ERROR] Detected unexpected encoding map: {}\n", map_name);
-            std::exit(-1);
-          }
-          if(encodings.at(map_name).size() != n_entries)
-          {
-            fmt::print(stderr, "[ERROR] Encoding map {} has incorrect number of entries\n", map_name);
-            std::exit(-1);
-          }
 
           fmt::print("Reading {} values from {}\n", n_entries, map_name);
           for(uint64_t j = 0; j < n_entries; j++)
           {
             const uint64_t value = compressed_header_stream.parse_uleb();
             const std::string name = compressed_header_stream.parse_string();
-            if(encodings.at(map_name).find(value) == encodings.at(map_name).end())
-            {
-              fmt::print(stderr, "[ERROR] Encoding map {} doesn't not have a mapping for {}\n", map_name, value);
-              std::exit(-1);
-            }
-            if(encodings.at(map_name).at(value) != name)
-            {
-              fmt::print(stderr, "[ERROR] Encoding map {} doesn't not have a mapping for {} -> {}\n", map_name, value, name);
-              std::exit(-1);
-            }
+            ids[map_name][name] = value;
 
-            fmt::print("{}->{}\n", value, name);
+            fmt::print("[{}] {}->{}\n", map_name, value, name);
+          }
+        }
+
+        // Verify correctnes
+        using namespace  wrong_path_trace_constants;
+        for(const auto& [map_name, names]: required_encodings)
+        {
+          if(ids.find(map_name) == ids.end())
+          {
+            fmt::print(stderr, "[ERROR] {} encoding not found in header. Exiting...\n", map_name);
+            std::exit(-1);
+          }
+          for(const auto& name: names)
+          {
+            if(ids[map_name].find(name) == ids[map_name].end())
+            {
+              fmt::print(stderr, "[ERROR] {} mapping in {} encoding not found in header. Exiting...\n", name, map_name);
+              std::exit(-1);
+            }
           }
         }
 
