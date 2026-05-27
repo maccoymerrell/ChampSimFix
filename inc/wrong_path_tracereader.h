@@ -33,6 +33,7 @@
 #include <string>
 #include <fmt/core.h>
 #include <fmt/ranges.h>
+#include <fmt/std.h>
 
 #include "inf_stream.h"
 #include "instruction.h"
@@ -556,23 +557,13 @@ class wrong_path_tracereader
                  "\tNot Taken WP {}\n"
                  "\tMemops CP {}\n"
                  "\tMemops WP {}\n"
-                 "\tPattern Flags {::#010b}\n",
-                 pf.exec_cp, pf.exec_wp, pf.taken_cp, pf.nottaken_cp, pf.taken_wp, pf.nottaken_wp, pf.memops_cp, pf.memops_wp, pf.pat_flags);
-
-      {
-        std::vector<uint64_t> lo_addr_cp, hi_addr_cp, lo_addr_wp, hi_addr_wp;
-        for (uint64_t i = 0; i < num_instr; i++) {
-          lo_addr_cp.emplace_back(pf.lo_addr_cp[i] ? pf.lo_addr_cp[i].value() : 0x0);
-          hi_addr_cp.emplace_back(pf.hi_addr_cp[i] ? pf.hi_addr_cp[i].value() : 0x0);
-          lo_addr_wp.emplace_back(pf.lo_addr_wp[i] ? pf.lo_addr_wp[i].value() : 0x0);
-          hi_addr_wp.emplace_back(pf.hi_addr_wp[i] ? pf.hi_addr_wp[i].value() : 0x0);
-        }
-        fmt::print("\tLo Addr CP: {::#x}\n"
-                   "\tHi Addr CP: {::#x}\n"
-                   "\tLo Addr WP: {::#x}\n"
-                   "\tHi Addr WP: {::#x}\n",
-                   lo_addr_cp, hi_addr_cp, lo_addr_wp, hi_addr_wp);
-      }
+                 "\tPattern Flags {::#010b}\n"
+                 "\tLo Addr CP: {::#x}\n"
+                 "\tHi Addr CP: {::#x}\n"
+                 "\tLo Addr WP: {::#x}\n"
+                 "\tHi Addr WP: {::#x}\n",
+                 pf.exec_cp, pf.exec_wp, pf.taken_cp, pf.nottaken_cp, pf.taken_wp, pf.nottaken_wp, pf.memops_cp, pf.memops_wp, pf.pat_flags, pf.lo_addr_cp,
+                 pf.hi_addr_cp, pf.lo_addr_wp, pf.hi_addr_wp);
 
       return pf;
     }
