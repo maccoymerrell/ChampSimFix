@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -56,9 +57,7 @@ class wrong_path_tracereader
   void construct_header_stream();
   void construct_body_stream();
 
-  // This class is responsible for decompressing the compressed streams and returning
-  // decompressed data byte-by-byte
-  // This class als:wo provides functions for decoding ULEBs and strings
+  // This class is responsible for decompressing the compressed streams and returning the decompressed data
   template <typename CompressedStreamType, std::size_t buffer_size = 4096>
   class stream_reader
   {
@@ -253,11 +252,17 @@ class wrong_path_tracereader
     }
   };
 
-  // Type erased wrapper for parsing the header. Type erasure is necessary since the concrete type depends on the compression
-  // format which is only known at runtime
+  // Forward declare body_parser
+  template <typename>
+  class body_parser;
+
+  // Type erased wrapper for parsing the header. Type erasure is necessary since the concrete type depends on the compression format, which is only known at
+  // runtime
   class header_wrapper
   {
-    friend class body_wrapper;
+    // Grant friendship to all instances of the body_parser template
+    template <typename>
+    friend class body_parser;
 
   protected:
     struct Prolog {
@@ -631,8 +636,8 @@ class wrong_path_tracereader
     ~header_parser() override = default;
   };
 
-  // Type erased wrapper for parsing the body. Type erasure is necessary since the concrete type
-  // depends on the compression format which is only known at runtime
+  // Type erased wrapper for parsing the body. Type erasure is necessary since the concrete type depends on the compression format, which is only known at
+  // runtime
   class body_wrapper
   {
   public:
@@ -641,63 +646,111 @@ class wrong_path_tracereader
     virtual ~body_wrapper() = default;
   };
 
+  // TODO: Add support for multithreaded simulation
   template <typename BodyCompressedType>
   class body_parser : public body_wrapper
   {
   private:
-    const uint8_t cpu;
     stream_reader<BodyCompressedType> compressed_body_stream;
+    const header_wrapper& header;
+    bool eof_ = false;
+
+    // Members needed to read the trace in bulk
+    constexpr static std::size_t buffer_size = 128;
+    constexpr static std::size_t refresh_thresh = 1; // Refresh when size < refresh_thresh
+    std::deque<ooo_model_instr> instr_buffer;
+
+    // Members needed to walk the trace
+    uint32_t previous_entry_template_id = 0;
+    uint32_t previous_thread_id = 0;
+    uint32_t seq_num = 0;
+    std::set<uint64_t> valid_body_tags;
+
+    void verify_integrity()
+    {
+      uint32_t trace_magic_bytes;
+      auto buffer = compressed_body_stream.read_bytes(sizeof(trace_magic_bytes));
+      std::memcpy(&trace_magic_bytes, std::data(buffer), sizeof(trace_magic_bytes));
+
+      fmt::print("Body Magic Bytes = {:X}\n", trace_magic_bytes);
+
+      // Verify integrity
+      using namespace wrong_path_trace_constants;
+      if (trace_magic_bytes != magic_bytes) {
+        fmt::print(stderr,
+                   "[ERROR] Can't verify integrity of trace body. Magic bytes don't match."
+                   "Expected {:X}, got {:X}\n",
+                   magic_bytes, trace_magic_bytes);
+        std::exit(-1);
+      }
+    }
 
     // TODO: Declare the body structure here
 
+    // Constructs an ooo_model_instruction from the trace format
+    ooo_model_instr cast_to_ooo(/* TODO: Finish this */)
+    {
+      // TODO: Finish this
+    }
+
+    // Reads the next instruction from the trace, constructs an ooo_model_instr from it, and return it
+    // Also sets the eof_ appropriately
+    ooo_model_instr get_next_instr()
+    {
+      if (valid_body_tags.size() == 0) {
+        using namespace wrong_path_trace_constants;
+        for (const auto& [_, value] : header.ids.at("body_tag"))
+          valid_body_tags.insert(value);
+      }
+
+      const uint8_t tag = compressed_body_stream.read();
+      if (valid_body_tags.find(tag) == valid_body_tags.end()) {
+        fmt::print(stderr, "[ERROR] Found unexpected tag value of {}. Expected values: {}. Exiting...\n", tag, valid_body_tags);
+        std::exit(-1);
+      }
+
+      if (tag == header.ids.at("body_tag").at("BODY_TAG_THREAD_SWITCH")) {
+        // TODO: Finish this
+      }
+    }
+
   public:
-    body_parser(uint8_t cpu_idx, const std::string& body_file) : cpu(cpu_idx), compressed_body_stream(body_file) {}
+    body_parser(uint8_t /* cpu_idx */, const std::string& body_file, const header_wrapper& header_) : compressed_body_stream(body_file), header(header_)
+    {
+      verify_integrity();
+      valid_body_tags.clear();
+    }
 
     ooo_model_instr read() override
     {
-      // TODO: Read the trace instruction by instruction and emit ooo_model_instr
-      // `encodings` are globally accessible
-      // The template maps in header_stream should be accessible since body_wrapper is friend of header_wrapper
-      std::size_t bytes_read = 0;
+      // No more instruction left in the stream
+      if (compressed_body_stream.eof) {
+        // Drain the buffer
+        if (instr_buffer.size() > 0) {
+          auto retval = instr_buffer.front();
+          instr_buffer.pop_front();
+          return retval;
+        }
 
-      fmt::print("Reading from the body file\n");
-      while (bytes_read <= 64) {
-        char byte = compressed_body_stream.read();
-
-        fmt::print("{:02x}", byte);
-        bytes_read++;
+        // We should never reach this point
+        fmt::print(stderr, "[ERROR] No more instructions left to read. Exiting...\n");
+        std::exit(-1);
       }
-      fmt::print("\n");
 
-      // if (std::size(instr_buffer) <= refresh_thresh) {
-      //   std::array<T, buffer_size - refresh_thresh> trace_read_buf;
-      //   std::array<char, std::size(trace_read_buf) * sizeof(T)> raw_buf;
-      //   std::size_t bytes_read;
-      //
-      //   // Read from trace file
-      //   trace_file.read(std::data(raw_buf), std::size(raw_buf));
-      //   bytes_read = static_cast<std::size_t>(trace_file.gcount());
-      //   eof_ = trace_file.eof();
-      //
-      //   // Transform bytes into trace format instructions
-      //   std::memcpy(std::data(trace_read_buf), std::data(raw_buf), bytes_read);
-      //
-      //   // Inflate trace format into core model instructions
-      //   auto begin = std::begin(trace_read_buf);
-      //   auto end = std::next(begin, bytes_read / sizeof(T));
-      //   std::transform(begin, end, std::back_inserter(instr_buffer), [cpu = this->cpu](T t) { return ooo_model_instr{cpu, t}; });
-      //
-      //   // Set branch targets
-      //   set_branch_targets(std::begin(instr_buffer), std::end(instr_buffer));
-      // }
-      //
-      //   auto retval = instr_buffer.front();
-      //   instr_buffer.pop_front();
-      //
-      //   return retval;
+      // Time to re-fill the buffer
+      if ((instr_buffer.size() <= refresh_thresh)) {
+        const std::size_t num_instr_to_fill = buffer_size - instr_buffer.size();
+        for (std::size_t i = 0; i < num_instr_to_fill; i++)
+          instr_buffer.emplace_back(get_next_instr());
+      }
+
+      // Return the next instruction
+      auto retval = instr_buffer.front();
+      instr_buffer.pop_front();
+      return retval;
     }
 
-    bool eof() const override { return compressed_body_stream.eof; }
+    bool eof() const override { return eof_; }
 
     ~body_parser() override = default;
   };
@@ -812,13 +865,13 @@ void wrong_path_tracereader::construct_body_stream()
 
   const std::string body_file_name = get_body_path().string();
   if (const bool is_gzip_compressed = (body_file_name.substr(std::size(body_file_name) - 2) == "gz"); is_gzip_compressed) {
-    body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::gzip_tag_t<>>>(cpu, body_file_name));
+    body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::gzip_tag_t<>>>(cpu, body_file_name, *header_stream));
     return;
   } else if (const bool is_lzma_compressed = (body_file_name.substr(std::size(body_file_name) - 2) == "xz"); is_lzma_compressed) {
-    body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::lzma_tag_t<>>>(cpu, body_file_name));
+    body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::lzma_tag_t<>>>(cpu, body_file_name, *header_stream));
     return;
   } else if (const bool is_bzip2_compressed = (body_file_name.substr(std::size(body_file_name) - 3) == "bz2"); is_bzip2_compressed) {
-    body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::bzip2_tag_t>>(cpu, body_file_name));
+    body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::bzip2_tag_t>>(cpu, body_file_name, *header_stream));
     return;
   } else {
     fmt::print(stderr, "[ERROR] Unknown compression format for trace body. Exiting...\n");
