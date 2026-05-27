@@ -26,10 +26,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <iomanip>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
 #include <fmt/core.h>
+#include <fmt/ranges.h>
 
 #include "inf_stream.h"
 #include "instruction.h"
@@ -131,7 +134,6 @@ class wrong_path_tracereader
       return parsed_bits;
     }
 
-    // TODO: Verify Correctness
     int64_t sleb_decoder(std::vector<char>& chunks) const
     {
       int64_t retval = 0;
@@ -348,7 +350,7 @@ class wrong_path_tracereader
       auto buffer = compressed_header_stream.read_bytes(bytes_to_read);
       std::memcpy(&(prolog.fixed_size), std::data(buffer), bytes_to_read);
 
-      fmt::print("Magic = {:X}\nISA = {:X}\nFlags = {:#b}\n", prolog.fixed_size.magic_bytes, prolog.fixed_size.isa, prolog.fixed_size.flags);
+      fmt::print("Magic = {:X}\nISA = {:X}\nFlags = {:#010b}\n", prolog.fixed_size.magic_bytes, prolog.fixed_size.isa, prolog.fixed_size.flags);
 
       using namespace wrong_path_trace_constants;
       if (prolog.fixed_size.magic_bytes != magic_bytes) {
@@ -458,7 +460,7 @@ class wrong_path_tracereader
       }
 
       fmt::print("New Dependency Block\n"
-                 "\tFlags = {:#b}\n"
+                 "\tFlags = {:#010b}\n"
                  "\tDestination Dependencies = {::#x}\n"
                  "\tStore Data Dependencies = {::#x}\n"
                  "\tLoad Address Dependencies = {::#x}\n"
@@ -492,7 +494,7 @@ class wrong_path_tracereader
                  "\tPC Delta = {}\n"
                  "\tOpcode = {}\n"
                  "\tBranch Type = {}\n"
-                 "\tFlags = {:#b}\n"
+                 "\tFlags = {:#010b}\n"
                  "\tn_src = {}\n"
                  "\tn_dst = {}\n"
                  "\tsrcs = {}\n"
@@ -554,8 +556,23 @@ class wrong_path_tracereader
                  "\tNot Taken WP {}\n"
                  "\tMemops CP {}\n"
                  "\tMemops WP {}\n"
-                 "\tPattern Flags {::#b}\n",
+                 "\tPattern Flags {::#010b}\n",
                  pf.exec_cp, pf.exec_wp, pf.taken_cp, pf.nottaken_cp, pf.taken_wp, pf.nottaken_wp, pf.memops_cp, pf.memops_wp, pf.pat_flags);
+
+      {
+        std::vector<uint64_t> lo_addr_cp, hi_addr_cp, lo_addr_wp, hi_addr_wp;
+        for (uint64_t i = 0; i < num_instr; i++) {
+          lo_addr_cp.emplace_back(pf.lo_addr_cp[i] ? pf.lo_addr_cp[i].value() : 0x0);
+          hi_addr_cp.emplace_back(pf.hi_addr_cp[i] ? pf.hi_addr_cp[i].value() : 0x0);
+          lo_addr_wp.emplace_back(pf.lo_addr_wp[i] ? pf.lo_addr_wp[i].value() : 0x0);
+          hi_addr_wp.emplace_back(pf.hi_addr_wp[i] ? pf.hi_addr_wp[i].value() : 0x0);
+        }
+        fmt::print("\tLo Addr CP: {::#x}\n"
+                   "\tHi Addr CP: {::#x}\n"
+                   "\tLo Addr WP: {::#x}\n"
+                   "\tHi Addr WP: {::#x}\n",
+                   lo_addr_cp, hi_addr_cp, lo_addr_wp, hi_addr_wp);
+      }
 
       return pf;
     }
@@ -725,6 +742,7 @@ void wrong_path_tracereader::parse_trace()
   construct_header_stream();
   construct_body_stream();
   header_stream->parse();
+  std::cout << std::flush;
 }
 
 std::filesystem::path wrong_path_tracereader::create_extract_dir()
