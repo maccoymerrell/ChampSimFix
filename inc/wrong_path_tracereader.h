@@ -23,7 +23,6 @@
 #include <bitset>
 #include <cstddef>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <filesystem>
@@ -31,8 +30,10 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <fmt/core.h>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <fmt/std.h>
 
@@ -67,7 +68,7 @@ class wrong_path_tracereader
     decltype(decompressed_buffer.end()) max_buffer_iter = decompressed_buffer.begin();
 
     // Returns the next byte from the input stream
-    std::optional<char> decompress()
+    std::optional<char> decompress() noexcept
     {
       // No more bytes left
       if ((buffer_iter >= max_buffer_iter) && stream.eof()) {
@@ -104,7 +105,7 @@ class wrong_path_tracereader
       return {front};
     }
 
-    uint64_t uleb_decoder(std::vector<char>& chunks) const
+    uint64_t uleb_decoder(std::vector<char>& chunks) const noexcept
     {
       uint64_t retval = 0;
       uint64_t chunk_id = 0;
@@ -120,9 +121,9 @@ class wrong_path_tracereader
 
     // Parses a ULEB_WIDE into std::bitset
     // TODO: Verify correctness
-    std::bitset<512> uleb_wide_decoder(std::vector<char>& chunks) const
+    std::bitset<512> uleb_wide_decoder(std::vector<char>& chunks) const noexcept
     {
-      fmt::print(stderr, "[WARNING] ULEB_WIDE decoder is unverified. Use at your own risk.\n");
+      fmt::print(stderr, "[WARNING] ULEB_WIDE decoder is unverified. Use at your own risk.");
       std::bitset<512> parsed_bits;
       parsed_bits.reset();
       for (auto i = chunks.rbegin(); i != chunks.rend(); i++) {
@@ -134,7 +135,7 @@ class wrong_path_tracereader
       return parsed_bits;
     }
 
-    int64_t sleb_decoder(std::vector<char>& chunks) const
+    int64_t sleb_decoder(std::vector<char>& chunks) const noexcept
     {
       int64_t retval = 0;
       uint64_t chunk_id = 0;
@@ -151,9 +152,9 @@ class wrong_path_tracereader
 
     // Parses a SLEB_WIDE into std::bitset
     // TODO: Verify correctness
-    std::bitset<512> sleb_wide_decoder(std::vector<char>& chunks) const
+    std::bitset<512> sleb_wide_decoder(std::vector<char>& chunks) const noexcept
     {
-      fmt::print(stderr, "[WARNING] SLEB_WIDE decoder is unverified. Use at your own risk.\n");
+      fmt::print(stderr, "[WARNING] SLEB_WIDE decoder is unverified. Use at your own risk.");
       std::size_t bit_idx = 0;
       bool msb = static_cast<bool>(chunks.back() & 0x40);
 
@@ -175,15 +176,14 @@ class wrong_path_tracereader
   public:
     uint64_t total_bytes_read = 0; // Number of bytes read from the stream so far
     bool eof = false;              // Set to true if no more bytes can be returned
-    stream_reader(const std::string& stream_name) : stream(stream_name) {}
+    stream_reader(const std::string& stream_name) noexcept : stream(stream_name) {}
 
     char read()
     {
       auto byte = decompress();
-      if (!byte) {
-        fmt::print(stderr, "[ERROR] Ran out of compressed stream. Exiting...\n");
-        std::exit(-1);
-      }
+      if (!byte)
+        throw std::runtime_error("[ERROR] Ran out of compressed stream. Exiting...");
+
       return byte.value();
     }
 
@@ -197,10 +197,8 @@ class wrong_path_tracereader
           break;
       }
 
-      if (chunks.size() > 10) {
-        fmt::print(stderr, "[ERROR] ULEB of more than 10 bytes detected\n");
-        std::exit(-1);
-      }
+      if (chunks.size() > 10)
+        throw std::runtime_error("[ERROR] ULEB of more than 10 bytes detected");
 
       return uleb_decoder(chunks);
     }
@@ -215,10 +213,8 @@ class wrong_path_tracereader
           break;
       }
 
-      if (chunks.size() > 10) {
-        fmt::print(stderr, "[ERROR] SLEB of more than 10 bytes detected\n");
-        std::exit(-1);
-      }
+      if (chunks.size() > 10)
+        throw std::runtime_error("[ERROR] SLEB of more than 10 bytes detected");
 
       return sleb_decoder(chunks);
     }
@@ -359,10 +355,8 @@ class wrong_path_tracereader
       fmt::print("Magic = {:X}\nISA = {:X}\nFlags = {:#010b}\n", prolog.fixed_size.magic_bytes, prolog.fixed_size.isa, prolog.fixed_size.flags);
 
       using namespace wrong_path_trace_constants;
-      if (prolog.fixed_size.magic_bytes != magic_bytes) {
-        fmt::print(stderr, "[ERROR] Can't verify header integrity. Magic bytes don't match\n");
-        std::exit(-1);
-      }
+      if (prolog.fixed_size.magic_bytes != magic_bytes)
+        throw std::runtime_error("[ERROR] Can't verify header integrity. Magic bytes don't match");
     }
 
     void parse_variable_size_prolog()
@@ -417,21 +411,17 @@ class wrong_path_tracereader
       // Verify correctness
       using namespace wrong_path_trace_constants;
       for (const auto& [map_name, names] : required_encodings) {
-        if (ids.find(map_name) == ids.end()) {
-          fmt::print(stderr, "[ERROR] {} encoding not found in header. Exiting...\n", map_name);
-          std::exit(-1);
-        }
+        if (ids.find(map_name) == ids.end())
+          throw std::runtime_error(fmt::format("[ERROR] {} encoding not found in header. Exiting...", map_name));
+
         for (const auto& name : names) {
-          if (ids[map_name].find(name) == ids[map_name].end()) {
-            fmt::print(stderr, "[ERROR] {} mapping in {} encoding not found in header. Exiting...\n", name, map_name);
-            std::exit(-1);
-          }
+          if (ids[map_name].find(name) == ids[map_name].end())
+            throw std::runtime_error(fmt::format("[ERROR] {} mapping in {} encoding not found in header. Exiting...", name, map_name));
         }
       }
 
       if (compressed_header_stream.total_bytes_read - initial_bytes_read != encoding_size) {
-        fmt::print(stderr, "[ERROR] Encoding section overflowed its size\n");
-        std::exit(-1);
+        throw std::runtime_error("[ERROR] Encoding section overflowed its size");
       }
     }
 
@@ -439,15 +429,12 @@ class wrong_path_tracereader
     {
       // Ensure that the relevant encodings are available
       using namespace wrong_path_trace_constants;
-      if (ids.find("dep_block_flag") == ids.end()) {
-        fmt::print(stderr, "[ERROR] dep_block_flag encodings are missing. Exiting...\n");
-        std::exit(-1);
-      }
+      if (ids.find("dep_block_flag") == ids.end())
+        throw std::runtime_error("[ERROR] dep_block_flag encodings are missing. Exiting...");
+
       for (const auto& name : optional_encodings.at("dep_block_flag")) {
-        if (ids["dep_block_flag"].find(name) == ids["dep_block_flag"].end()) {
-          fmt::print(stderr, "[ERROR] dep_block_flag encodings don't map {}. Exiting...\n", name);
-          std::exit(-1);
-        }
+        if (ids["dep_block_flag"].find(name) == ids["dep_block_flag"].end())
+          throw std::runtime_error(fmt::format("[ERROR] dep_block_flag encodings don't map {}. Exiting...", name));
       }
 
       Dependency dep;
@@ -600,13 +587,9 @@ class wrong_path_tracereader
         templates[template_id].profile = parse_profile(templates[template_id].num_targets, templates[template_id].num_instr);
 
       const uint64_t detected_template_size = compressed_header_stream.total_bytes_read - bytes_read;
-      if (detected_template_size != template_size) {
-        fmt::print(stderr,
-                   "[ERROR] Malformed template detected. Expected Size = {}, Detected"
-                   " Size = {}. Exiting...\n",
-                   template_size, detected_template_size);
-        std::exit(-1);
-      }
+      if (detected_template_size != template_size)
+        throw std::runtime_error(
+            fmt::format("[ERROR] Malformed template detected. Expected Size = {}, Detected Size = {}. Exiting...", template_size, detected_template_size));
     }
 
     void parse_templates()
@@ -627,10 +610,8 @@ class wrong_path_tracereader
       parse_encoding_maps();
       parse_templates();
 
-      if (!compressed_header_stream.eof) {
-        fmt::print(stderr, "[ERROR] Unexpected bytes found at the end of the header\n");
-        std::exit(-1);
-      }
+      if (!compressed_header_stream.eof)
+        throw std::runtime_error("[ERROR] Unexpected bytes found at the end of the header");
     }
 
     ~header_parser() override = default;
@@ -676,19 +657,15 @@ class wrong_path_tracereader
 
       // Verify integrity
       using namespace wrong_path_trace_constants;
-      if (trace_magic_bytes != magic_bytes) {
-        fmt::print(stderr,
-                   "[ERROR] Can't verify integrity of trace body. Magic bytes don't match."
-                   "Expected {:X}, got {:X}\n",
-                   magic_bytes, trace_magic_bytes);
-        std::exit(-1);
-      }
+      if (trace_magic_bytes != magic_bytes)
+        throw std::runtime_error(
+            fmt::format("[ERROR] Can't verify integrity of trace body. Magic bytes don't match. Expected {:X}, got {:X}", magic_bytes, trace_magic_bytes));
     }
 
     // TODO: Declare the body structure here
 
     // Constructs an ooo_model_instruction from the trace format
-    ooo_model_instr cast_to_ooo(/* TODO: Finish this */)
+    ooo_model_instr cast_to_ooo(/* TODO: Finish this */) noexcept
     {
       // TODO: Finish this
     }
@@ -704,10 +681,8 @@ class wrong_path_tracereader
       }
 
       const uint8_t tag = compressed_body_stream.read();
-      if (valid_body_tags.find(tag) == valid_body_tags.end()) {
-        fmt::print(stderr, "[ERROR] Found unexpected tag value of {}. Expected values: {}. Exiting...\n", tag, valid_body_tags);
-        std::exit(-1);
-      }
+      if (valid_body_tags.find(tag) == valid_body_tags.end())
+        throw std::runtime_error(fmt::format("[ERROR] Found unexpected tag value of {}. Expected values: {}. Exiting...", tag, valid_body_tags));
 
       if (tag == header.ids.at("body_tag").at("BODY_TAG_THREAD_SWITCH")) {
         // TODO: Finish this
@@ -733,8 +708,7 @@ class wrong_path_tracereader
         }
 
         // We should never reach this point
-        fmt::print(stderr, "[ERROR] No more instructions left to read. Exiting...\n");
-        std::exit(-1);
+        throw std::runtime_error("[ERROR] No more instructions left to read. Exiting...");
       }
 
       // Time to re-fill the buffer
@@ -769,10 +743,9 @@ public:
 
   [[nodiscard]] bool eof() const
   {
-    if (!body_stream) {
-      fmt::print(stderr, "[ERROR] Body stream is not initialized\n");
-      std::exit(-1);
-    }
+    if (!body_stream)
+      throw std::runtime_error("[ERROR] Body stream is not initialized");
+
     return body_stream->eof();
   };
 
@@ -801,10 +774,9 @@ std::filesystem::path wrong_path_tracereader::create_extract_dir()
   }
   fmt::print("New dir: {}\n", extract_dir.string());
   const bool success = std::filesystem::create_directory(extract_dir);
-  if (!success) {
-    fmt::print(stderr, "[ERROR] Could not create the directory to extract the wrong path trace. Exiting...\n");
-    std::exit(-1);
-  }
+  if (!success)
+    throw std::runtime_error("[ERROR] Could not create the directory to extract the wrong path trace. Exiting...");
+
   return extract_dir;
 }
 
@@ -812,10 +784,8 @@ void wrong_path_tracereader::extract_trace(const std::string& trace_file_name) c
 {
   // TODO: Untar the trace using C++ instead of calling `tar`
   const std::string command = "tar -xf " + trace_file_name + " -C " + trace_extract_dir.string();
-  if (std::system(command.c_str()) != 0) {
-    fmt::print(stderr, "[ERROR] Could not extract the wrong path trace. Exiting...\n");
-    std::exit(-1);
-  }
+  if (std::system(command.c_str()) != 0)
+    throw std::runtime_error("[ERROR] Could not extract the wrong path trace. Exiting...");
 }
 
 std::filesystem::path wrong_path_tracereader::get_header_path() const
@@ -824,8 +794,7 @@ std::filesystem::path wrong_path_tracereader::get_header_path() const
     if (entry.path().filename().string().find("header.cst") == 0)
       return entry.path();
   }
-  fmt::print(stderr, "[ERROR] The trace has no header. Exiting...\n");
-  std::exit(-1);
+  throw std::runtime_error("[ERROR] The trace has no header. Exiting...");
 }
 
 std::filesystem::path wrong_path_tracereader::get_body_path() const
@@ -834,8 +803,7 @@ std::filesystem::path wrong_path_tracereader::get_body_path() const
     if (entry.path().filename().string().find("body.cst") != 0)
       return entry.path();
   }
-  fmt::print(stderr, "[ERROR] The trace has no body. Exiting...\n");
-  std::exit(-1);
+  throw std::runtime_error("[ERROR] The trace has no body. Exiting...");
 }
 
 void wrong_path_tracereader::construct_header_stream()
@@ -851,10 +819,8 @@ void wrong_path_tracereader::construct_header_stream()
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::lzma_tag_t<>>>(header_file_name));
   } else if (const bool is_bzip2_compressed = (header_file_name.substr(std::size(header_file_name) - 3) == "bz2"); is_bzip2_compressed) {
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::bzip2_tag_t>>(header_file_name));
-  } else {
-    fmt::print(stderr, "[ERROR] Unknown compression format for trace header. Exiting...\n");
-    std::exit(-1);
-  }
+  } else
+    throw std::runtime_error("[ERROR] Unknown compression format for trace header. Exiting...");
 }
 
 void wrong_path_tracereader::construct_body_stream()
@@ -873,10 +839,8 @@ void wrong_path_tracereader::construct_body_stream()
   } else if (const bool is_bzip2_compressed = (body_file_name.substr(std::size(body_file_name) - 3) == "bz2"); is_bzip2_compressed) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::bzip2_tag_t>>(cpu, body_file_name, *header_stream));
     return;
-  } else {
-    fmt::print(stderr, "[ERROR] Unknown compression format for trace body. Exiting...\n");
-    std::exit(-1);
-  }
+  } else
+    throw std::runtime_error("[ERROR] Unknown compression format for trace body. Exiting...");
 }
 
 } // namespace champsim
