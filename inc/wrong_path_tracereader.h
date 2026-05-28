@@ -51,7 +51,7 @@ class wrong_path_tracereader
   std::filesystem::path trace_extract_dir;
 
   void parse_trace();
-  std::filesystem::path create_extract_dir();
+  std::filesystem::path create_extract_dir() const;
   void extract_trace(const std::string& trace_file_name) const;
   std::filesystem::path get_header_path() const;
   std::filesystem::path get_body_path() const;
@@ -117,22 +117,6 @@ class wrong_path_tracereader
         chunk_id++;
       }
       return retval;
-    }
-
-    // Parses a ULEB_WIDE into std::bitset
-    // TODO: Verify correctness
-    std::bitset<512> uleb_wide_decoder(std::vector<char>& chunks) const noexcept
-    {
-      fmt::print(stderr, "[WARNING] ULEB_WIDE decoder is unverified. Use at your own risk.");
-      std::bitset<512> parsed_bits;
-      parsed_bits.reset();
-      for (auto i = chunks.rbegin(); i != chunks.rend(); i++) {
-        uint8_t chunk = static_cast<uint8_t>(*i & 0x7f);
-        parsed_bits |= chunk;
-        parsed_bits <<= 7;
-      }
-
-      return parsed_bits;
     }
 
     int64_t sleb_decoder(std::vector<char>& chunks) const noexcept
@@ -217,6 +201,22 @@ class wrong_path_tracereader
         throw std::runtime_error("[ERROR] SLEB of more than 10 bytes detected");
 
       return sleb_decoder(chunks);
+    }
+
+    // Reads a SLEB_WIDE from the stream
+    std::bitset<512> parse_sleb_wide()
+    {
+      std::vector<char> chunks;
+      while (auto byte = decompress()) {
+        chunks.emplace_back(byte.value());
+        if (!(byte.value() & 0x80))
+          break;
+      }
+
+      if (chunks.size() > 74)
+        throw std::runtime_error("[ERROR] SLEB_WIDE of more than 74 bytes detected");
+
+      return sleb_wide_decoder(chunks);
     }
 
     // Reads a string from the stream
@@ -623,7 +623,7 @@ class wrong_path_tracereader
   {
   public:
     virtual ooo_model_instr read() = 0;
-    virtual bool eof() const = 0;
+    virtual bool eof() const noexcept = 0;
     virtual ~body_wrapper() = default;
   };
 
@@ -634,18 +634,47 @@ class wrong_path_tracereader
   private:
     stream_reader<BodyCompressedType> compressed_body_stream;
     const header_wrapper& header;
-    bool eof_ = false;
+    bool eof_ = false; // Set to true when the compressed_body_stream runs out
 
     // Members needed to read the trace in bulk
     constexpr static std::size_t buffer_size = 128;
-    constexpr static std::size_t refresh_thresh = 1; // Refresh when size < refresh_thresh
     std::deque<ooo_model_instr> instr_buffer;
 
     // Members needed to walk the trace
-    uint32_t previous_entry_template_id = 0;
+    uint32_t previous_template_id = 0;
     uint32_t previous_thread_id = 0;
     uint32_t seq_num = 0;
     std::set<uint64_t> valid_body_tags;
+
+    // TODO: Verify this structure
+    struct field_delta_section {
+      uint64_t ipos;
+      uint64_t fid;
+      std::bitset<512> delta;
+      std::optional<uint64_t> ext_payload;
+    };
+
+    struct delta_section {
+      uint64_t n_records;
+      std::vector<field_delta_section> records;
+    };
+
+    struct wp_chain_section {
+      uint64_t num_wp;
+      std::vector<int64_t> template_id_deltas;
+      std::vector<delta_section> wp_deltas;
+    };
+
+    // TODO: Verify this structure
+    struct wp_events_section {
+      uint64_t num_events;
+      std::vector<uint64_t> wp_index;
+      std::vector<std::optional<uint64_t>> fault_instr_index;
+    };
+
+    struct body_entry {
+      // TODO: Finish this
+    };
 
     void verify_integrity()
     {
@@ -662,30 +691,149 @@ class wrong_path_tracereader
             fmt::format("[ERROR] Can't verify integrity of trace body. Magic bytes don't match. Expected {:X}, got {:X}", magic_bytes, trace_magic_bytes));
     }
 
-    // TODO: Declare the body structure here
-
-    // Constructs an ooo_model_instruction from the trace format
-    ooo_model_instr cast_to_ooo(/* TODO: Finish this */) noexcept
+    // Constructs a vector of ooo_model_instr from a single body entry
+    std::vector<ooo_model_instr> cast_to_ooo(const body_entry& entry) const noexcept
     {
       // TODO: Finish this
     }
 
-    // Reads the next instruction from the trace, constructs an ooo_model_instr from it, and return it
-    // Also sets the eof_ appropriately
-    ooo_model_instr get_next_instr()
+    void handle_thread_switch()
     {
-      if (valid_body_tags.size() == 0) {
-        using namespace wrong_path_trace_constants;
-        for (const auto& [_, value] : header.ids.at("body_tag"))
-          valid_body_tags.insert(value);
+      const int64_t thread_id_delta = compressed_body_stream.parse_sleb();
+      previous_thread_id += static_cast<uint32_t>(static_cast<int64_t>(previous_thread_id) + thread_id_delta);
+    }
+
+    void handle_regfile()
+    {
+      const uint64_t thread_id = compressed_body_stream.parse_uleb();
+      const uint64_t n_present = compressed_body_stream.parse_uleb();
+      for (uint64_t i = 0; i < n_present; i++) {
+        const uint8_t gen_id = static_cast<uint8_t>(compressed_body_stream.read());
+        const uint8_t width = static_cast<uint8_t>(compressed_body_stream.read());
+        const std::vector<char> bytes = compressed_body_stream.read_bytes(width);
+
+        // TODO: Do something here
+      }
+    }
+
+    // TODO: Verify this
+    field_delta_section read_field_delta_section(const uint64_t ipos)
+    {
+      field_delta_section field_delta;
+      field_delta.ipos = ipos + compressed_body_stream.parse_uleb();
+      field_delta.fid = compressed_body_stream.parse_uleb();
+      field_delta.delta = compressed_body_stream.parse_sleb_wide();
+
+      if (field_delta.fid == header.ids.at("field_id").at("CST_FID_EXTENDED"))
+        field_delta.ext_payload = compressed_body_stream.parse_uleb();
+
+      // TODO: Do something here
+
+      return field_delta;
+    }
+
+    delta_section read_cp_delta_section()
+    {
+      delta_section cp_delta;
+      const uint64_t n_records = compressed_body_stream.parse_uleb();
+      for (uint64_t i = 0; i < n_records; i++)
+        cp_delta.records.emplace_back(read_field_delta_section(i));
+      return cp_delta;
+    }
+
+    wp_chain_section read_wp_chain_section()
+    {
+      wp_chain_section wp_chain;
+      wp_chain.num_wp = compressed_body_stream.parse_uleb();
+      for (uint64_t i = 0; i < wp_chain.num_wp; i++) {
+        wp_chain.template_id_deltas.emplace_back(compressed_body_stream.parse_sleb());
+        wp_chain.wp_deltas.emplace_back(read_cp_delta_section());
       }
 
+      return wp_chain;
+    }
+
+    wp_events_section read_wp_events_section()
+    {
+      wp_events_section wp_events;
+      wp_events.num_events = compressed_body_stream.parse_uleb();
+      int32_t wp_index = -1;
+      for (uint64_t i = 0; i < wp_events.num_events; i++) {
+        const uint64_t pos_gap = compressed_body_stream.parse_uleb();
+        wp_index = wp_index + 1 + static_cast<int32_t>(pos_gap);
+        wp_events.wp_index.emplace_back(static_cast<uint64_t>(wp_index));
+
+        const uint8_t ev_flags = static_cast<uint8_t>(compressed_body_stream.read());
+        if (ev_flags & header.ids.at("wp_event_flag").at("CST_WP_EVENT_FAULT"))
+          wp_events.fault_instr_index.emplace_back(compressed_body_stream.parse_uleb());
+        else
+          wp_events.fault_instr_index.emplace_back();
+
+        // TODO: Do something here
+      }
+    }
+
+    body_entry handle_entry()
+    {
+      const int64_t template_id_delta = compressed_body_stream.parse_sleb();
+      previous_template_id = static_cast<uint32_t>(static_cast<int64_t>(previous_template_id) + template_id_delta);
+
+      delta_section cp_delta = read_cp_delta_section();
+      if (header.prolog.fixed_size.flags & header.ids.at("header_flag").at("CST_FLAG_WP")) {
+        wp_chain_section wp_chain = read_wp_chain_section();
+        wp_events_section wp_events = read_wp_events_section();
+      }
+
+      seq_num += 1;
+
+      // TODO: Return something here
+    }
+
+    void handle_iframe()
+    {
+      delta_section cp_delta = read_cp_delta_section();
+      if (header.prolog.fixed_size.flags & header.ids.at("header_flag").at("CST_FLAG_WP")) {
+        wp_chain_section wp_chain = read_wp_chain_section();
+        wp_events_section wp_events = read_wp_events_section();
+      }
+
+      // TODO: Validate the state here
+    }
+
+    void handle_end()
+    {
+      const uint64_t num_entries = compressed_body_stream.parse_uleb();
+      if (num_entries != seq_num)
+        throw std::runtime_error(
+            fmt::format("[ERROR] Number of entries ({}) doesn't match the expected number of entries ({}). Exiting...", seq_num, num_entries));
+
+      verify_integrity();
+
+      if (!compressed_body_stream.eof)
+        throw std::runtime_error("[ERROR] Unexpected bytes found at the end of body section");
+    }
+
+    // Reads the next instruction from the trace, constructs an ooo_model_instr from it, and return it
+    std::vector<ooo_model_instr> get_next_instr()
+    {
       const uint8_t tag = compressed_body_stream.read();
       if (valid_body_tags.find(tag) == valid_body_tags.end())
         throw std::runtime_error(fmt::format("[ERROR] Found unexpected tag value of {}. Expected values: {}. Exiting...", tag, valid_body_tags));
 
-      if (tag == header.ids.at("body_tag").at("BODY_TAG_THREAD_SWITCH")) {
-        // TODO: Finish this
+      while (true) {
+        if (tag == header.ids.at("body_tag").at("BODY_TAG_THREAD_SWITCH")) {
+          handle_thread_switch();
+        } else if (tag == header.ids.at("body_tag").at("BODY_TAG_REGFILE")) {
+          handle_regfile();
+        } else if (tag == header.ids.at("body_tag").at("BODY_TAG_ENTRY")) {
+          const body_entry entry = handle_entry();
+          return cast_to_ooo(entry);
+        } else if (tag == header.ids.at("body_tag").at("BODY_TAG_IFRAME")) {
+          handle_iframe();
+        } else if (tag == header.ids.at("body_tag").at("BODY_TAG_END")) {
+          handle_end();
+          return {};
+        }
       }
     }
 
@@ -693,13 +841,16 @@ class wrong_path_tracereader
     body_parser(uint8_t /* cpu_idx */, const std::string& body_file, const header_wrapper& header_) : compressed_body_stream(body_file), header(header_)
     {
       verify_integrity();
-      valid_body_tags.clear();
+
+      using namespace wrong_path_trace_constants;
+      for (const auto& [_, value] : header.ids.at("body_tag"))
+        valid_body_tags.insert(value);
     }
 
     ooo_model_instr read() override
     {
       // No more instruction left in the stream
-      if (compressed_body_stream.eof) {
+      if (eof_) {
         // Drain the buffer
         if (instr_buffer.size() > 0) {
           auto retval = instr_buffer.front();
@@ -712,10 +863,14 @@ class wrong_path_tracereader
       }
 
       // Time to re-fill the buffer
-      if ((instr_buffer.size() <= refresh_thresh)) {
+      if ((instr_buffer.size() == 0)) {
         const std::size_t num_instr_to_fill = buffer_size - instr_buffer.size();
-        for (std::size_t i = 0; i < num_instr_to_fill; i++)
-          instr_buffer.emplace_back(get_next_instr());
+        for (std::size_t i = 0; i < num_instr_to_fill; i++) {
+          auto instrs = get_next_instr();
+          instr_buffer.insert(std::end(instr_buffer), std::begin(instrs), std::end(instrs));
+          if (instrs.size() == 0)
+            eof_ = true;
+        }
       }
 
       // Return the next instruction
@@ -724,7 +879,7 @@ class wrong_path_tracereader
       return retval;
     }
 
-    bool eof() const override { return eof_; }
+    bool eof() const noexcept override { return (instr_buffer.size() == 0 && eof_); }
 
     ~body_parser() override = default;
   };
@@ -757,12 +912,12 @@ void wrong_path_tracereader::parse_trace()
   trace_extract_dir = create_extract_dir();
   extract_trace(trace_file);
   construct_header_stream();
-  construct_body_stream();
   header_stream->parse();
+  construct_body_stream();
   std::cout << std::flush;
 }
 
-std::filesystem::path wrong_path_tracereader::create_extract_dir()
+std::filesystem::path wrong_path_tracereader::create_extract_dir() const
 {
   std::filesystem::path base_extract_dir(".temp_extracted_trace");
   std::filesystem::path extract_dir = base_extract_dir;
