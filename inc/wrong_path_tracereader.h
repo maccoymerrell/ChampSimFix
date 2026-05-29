@@ -26,6 +26,8 @@
 #include <cstring>
 #include <deque>
 #include <filesystem>
+#include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -51,12 +53,39 @@ class wrong_path_tracereader
   std::filesystem::path trace_extract_dir;
 
   void parse_trace();
+  void verify_trace_file_type() const;
   std::filesystem::path create_extract_dir() const;
-  void extract_trace(const std::string& trace_file_name) const;
+  void extract_trace() const;
   std::filesystem::path get_header_path() const;
   std::filesystem::path get_body_path() const;
   void construct_header_stream();
   void construct_body_stream();
+
+  // File type verification utilities
+  static constexpr char tar_magic[6] = "ustar";
+  static constexpr std::size_t tar_magic_position = 257;
+  static constexpr char gzip_magic[2] = {'\x1f', '\x1b'};
+  static constexpr std::size_t gzip_magic_position = 0;
+  static constexpr char lzma_magic[6] = {'\xfd', '\x37', '\x7a', '\x58', '\x5a', '\x00'};
+  static constexpr std::size_t lzma_magic_position = 0;
+  static constexpr char bzip2_magic[2] = {'\x42', '\x5a'};
+  static constexpr std::size_t bzip2_magic_position = 0;
+
+  template <const char* magic, const std::size_t magic_length, const std::size_t position>
+  bool check_file_type(const std::string& file_name) const;
+
+  std::function<bool(const std::string&)> is_tar = [this](const std::string& file_name) -> bool {
+    return check_file_type<tar_magic, sizeof(tar_magic), tar_magic_position>(file_name);
+  };
+  std::function<bool(const std::string&)> is_gzip = [this](const std::string& file_name) -> bool {
+    return (file_name.substr(std::size(file_name) - 2) == "gz") && check_file_type<gzip_magic, sizeof(gzip_magic), gzip_magic_position>(file_name);
+  };
+  std::function<bool(const std::string&)> is_lzma = [this](const std::string& file_name) -> bool {
+    return (file_name.substr(std::size(file_name) - 2) == "xz") && check_file_type<lzma_magic, sizeof(lzma_magic), lzma_magic_position>(file_name);
+  };
+  std::function<bool(const std::string&)> is_bzip2 = [this](const std::string& file_name) -> bool {
+    return (file_name.substr(std::size(file_name) - 3) == "bz2") && check_file_type<bzip2_magic, sizeof(bzip2_magic), bzip2_magic_position>(file_name);
+  };
 
   // This class is responsible for decompressing the compressed streams and returning the decompressed data
   template <typename CompressedStreamType, std::size_t buffer_size = 4096>
@@ -909,12 +938,36 @@ public:
 
 void wrong_path_tracereader::parse_trace()
 {
+  verify_trace_file_type();
   trace_extract_dir = create_extract_dir();
-  extract_trace(trace_file);
+  extract_trace();
   construct_header_stream();
   header_stream->parse();
   construct_body_stream();
   std::cout << std::flush;
+}
+
+// Verifies the magic bytes of file_name. Return true if magic bytes match
+template <const char* magic, const std::size_t magic_length, const std::size_t position>
+bool wrong_path_tracereader::check_file_type(const std::string& file_name) const
+{
+  std::ifstream input(file_name, std::ios::binary);
+  if (!input.is_open())
+    throw std::runtime_error(fmt::format("[ERROR] Can't open {}\n", file_name));
+
+  // Read the magic bytes
+  input.seekg(position);
+  char magic_bytes[magic_length] = "";
+  input.read((char*)magic_bytes, magic_length);
+
+  return (std::memcmp(magic_bytes, magic, magic_length) == 0);
+}
+
+void wrong_path_tracereader::verify_trace_file_type() const
+{
+  // Verify that the file type is correct
+  if (!is_tar(trace_file))
+    throw std::runtime_error("[ERROR] Unknown trace file format. Was expecting a TAR file\n");
 }
 
 std::filesystem::path wrong_path_tracereader::create_extract_dir() const
@@ -935,10 +988,10 @@ std::filesystem::path wrong_path_tracereader::create_extract_dir() const
   return extract_dir;
 }
 
-void wrong_path_tracereader::extract_trace(const std::string& trace_file_name) const
+void wrong_path_tracereader::extract_trace() const
 {
   // TODO: Untar the trace using C++ instead of calling `tar`
-  const std::string command = "tar -xf " + trace_file_name + " -C " + trace_extract_dir.string();
+  const std::string command = "tar -xf " + trace_file + " -C " + trace_extract_dir.string();
   if (std::system(command.c_str()) != 0)
     throw std::runtime_error("[ERROR] Could not extract the wrong path trace. Exiting...");
 }
@@ -963,16 +1016,15 @@ std::filesystem::path wrong_path_tracereader::get_body_path() const
 
 void wrong_path_tracereader::construct_header_stream()
 {
-  // TODO: Detect file type using magic bytes instead of file name
   // TODO: Add support for zst and lz4 compression formats
   // TODO: Add support for uncompressed trace format
 
   const std::string header_file_name = get_header_path().string();
-  if (const bool is_gzip_compressed = (header_file_name.substr(std::size(header_file_name) - 2) == "gz"); is_gzip_compressed) {
+  if (is_gzip(header_file_name)) {
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::gzip_tag_t<>>>(header_file_name));
-  } else if (const bool is_lzma_compressed = (header_file_name.substr(std::size(header_file_name) - 2) == "xz"); is_lzma_compressed) {
+  } else if (is_lzma(header_file_name)) {
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::lzma_tag_t<>>>(header_file_name));
-  } else if (const bool is_bzip2_compressed = (header_file_name.substr(std::size(header_file_name) - 3) == "bz2"); is_bzip2_compressed) {
+  } else if (is_bzip2(header_file_name)) {
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::bzip2_tag_t>>(header_file_name));
   } else
     throw std::runtime_error("[ERROR] Unknown compression format for trace header. Exiting...");
@@ -980,18 +1032,17 @@ void wrong_path_tracereader::construct_header_stream()
 
 void wrong_path_tracereader::construct_body_stream()
 {
-  // TODO: Detect file type using magic bytes instead of file name
   // TODO: Add support for zst and lz4 compression formats
   // TODO: Add support for uncompressed trace format
 
   const std::string body_file_name = get_body_path().string();
-  if (const bool is_gzip_compressed = (body_file_name.substr(std::size(body_file_name) - 2) == "gz"); is_gzip_compressed) {
+  if (is_gzip(body_file_name)) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::gzip_tag_t<>>>(cpu, body_file_name, *header_stream));
     return;
-  } else if (const bool is_lzma_compressed = (body_file_name.substr(std::size(body_file_name) - 2) == "xz"); is_lzma_compressed) {
+  } else if (is_lzma(body_file_name)) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::lzma_tag_t<>>>(cpu, body_file_name, *header_stream));
     return;
-  } else if (const bool is_bzip2_compressed = (body_file_name.substr(std::size(body_file_name) - 3) == "bz2"); is_bzip2_compressed) {
+  } else if (is_bzip2(body_file_name)) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::bzip2_tag_t>>(cpu, body_file_name, *header_stream));
     return;
   } else
