@@ -70,6 +70,10 @@ class wrong_path_tracereader
   static constexpr std::size_t lzma_magic_position = 0;
   static constexpr char bzip2_magic[2] = {'\x42', '\x5a'};
   static constexpr std::size_t bzip2_magic_position = 0;
+  static constexpr char zstd_magic[4] = {'\x28', '\xb5', '\x2f', '\xfd'};
+  static constexpr std::size_t zstd_magic_position = 0;
+  static constexpr char lz4_magic[4] = {'\x04', '\x22', '\x4d', '\x18'};
+  static constexpr std::size_t lz4_magic_position = 0;
 
   template <const char* magic, const std::size_t magic_length, const std::size_t position>
   bool check_file_type(const std::string& file_name) const;
@@ -85,6 +89,12 @@ class wrong_path_tracereader
   };
   std::function<bool(const std::string&)> is_bzip2 = [this](const std::string& file_name) -> bool {
     return (file_name.substr(std::size(file_name) - 3) == "bz2") && check_file_type<bzip2_magic, sizeof(bzip2_magic), bzip2_magic_position>(file_name);
+  };
+  std::function<bool(const std::string&)> is_zstd = [this](const std::string& file_name) -> bool {
+    return (file_name.substr(std::size(file_name) - 3) == "zst") && check_file_type<zstd_magic, sizeof(zstd_magic), zstd_magic_position>(file_name);
+  };
+  std::function<bool(const std::string&)> is_lz4 = [this](const std::string& file_name) -> bool {
+    return (file_name.substr(std::size(file_name) - 3) == "lz4") && check_file_type<lz4_magic, sizeof(lz4_magic), lz4_magic_position>(file_name);
   };
 
   // This class is responsible for decompressing the compressed streams and returning the decompressed data
@@ -1025,6 +1035,10 @@ void wrong_path_tracereader::construct_header_stream()
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::lzma_tag_t<>>>(header_file_name));
   } else if (is_bzip2(header_file_name)) {
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::bzip2_tag_t>>(header_file_name));
+  } else if (is_zstd(header_file_name)) {
+    throw std::runtime_error(fmt::format("[ERROR] ZSTD compression detected for {}. Exiting...", header_file_name));
+  } else if (is_lz4(header_file_name)) {
+    throw std::runtime_error(fmt::format("[ERROR] LZ4 compression detected for {}. Exiting...", header_file_name));
   } else { // If all else fails, parse the input as a raw text file
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::raw_data_tag_t>>(header_file_name));
   }
@@ -1037,13 +1051,14 @@ void wrong_path_tracereader::construct_body_stream()
   const std::string body_file_name = get_body_path().string();
   if (is_gzip(body_file_name)) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::gzip_tag_t<>>>(cpu, body_file_name, *header_stream));
-    return;
   } else if (is_lzma(body_file_name)) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::lzma_tag_t<>>>(cpu, body_file_name, *header_stream));
-    return;
   } else if (is_bzip2(body_file_name)) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::bzip2_tag_t>>(cpu, body_file_name, *header_stream));
-    return;
+  } else if (is_zstd(body_file_name)) {
+    throw std::runtime_error(fmt::format("[ERROR] ZSTD compression detected for {}. Exiting...", body_file_name));
+  } else if (is_lz4(body_file_name)) {
+    throw std::runtime_error(fmt::format("[ERROR] LZ4 compression detected for {}. Exiting...", body_file_name));
   } else { // If all else fails, parse the input as a raw text file
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::raw_data_tag_t>>(cpu, body_file_name, *header_stream));
   }

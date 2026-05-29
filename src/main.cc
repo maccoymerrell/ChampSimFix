@@ -61,6 +61,7 @@ static void collect_config_vars(const nlohmann::json& node, std::set<std::string
 
 int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 {
+  // TODO: Fix exception handling code. The stack isn't being unwound
   try {
     CLI::App app{"A microarchitecture simulator for research and education"};
 

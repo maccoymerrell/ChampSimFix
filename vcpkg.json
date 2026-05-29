@@ -8,6 +8,8 @@
     "bzip2",
     "liblzma",
     "zlib",
-    "catch2"
+    "catch2",
+    "zstd",
+    "lz4"
   ]
 }

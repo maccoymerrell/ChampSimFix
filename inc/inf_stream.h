@@ -20,10 +20,14 @@
 #include <algorithm>
 #include <bzlib.h>
 #include <cassert>
-#include <iostream>
+#include <lz4.h>
 #include <lzma.h>
 #include <memory>
 #include <zlib.h>
+#include <zstd.h>
+
+// TODO: Add support for ZSTD
+// TODO: Add support for LZ4
 
 namespace champsim
 {
