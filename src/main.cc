@@ -311,6 +311,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
       }
     }
   } catch (const std::exception& e) {
+    fmt::print(stderr, "Runtime Error: {}", e.what());
     return 1;
   }
 
