@@ -17,6 +17,7 @@
 #ifndef INF_STREAM_H
 #define INF_STREAM_H
 
+#include <algorithm>
 #include <bzlib.h>
 #include <cassert>
 #include <iostream>
@@ -40,7 +41,44 @@ struct end_deleter {
     delete s;
   }
 };
+
+struct raw_data_state_type {
+  // Input is read from [next_in, next_in + avail_in], and written to [next_out, next_out + avail_out]
+  char* next_in;
+  std::size_t avail_in;
+  char* next_out;
+  std::size_t avail_out;
+};
 } // namespace detail
+
+struct raw_data_tag_t {
+  using state_type = detail::raw_data_state_type;
+  using in_char_type = char;
+  using out_char_type = char;
+  using inflate_state_type = std::unique_ptr<state_type>;
+  using status_type = status_t;
+
+  static status_type inflate(inflate_state_type& x)
+  {
+    const size_t bytes_to_copy = std::min(x->avail_in, x->avail_out);
+    std::copy(x->next_in, x->next_in + bytes_to_copy, x->next_out);
+    x->next_in += bytes_to_copy;
+    x->avail_in -= bytes_to_copy;
+    x->next_out += bytes_to_copy;
+    x->avail_out -= bytes_to_copy;
+    return status_type::CAN_CONTINUE;
+  }
+
+  static inflate_state_type new_inflate_state()
+  {
+    inflate_state_type state{new detail::raw_data_state_type};
+    state->next_in = NULL;
+    state->avail_in = 0U;
+    state->next_out = NULL;
+    state->avail_out = 0U;
+    return state;
+  }
+};
 
 struct bzip2_tag_t {
   using state_type = bz_stream;

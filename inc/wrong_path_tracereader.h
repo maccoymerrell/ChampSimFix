@@ -62,7 +62,7 @@ class wrong_path_tracereader
   void construct_body_stream();
 
   // File type verification utilities
-  static constexpr char tar_magic[6] = "ustar";
+  static constexpr char tar_magic[5] = {'u', 's', 't', 'a', 'r'};
   static constexpr std::size_t tar_magic_position = 257;
   static constexpr char gzip_magic[2] = {'\x1f', '\x1b'};
   static constexpr std::size_t gzip_magic_position = 0;
@@ -1017,7 +1017,6 @@ std::filesystem::path wrong_path_tracereader::get_body_path() const
 void wrong_path_tracereader::construct_header_stream()
 {
   // TODO: Add support for zst and lz4 compression formats
-  // TODO: Add support for uncompressed trace format
 
   const std::string header_file_name = get_header_path().string();
   if (is_gzip(header_file_name)) {
@@ -1026,14 +1025,14 @@ void wrong_path_tracereader::construct_header_stream()
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::lzma_tag_t<>>>(header_file_name));
   } else if (is_bzip2(header_file_name)) {
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::bzip2_tag_t>>(header_file_name));
-  } else
-    throw std::runtime_error("[ERROR] Unknown compression format for trace header. Exiting...");
+  } else { // If all else fails, parse the input as a raw text file
+    header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::raw_data_tag_t>>(header_file_name));
+  }
 }
 
 void wrong_path_tracereader::construct_body_stream()
 {
   // TODO: Add support for zst and lz4 compression formats
-  // TODO: Add support for uncompressed trace format
 
   const std::string body_file_name = get_body_path().string();
   if (is_gzip(body_file_name)) {
@@ -1045,8 +1044,9 @@ void wrong_path_tracereader::construct_body_stream()
   } else if (is_bzip2(body_file_name)) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::bzip2_tag_t>>(cpu, body_file_name, *header_stream));
     return;
-  } else
-    throw std::runtime_error("[ERROR] Unknown compression format for trace body. Exiting...");
+  } else { // If all else fails, parse the input as a raw text file
+    body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::raw_data_tag_t>>(cpu, body_file_name, *header_stream));
+  }
 }
 
 } // namespace champsim
