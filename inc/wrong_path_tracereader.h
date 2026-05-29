@@ -23,6 +23,7 @@
 #include <bitset>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <filesystem>
@@ -51,6 +52,8 @@ class wrong_path_tracereader
   const uint8_t cpu;
   const std::string trace_file;
   std::filesystem::path trace_extract_dir;
+
+  void cleanup() const { std::filesystem::remove_all(trace_extract_dir); }
 
   void parse_trace();
   void verify_trace_file_type() const;
@@ -927,9 +930,27 @@ class wrong_path_tracereader
   std::unique_ptr<body_wrapper> body_stream = nullptr;
 
 public:
-  ooo_model_instr operator()() { return body_stream->read(); }
+  ooo_model_instr operator()()
+  {
+    try {
+      return body_stream->read();
+    } catch (const std::exception& e) {
+      fmt::print(stderr, fmt::format("[ERROR] Could not read instructions\n\n {}", e.what()));
+      cleanup();
+      std::exit(1);
+    }
+  }
 
-  wrong_path_tracereader(const std::string& tf, const uint8_t cpu_idx) : cpu(cpu_idx), trace_file(tf) { parse_trace(); }
+  wrong_path_tracereader(const std::string& tf, const uint8_t cpu_idx) : cpu(cpu_idx), trace_file(tf)
+  {
+    try {
+      parse_trace();
+    } catch (const std::exception& e) {
+      fmt::print(stderr, fmt::format("[ERROR] Failed to initialize trace reader\n\n {}", e.what()));
+      cleanup();
+      std::exit(1);
+    }
+  }
   wrong_path_tracereader(champsim::wrong_path_tracereader&& other)
       : cpu(other.cpu), trace_file(std::move(other.trace_file)), header_stream(std::move(other.header_stream)), body_stream(std::move(other.body_stream))
   {
@@ -943,7 +964,7 @@ public:
     return body_stream->eof();
   };
 
-  ~wrong_path_tracereader() { std::filesystem::remove_all(trace_extract_dir); }
+  ~wrong_path_tracereader() { cleanup(); }
 };
 
 void wrong_path_tracereader::parse_trace()
