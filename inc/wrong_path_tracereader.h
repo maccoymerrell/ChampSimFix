@@ -1072,7 +1072,7 @@ void wrong_path_tracereader::construct_header_stream()
   } else if (is_bzip2(header_file_name)) {
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::bzip2_tag_t>>(header_file_name));
   } else if (is_zstd(header_file_name)) {
-    throw std::runtime_error(fmt::format("[ERROR] ZSTD compression detected for {}. Exiting...", header_file_name));
+    header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::zst_tag_t>>(header_file_name));
   } else if (is_lz4(header_file_name)) {
     throw std::runtime_error(fmt::format("[ERROR] LZ4 compression detected for {}. Exiting...", header_file_name));
   } else { // If all else fails, parse the input as a raw text file
@@ -1092,7 +1092,7 @@ void wrong_path_tracereader::construct_body_stream()
   } else if (is_bzip2(body_file_name)) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::bzip2_tag_t>>(cpu, body_file_name, *header_stream));
   } else if (is_zstd(body_file_name)) {
-    throw std::runtime_error(fmt::format("[ERROR] ZSTD compression detected for {}. Exiting...", body_file_name));
+    body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::zst_tag_t>>(cpu, body_file_name, *header_stream));
   } else if (is_lz4(body_file_name)) {
     throw std::runtime_error(fmt::format("[ERROR] LZ4 compression detected for {}. Exiting...", body_file_name));
   } else { // If all else fails, parse the input as a raw text file

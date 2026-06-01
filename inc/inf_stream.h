@@ -20,13 +20,13 @@
 #include <algorithm>
 #include <bzlib.h>
 #include <cassert>
+#include <functional>
 #include <lz4.h>
 #include <lzma.h>
 #include <memory>
 #include <zlib.h>
 #include <zstd.h>
 
-// TODO: Add support for ZSTD
 // TODO: Add support for LZ4
 
 namespace champsim
@@ -53,12 +53,24 @@ struct raw_data_state_type {
   char* next_out;
   std::size_t avail_out;
 };
+
+struct zst_state_type {
+  // Input is read from [next_in, next_in + avail_in], and written to [next_out, next_out + avail_out]
+  char* next_in;
+  std::size_t avail_in;
+  char* next_out;
+  std::size_t avail_out;
+
+  ZSTD_inBuffer_s input;
+  ZSTD_outBuffer_s output;
+  ZSTD_DStream* zds;
+};
 } // namespace detail
 
 struct raw_data_tag_t {
   using state_type = detail::raw_data_state_type;
-  using in_char_type = char;
-  using out_char_type = char;
+  using in_char_type = std::remove_pointer_t<decltype(state_type::next_in)>;
+  using out_char_type = std::remove_pointer_t<decltype(state_type::next_out)>;
   using inflate_state_type = std::unique_ptr<state_type>;
   using status_type = status_t;
 
@@ -76,6 +88,53 @@ struct raw_data_tag_t {
   static inflate_state_type new_inflate_state()
   {
     inflate_state_type state{new detail::raw_data_state_type};
+    state->next_in = NULL;
+    state->avail_in = 0U;
+    state->next_out = NULL;
+    state->avail_out = 0U;
+    return state;
+  }
+};
+
+struct zst_tag_t {
+  std::function<void(detail::zst_state_type*)> deleter = [](detail::zst_state_type* state) {
+    ZSTD_freeDStream(state->zds);
+  };
+  using state_type = detail::zst_state_type;
+  using in_char_type = std::remove_pointer_t<decltype(state_type::next_in)>;
+  using out_char_type = std::remove_pointer_t<decltype(state_type::next_out)>;
+  using inflate_state_type = std::unique_ptr<state_type, decltype(deleter)>;
+  using status_type = status_t;
+
+  static status_type inflate(inflate_state_type& x)
+  {
+    // Prepare inputs
+    x->input.src = x->next_in;
+    x->input.size = x->avail_in;
+    x->input.pos = 0;
+
+    x->output.dst = x->next_out;
+    x->output.size = x->avail_out;
+    x->output.pos = 0;
+
+    // Decompress
+    std::size_t ret = ZSTD_decompressStream(x->zds, &(x->output), &(x->input));
+
+    // Set the state fields
+    x->next_in += x->input.pos;
+    x->avail_in = x->input.size - x->input.pos;
+    x->next_out += x->output.pos;
+    x->avail_out = x->output.size - x->output.pos;
+
+    if (ZSTD_isError(ret))
+      return status_type::ERROR;
+    return status_type::CAN_CONTINUE;
+  }
+
+  static inflate_state_type new_inflate_state()
+  {
+    inflate_state_type state{new detail::zst_state_type};
+    state->zds = ZSTD_createDStream();
     state->next_in = NULL;
     state->avail_in = 0U;
     state->next_out = NULL;
