@@ -26,15 +26,18 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <libtar.h>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+
 #include <fmt/core.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -932,13 +935,7 @@ class wrong_path_tracereader
 public:
   ooo_model_instr operator()()
   {
-    try {
-      return body_stream->read();
-    } catch (const std::exception& e) {
-      fmt::print(stderr, fmt::format("[ERROR] Could not read instructions\n\n {}", e.what()));
-      cleanup();
-      std::exit(1);
-    }
+    return body_stream->read();
   }
 
   wrong_path_tracereader(const std::string& tf, const uint8_t cpu_idx) : cpu(cpu_idx), trace_file(tf)
@@ -1021,10 +1018,28 @@ std::filesystem::path wrong_path_tracereader::create_extract_dir() const
 
 void wrong_path_tracereader::extract_trace() const
 {
-  // TODO: Untar the trace using C++ instead of calling `tar`
-  const std::string command = "tar -xf " + trace_file + " -C " + trace_extract_dir.string();
-  if (std::system(command.c_str()) != 0)
-    throw std::runtime_error("[ERROR] Could not extract the wrong path trace. Exiting...");
+  auto open = [](const char* file_name) -> TAR*
+  {
+    TAR* handle = nullptr;
+    int retval = tar_open(&handle, file_name, nullptr, O_RDONLY, 0, TAR_GNU);
+    if(retval != 0)
+      throw std::runtime_error(fmt::format("[ERROR] Can't open trace: {}. Exiting...", file_name));
+    return handle;
+  };
+
+  auto close = [](TAR* handle)
+  {
+    auto retval = tar_close(handle);
+    if(retval != 0)
+      throw std::runtime_error("[ERROR] Can't close trace. Exiting...");
+  };
+
+  std::unique_ptr<TAR, decltype(close)> trace{open(trace_file.c_str()), close};
+
+  // Extract the trace files to the extract dir
+  int retval = tar_extract_all(trace.get(), const_cast<char*>(trace_extract_dir.c_str()));
+  if(retval != 0)
+    throw std::runtime_error(fmt::format("[ERROR] Can't extract trace: {}. Exiting...", trace_file));
 }
 
 std::filesystem::path wrong_path_tracereader::get_header_path() const

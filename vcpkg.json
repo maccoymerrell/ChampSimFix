@@ -10,6 +10,7 @@
     "zlib",
     "catch2",
     "zstd",
-    "lz4"
+    "lz4",
+    "libtar"
   ]
 }
