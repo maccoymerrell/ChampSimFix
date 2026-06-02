@@ -37,7 +37,6 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-
 #include <fmt/core.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -933,10 +932,7 @@ class wrong_path_tracereader
   std::unique_ptr<body_wrapper> body_stream = nullptr;
 
 public:
-  ooo_model_instr operator()()
-  {
-    return body_stream->read();
-  }
+  ooo_model_instr operator()() { return body_stream->read(); }
 
   wrong_path_tracereader(const std::string& tf, const uint8_t cpu_idx) : cpu(cpu_idx), trace_file(tf)
   {
@@ -1018,19 +1014,17 @@ std::filesystem::path wrong_path_tracereader::create_extract_dir() const
 
 void wrong_path_tracereader::extract_trace() const
 {
-  auto open = [](const char* file_name) -> TAR*
-  {
+  auto open = [](const char* file_name) -> TAR* {
     TAR* handle = nullptr;
     int retval = tar_open(&handle, file_name, nullptr, O_RDONLY, 0, TAR_GNU);
-    if(retval != 0)
+    if (retval != 0)
       throw std::runtime_error(fmt::format("[ERROR] Can't open trace: {}. Exiting...", file_name));
     return handle;
   };
 
-  auto close = [](TAR* handle)
-  {
+  auto close = [](TAR* handle) {
     auto retval = tar_close(handle);
-    if(retval != 0)
+    if (retval != 0)
       throw std::runtime_error("[ERROR] Can't close trace. Exiting...");
   };
 
@@ -1038,7 +1032,7 @@ void wrong_path_tracereader::extract_trace() const
 
   // Extract the trace files to the extract dir
   int retval = tar_extract_all(trace.get(), const_cast<char*>(trace_extract_dir.c_str()));
-  if(retval != 0)
+  if (retval != 0)
     throw std::runtime_error(fmt::format("[ERROR] Can't extract trace: {}. Exiting...", trace_file));
 }
 
@@ -1062,8 +1056,6 @@ std::filesystem::path wrong_path_tracereader::get_body_path() const
 
 void wrong_path_tracereader::construct_header_stream()
 {
-  // TODO: Add support for zst and lz4 compression formats
-
   const std::string header_file_name = get_header_path().string();
   if (is_gzip(header_file_name)) {
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::gzip_tag_t<>>>(header_file_name));
@@ -1074,7 +1066,7 @@ void wrong_path_tracereader::construct_header_stream()
   } else if (is_zstd(header_file_name)) {
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::zst_tag_t>>(header_file_name));
   } else if (is_lz4(header_file_name)) {
-    throw std::runtime_error(fmt::format("[ERROR] LZ4 compression detected for {}. Exiting...", header_file_name));
+    header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::lz4_tag_t>>(header_file_name));
   } else { // If all else fails, parse the input as a raw text file
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::raw_data_tag_t>>(header_file_name));
   }
@@ -1082,8 +1074,6 @@ void wrong_path_tracereader::construct_header_stream()
 
 void wrong_path_tracereader::construct_body_stream()
 {
-  // TODO: Add support for zst and lz4 compression formats
-
   const std::string body_file_name = get_body_path().string();
   if (is_gzip(body_file_name)) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::gzip_tag_t<>>>(cpu, body_file_name, *header_stream));
@@ -1094,7 +1084,7 @@ void wrong_path_tracereader::construct_body_stream()
   } else if (is_zstd(body_file_name)) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::zst_tag_t>>(cpu, body_file_name, *header_stream));
   } else if (is_lz4(body_file_name)) {
-    throw std::runtime_error(fmt::format("[ERROR] LZ4 compression detected for {}. Exiting...", body_file_name));
+    body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::lz4_tag_t>>(cpu, body_file_name, *header_stream));
   } else { // If all else fails, parse the input as a raw text file
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::raw_data_tag_t>>(cpu, body_file_name, *header_stream));
   }

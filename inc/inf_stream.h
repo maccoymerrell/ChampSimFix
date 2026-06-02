@@ -21,13 +21,11 @@
 #include <bzlib.h>
 #include <cassert>
 #include <functional>
-#include <lz4.h>
+#include <lz4frame.h>
 #include <lzma.h>
 #include <memory>
 #include <zlib.h>
 #include <zstd.h>
-
-// TODO: Add support for LZ4
 
 namespace champsim
 {
@@ -64,6 +62,16 @@ struct zst_state_type {
   ZSTD_inBuffer_s input;
   ZSTD_outBuffer_s output;
   ZSTD_DStream* zds;
+};
+
+struct lz4_state_type {
+  // Input is read from [next_in, next_in + avail_in], and written to [next_out, next_out + avail_out]
+  char* next_in;
+  std::size_t avail_in;
+  char* next_out;
+  std::size_t avail_out;
+
+  LZ4F_dctx* dctx;
 };
 } // namespace detail
 
@@ -135,6 +143,47 @@ struct zst_tag_t {
   {
     inflate_state_type state{new detail::zst_state_type};
     state->zds = ZSTD_createDStream();
+    state->next_in = NULL;
+    state->avail_in = 0U;
+    state->next_out = NULL;
+    state->avail_out = 0U;
+    return state;
+  }
+};
+
+struct lz4_tag_t {
+  std::function<void(detail::lz4_state_type*)> deleter = [](detail::lz4_state_type* state) {
+    LZ4F_freeDecompressionContext(state->dctx);
+  };
+  using state_type = detail::lz4_state_type;
+  using in_char_type = std::remove_pointer_t<decltype(state_type::next_in)>;
+  using out_char_type = std::remove_pointer_t<decltype(state_type::next_out)>;
+  using inflate_state_type = std::unique_ptr<state_type, decltype(deleter)>;
+  using status_type = status_t;
+
+  static status_type inflate(inflate_state_type& x)
+  {
+    std::size_t old_avail_in = x->avail_in;
+    std::size_t old_avail_out = x->avail_out;
+
+    // Decompress
+    std::size_t ret = LZ4F_decompress(x->dctx, x->next_out, &(x->avail_out), x->next_in, &(x->avail_in), NULL);
+
+    // Set the state fields
+    x->next_in += x->avail_in;
+    x->avail_in = old_avail_in - x->avail_in;
+    x->next_out += x->avail_out;
+    x->avail_out = old_avail_out - x->avail_out;
+
+    if (LZ4F_isError(ret))
+      return status_type::ERROR;
+    return status_type::CAN_CONTINUE;
+  }
+
+  static inflate_state_type new_inflate_state()
+  {
+    inflate_state_type state{new detail::lz4_state_type};
+    LZ4F_createDecompressionContext(&(state->dctx), LZ4F_VERSION);
     state->next_in = NULL;
     state->avail_in = 0U;
     state->next_out = NULL;
