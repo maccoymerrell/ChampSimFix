@@ -17,6 +17,7 @@
 #ifndef WRONG_PATH_TRACEREADER_H
 #define WRONG_PATH_TRACEREADER_H
 
+#warning "compiling with debug statements"
 // TODO: Remove the debug prints
 
 #include <array>
@@ -179,10 +180,8 @@ class wrong_path_tracereader
     }
 
     // Parses a SLEB_WIDE into std::bitset
-    // TODO: Verify correctness
-    std::bitset<512> sleb_wide_decoder(std::vector<char>& chunks) const noexcept
+    std::bitset<512> sleb_wide_decoder(const std::vector<char>& chunks) const noexcept
     {
-      fmt::print(stderr, "[WARNING] SLEB_WIDE decoder is unverified. Use at your own risk.");
       std::size_t bit_idx = 0;
       bool msb = static_cast<bool>(chunks.back() & 0x40);
 
@@ -190,9 +189,8 @@ class wrong_path_tracereader
       parsed_bits.reset();
       for (auto i = chunks.rbegin(); i != chunks.rend(); i++) {
         uint8_t chunk = static_cast<uint8_t>(*i & 0x7f);
-        parsed_bits |= chunk;
         parsed_bits <<= 7;
-
+        parsed_bits |= chunk;
         bit_idx += 7;
       }
       while (bit_idx < 512)
@@ -671,7 +669,6 @@ class wrong_path_tracereader
     virtual ~body_wrapper() = default;
   };
 
-  // TODO: Add support for multithreaded simulation
   template <typename BodyCompressedType>
   class body_parser : public body_wrapper
   {
@@ -679,6 +676,20 @@ class wrong_path_tracereader
     stream_reader<BodyCompressedType> compressed_body_stream;
     const header_wrapper& header;
     bool eof_ = false; // Set to true when the compressed_body_stream runs out
+    const uint8_t cpu;
+
+    // Note: The trace contains register file values but ChampSim doesn't care about them. We maintain this regfile for posterity's sake only
+    std::map<uint64_t, std::map<uint64_t, std::bitset<512>>> regfile;
+
+    // Persistent overlay
+    struct overlay_key {
+      uint32_t template_id;
+      uint64_t ipos;
+      uint64_t fid;
+
+      bool operator<(const overlay_key& other) const noexcept { return std::tie(template_id, ipos, fid) < std::tie(other.template_id, other.ipos, other.fid); }
+    };
+    std::map<overlay_key, std::bitset<512>> overlay;
 
     // Members needed to read the trace in bulk
     constexpr static std::size_t buffer_size = 128;
@@ -690,7 +701,6 @@ class wrong_path_tracereader
     uint32_t seq_num = 0;
     std::set<uint64_t> valid_body_tags;
 
-    // TODO: Verify this structure
     struct field_delta_section {
       uint64_t ipos;
       uint64_t fid;
@@ -709,7 +719,6 @@ class wrong_path_tracereader
       std::vector<delta_section> wp_deltas;
     };
 
-    // TODO: Verify this structure
     struct wp_events_section {
       uint64_t num_events;
       std::vector<uint64_t> wp_index;
@@ -717,8 +726,42 @@ class wrong_path_tracereader
     };
 
     struct body_entry {
-      // TODO: Finish this
+      uint32_t template_id;
+      delta_section cp_delta;
+      wp_chain_section wp_chain;
+      wp_events_section wp_events;
     };
+
+    template <std::size_t width>
+    std::bitset<width> add_bitset(std::bitset<width> b1, std::bitset<width> b2) const noexcept
+    {
+      std::bitset<width> retval(0);
+      constexpr uint64_t bitmask = 0x00000000'ffffffff;
+      int64_t carry = 0;
+      int64_t bits_left = static_cast<int64_t>(width);
+      while (bits_left > 0) {
+        const uint64_t temp_b1 = (b1 & std::bitset<width>(bitmask)).to_ullong();
+        int64_t b1_chunk = 0;
+        std::memcpy(&b1_chunk, &temp_b1, 4);
+
+        const uint64_t temp_b2 = (b2 & std::bitset<width>(bitmask)).to_ullong();
+        int64_t b2_chunk = 0;
+        std::memcpy(&b2_chunk, &temp_b2, 4);
+
+        const int64_t partial_sum = b1_chunk + b2_chunk + carry;
+        const uint32_t retval_chunk = partial_sum & bitmask;
+        carry = (partial_sum & 0x1'00000000) >> 32;
+
+        std::bitset<width> new_bits(retval_chunk);
+        new_bits <<= (width - bits_left);
+        retval |= new_bits;
+
+        b1 >>= 32;
+        b2 >>= 32;
+        bits_left -= (4 * 8);
+      }
+      return retval;
+    }
 
     void verify_integrity()
     {
@@ -735,16 +778,56 @@ class wrong_path_tracereader
             fmt::format("[ERROR] Can't verify integrity of trace body. Magic bytes don't match. Expected {:X}, got {:X}", magic_bytes, trace_magic_bytes));
     }
 
-    // Constructs a vector of ooo_model_instr from a single body entry
-    std::vector<ooo_model_instr> cast_to_ooo(const body_entry& entry) const noexcept
+    // Applies the deltas to the overlays and constructs a vector of ooo_model_instr from a single body entry
+    std::vector<ooo_model_instr> construct_instructions(const body_entry& entry)
     {
+#warning "WP is not supported yet"
+      // TODO: Add support for WP
+      fmt::print("Generating instructions from template {}\n", entry.template_id);
+
+      if (header.templates.find(entry.template_id) == header.templates.end())
+        throw std::runtime_error(fmt::format("[ERROR] Unknown template ID {} found", entry.template_id));
+      auto& instructions = header.templates.at(entry.template_id).instructions;
+
+      // Apply the overlay delta changes
+      const auto& deltas = entry.cp_delta.records;
+      for (const auto& delta : deltas) {
+        if (delta.ipos >= instructions.size())
+          throw std::runtime_error(
+              fmt::format("[ERROR] Illegal instruction position {} found for template with {} instructions", delta.ipos, instructions.size()));
+
+        overlay_key key;
+        key.template_id = entry.template_id;
+        key.ipos = delta.ipos;
+        key.fid = delta.fid;
+        if (overlay.find(key) == overlay.end())
+          throw std::runtime_error(
+              fmt::format("[ERROR] Illegal update for (template id = {}, instruction position = {}, field ID = {}) found", key.template_id, key.ipos, key.fid));
+
+        overlay[key] = add_bitset(overlay[key], delta.delta);
+      }
+
+      // Generate the instructions
+#warning "incomplete implementation"
       // TODO: Finish this
+
+      return {};
     }
 
     void handle_thread_switch()
     {
       const int64_t thread_id_delta = compressed_body_stream.parse_sleb();
       previous_thread_id += static_cast<uint32_t>(static_cast<int64_t>(previous_thread_id) + thread_id_delta);
+    }
+
+    std::bitset<512> cast_to_bitset(const std::vector<char>& bytes)
+    {
+      std::bitset<512> retval;
+      for (const auto& b : bytes) {
+        retval <<= 8;
+        retval |= std::bitset<512>(b);
+      }
+      return retval;
     }
 
     void handle_regfile()
@@ -755,38 +838,39 @@ class wrong_path_tracereader
         const uint8_t gen_id = static_cast<uint8_t>(compressed_body_stream.read());
         const uint8_t width = static_cast<uint8_t>(compressed_body_stream.read());
         const std::vector<char> bytes = compressed_body_stream.read_bytes(width);
-
-        // TODO: Do something here
+        regfile[thread_id][gen_id] = cast_to_bitset(bytes);
       }
     }
 
-    // TODO: Verify this
-    field_delta_section read_field_delta_section(const uint64_t ipos)
+    field_delta_section read_field_delta_section(uint32_t& ipos)
     {
+      fmt::print("Reading Field Delta Section\n");
       field_delta_section field_delta;
-      field_delta.ipos = ipos + compressed_body_stream.parse_uleb();
+      ipos = static_cast<uint32_t>(static_cast<uint64_t>(ipos) + compressed_body_stream.parse_uleb());
+      field_delta.ipos = ipos;
       field_delta.fid = compressed_body_stream.parse_uleb();
       field_delta.delta = compressed_body_stream.parse_sleb_wide();
 
       if (field_delta.fid == header.ids.at("field_id").at("CST_FID_EXTENDED"))
         field_delta.ext_payload = compressed_body_stream.parse_uleb();
 
-      // TODO: Do something here
-
       return field_delta;
     }
 
     delta_section read_cp_delta_section()
     {
+      fmt::print("Reading Correct Path Delta Section\n");
       delta_section cp_delta;
       const uint64_t n_records = compressed_body_stream.parse_uleb();
+      uint32_t ipos = 0;
       for (uint64_t i = 0; i < n_records; i++)
-        cp_delta.records.emplace_back(read_field_delta_section(i));
+        cp_delta.records.emplace_back(read_field_delta_section(ipos));
       return cp_delta;
     }
 
     wp_chain_section read_wp_chain_section()
     {
+      fmt::print("Reading Wrong Path Chain Section\n");
       wp_chain_section wp_chain;
       wp_chain.num_wp = compressed_body_stream.parse_uleb();
       for (uint64_t i = 0; i < wp_chain.num_wp; i++) {
@@ -799,6 +883,7 @@ class wrong_path_tracereader
 
     wp_events_section read_wp_events_section()
     {
+      fmt::print("Reading Wrong Path Events Section\n");
       wp_events_section wp_events;
       wp_events.num_events = compressed_body_stream.parse_uleb();
       int32_t wp_index = -1;
@@ -812,25 +897,35 @@ class wrong_path_tracereader
           wp_events.fault_instr_index.emplace_back(compressed_body_stream.parse_uleb());
         else
           wp_events.fault_instr_index.emplace_back();
-
-        // TODO: Do something here
       }
+
+#warning "incomplete implementation"
+      // TODO: Do something here
+      return wp_events;
     }
 
     body_entry handle_entry()
     {
+      fmt::print("Decoding BODY_TAG_ENTRY section\n");
+      body_entry retval;
       const int64_t template_id_delta = compressed_body_stream.parse_sleb();
-      previous_template_id = static_cast<uint32_t>(static_cast<int64_t>(previous_template_id) + template_id_delta);
 
-      delta_section cp_delta = read_cp_delta_section();
+      retval.cp_delta = read_cp_delta_section();
       if (header.prolog.fixed_size.flags & header.ids.at("header_flag").at("CST_FLAG_WP")) {
-        wp_chain_section wp_chain = read_wp_chain_section();
-        wp_events_section wp_events = read_wp_events_section();
+        retval.wp_chain = read_wp_chain_section();
+        retval.wp_events = read_wp_events_section();
       }
 
+      // Get the current correct path template
+      const uint32_t current_template_id = static_cast<uint32_t>(static_cast<int64_t>(previous_template_id) + template_id_delta);
+      if (header.templates.find(current_template_id) == header.templates.end())
+        throw std::runtime_error(fmt::format("[ERROR] Unknown template ID {} found in trace body. Exiting...\n", current_template_id));
+      retval.template_id = current_template_id;
+
+      previous_template_id = current_template_id;
       seq_num += 1;
 
-      // TODO: Return something here
+      return retval;
     }
 
     void handle_iframe()
@@ -841,6 +936,7 @@ class wrong_path_tracereader
         wp_events_section wp_events = read_wp_events_section();
       }
 
+#warning "incomplete implementation"
       // TODO: Validate the state here
     }
 
@@ -860,35 +956,50 @@ class wrong_path_tracereader
     // Reads the next instruction from the trace, constructs an ooo_model_instr from it, and return it
     std::vector<ooo_model_instr> get_next_instr()
     {
-      const uint8_t tag = compressed_body_stream.read();
-      if (valid_body_tags.find(tag) == valid_body_tags.end())
-        throw std::runtime_error(fmt::format("[ERROR] Found unexpected tag value of {}. Expected values: {}. Exiting...", tag, valid_body_tags));
-
       while (true) {
+        const uint8_t tag = compressed_body_stream.read();
+        if (valid_body_tags.find(tag) == valid_body_tags.end())
+          throw std::runtime_error(fmt::format("[ERROR] Found unexpected tag value of {}. Expected values: {}. Exiting...", tag, valid_body_tags));
+
+        fmt::print("Found tag ID = {}: ", tag);
         if (tag == header.ids.at("body_tag").at("BODY_TAG_THREAD_SWITCH")) {
+          fmt::print("BODY_TAG_THREAD_SWITCH\n");
           handle_thread_switch();
         } else if (tag == header.ids.at("body_tag").at("BODY_TAG_REGFILE")) {
+          fmt::print("BODY_TAG_REGFILE\n");
           handle_regfile();
         } else if (tag == header.ids.at("body_tag").at("BODY_TAG_ENTRY")) {
+          fmt::print("BODY_TAG_ENTRY\n");
           const body_entry entry = handle_entry();
-          return cast_to_ooo(entry);
+          return construct_instructions(entry);
         } else if (tag == header.ids.at("body_tag").at("BODY_TAG_IFRAME")) {
+          fmt::print("BODY_TAG_IFRAME\n");
           handle_iframe();
         } else if (tag == header.ids.at("body_tag").at("BODY_TAG_END")) {
+          fmt::print("BODY_TAG_END\n");
           handle_end();
           return {};
         }
       }
     }
 
+    void initialize_overlay_from_template(std::map<overlay_key, std::bitset<512>>& overlay_map) noexcept
+    {
+#warning "incomplete implementation"
+      // TODO: Finish this
+    }
+
   public:
-    body_parser(uint8_t /* cpu_idx */, const std::string& body_file, const header_wrapper& header_) : compressed_body_stream(body_file), header(header_)
+    body_parser(const uint8_t cpu_idx, const std::string& body_file, const header_wrapper& header_)
+        : compressed_body_stream(body_file), header(header_), cpu(cpu_idx)
     {
       verify_integrity();
 
       using namespace wrong_path_trace_constants;
       for (const auto& [_, value] : header.ids.at("body_tag"))
         valid_body_tags.insert(value);
+
+      initialize_overlay_from_template(overlay);
     }
 
     ooo_model_instr read() override
@@ -1048,7 +1159,7 @@ std::filesystem::path wrong_path_tracereader::get_header_path() const
 std::filesystem::path wrong_path_tracereader::get_body_path() const
 {
   for (const auto& entry : std::filesystem::directory_iterator(trace_extract_dir)) {
-    if (entry.path().filename().string().find("body.cst") != 0)
+    if (entry.path().filename().string().find("body.cst") == 0)
       return entry.path();
   }
   throw std::runtime_error("[ERROR] The trace has no body. Exiting...");
