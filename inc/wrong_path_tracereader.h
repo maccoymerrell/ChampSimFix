@@ -685,11 +685,11 @@ class wrong_path_tracereader
     struct overlay_key {
       uint32_t template_id;
       uint64_t ipos;
-      uint64_t fid;
 
-      bool operator<(const overlay_key& other) const noexcept { return std::tie(template_id, ipos, fid) < std::tie(other.template_id, other.ipos, other.fid); }
+      overlay_key(const uint32_t tid, const uint64_t ip) : template_id(tid), ipos(ip) {}
+      bool operator<(const overlay_key& other) const noexcept { return std::tie(template_id, ipos) < std::tie(other.template_id, other.ipos); }
     };
-    std::map<overlay_key, std::bitset<512>> overlay;
+    std::map<overlay_key, std::map<uint64_t, std::bitset<512>>> overlay;
 
     // Members needed to read the trace in bulk
     constexpr static std::size_t buffer_size = 128;
@@ -778,6 +778,13 @@ class wrong_path_tracereader
             fmt::format("[ERROR] Can't verify integrity of trace body. Magic bytes don't match. Expected {:X}, got {:X}", magic_bytes, trace_magic_bytes));
     }
 
+    ooo_model_instr generate_instruction(const header_wrapper::Instruction& /*instruction_template*/, const std::map<uint64_t, std::bitset<512>>& /*deltas*/)
+    {
+#warning "incomplete implementation"
+      // TODO: Finish this
+      throw std::runtime_error(fmt::format("[ERROR] {} is not implemented\n", __PRETTY_FUNCTION__));
+    }
+
     // Applies the deltas to the overlays and constructs a vector of ooo_model_instr from a single body entry
     std::vector<ooo_model_instr> construct_instructions(const body_entry& entry)
     {
@@ -796,22 +803,23 @@ class wrong_path_tracereader
           throw std::runtime_error(
               fmt::format("[ERROR] Illegal instruction position {} found for template with {} instructions", delta.ipos, instructions.size()));
 
-        overlay_key key;
-        key.template_id = entry.template_id;
-        key.ipos = delta.ipos;
-        key.fid = delta.fid;
+        const overlay_key key(entry.template_id, delta.ipos);
         if (overlay.find(key) == overlay.end())
-          throw std::runtime_error(
-              fmt::format("[ERROR] Illegal update for (template id = {}, instruction position = {}, field ID = {}) found", key.template_id, key.ipos, key.fid));
+          overlay[key][delta.fid] = delta.delta;
 
-        overlay[key] = add_bitset(overlay[key], delta.delta);
+        overlay[key][delta.fid] = add_bitset(overlay[key][delta.fid], delta.delta);
       }
 
       // Generate the instructions
-#warning "incomplete implementation"
-      // TODO: Finish this
+      const std::size_t num_instr = instructions.size();
+      std::vector<ooo_model_instr> retvec;
+      retvec.reserve(num_instr);
+      for (uint64_t ipos = 0; ipos < num_instr; ipos++) {
+        const overlay_key key(entry.template_id, ipos);
+        retvec.emplace_back(generate_instruction(instructions[ipos], overlay[key]));
+      }
 
-      return {};
+      return retvec;
     }
 
     void handle_thread_switch()
@@ -983,12 +991,6 @@ class wrong_path_tracereader
       }
     }
 
-    void initialize_overlay_from_template(std::map<overlay_key, std::bitset<512>>& overlay_map) noexcept
-    {
-#warning "incomplete implementation"
-      // TODO: Finish this
-    }
-
   public:
     body_parser(const uint8_t cpu_idx, const std::string& body_file, const header_wrapper& header_)
         : compressed_body_stream(body_file), header(header_), cpu(cpu_idx)
@@ -998,8 +1000,6 @@ class wrong_path_tracereader
       using namespace wrong_path_trace_constants;
       for (const auto& [_, value] : header.ids.at("body_tag"))
         valid_body_tags.insert(value);
-
-      initialize_overlay_from_template(overlay);
     }
 
     ooo_model_instr read() override
