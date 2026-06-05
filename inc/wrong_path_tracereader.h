@@ -60,10 +60,10 @@ class wrong_path_tracereader
 
   void parse_trace();
   void verify_trace_file_type() const;
-  std::filesystem::path create_extract_dir() const;
+  [[nodiscard]] std::filesystem::path create_extract_dir() const;
   void extract_trace() const;
-  std::filesystem::path get_header_path() const;
-  std::filesystem::path get_body_path() const;
+  [[nodiscard]] std::filesystem::path get_header_path() const;
+  [[nodiscard]] std::filesystem::path get_body_path() const;
   void construct_header_stream();
   void construct_body_stream();
 
@@ -113,7 +113,7 @@ class wrong_path_tracereader
     decltype(decompressed_buffer.end()) max_buffer_iter = decompressed_buffer.begin();
 
     // Returns the next byte from the input stream
-    std::optional<char> decompress() noexcept
+    [[nodiscard]] std::optional<char> decompress() noexcept
     {
       // No more bytes left
       if ((buffer_iter >= max_buffer_iter) && stream.eof()) {
@@ -150,7 +150,7 @@ class wrong_path_tracereader
       return {front};
     }
 
-    uint64_t uleb_decoder(std::vector<char>& chunks) const noexcept
+    [[nodiscard]] uint64_t uleb_decoder(std::vector<char>& chunks) const noexcept
     {
       uint64_t retval = 0;
       uint64_t chunk_id = 0;
@@ -164,7 +164,7 @@ class wrong_path_tracereader
       return retval;
     }
 
-    int64_t sleb_decoder(std::vector<char>& chunks) const noexcept
+    [[nodiscard]] int64_t sleb_decoder(std::vector<char>& chunks) const noexcept
     {
       int64_t retval = 0;
       uint64_t chunk_id = 0;
@@ -180,7 +180,7 @@ class wrong_path_tracereader
     }
 
     // Parses a SLEB_WIDE into std::bitset
-    std::bitset<512> sleb_wide_decoder(const std::vector<char>& chunks) const noexcept
+    [[nodiscard]] std::bitset<512> sleb_wide_decoder(const std::vector<char>& chunks) const noexcept
     {
       std::size_t bit_idx = 0;
       bool msb = static_cast<bool>(chunks.back() & 0x40);
@@ -204,7 +204,7 @@ class wrong_path_tracereader
     bool eof = false;              // Set to true if no more bytes can be returned
     stream_reader(const std::string& stream_name) noexcept : stream(stream_name) {}
 
-    char read()
+    [[nodiscard]] char read()
     {
       auto byte = decompress();
       if (!byte)
@@ -214,7 +214,7 @@ class wrong_path_tracereader
     }
 
     // Reads a ULEB from the stream
-    uint64_t parse_uleb()
+    [[nodiscard]] uint64_t parse_uleb()
     {
       std::vector<char> chunks;
       while (auto byte = decompress()) {
@@ -230,7 +230,7 @@ class wrong_path_tracereader
     }
 
     // Reads a SLEB from the stream
-    uint64_t parse_sleb()
+    [[nodiscard]] uint64_t parse_sleb()
     {
       std::vector<char> chunks;
       while (auto byte = decompress()) {
@@ -246,7 +246,7 @@ class wrong_path_tracereader
     }
 
     // Reads a SLEB_WIDE from the stream
-    std::bitset<512> parse_sleb_wide()
+    [[nodiscard]] std::bitset<512> parse_sleb_wide()
     {
       std::vector<char> chunks;
       while (auto byte = decompress()) {
@@ -262,7 +262,7 @@ class wrong_path_tracereader
     }
 
     // Reads a string from the stream
-    std::string parse_string()
+    [[nodiscard]] std::string parse_string()
     {
       const std::size_t string_size = static_cast<std::size_t>(parse_uleb());
       std::string retval = "";
@@ -272,7 +272,7 @@ class wrong_path_tracereader
     }
 
     // Reads a chunk of bytes from the stream
-    std::vector<char> read_bytes(const std::size_t num_bytes)
+    [[nodiscard]] std::vector<char> read_bytes(const std::size_t num_bytes)
     {
       std::vector<char> retvec;
       for (std::size_t bytes_read = 0; bytes_read != num_bytes; bytes_read++)
@@ -281,7 +281,7 @@ class wrong_path_tracereader
     }
 
     // Reads a f64 from the stream
-    double parse_f64()
+    [[nodiscard]] double parse_f64()
     {
       double retval = 0.0f;
       auto bytes = read_bytes(8);
@@ -467,7 +467,7 @@ class wrong_path_tracereader
       }
     }
 
-    Dependency parse_dependency(const uint8_t n_dst, const uint8_t max_dep_stores, const uint8_t max_dep_loads)
+    [[nodiscard]] Dependency parse_dependency(const uint8_t n_dst, const uint8_t max_dep_stores, const uint8_t max_dep_loads)
     {
       // Ensure that the relevant encodings are available
       using namespace wrong_path_trace_constants;
@@ -505,7 +505,7 @@ class wrong_path_tracereader
       return dep;
     }
 
-    Instruction parse_instruction()
+    [[nodiscard]] Instruction parse_instruction()
     {
       Instruction instr;
       instr.pc_delta = compressed_header_stream.parse_uleb();
@@ -549,7 +549,7 @@ class wrong_path_tracereader
       return instr;
     }
 
-    Profile parse_profile(const uint64_t n_targets, const uint64_t num_instr)
+    [[nodiscard]] Profile parse_profile(const uint64_t n_targets, const uint64_t num_instr)
     {
       Profile pf;
       pf.exec_cp = compressed_header_stream.parse_uleb();
@@ -687,7 +687,7 @@ class wrong_path_tracereader
       uint64_t ipos;
 
       overlay_key(const uint32_t tid, const uint64_t ip) : template_id(tid), ipos(ip) {}
-      bool operator<(const overlay_key& other) const noexcept { return std::tie(template_id, ipos) < std::tie(other.template_id, other.ipos); }
+      [[nodiscard]] bool operator<(const overlay_key& other) const noexcept { return std::tie(template_id, ipos) < std::tie(other.template_id, other.ipos); }
     };
     std::map<overlay_key, std::map<uint64_t, std::bitset<512>>> overlay;
 
@@ -733,7 +733,7 @@ class wrong_path_tracereader
     };
 
     template <std::size_t width>
-    std::bitset<width> add_bitset(std::bitset<width> b1, std::bitset<width> b2) const noexcept
+    [[nodiscard]] std::bitset<width> add_bitset(std::bitset<width> b1, std::bitset<width> b2) const noexcept
     {
       std::bitset<width> retval(0);
       constexpr uint64_t bitmask = 0x00000000'ffffffff;
@@ -778,7 +778,7 @@ class wrong_path_tracereader
             fmt::format("[ERROR] Can't verify integrity of trace body. Magic bytes don't match. Expected {:X}, got {:X}", magic_bytes, trace_magic_bytes));
     }
 
-    ooo_model_instr generate_instruction(const header_wrapper::Instruction& /*instruction_template*/, const std::map<uint64_t, std::bitset<512>>& /*deltas*/)
+    [[nodiscard]] ooo_model_instr generate_instruction(const header_wrapper::Instruction& /*instruction_template*/, const std::map<uint64_t, std::bitset<512>>& /*deltas*/) const
     {
 #warning "incomplete implementation"
       // TODO: Finish this
@@ -786,7 +786,7 @@ class wrong_path_tracereader
     }
 
     // Applies the deltas to the overlays and constructs a vector of ooo_model_instr from a single body entry
-    std::vector<ooo_model_instr> construct_instructions(const body_entry& entry)
+    [[nodiscard]] std::vector<ooo_model_instr> construct_instructions(const body_entry& entry)
     {
 #warning "WP is not supported yet"
       // TODO: Add support for WP
@@ -828,7 +828,7 @@ class wrong_path_tracereader
       previous_thread_id += static_cast<uint32_t>(static_cast<int64_t>(previous_thread_id) + thread_id_delta);
     }
 
-    std::bitset<512> cast_to_bitset(const std::vector<char>& bytes)
+    [[nodiscard]] std::bitset<512> cast_to_bitset(const std::vector<char>& bytes) const noexcept
     {
       std::bitset<512> retval;
       for (const auto& b : bytes) {
@@ -850,7 +850,7 @@ class wrong_path_tracereader
       }
     }
 
-    field_delta_section read_field_delta_section(uint32_t& ipos)
+    [[nodiscard]] field_delta_section read_field_delta_section(uint32_t& ipos)
     {
       fmt::print("Reading Field Delta Section\n");
       field_delta_section field_delta;
@@ -865,7 +865,7 @@ class wrong_path_tracereader
       return field_delta;
     }
 
-    delta_section read_cp_delta_section()
+    [[nodiscard]] delta_section read_cp_delta_section()
     {
       fmt::print("Reading Correct Path Delta Section\n");
       delta_section cp_delta;
@@ -876,7 +876,7 @@ class wrong_path_tracereader
       return cp_delta;
     }
 
-    wp_chain_section read_wp_chain_section()
+    [[nodiscard]] wp_chain_section read_wp_chain_section()
     {
       fmt::print("Reading Wrong Path Chain Section\n");
       wp_chain_section wp_chain;
@@ -889,7 +889,7 @@ class wrong_path_tracereader
       return wp_chain;
     }
 
-    wp_events_section read_wp_events_section()
+    [[nodiscard]] wp_events_section read_wp_events_section()
     {
       fmt::print("Reading Wrong Path Events Section\n");
       wp_events_section wp_events;
@@ -912,7 +912,7 @@ class wrong_path_tracereader
       return wp_events;
     }
 
-    body_entry handle_entry()
+    [[nodiscard]] body_entry handle_entry()
     {
       fmt::print("Decoding BODY_TAG_ENTRY section\n");
       body_entry retval;
@@ -962,7 +962,7 @@ class wrong_path_tracereader
     }
 
     // Reads the next instruction from the trace, constructs an ooo_model_instr from it, and return it
-    std::vector<ooo_model_instr> get_next_instr()
+    [[nodiscard]] std::vector<ooo_model_instr> get_next_instr()
     {
       while (true) {
         const uint8_t tag = compressed_body_stream.read();
@@ -1002,7 +1002,7 @@ class wrong_path_tracereader
         valid_body_tags.insert(value);
     }
 
-    ooo_model_instr read() override
+    [[nodiscard]] ooo_model_instr read() override
     {
       // No more instruction left in the stream
       if (eof_) {
@@ -1034,7 +1034,7 @@ class wrong_path_tracereader
       return retval;
     }
 
-    bool eof() const noexcept override { return (instr_buffer.size() == 0 && eof_); }
+    [[nodiscard]] bool eof() const noexcept override { return (instr_buffer.size() == 0 && eof_); }
 
     ~body_parser() override = default;
   };
@@ -1043,7 +1043,7 @@ class wrong_path_tracereader
   std::unique_ptr<body_wrapper> body_stream = nullptr;
 
 public:
-  ooo_model_instr operator()() { return body_stream->read(); }
+  [[nodiscard]] ooo_model_instr operator()() { return body_stream->read(); }
 
   wrong_path_tracereader(const std::string& tf, const uint8_t cpu_idx) : cpu(cpu_idx), trace_file(tf)
   {
@@ -1084,7 +1084,7 @@ void wrong_path_tracereader::parse_trace()
 
 // Verifies the magic bytes of file_name. Return true if magic bytes match
 template <const char* magic, const std::size_t magic_length, const std::size_t position>
-bool wrong_path_tracereader::check_file_type(const std::string& file_name) const
+[[nodiscard]] bool wrong_path_tracereader::check_file_type(const std::string& file_name) const
 {
   std::ifstream input(file_name, std::ios::binary);
   if (!input.is_open())
@@ -1105,7 +1105,7 @@ void wrong_path_tracereader::verify_trace_file_type() const
     throw std::runtime_error("[ERROR] Unknown trace file format. Was expecting a TAR file\n");
 }
 
-std::filesystem::path wrong_path_tracereader::create_extract_dir() const
+[[nodiscard]] std::filesystem::path wrong_path_tracereader::create_extract_dir() const
 {
   std::filesystem::path base_extract_dir(".temp_extracted_trace");
   std::filesystem::path extract_dir = base_extract_dir;
@@ -1147,7 +1147,7 @@ void wrong_path_tracereader::extract_trace() const
     throw std::runtime_error(fmt::format("[ERROR] Can't extract trace: {}. Exiting...", trace_file));
 }
 
-std::filesystem::path wrong_path_tracereader::get_header_path() const
+[[nodiscard]] std::filesystem::path wrong_path_tracereader::get_header_path() const
 {
   for (const auto& entry : std::filesystem::directory_iterator(trace_extract_dir)) {
     if (entry.path().filename().string().find("header.cst") == 0)
@@ -1156,7 +1156,7 @@ std::filesystem::path wrong_path_tracereader::get_header_path() const
   throw std::runtime_error("[ERROR] The trace has no header. Exiting...");
 }
 
-std::filesystem::path wrong_path_tracereader::get_body_path() const
+[[nodiscard]] std::filesystem::path wrong_path_tracereader::get_body_path() const
 {
   for (const auto& entry : std::filesystem::directory_iterator(trace_extract_dir)) {
     if (entry.path().filename().string().find("body.cst") == 0)
