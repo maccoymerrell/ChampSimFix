@@ -11,6 +11,7 @@
     "catch2",
     "zstd",
     "lz4",
-    "libtar"
+    "libtar",
+    "boost-bimap"
   ]
 }

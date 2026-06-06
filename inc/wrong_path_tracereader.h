@@ -38,6 +38,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <boost/bimap.hpp>
 #include <fmt/core.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -373,7 +374,9 @@ class wrong_path_tracereader
       std::optional<Profile> profile;
     };
 
-    std::map<std::string, std::map<std::string, uint64_t>> ids;
+    typedef boost::bimap<std::string, uint64_t> bimap_type;
+    typedef bimap_type::value_type position;
+    std::map<std::string, bimap_type> ids;
     std::map<uint32_t, Template> templates;
 
   public:
@@ -444,7 +447,7 @@ class wrong_path_tracereader
         for (uint64_t j = 0; j < n_entries; j++) {
           const uint64_t value = compressed_header_stream.parse_uleb();
           const std::string name = compressed_header_stream.parse_string();
-          ids[map_name][name] = value;
+          ids[map_name].insert(position(name, value));
 
           fmt::print("[{}] {}->{}\n", map_name, value, name);
         }
@@ -457,7 +460,7 @@ class wrong_path_tracereader
           throw std::runtime_error(fmt::format("[ERROR] {} encoding not found in header. Exiting...", map_name));
 
         for (const auto& name : names) {
-          if (ids[map_name].find(name) == ids[map_name].end())
+          if (ids[map_name].left.find(name) == ids[map_name].left.end())
             throw std::runtime_error(fmt::format("[ERROR] {} mapping in {} encoding not found in header. Exiting...", name, map_name));
         }
       }
@@ -475,19 +478,19 @@ class wrong_path_tracereader
         throw std::runtime_error("[ERROR] dep_block_flag encodings are missing. Exiting...");
 
       for (const auto& name : optional_encodings.at("dep_block_flag")) {
-        if (ids["dep_block_flag"].find(name) == ids["dep_block_flag"].end())
+        if (ids["dep_block_flag"].left.find(name) == ids["dep_block_flag"].left.end())
           throw std::runtime_error(fmt::format("[ERROR] dep_block_flag encodings don't map {}. Exiting...", name));
       }
 
       Dependency dep;
       dep.dep_block_flags = static_cast<uint8_t>(compressed_header_stream.read());
-      if (dep.dep_block_flags & ids["dep_block_flag"]["CST_DEP_BLOCK_HAS_REG"]) {
+      if (dep.dep_block_flags & ids["dep_block_flag"].left.at("CST_DEP_BLOCK_HAS_REG")) {
         for (uint8_t i = 0; i < n_dst; i++)
           dep.dst_dep.emplace_back(compressed_header_stream.parse_uleb());
         for (uint8_t i = 0; i < max_dep_stores; i++)
           dep.store_data_dep.emplace_back(compressed_header_stream.parse_uleb());
       }
-      if (dep.dep_block_flags & ids["dep_block_flag"]["CST_DEP_BLOCK_HAS_ADDR"]) {
+      if (dep.dep_block_flags & ids["dep_block_flag"].left.at("CST_DEP_BLOCK_HAS_ADDR")) {
         for (uint8_t i = 0; i < max_dep_loads; i++)
           dep.load_addr_dep.emplace_back(compressed_header_stream.parse_uleb());
         for (uint8_t i = 0; i < max_dep_stores; i++)
@@ -520,7 +523,7 @@ class wrong_path_tracereader
         instr.dst_regs.emplace_back(static_cast<uint8_t>(compressed_header_stream.read()));
       instr.max_dep_loads = static_cast<uint8_t>(compressed_header_stream.read());
       instr.max_dep_stores = static_cast<uint8_t>(compressed_header_stream.read());
-      if (instr.flags & ids["insn_flag"]["CST_INSN_FLAG_HAS_IMM"])
+      if (instr.flags & ids["insn_flag"].left.at("CST_INSN_FLAG_HAS_IMM"))
         instr.immidiate = compressed_header_stream.parse_sleb();
       instr.instr_size = static_cast<uint8_t>(compressed_header_stream.read());
       instr.instr_bytes = compressed_header_stream.read_bytes(static_cast<std::size_t>(instr.instr_size));
@@ -543,7 +546,7 @@ class wrong_path_tracereader
       if (instr.immidiate)
         fmt::print("\tImmediate = {:#x}\n", instr.immidiate.value());
 
-      if (instr.flags & ids["insn_flag"]["CST_INSN_FLAG_HAS_DEP_BLOCK"])
+      if (instr.flags & ids["insn_flag"].left.at("CST_INSN_FLAG_HAS_DEP_BLOCK"))
         instr.dependency = parse_dependency(instr.n_dst, instr.max_dep_stores, instr.max_dep_loads);
 
       return instr;
@@ -625,7 +628,7 @@ class wrong_path_tracereader
 
       for (uint64_t i = 0; i < templates[template_id].num_instr; i++)
         templates[template_id].instructions.emplace_back(parse_instruction());
-      if (prolog.fixed_size.flags & ids["header_flag"]["CST_FLAG_PROFILE"])
+      if (prolog.fixed_size.flags & ids["header_flag"].left.at("CST_FLAG_PROFILE"))
         templates[template_id].profile = parse_profile(templates[template_id].num_targets, templates[template_id].num_instr);
 
       const uint64_t detected_template_size = compressed_header_stream.total_bytes_read - bytes_read;
@@ -860,7 +863,7 @@ class wrong_path_tracereader
       field_delta.fid = compressed_body_stream.parse_uleb();
       field_delta.delta = compressed_body_stream.parse_sleb_wide();
 
-      if (field_delta.fid == header.ids.at("field_id").at("CST_FID_EXTENDED"))
+      if (field_delta.fid == header.ids.at("field_id").left.at("CST_FID_EXTENDED"))
         field_delta.ext_payload = compressed_body_stream.parse_uleb();
 
       return field_delta;
@@ -902,7 +905,7 @@ class wrong_path_tracereader
         wp_events.wp_index.emplace_back(static_cast<uint64_t>(wp_index));
 
         const uint8_t ev_flags = static_cast<uint8_t>(compressed_body_stream.read());
-        if (ev_flags & header.ids.at("wp_event_flag").at("CST_WP_EVENT_FAULT"))
+        if (ev_flags & header.ids.at("wp_event_flag").left.at("CST_WP_EVENT_FAULT"))
           wp_events.fault_instr_index.emplace_back(compressed_body_stream.parse_uleb());
         else
           wp_events.fault_instr_index.emplace_back();
@@ -920,7 +923,7 @@ class wrong_path_tracereader
       const int64_t template_id_delta = compressed_body_stream.parse_sleb();
 
       retval.cp_delta = read_cp_delta_section();
-      if (header.prolog.fixed_size.flags & header.ids.at("header_flag").at("CST_FLAG_WP")) {
+      if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
         retval.wp_chain = read_wp_chain_section();
         retval.wp_events = read_wp_events_section();
       }
@@ -940,7 +943,7 @@ class wrong_path_tracereader
     void handle_iframe()
     {
       delta_section cp_delta = read_cp_delta_section();
-      if (header.prolog.fixed_size.flags & header.ids.at("header_flag").at("CST_FLAG_WP")) {
+      if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
         wp_chain_section wp_chain = read_wp_chain_section();
         wp_events_section wp_events = read_wp_events_section();
       }
@@ -971,25 +974,33 @@ class wrong_path_tracereader
           throw std::runtime_error(fmt::format("[ERROR] Found unexpected tag value of {}. Expected values: {}. Exiting...", tag, valid_body_tags));
 
         fmt::print("Found tag ID = {}: ", tag);
-        if (tag == header.ids.at("body_tag").at("BODY_TAG_THREAD_SWITCH")) {
+        if (tag == header.ids.at("body_tag").left.at("BODY_TAG_THREAD_SWITCH")) {
           fmt::print("BODY_TAG_THREAD_SWITCH\n");
           handle_thread_switch();
-        } else if (tag == header.ids.at("body_tag").at("BODY_TAG_REGFILE")) {
+        } else if (tag == header.ids.at("body_tag").left.at("BODY_TAG_REGFILE")) {
           fmt::print("BODY_TAG_REGFILE\n");
           handle_regfile();
-        } else if (tag == header.ids.at("body_tag").at("BODY_TAG_ENTRY")) {
+        } else if (tag == header.ids.at("body_tag").left.at("BODY_TAG_ENTRY")) {
           fmt::print("BODY_TAG_ENTRY\n");
           const body_entry entry = handle_entry();
           return construct_instructions(entry);
-        } else if (tag == header.ids.at("body_tag").at("BODY_TAG_IFRAME")) {
+        } else if (tag == header.ids.at("body_tag").left.at("BODY_TAG_IFRAME")) {
           fmt::print("BODY_TAG_IFRAME\n");
           handle_iframe();
-        } else if (tag == header.ids.at("body_tag").at("BODY_TAG_END")) {
+        } else if (tag == header.ids.at("body_tag").left.at("BODY_TAG_END")) {
           fmt::print("BODY_TAG_END\n");
           handle_end();
           return {};
         }
       }
+    }
+
+    // Returns the next instruction from the instruction buffer
+    [[nodiscard]] ooo_model_instr pop_from_instr_buffer() noexcept
+    {
+      auto retval = instr_buffer.front();
+      instr_buffer.pop_front();
+      return retval;
     }
 
   public:
@@ -1001,14 +1012,6 @@ class wrong_path_tracereader
       using namespace wrong_path_trace_constants;
       for (const auto& [_, value] : header.ids.at("body_tag"))
         valid_body_tags.insert(value);
-    }
-
-    // Returns the next instruction from the instruction buffer
-    [[nodiscard]] ooo_model_instr pop_from_instr_buffer() noexcept
-    {
-      auto retval = instr_buffer.front();
-      instr_buffer.pop_front();
-      return retval;
     }
 
     [[nodiscard]] ooo_model_instr read() override
