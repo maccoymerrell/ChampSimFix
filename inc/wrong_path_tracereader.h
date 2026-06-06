@@ -778,7 +778,8 @@ class wrong_path_tracereader
             fmt::format("[ERROR] Can't verify integrity of trace body. Magic bytes don't match. Expected {:X}, got {:X}", magic_bytes, trace_magic_bytes));
     }
 
-    [[nodiscard]] ooo_model_instr generate_instruction(const header_wrapper::Instruction& /*instruction_template*/, const std::map<uint64_t, std::bitset<512>>& /*deltas*/) const
+    [[nodiscard]] ooo_model_instr generate_instruction(const header_wrapper::Instruction& /*instruction_template*/,
+                                                       const std::map<uint64_t, std::bitset<512>>& /*deltas*/) const
     {
 #warning "incomplete implementation"
       // TODO: Finish this
@@ -1002,16 +1003,21 @@ class wrong_path_tracereader
         valid_body_tags.insert(value);
     }
 
+    // Returns the next instruction from the instruction buffer
+    [[nodiscard]] ooo_model_instr pop_from_instr_buffer() noexcept
+    {
+      auto retval = instr_buffer.front();
+      instr_buffer.pop_front();
+      return retval;
+    }
+
     [[nodiscard]] ooo_model_instr read() override
     {
       // No more instruction left in the stream
       if (eof_) {
         // Drain the buffer
-        if (instr_buffer.size() > 0) {
-          auto retval = instr_buffer.front();
-          instr_buffer.pop_front();
-          return retval;
-        }
+        if (instr_buffer.size() > 0)
+          return pop_from_instr_buffer();
 
         // We should never reach this point
         throw std::runtime_error("[ERROR] No more instructions left to read. Exiting...");
@@ -1029,9 +1035,7 @@ class wrong_path_tracereader
       }
 
       // Return the next instruction
-      auto retval = instr_buffer.front();
-      instr_buffer.pop_front();
-      return retval;
+      return pop_from_instr_buffer();
     }
 
     [[nodiscard]] bool eof() const noexcept override { return (instr_buffer.size() == 0 && eof_); }
@@ -1125,7 +1129,7 @@ void wrong_path_tracereader::verify_trace_file_type() const
 
 void wrong_path_tracereader::extract_trace() const
 {
-  auto open = [](const char* file_name) -> TAR* {
+  auto open = [] [[nodiscard]] (const char* file_name) -> TAR* {
     TAR* handle = nullptr;
     int retval = tar_open(&handle, file_name, nullptr, O_RDONLY, 0, TAR_GNU);
     if (retval != 0)
