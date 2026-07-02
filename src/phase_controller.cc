@@ -17,10 +17,10 @@
 #include "modules.h"
 
 #include <algorithm>
-#include <cmath>
 #include <functional>
 #include <map>
-#include <numeric>
+#include <set>
+#include <string>
 #include <vector>
 #include <fmt/core.h>
 #include <fmt/chrono.h>
@@ -28,18 +28,45 @@
 
 namespace {
 
-class instruction_phase_controller : public champsim::modules::phase_controller {
+/*
+ * The generic phase controller. Token-agnostic: it never assumes what a
+ * source consumer's progress unit is. It owns only the generic mechanics:
+ *
+ *  - completion: a source completes when its sim_progress() delta reaches
+ *    the phase length (denominated in that consumer's own tokens), or when
+ *    its sources hit EOF (policy-selectable, see eof_policy).
+ *  - deadlock: consecutive zero-progress cycles, vetoed while any consumer
+ *    reports scheduled future work (has_pending_work).
+ *  - health: every health_period cycles each consumer judges itself via
+ *    check_health(); a stalled verdict aborts. The old instruction-rate
+ *    "livelock" policy now lives in core_module::check_health.
+ *
+ * Parameters:
+ *  - deadlock_cycles (int, default 500)
+ *  - health_period (uint64, default 10000000; legacy alias livelock_period)
+ *  - eof_policy (string, default "complete_all"): when a consumer's sources
+ *    are exhausted, either every source completes ("complete_all", the
+ *    classic trace-driven behavior) or only that source ("complete_source",
+ *    for heterogeneous runs).
+ *  - phases (json array of {name, is_warmup, length}) or
+ *    warmup_length/simulation_length scalars: optional run structure.
+ */
+class default_phase_controller : public champsim::modules::phase_controller {
+  using source_health = champsim::modules::source_consumer::source_health;
+
   // Configuration (from builder)
   int deadlock_cycles_ = 500;
-  uint64_t livelock_period_ = 10000000;
-  std::vector<double> livelock_thresholds_{0.01, 0.02, 0.05};
+  uint64_t health_period_ = 10000000;
+  bool complete_all_on_eof_ = true;
 
   // Parent environment, captured at construction.
   champsim::modules::environment_module* env_ = nullptr;
 
-  // Per-phase cache of the source_consumer view (typed_view is expensive).
-  // Refreshed once per begin_phase().
+  // Per-phase caches (typed_view is expensive). Refreshed once per begin_phase().
   std::vector<std::reference_wrapper<champsim::modules::source_consumer>> source_consumers_;
+  // For the deadlock veto: operables with timer-scheduled work (e.g. DRAM
+  // refresh) also make zero global progress a scheduled quiet time.
+  std::vector<std::reference_wrapper<champsim::operable>> operables_;
 
   // Per-phase state
   std::string phase_name_;
@@ -49,22 +76,27 @@ class instruction_phase_controller : public champsim::modules::phase_controller 
   std::vector<champsim::phase_info> phases_;
 
   int stalled_cycles_ = 0;
-  uint64_t livelock_timer_ = 0;
-  bool livelock_triggered_ = false;
+  uint64_t health_timer_ = 0;
+  bool health_abort_ = false;
 
-  // Entity tracking: keyed by entity_index from source_consumer
-  std::map<int, bool> entity_complete_;
+  // Source ids this controller governs; empty = all.
+  std::set<int> governed_;
+
+  // Source tracking: keyed by source_id from source_consumer
+  std::map<int, bool> source_complete_;
   std::map<int, uint64_t> progress_baseline_;
-  std::map<int, uint64_t> livelock_progress_;
   std::vector<unsigned> newly_completed_;
-  bool trace_eof_ = false;
+
+  bool governs(int idx) const { return governed_.empty() || governed_.count(idx) > 0; }
 
 public:
-  explicit instruction_phase_controller(champsim::modules::ModuleBuilder builder)
+  explicit default_phase_controller(champsim::modules::ModuleBuilder builder)
   {
     env_ = builder.get_parent<champsim::modules::environment_module>();
     deadlock_cycles_ = builder.get_parameter<int>("deadlock_cycles", true, 500);
-    livelock_period_ = builder.get_parameter<uint64_t>("livelock_period", true, 10000000ULL);
+    health_period_ = builder.get_parameter<uint64_t>("health_period", true,
+                                                     builder.get_parameter<uint64_t>("livelock_period", true, 10000000ULL));
+    complete_all_on_eof_ = builder.get_parameter<std::string>("eof_policy", true, std::string{"complete_all"}) != "complete_source";
 
     // Build the phases list from explicit JSON phases array if provided,
     // otherwise fall back to {warmup_length, simulation_length} scalar params.
@@ -73,6 +105,7 @@ public:
         champsim::phase_info pi;
         pi.name       = p.value("name", "Phase");
         pi.is_warmup  = p.value("is_warmup", false);
+        pi.roi        = p.value("roi", !pi.is_warmup);
         pi.length     = p.value("length", uint64_t{0});
         phases_.push_back(pi);
       }
@@ -80,11 +113,20 @@ public:
       uint64_t wlen = builder.get_parameter<uint64_t>("warmup_length", true, 0ULL);
       uint64_t slen = builder.get_parameter<uint64_t>("simulation_length", true, 0ULL);
       phases_ = {
-        champsim::phase_info{"Warmup",     true,  wlen, {}, {}},
-        champsim::phase_info{"Simulation", false, slen, {}, {}},
+        champsim::phase_info{"Warmup",     true,  false, wlen},
+        champsim::phase_info{"Simulation", false, true,  slen},
       };
     }
     // If neither is set, phases_ stays empty — caller owns the phase list.
+
+    // Optional: the source ids this controller governs. Multiple controllers
+    // can partition the sources of a run; each controller then applies its
+    // own completion/health policy to its subset. Default: govern all.
+    if (builder.has_parameter("sources")) {
+      for (auto& s : builder.get_parameter<nlohmann::json>("sources")) {
+        governed_.insert(s.get<int>());
+      }
+    }
   }
 
   void begin_phase(const std::string& name, bool /*is_warmup*/, uint64_t length) override
@@ -92,25 +134,30 @@ public:
     phase_name_ = name;
     length_ = length;
     stalled_cycles_ = 0;
-    livelock_timer_ = 0;
-    livelock_triggered_ = false;
-    trace_eof_ = false;
+    health_timer_ = 0;
+    health_abort_ = false;
     newly_completed_.clear();
-    entity_complete_.clear();
-    livelock_progress_.clear();
+    source_complete_.clear();
 
-    // Refresh the source_consumer cache for this phase.
-    // typed_view is expensive: cache it here and reuse across cycles.
+    // Refresh the per-phase view caches.
+    // typed_view is expensive: cache here and reuse across cycles.
     source_consumers_ = env_->typed_view<champsim::modules::source_consumer>("source_consumer");
+    operables_ = env_->typed_view<champsim::operable>("operable");
 
-    // Discover tracked entities from source_consumers
+    // Restrict the cached view to governed consumers, then discover tracked
+    // sources and re-baseline progress and health.
+    if (!governed_.empty()) {
+      source_consumers_.erase(std::remove_if(std::begin(source_consumers_), std::end(source_consumers_),
+                                             [this](const auto& sc) { return !governs(sc.get().consumer_id()); }),
+                              std::end(source_consumers_));
+    }
     for (auto& sc : source_consumers_) {
-      int idx = sc.get().entity_index();
+      int idx = sc.get().consumer_id();
       if (idx >= 0) {
-        entity_complete_[idx] = false;
+        source_complete_[idx] = false;
         progress_baseline_[idx] = sc.get().sim_progress();
-        livelock_progress_[idx] = sc.get().sim_progress();
       }
+      sc.get().reset_health();
     }
   }
 
@@ -118,90 +165,97 @@ public:
   {
     newly_completed_.clear();
 
-    // Deadlock detection
+    // Deadlock detection: consecutive zero-progress cycles are a hang unless
+    // someone knows more work is scheduled — a consumer awaiting a paced
+    // arrival, or an operable with timer-scheduled work in flight (e.g. a
+    // DRAM refresh stalling requests for a known, bounded time).
     if (progress == 0) {
-      ++stalled_cycles_;
+      const bool pending = std::any_of(std::begin(source_consumers_), std::end(source_consumers_),
+                                       [](const auto& sc) { return sc.get().has_pending_work(); })
+                           || std::any_of(std::begin(operables_), std::end(operables_),
+                                          [](const auto& op) { return op.get().has_pending_work(); });
+      stalled_cycles_ = pending ? 0 : stalled_cycles_ + 1;
     } else {
       stalled_cycles_ = 0;
     }
 
-    // Livelock detection via source_consumer::sim_progress()
-    livelock_timer_++;
-    if (livelock_timer_ >= livelock_period_) {
+    // Health aggregation: each consumer judges itself over the window.
+    if (++health_timer_ >= health_period_) {
       for (auto& sc : source_consumers_) {
-        int idx = sc.get().entity_index();
-        if (idx < 0) continue;
-        uint64_t cur_progress = sc.get().sim_progress();
-        for (auto thres = livelock_thresholds_.begin(); thres != livelock_thresholds_.end(); ++thres) {
-          double rate = std::ceil(static_cast<double>(cur_progress - livelock_progress_[idx])) / std::ceil(static_cast<double>(livelock_period_));
-          if (rate <= *thres) {
-            auto dist = std::distance(livelock_thresholds_.begin(), thres);
-            if (dist == 0) {
-              livelock_triggered_ = true;
-              fmt::print("{} entity {} panic: progress rate {:.5g} < {:.5g}\n", phase_name_, idx, rate, *thres);
-            } else if (dist == 1) {
-              fmt::print("{} entity {} critical: progress rate {:.5g} < {:.5g}\n", phase_name_, idx, rate, *thres);
-            } else {
-              fmt::print("{} entity {} warning: progress rate {:.5g} < {:.5g}\n", phase_name_, idx, rate, *thres);
-            }
-            break;
-          }
+        if (sc.get().consumer_id() < 0) {
+          continue;
         }
-        livelock_progress_[idx] = cur_progress;
+        auto health = sc.get().check_health(health_period_);
+        if (health == source_health::stalled) {
+          fmt::print("{} source {} reported stalled\n", phase_name_, sc.get().consumer_id());
+          health_abort_ = true;
+        }
       }
-      livelock_timer_ = 0;
+      health_timer_ = 0;
     }
 
-    if (stalled_cycles_ >= deadlock_cycles_ || livelock_triggered_) {
+    if (stalled_cycles_ >= deadlock_cycles_ || health_abort_) {
       return status::ABORT;
     }
 
-    // Trace EOF: mark all incomplete entities as complete
-    if (trace_eof_) {
-      for (auto& [idx, complete] : entity_complete_) {
-        if (!complete) {
-          complete = true;
-          newly_completed_.push_back(static_cast<unsigned>(idx));
-        }
-      }
-    }
-
-    // Progress-based completion: length_ is steps in THIS phase (not total cumulative)
+    // Completion: per-source EOF (policy-dependent) and progress thresholds.
     for (auto& sc : source_consumers_) {
-      int idx = sc.get().entity_index();
-      if (idx < 0) continue;
-      if (!entity_complete_[idx] && (sc.get().sim_progress() - progress_baseline_[idx]) >= length_) {
-        entity_complete_[idx] = true;
+      int idx = sc.get().consumer_id();
+      if (idx < 0) {
+        continue;
+      }
+      if (source_complete_[idx]) {
+        continue;
+      }
+
+      if (sc.get().source_eof()) {
+        if (complete_all_on_eof_) {
+          // Classic behavior: the first exhausted source ends the phase for everyone.
+          for (auto& [other_idx, complete] : source_complete_) {
+            if (!complete) {
+              complete = true;
+              newly_completed_.push_back(static_cast<unsigned>(other_idx));
+            }
+          }
+          break;
+        }
+        source_complete_[idx] = true;
+        newly_completed_.push_back(static_cast<unsigned>(idx));
+        continue;
+      }
+
+      if ((sc.get().sim_progress() - progress_baseline_[idx]) >= length_) {
+        source_complete_[idx] = true;
         newly_completed_.push_back(static_cast<unsigned>(idx));
       }
     }
 
-    bool all_complete = !entity_complete_.empty()
-                        && std::all_of(entity_complete_.begin(), entity_complete_.end(),
+    bool all_complete = !source_complete_.empty()
+                        && std::all_of(source_complete_.begin(), source_complete_.end(),
                                        [](const auto& p) { return p.second; });
     return all_complete ? status::COMPLETE : status::CONTINUE;
   }
 
-  std::vector<unsigned> newly_completed_entities() const override
+  std::vector<unsigned> newly_completed_sources() const override
   {
     return newly_completed_;
-  }
-
-  void notify_trace_eof() override
-  {
-    trace_eof_ = true;
   }
 
   void end_phase() override
   {
     source_consumers_.clear();
+    operables_.clear();
   }
 
   std::vector<champsim::phase_info> get_phases() const override { return phases_; }
 };
 
-// Register interface and model
+// Register interface and model. The historic INSTRUCTION_PHASE_CONTROLLER
+// name remains registered as an alias so existing configs keep working; the
+// controller itself is token-agnostic (livelock policy lives in the
+// consumers' check_health).
 static champsim::modules::phase_controller::register_interface phase_controller_iface_reg("phase_controller");
-static champsim::modules::phase_controller::register_module<instruction_phase_controller> instruction_pc_reg("INSTRUCTION_PHASE_CONTROLLER");
+static champsim::modules::phase_controller::register_module<default_phase_controller> default_pc_reg("PHASE_CONTROLLER");
+static champsim::modules::phase_controller::register_module<default_phase_controller> instruction_pc_reg("INSTRUCTION_PHASE_CONTROLLER");
 
 } // anonymous namespace

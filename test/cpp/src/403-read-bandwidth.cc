@@ -40,7 +40,7 @@ TEMPLATE_TEST_CASE("The read queue respects the tag bandwidth", "", to_rq_MRP, t
       typename TestType::request_type seed;
       seed.address = champsim::address{seed_base_addr + i};
       seed.instr_id = (uint64_t)i;
-      seed.cpu = 0;
+      seed.origin = champsim::origin{0, 0};
 
       seeds.push_back(seed);
     }

@@ -27,9 +27,26 @@
 #include "cache.h"
 #include "champsim.h"
 #include "deadlock.h"
-#include "event_listeners.h"
 #include "instruction.h"
 #include "util/span.h"
+
+long O3_CPU::poll_cycle()
+{
+  // A live core is never idle: fill_from_sources() refills the input queue
+  // every cycle until every workload source is exhausted. Skipping is
+  // therefore only possible in the post-EOF drain state — every pipeline
+  // structure empty and nothing left to fetch. This matters for multi-core
+  // runs where an early-finishing core would otherwise burn a full pipeline
+  // walk every cycle until the last core completes its phase.
+  const bool drained = std::empty(ROB) && std::empty(IFETCH_BUFFER) && std::empty(DIB_HIT_BUFFER)
+                       && std::empty(DECODE_BUFFER) && std::empty(DISPATCH_BUFFER)
+                       && std::empty(input_queue) && std::empty(SQ)
+                       && std::all_of(std::cbegin(LQ), std::cend(LQ), [](const auto& lq_entry) { return !lq_entry.has_value(); })
+                       && std::empty(L1I_bus.lower_level->get_returned())
+                       && std::empty(L1D_bus.lower_level->get_returned())
+                       && source_eof();
+  return drained ? 1 : 0;
+}
 
 long O3_CPU::operate()
 {
@@ -261,6 +278,7 @@ long O3_CPU::fetch_instruction()
 bool O3_CPU::do_fetch_instruction(std::deque<ooo_model_instr>::iterator begin, std::deque<ooo_model_instr>::iterator end)
 {
   CacheBus::request_type fetch_packet;
+  fetch_packet.origin = begin->origin;
   fetch_packet.v_address = begin->ip;
   fetch_packet.instr_id = begin->instr_id;
   fetch_packet.ip = begin->ip;
@@ -505,7 +523,7 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
   for (auto& smem : instr.source_memory) {
     auto q_entry = std::find_if_not(std::begin(LQ), std::end(LQ), [](const auto& lq_entry) { return lq_entry.has_value(); });
     assert(q_entry != std::end(LQ));
-    q_entry->emplace(smem, instr.instr_id, instr.ip, instr.asid); // add it to the load queue
+    q_entry->emplace(smem, instr.instr_id, instr.ip, instr.origin); // add it to the load queue
 
     // Check for forwarding
     auto sq_it = std::max_element(std::begin(SQ), std::end(SQ), [smem](const auto& lhs, const auto& rhs) {
@@ -529,7 +547,7 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
 
   // store
   for (auto& dmem : instr.destination_memory) {
-    SQ.emplace_back(dmem, instr.instr_id, instr.ip, instr.asid); // add it to the store queue
+    SQ.emplace_back(dmem, instr.instr_id, instr.ip, instr.origin); // add it to the store queue
   }
 
   if constexpr (champsim::debug_print) {
@@ -598,6 +616,7 @@ void O3_CPU::do_finish_store(const LSQ_ENTRY& sq_entry)
 bool O3_CPU::do_complete_store(const LSQ_ENTRY& sq_entry)
 {
   CacheBus::request_type data_packet;
+  data_packet.origin = sq_entry.origin;
   data_packet.v_address = sq_entry.virtual_address;
   data_packet.instr_id = sq_entry.instr_id;
   data_packet.ip = sq_entry.ip;
@@ -612,6 +631,7 @@ bool O3_CPU::do_complete_store(const LSQ_ENTRY& sq_entry)
 bool O3_CPU::execute_load(const LSQ_ENTRY& lq_entry)
 {
   CacheBus::request_type data_packet;
+  data_packet.origin = lq_entry.origin;
   data_packet.v_address = lq_entry.virtual_address;
   data_packet.instr_id = lq_entry.instr_id;
   data_packet.ip = lq_entry.ip;
@@ -716,11 +736,12 @@ long O3_CPU::retire_rob()
     }
   }
 
-  uint64_t cycles = current_time.time_since_epoch() / clock_period;
-  handle_event<Event::RETIRE>(cpu, retire_begin, retire_end, cycles);
-
   auto retire_count = std::distance(retire_begin, retire_end);
   num_retired += retire_count;
+  if (retire_count > 0) {
+    uint64_t cycles = static_cast<uint64_t>(current_time.time_since_epoch() / clock_period);
+    champsim::modules::emit_progress(*this, static_cast<uint64_t>(num_retired), cycles);
+  }
   ROB.erase(retire_begin, retire_end);
 
   return retire_count;
@@ -729,8 +750,12 @@ long O3_CPU::retire_rob()
 void O3_CPU::fill_from_sources()
 {
   for (auto* src : workload_source_pimpl) {
-    for (auto space = instructions_requested(); !src->eof() && space > 0; --space) {
-      push_instruction(src->next_instruction());
+    for (auto space = instructions_requested(); space > 0; --space) {
+      auto instr = src->next();
+      if (!instr.has_value()) {
+        break;
+      }
+      push_instruction(std::move(*instr));
     }
   }
 }
@@ -818,8 +843,8 @@ void O3_CPU::print_deadlock()
 }
 // LCOV_EXCL_STOP
 
-LSQ_ENTRY::LSQ_ENTRY(champsim::address addr, champsim::program_ordered<LSQ_ENTRY>::id_type id, champsim::address local_ip, std::array<uint8_t, 2> local_asid)
-    : champsim::program_ordered<LSQ_ENTRY>{id}, virtual_address(addr), ip(local_ip), asid(local_asid)
+LSQ_ENTRY::LSQ_ENTRY(champsim::address addr, champsim::program_ordered<LSQ_ENTRY>::id_type id, champsim::address local_ip, champsim::origin local_origin)
+    : champsim::program_ordered<LSQ_ENTRY>{id}, virtual_address(addr), ip(local_ip), origin(local_origin)
 {
 }
 
@@ -845,9 +870,9 @@ void LSQ_ENTRY::finish(ooo_model_instr& rob_entry) const
 
 bool CacheBus::issue_read(request_type data_packet)
 {
+
   data_packet.address = data_packet.v_address;
   data_packet.is_translated = false;
-  data_packet.cpu = cpu;
   data_packet.type = access_type::LOAD;
 
   return lower_level->add_rq(data_packet);
@@ -857,7 +882,6 @@ bool CacheBus::issue_write(request_type data_packet)
 {
   data_packet.address = data_packet.v_address;
   data_packet.is_translated = false;
-  data_packet.cpu = cpu;
   data_packet.type = access_type::WRITE;
   data_packet.response_requested = false;
 

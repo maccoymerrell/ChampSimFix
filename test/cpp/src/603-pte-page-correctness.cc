@@ -56,7 +56,7 @@ SCENARIO("The page table steps have correct offsets") {
         decltype(mock_ul)::request_type test;
         test.address = addr;
         test.v_address = test.address;
-        test.cpu = 0;
+        test.origin = champsim::origin{0, 0};
 
         auto test_result = mock_ul.issue(test);
         REQUIRE(test_result);

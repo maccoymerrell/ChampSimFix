@@ -82,7 +82,7 @@ SCENARIO("A cache merges two requests in the MSHR")
       uint64_t id = 1;
       queue_issue_MRP::request_type test_a;
       test_a.address = champsim::address{0xdeadbeef};
-      test_a.cpu = 0;
+      test_a.origin = champsim::origin{0, 0};
       test_a.type = type;
       test_a.instr_id = id++;
 

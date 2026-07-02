@@ -104,7 +104,7 @@ struct DRAM_CHANNEL final : public champsim::operable {
     bool scheduled = false;
     bool forward_checked = false;
 
-    uint8_t asid[2] = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
+    champsim::origin origin{};
 
     uint32_t pf_metadata = 0;
 
@@ -174,7 +174,7 @@ struct DRAM_CHANNEL final : public champsim::operable {
   void check_write_collision();
   void check_read_collision();
   long finish_dbus_request();
-  long schedule_refresh();
+  void schedule_refresh();
   void swap_write_mode();
   long populate_dbus();
   DRAM_CHANNEL::queue_type::iterator schedule_packet();
@@ -183,6 +183,17 @@ struct DRAM_CHANNEL final : public champsim::operable {
   void initialize() final;
   long operate() final;
   void print_deadlock() final;
+
+  // True if operate() would perform (or settle) any work at time t: pending
+  // queue entries, bank/bus activity, a due refresh, or a write->read mode
+  // switch. Used by the owning MEMORY_CONTROLLER's poll_cycle(); this channel
+  // is parent-ticked, so its own poll_cycle() is never consulted.
+  bool would_do_work_at(champsim::chrono::clock::time_point t) const;
+
+  // Timer-scheduled work in flight (refresh, busy banks, an occupied data
+  // bus): completes at a known future time without external input. Vetoes
+  // the zero-progress deadlock abort while requests stall behind a refresh.
+  bool has_pending_work() const final;
 
   std::size_t bank_request_capacity() const;
   std::size_t bankgroup_request_capacity() const;
@@ -214,6 +225,8 @@ public:
 
   void initialize() final;
   long operate() final;
+  long poll_cycle() final;
+  bool has_pending_work() const final;
   void begin_phase(bool warmup, bool roi) override;
   void end_phase() override;
   void print_deadlock() final;

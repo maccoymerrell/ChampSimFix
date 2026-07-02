@@ -155,7 +155,7 @@ SCENARIO("Prefetch metadata from an filled block is seen in the upper level")
 
       decltype(mock_ul)::request_type seed;
       seed.address = seed_addr;
-      seed.cpu = 0;
+      seed.origin = champsim::origin{0, 0};
       auto seed_result = mock_ul.issue(seed);
       REQUIRE(seed_result);
 

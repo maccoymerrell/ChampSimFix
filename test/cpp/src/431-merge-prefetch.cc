@@ -26,7 +26,7 @@ struct merge_testbed {
     pkt.v_address = champsim::address{0xdeadbeef};
     pkt.type = type;
     pkt.instr_id = pkt_id++;
-    pkt.cpu = 0;
+    pkt.origin = champsim::origin{0, 0};
 
     ul.issue(pkt);
 

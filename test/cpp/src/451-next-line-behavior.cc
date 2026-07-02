@@ -33,7 +33,7 @@ SCENARIO("The next line prefetcher issues prefetches")
       decltype(mock_ul)::request_type seed;
       seed.address = champsim::address{0xffff'003f};
       seed.instr_id = id++;
-      seed.cpu = 0;
+      seed.origin = champsim::origin{0, 0};
 
       // Issue it to the uut
       auto seed_result = mock_ul.issue(seed);

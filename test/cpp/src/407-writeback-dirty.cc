@@ -39,7 +39,7 @@ SCENARIO("Blocks that have been written are marked dirty")
       uint64_t id = 1;
       decltype(mock_ul_seed)::request_type seed_a;
       seed_a.address = champsim::address{0xdeadbeef};
-      seed_a.cpu = 0;
+      seed_a.origin = champsim::origin{0, 0};
       seed_a.type = access_type::WRITE;
       seed_a.instr_id = id++;
 
@@ -77,7 +77,7 @@ SCENARIO("Blocks that have been written are marked dirty")
         {
           decltype(mock_ul_test)::request_type test;
           test.address = champsim::address{0xcafebabe};
-          test.cpu = 0;
+          test.origin = champsim::origin{0, 0};
           test.type = access_type::LOAD;
           test.instr_id = id++;
 

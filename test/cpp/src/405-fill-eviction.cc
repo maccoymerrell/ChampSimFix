@@ -39,7 +39,7 @@ SCENARIO("A cache evicts a block when required")
       uint64_t id = 1;
       decltype(mock_ul_seed)::request_type test_a;
       test_a.address = champsim::address{0xdeadbeef};
-      test_a.cpu = 0;
+      test_a.origin = champsim::origin{0, 0};
       test_a.type = access_type::WRITE;
       test_a.instr_id = id++;
 
@@ -59,7 +59,7 @@ SCENARIO("A cache evicts a block when required")
       {
         decltype(mock_ul_test)::request_type test_b;
         test_b.address = champsim::address{0xcafebabe};
-        test_b.cpu = 0;
+        test_b.origin = champsim::origin{0, 0};
         test_b.type = access_type::LOAD;
         test_b.instr_id = id++;
 

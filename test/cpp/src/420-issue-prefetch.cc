@@ -95,7 +95,7 @@ SCENARIO("A prefetch can be issued") {
         // Create a test packet
         decltype(mock_ul)::request_type test;
         test.address = champsim::address{0xdeadbeef};
-        test.cpu = 0;
+        test.origin = champsim::origin{0, 0};
 
         auto test_result = mock_ul.issue(test);
         THEN("The issue is accepted") { REQUIRE(test_result); }

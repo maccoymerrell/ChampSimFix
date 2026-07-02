@@ -37,7 +37,7 @@ TEMPLATE_TEST_CASE("Caches detect translation misses", "", to_wq_MRP, to_rq_MRP,
       test.address = champsim::address{0xdeadbeef};
       test.v_address = champsim::address{0xdeadbeef};
       test.is_translated = false;
-      test.cpu = 0;
+      test.origin = champsim::origin{0, 0};
 
       auto test_result = mock_ul.issue(test);
       THEN("The issue is accepted") { REQUIRE(test_result); }

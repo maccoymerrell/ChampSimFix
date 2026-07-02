@@ -56,7 +56,7 @@ struct test_fixture {
       pkt.address = addr;
       pkt.is_translated = true;
       pkt.instr_id = id++;
-      pkt.cpu = 0;
+      pkt.origin = champsim::origin{0, 0};
       pkt.type = access_type::WRITE;
 
       mock_ul.issue(pkt);

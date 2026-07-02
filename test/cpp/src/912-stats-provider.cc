@@ -27,12 +27,11 @@ struct stats_core : public champsim::modules::core_module, public champsim::modu
   void push_instruction(ooo_model_instr) override {}
   std::size_t instructions_requested() override { return 0; }
   uint64_t sim_instr() const override { return 100; }
-  uint8_t get_cpu_num() const override { return 0; }
+  int consumer_id() const override { return static_cast<int>(0); }
   uint64_t sim_cycle() const override { return 200; }
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return sim_stats_; }
   cpu_stats get_roi_stats() const override { return roi_stats_; }
-  void quiet(bool) override {}
 
   std::vector<std::string> print_stats(bool roi) const override
   {
@@ -60,7 +59,7 @@ struct stats_cache : public champsim::modules::cache_module, public champsim::mo
   cache_stats get_roi_stats() const override { return roi_stats_; }
   bool is_virtual_prefetch() const override { return false; }
   bool prefetch_line(champsim::address, bool, uint32_t) override { return false; }
-  void impl_update_replacement_state(uint32_t, long, long, champsim::address, champsim::address,
+  void impl_update_replacement_state(champsim::origin, long, long, champsim::address, champsim::address,
                                      champsim::address, access_type, bool) const override {}
   void impl_prefetcher_branch_operate(champsim::address, uint8_t, champsim::address) const override {}
   long invalidate_entry(champsim::address) override { return -1; }

@@ -110,7 +110,7 @@ SCENARIO("The prefetcher is triggered if the packet matches the activate field")
 
       decltype(mock_ul)::request_type test;
       test.address = champsim::address{0xdeadbeef};
-      test.cpu = 0;
+      test.origin = champsim::origin{0, 0};
       test.type = type;
       auto test_result = mock_ul.issue(test);
 
@@ -167,7 +167,7 @@ SCENARIO("The prefetcher is not triggered if the packet does not match the activ
 
       decltype(mock_ul)::request_type test;
       test.address = champsim::address{0xdeadbeef};
-      test.cpu = 0;
+      test.origin = champsim::origin{0, 0};
       test.type = type;
       auto test_result = mock_ul.issue(test);
       CHECK(test_result);

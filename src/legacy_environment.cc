@@ -267,19 +267,18 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
   unsigned log2_block_size = static_cast<unsigned>(champsim::lg2(block_size_));
   unsigned log2_page_size = static_cast<unsigned>(champsim::lg2(page_size_));
   std::size_t num_cores_cfg = config.value("num_cores", 1u);
-  num_cpus_ = num_cores_cfg;
 
   // Pre-construction: publish system-wide globals so any module attached to
   // a cache (ship/drrip etc.) can read them via builder.get_parameter
   // fall-through. The legacy env spawns one workload_source per core, so
-  // num_sources == num_cores here.
+  // num_consumers == num_cores here.
   {
     auto& g = ModuleBuilder::globals();
     g.add_parameter("block_size",      block_size_);
     g.add_parameter("page_size",       page_size_);
     g.add_parameter("log2_block_size", log2_block_size);
     g.add_parameter("log2_page_size",  log2_page_size);
-    g.add_parameter("num_sources",     num_cores_cfg);
+    g.add_parameter("num_consumers",   num_cores_cfg);
   }
   // Sync the cached address extents with the freshly-published globals.
   champsim::refresh_address_extents();
@@ -675,7 +674,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
       ptw_ul_channels.push_back(channels.at(idx));
     ptw_builder.add_parameter("upper_levels", ptw_ul_channels);
     ptw_builder.add_parameter("vmem", vmem);
-    ptw_builder.add_parameter("cpu", pc.cpu_index);
+    ptw_builder.add_parameter("asid", pc.cpu_index);
     ptw_builder.add_parameter("lower_level", channels.at(find_ul_index(pc.lower_level, pc.name)));
     ptw_builder.add_parameter("clock_period", champsim::chrono::picoseconds{freq_to_period(pc.frequency)});
 
@@ -878,6 +877,8 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
 
     cache_index_map[cc.name] = caches.size();
     builder_params_[cc.name] = cache_builder;
+    // Submodules (prefetchers, replacement policies) self-enroll so views cover them.
+    cache_builder.set_owner_of_submodules(this);
     caches.push_back(module_base<cache_module, environment_module>::create_instance(cache_builder, this));
   }
 
@@ -931,7 +932,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
     auto trace_names = builder.get_parameter<std::vector<std::string>>("traces", true, std::vector<std::string>{});
     auto ws_model = builder.get_parameter<std::string>("workload_source_model", true, std::string{"TRACE_WORKLOAD_SOURCE"});
     auto src_builder = ModuleBuilder{cc.name + ".workload_source", ws_model};
-    src_builder.add_parameter("cpu", static_cast<uint8_t>(cc.index));
+    src_builder.add_parameter("stream_id", static_cast<uint32_t>(cc.index));
     if (ws_model == "TRACE_WORKLOAD_SOURCE") {
       if (static_cast<std::size_t>(cc.index) >= trace_names.size()) {
         fmt::print(stderr, "[LEGACY_ENVIRONMENT] ERROR: no trace provided for cpu{}\n", cc.index);
@@ -942,7 +943,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
       src_builder.add_parameter("repeat", builder.get_parameter<bool>("repeat", true, false));
     }
     core_builder.add_submodule("workload_source", std::move(src_builder));
-    core_builder.add_parameter("cpu", cc.index);
+    core_builder.add_parameter("consumer_id", cc.index);
     core_builder.add_parameter("clock_period", champsim::chrono::picoseconds{freq_to_period(cc.frequency)});
 
     // Forward all JSON scalar overrides (buffer sizes, latencies, etc.)
@@ -967,6 +968,8 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
     json_bandwidth_or_wrapped(core_builder, cc.config, "dib_inorder_width", "dib_inorder_width");
 
     builder_params_[cc.name] = core_builder;
+    // Submodules (branch predictors, BTBs, workload sources) self-enroll so views cover them.
+    core_builder.set_owner_of_submodules(this);
     cores.push_back(module_base<core_module, environment_module>::create_instance(core_builder, this));
   }
 
@@ -1010,9 +1013,22 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
     module_order_.emplace_back(ch->NAME, "channel");
   }
 
-  // Post-construction: publish num_cpus as a deprecated alias for the actual
-  // count of source_consumers. New code should read num_sources instead.
-  ModuleBuilder::globals().add_parameter("num_cpus", view("source_consumer").size());
+}
+
+// ====== Nested-instance enrollment ======
+
+void champsim::legacy_environment::enroll_nested_instance(const std::string& interface_name, const std::string& name, std::any instance)
+{
+  if (interface_name.empty()) {
+    return; // interface was never registered by name; nothing to file it under
+  }
+  if (nested_by_name_.count(name) != 0U) {
+    fmt::print("[LEGACY ENVIRONMENT] ERROR: duplicate nested module name '{}'\n", name);
+    std::exit(-1);
+  }
+  nested_by_name_[name] = instance;
+  nested_by_type_[interface_name].push_back(instance);
+  nested_order_.emplace_back(name, interface_name);
 }
 
 // ====== View function ======
@@ -1028,7 +1044,20 @@ auto champsim::legacy_environment::view(const std::string& interface_type) const
       if (!to_op) continue;
       auto& vec = modules_by_type_.at(iface);
       auto idx = type_idx[iface]++;
-      result.push_back(static_cast<champsim::operable*>(to_op(vec.at(idx))));
+      // to_operable is a per-instance dynamic_cast: advance the per-interface
+      // index for every instance (to stay aligned with modules_by_type_), but
+      // only enroll instances that actually inherit operable.
+      if (auto* op = to_op(vec.at(idx))) {
+        result.push_back(op);
+      }
+    }
+    // Nested instances follow, preserving top-level ordering.
+    for (auto& [name, iface] : nested_order_) {
+      auto to_op = champsim::modules::interface_registry::get_to_operable(iface);
+      if (!to_op) continue;
+      if (auto* op = to_op(nested_by_name_.at(name))) {
+        result.push_back(op);
+      }
     }
     return result;
   }
@@ -1041,12 +1070,33 @@ auto champsim::legacy_environment::view(const std::string& interface_type) const
       if (!to_sc) continue;
       auto& vec = modules_by_type_.at(iface);
       auto idx = type_idx[iface]++;
-      result.push_back(static_cast<champsim::modules::source_consumer*>(to_sc(vec.at(idx))));
+      // to_source_consumer is a per-instance dynamic_cast: advance the
+      // per-interface index for every instance (to stay aligned with
+      // modules_by_type_), but only enroll instances that actually inherit
+      // source_consumer. Otherwise null pointers leak into the view and get
+      // dereferenced by typed_view()/the phase controller. Mirrors the null
+      // filtering already done in the "operable" branch above.
+      if (auto* sc = to_sc(vec.at(idx))) {
+        result.push_back(static_cast<champsim::modules::source_consumer*>(sc));
+      }
+    }
+    // Nested instances follow, preserving top-level ordering.
+    for (auto& [name, iface] : nested_order_) {
+      auto to_sc = champsim::modules::interface_registry::get_to_source_consumer(iface);
+      if (!to_sc) continue;
+      if (auto* sc = to_sc(nested_by_name_.at(name))) {
+        result.push_back(static_cast<champsim::modules::source_consumer*>(sc));
+      }
     }
     return result;
   }
 
-  auto it = modules_by_type_.find(interface_type);
-  if (it == modules_by_type_.end()) return {};
-  return it->second;
+  std::vector<std::any> result;
+  if (auto it = modules_by_type_.find(interface_type); it != modules_by_type_.end()) {
+    result = it->second;
+  }
+  if (auto it = nested_by_type_.find(interface_type); it != nested_by_type_.end()) {
+    result.insert(result.end(), it->second.begin(), it->second.end());
+  }
+  return result;
 }

@@ -83,22 +83,53 @@ void champsim::modules::core_module::format_json(const stats_type& stats, champs
 }
 
 // source_consumer hooks for phase messaging
-int champsim::modules::core_module::entity_index() const { return static_cast<int>(get_cpu_num()); }
-
 uint64_t champsim::modules::core_module::sim_progress() const { return sim_instr(); }
+
+// Health policy for instruction consumers. The rate floors are the classic
+// livelock thresholds that previously lived in the phase controller: a
+// retirement rate at or below 0.01 IPC over the check window is a stall.
+champsim::modules::source_consumer::source_health champsim::modules::core_module::check_health(uint64_t elapsed)
+{
+  const uint64_t progress = sim_progress();
+  const double rate = std::ceil(static_cast<double>(progress - health_last_progress_)) / std::ceil(static_cast<double>(elapsed));
+  health_last_progress_ = progress;
+
+  if (rate <= 0.01) {
+    fmt::print("CPU {} panic: progress rate {:.5g} <= {:.5g}\n", consumer_id(), rate, 0.01);
+    return source_health::stalled;
+  }
+  if (rate <= 0.02) {
+    fmt::print("CPU {} critical: progress rate {:.5g} <= {:.5g}\n", consumer_id(), rate, 0.02);
+    return source_health::critical;
+  }
+  if (rate <= 0.05) {
+    fmt::print("CPU {} warning: progress rate {:.5g} <= {:.5g}\n", consumer_id(), rate, 0.05);
+    return source_health::warning;
+  }
+  return source_health::healthy;
+}
+
+void champsim::modules::core_module::reset_health() { health_last_progress_ = sim_progress(); }
 
 std::string champsim::modules::core_module::source_finish_message(const std::string& phase_name) const
 {
   return fmt::format("{} finished CPU {} instructions: {} cycles: {} cumulative IPC: {:.4g}",
-                     phase_name, get_cpu_num(), sim_instr(), sim_cycle(),
+                     phase_name, consumer_id(), sim_instr(), sim_cycle(),
                      std::ceil(static_cast<double>(sim_instr())) / std::ceil(static_cast<double>(sim_cycle())));
 }
 
 std::string champsim::modules::core_module::phase_complete_message(const std::string& phase_name) const
 {
   return fmt::format("{} complete CPU {} instructions: {} cycles: {} cumulative IPC: {:.4g}",
-                     phase_name, get_cpu_num(), sim_instr(), sim_cycle(),
+                     phase_name, consumer_id(), sim_instr(), sim_cycle(),
                      std::ceil(static_cast<double>(sim_instr())) / std::ceil(static_cast<double>(sim_cycle())));
+}
+
+std::string champsim::modules::core_module::progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate,
+                                                             double cumulative_rate) const
+{
+  return fmt::format("Heartbeat CPU {} instructions: {} cycles: {} heartbeat IPC: {:.4} cumulative IPC: {:.4}", consumer_id(), total_progress, total_cycles,
+                     interval_rate, cumulative_rate);
 }
 
 // ============================================================================

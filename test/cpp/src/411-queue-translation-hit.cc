@@ -36,7 +36,7 @@ TEMPLATE_TEST_CASE("Caches issue translations", "", to_wq_MRP, to_rq_MRP, to_pq_
       test.address = champsim::address{0xdeadbeef};
       test.v_address = champsim::address{0xdeadbeef};
       test.is_translated = false;
-      test.cpu = 0;
+      test.origin = champsim::origin{0, 0};
 
       auto test_result = mock_ul.issue(test);
       THEN("The issue is accepted") { REQUIRE(test_result); }
@@ -88,7 +88,7 @@ TEMPLATE_TEST_CASE("Translations work even if the addresses happen to be the sam
       test.address = champsim::address{0x11111eef};
       test.v_address = test.address;
       test.is_translated = false;
-      test.cpu = 0;
+      test.origin = champsim::origin{0, 0};
 
       auto test_result = mock_ul.issue(test);
       THEN("The issue is accepted") { REQUIRE(test_result); }

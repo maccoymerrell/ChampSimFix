@@ -33,7 +33,7 @@ PageTableWalker::PageTableWalker(champsim::modules::ModuleBuilder builder)
       MSHR_SIZE(builder.get_parameter<uint32_t>("mshr_size")),
       MAX_READ(builder.get_parameter<champsim::bandwidth::maximum_type>("max_tag_check")),
       MAX_FILL(builder.get_parameter<champsim::bandwidth::maximum_type>("max_fill")),
-      HIT_LATENCY(builder.get_parameter<unsigned>("latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), vmem(builder.get_parameter<champsim::modules::vmem_module*>("vmem")), CR3_addr(vmem->get_pte_pa(builder.get_parameter<uint32_t>("cpu"), champsim::page_number{}, vmem->get_pt_levels()).first)
+      HIT_LATENCY(builder.get_parameter<unsigned>("latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), vmem(builder.get_parameter<champsim::modules::vmem_module*>("vmem")), CR3_addr(vmem->get_pte_pa(champsim::origin{champsim::origin::invalid_id, builder.get_parameter<uint32_t>("asid")}, champsim::page_number{}, vmem->get_pt_levels()).first)
 {
   log2_page_size_ = builder.get_parameter<unsigned>("log2_page_size");
   auto local_pscl_dims = builder.get_parameter<std::vector<std::array<uint32_t, 3>>>("pscl_dims");
@@ -65,11 +65,9 @@ PageTableWalker::PageTableWalker(champsim::modules::ModuleBuilder builder)
 }
 
 PageTableWalker::mshr_type::mshr_type(const request_type& req, std::size_t level)
-    : address(req.address), v_address(req.v_address), instr_depend_on_me(req.instr_depend_on_me), pf_metadata(req.pf_metadata), cpu(req.cpu),
+    : address(req.address), v_address(req.v_address), instr_depend_on_me(req.instr_depend_on_me), pf_metadata(req.pf_metadata), origin(req.origin),
       translation_level(level)
 {
-  asid[0] = req.asid[0];
-  asid[1] = req.asid[1];
 }
 
 auto PageTableWalker::handle_read(const request_type& handle_pkt, channel_type* ul) -> std::optional<mshr_type>
@@ -124,9 +122,7 @@ auto PageTableWalker::step_translation(const mshr_type& source) -> std::optional
   packet.address = source.address;
   packet.v_address = source.v_address;
   packet.pf_metadata = source.pf_metadata;
-  packet.cpu = source.cpu;
-  packet.asid[0] = source.asid[0];
-  packet.asid[1] = source.asid[1];
+  packet.origin = source.origin;
   packet.is_translated = true;
   packet.type = access_type::TRANSLATION;
 
@@ -136,6 +132,19 @@ auto PageTableWalker::step_translation(const mshr_type& source) -> std::optional
   }
 
   return std::nullopt;
+}
+
+long PageTableWalker::poll_cycle()
+{
+  // Skip only when no walk state exists anywhere: nothing returned from
+  // below, no in-flight walk steps, and no requests on any upper channel.
+  // MSHR entries awaiting a lower-level response are skippable — the wake
+  // event is an arrival on lower_level->get_returned(), re-checked here
+  // every cycle.
+  const bool idle = std::empty(lower_level->get_returned()) && std::empty(finished) && std::empty(completed)
+                    && std::all_of(std::cbegin(upper_levels), std::cend(upper_levels),
+                                   [](auto* ul) { return std::empty(ul->get_rq()); });
+  return idle ? 1 : 0;
 }
 
 long PageTableWalker::operate()
@@ -202,7 +211,7 @@ long PageTableWalker::operate()
 void PageTableWalker::finish_packet(const response_type& packet)
 {
   auto finish_step = [this](auto mshr_entry) {
-    auto [ppage, penalty] = this->vmem->get_pte_pa(mshr_entry.cpu, champsim::page_number{mshr_entry.v_address}, mshr_entry.translation_level);
+    auto [ppage, penalty] = this->vmem->get_pte_pa(mshr_entry.origin, champsim::page_number{mshr_entry.v_address}, mshr_entry.translation_level);
 
     if constexpr (champsim::debug_print) {
       fmt::print("[{}] finish_packet address: {} v_address: {} data: {} translation_level: {} cycle: {} penalty: {}\n", NAME, mshr_entry.address,
@@ -214,7 +223,7 @@ void PageTableWalker::finish_packet(const response_type& packet)
   };
 
   auto finish_last_step = [this](auto mshr_entry) {
-    auto [ppage, penalty] = this->vmem->va_to_pa(mshr_entry.cpu, champsim::page_number{mshr_entry.v_address});
+    auto [ppage, penalty] = this->vmem->va_to_pa(mshr_entry.origin, champsim::page_number{mshr_entry.v_address});
 
     if constexpr (champsim::debug_print) {
       fmt::print("[{}] complete_packet address: {} v_address: {} data: {} translation_level: {} clock: {} penalty: {}\n", NAME, mshr_entry.address,

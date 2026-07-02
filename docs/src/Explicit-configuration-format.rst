@@ -173,6 +173,64 @@ Channels connect modules together. A channel definition looks like::
     }
 
 ----------------------------------
+Cores and Workload Sources
+----------------------------------
+
+A core declares its ``consumer_id`` (its hardware-context identity; ids must be unique
+and dense from 0) and attaches one or more workload sources as children. A source's
+``stream_id`` — the address-space identity stamped on its tokens — defaults to the
+owning consumer's id and only needs to be set when they differ (e.g. two traces feeding
+one core)::
+
+    {
+        "name": "cpu0",
+        "module": "core",
+        "model": "DEFAULT_CORE",
+        "consumer_id": 0,
+        "fetch_queues": "@cpu0_cpu0_L1I_channel",
+        "data_queues": "@cpu0_cpu0_L1D_channel",
+        "l1i": "@cpu0_L1I",
+        ...
+        "children": [
+            {"name": "cpu0_bp",  "module": "branch_predictor", "model": "hashed_perceptron"},
+            {"name": "cpu0_btb", "module": "btb", "model": "basic_btb"},
+            {"name": "cpu0_trace", "module": "workload_source", "model": "TRACE_WORKLOAD_SOURCE",
+             "trace_file": "$trace0"}
+        ]
+    }
+
+Page-table walkers take an ``asid`` parameter (the address space whose root they walk
+from); in the classic shape it equals the core's ``consumer_id``. See
+:ref:`Orchestration` for the consumer/stream identity model.
+
+----------------------------------
+Orchestration Modules
+----------------------------------
+
+Phase controllers and listeners are ordinary top-level children::
+
+    {
+        "name": "pc",
+        "module": "phase_controller",
+        "model": "PHASE_CONTROLLER",
+        "deadlock_cycles": 500,
+        "warmup_length": "$warmup_instructions",
+        "simulation_length": "$simulation_instructions"
+    },
+    {
+        "name": "hb",
+        "module": "listener",
+        "model": "HEARTBEAT",
+        "interval": 10000000
+    }
+
+Any number of phase controllers may be declared (each optionally governing a subset of
+consumers), a controller may define an arbitrary phase list including unmeasured
+fast-forward phases, and root-level keys ``"cycle_skip"``, ``"heartbeat_frequency"``, and
+``"num_consumers"`` tune the orchestration defaults. The full contracts, parameters, and
+composition rules are documented in :ref:`Orchestration`.
+
+----------------------------------
 A Minimal Example
 ----------------------------------
 

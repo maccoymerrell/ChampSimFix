@@ -34,7 +34,7 @@ SCENARIO("The number of issued steps matches the virtual memory levels")
       decltype(mock_ul)::request_type test;
       test.address = champsim::address{0xdeadbeef};
       test.v_address = test.address;
-      test.cpu = 0;
+      test.origin = champsim::origin{0, 0};
 
       auto test_result = mock_ul.issue(test);
       REQUIRE(test_result);
@@ -80,7 +80,7 @@ SCENARIO("Issuing a PTW fills the PSCLs")
       decltype(mock_ul)::request_type test;
       test.address = champsim::address{0xffff'ffff'ffff'ffff};
       test.v_address = test.address;
-      test.cpu = 0;
+      test.origin = champsim::origin{0, 0};
 
       auto test_result = mock_ul.issue(test);
       REQUIRE(test_result);
@@ -126,7 +126,7 @@ SCENARIO("PSCLs can reduce the number of issued translation requests")
     decltype(mock_ul)::request_type seed;
     seed.address = champsim::address{0xffff'ffff'ffff'ffff};
     seed.v_address = seed.address;
-    seed.cpu = 0;
+    seed.origin = champsim::origin{0, 0};
 
     auto seed_result = mock_ul.issue(seed);
     REQUIRE(seed_result);

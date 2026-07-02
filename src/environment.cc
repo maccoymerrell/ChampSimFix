@@ -196,9 +196,11 @@ champsim::environment::environment(ModuleBuilder builder)
   auto& children = config["children"];
 
   // Pre-construction: count workload_source children so we can publish
-  // num_sources to the globals before any module is constructed. Modules
-  // that need the source count (e.g. ship/drrip for per-source tables)
-  // read it via builder.get_parameter fall-through.
+  // num_consumers to the globals before any module is constructed. Modules
+  // that need the consumer count (e.g. ship/drrip for per-consumer tables)
+  // read it via builder.get_parameter fall-through. The textual source count
+  // is a safe stand-in (>= the consumer count when consumers hold multiple
+  // sources); configs may override with a root-level "num_consumers" key.
   std::function<std::size_t(const json&)> count_workload_sources = [&](const json& node) -> std::size_t {
     std::size_t n = 0;
     if (node.contains("children")) {
@@ -209,11 +211,12 @@ champsim::environment::environment(ModuleBuilder builder)
     }
     return n;
   };
-  std::size_t num_sources = 0;
+  std::size_t num_consumers = 0;
   for (const auto& child : children) {
-    if (child.value("module", "") == "workload_source") ++num_sources;
-    num_sources += count_workload_sources(child);
+    if (child.value("module", "") == "workload_source") ++num_consumers;
+    num_consumers += count_workload_sources(child);
   }
+  num_consumers = config.value("num_consumers", num_consumers);
 
   // Publish system-wide params to the globals before module construction.
   {
@@ -222,7 +225,7 @@ champsim::environment::environment(ModuleBuilder builder)
     g.add_parameter("page_size",       page_size_);
     g.add_parameter("log2_block_size", static_cast<unsigned>(champsim::lg2(block_size_)));
     g.add_parameter("log2_page_size",  static_cast<unsigned>(champsim::lg2(page_size_)));
-    g.add_parameter("num_sources",     num_sources);
+    g.add_parameter("num_consumers",   num_consumers);
   }
   // Sync the cached address extents (page_number, block_offset, etc.) with
   // the freshly-published globals so the hot path doesn't pay a lookup per
@@ -242,6 +245,11 @@ champsim::environment::environment(ModuleBuilder builder)
     auto mod_builder = ModuleBuilder{name, model};
 
     populate_builder(child, mod_builder, modules_by_name_, module_interfaces_, cli_args);
+
+    // Submodule builders self-enroll their instances (enroll_nested_instance)
+    // so nested modules join the views; the top-level module itself is
+    // registered below, preserving declaration order.
+    mod_builder.set_owner_of_submodules(this);
 
     // Create the module via the interface registry
     std::any typed_ptr = interface_registry::create(iface, mod_builder, static_cast<environment_module*>(this));
@@ -276,43 +284,65 @@ champsim::environment::environment(ModuleBuilder builder)
       deadlock_cycles_ = static_cast<int>(std::max((sum_ps / min_ps)*3, ps_rep{500}));
   }
 
-  // Post-construction: publish num_cpus as a deprecated alias for the actual
-  // count of source_consumers in the constructed system. New code should read
-  // num_sources instead.
-  ModuleBuilder::globals().add_parameter("num_cpus", view("source_consumer").size());
+}
+
+// ====== Nested-instance enrollment ======
+
+void champsim::environment::enroll_nested_instance(const std::string& interface_name, const std::string& name, std::any instance)
+{
+  if (interface_name.empty()) {
+    return; // interface was never registered by name; nothing to file it under
+  }
+  if (modules_by_name_.count(name) != 0U) {
+    fmt::print("[ENVIRONMENT] ERROR: duplicate module name '{}' (nested instance collides with an existing module)\n", name);
+    std::exit(-1);
+  }
+  modules_by_name_[name] = instance;
+  module_interfaces_[name] = interface_name;
+  nested_by_type_[interface_name].push_back(instance);
+  nested_order_.emplace_back(name, interface_name);
 }
 
 // ====== Generic view function ======
 
 auto champsim::environment::view(const std::string& interface_type) const -> std::vector<std::any>
 {
-  if (interface_type == "operable") {
-    // Aggregate all operable modules in declaration order
+  // Collect matches for an aggregate view: converter-filtered walk of the
+  // top-level modules (declaration order) followed by nested instances
+  // (creation order), so pre-existing top-level ordering is preserved.
+  auto collect_aggregate = [this](auto&& get_converter) {
     std::vector<std::any> result;
-    for (auto& [name, iface] : module_order_) {
-      auto to_op = interface_registry::get_to_operable(iface);
-      if (to_op) {
-        auto& typed_ptr = modules_by_name_.at(name);
-        result.push_back(static_cast<champsim::operable*>(to_op(typed_ptr)));
+    for (const auto* order : {&module_order_, &nested_order_}) {
+      for (auto& [name, iface] : *order) {
+        auto converter = get_converter(iface);
+        if (converter) {
+          auto& typed_ptr = modules_by_name_.at(name);
+          // Converters are per-instance dynamic_casts: they return nullptr
+          // for models that do not actually inherit the aggregate mixin
+          // (e.g. the default channel), so only genuine matches enroll.
+          if (auto* match = converter(typed_ptr)) {
+            result.push_back(match);
+          }
+        }
       }
     }
     return result;
+  };
+
+  if (interface_type == "operable") {
+    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_operable(iface); });
   }
 
   if (interface_type == "source_consumer") {
-    // Aggregate all source_consumer modules in declaration order
-    std::vector<std::any> result;
-    for (auto& [name, iface] : module_order_) {
-      auto to_sc = interface_registry::get_to_source_consumer(iface);
-      if (to_sc) {
-        auto& typed_ptr = modules_by_name_.at(name);
-        result.push_back(static_cast<source_consumer*>(to_sc(typed_ptr)));
-      }
-    }
-    return result;
+    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_source_consumer(iface); });
   }
 
-  auto it = modules_by_type_.find(interface_type);
-  if (it == modules_by_type_.end()) return {};
-  return it->second;
+  std::vector<std::any> result;
+  if (auto it = modules_by_type_.find(interface_type); it != modules_by_type_.end()) {
+    result = it->second;
+  }
+  if (auto it = nested_by_type_.find(interface_type); it != nested_by_type_.end()) {
+    result.insert(result.end(), it->second.begin(), it->second.end());
+  }
+  return result;
 }

@@ -216,7 +216,6 @@
       "clock_period": {
         "time": "250p"
       },
-      "cpu": 0,
       "mshr_size": 5,
       "latency": 0,
       "max_tag_check": {
@@ -251,7 +250,8 @@
           4,
           8
         ]
-      ]
+      ],
+      "asid": 0
     },
     {
       "name": "LLC",
@@ -615,7 +615,6 @@
       "clock_period": {
         "time": "250p"
       },
-      "cpu": 0,
       "dib_set": 32,
       "dib_way": 8,
       "dib_window": 16,
@@ -685,9 +684,10 @@
           "module": "workload_source",
           "model": "TRACE_WORKLOAD_SOURCE",
           "trace_file": "$trace0",
-          "cpu": 0
+          "stream_id": 0
         }
-      ]
+      ],
+      "consumer_id": 0
     }
   ]
 }

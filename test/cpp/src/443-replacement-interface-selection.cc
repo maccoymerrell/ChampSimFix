@@ -20,18 +20,18 @@ struct dual_interface : champsim::modules::replacement {
     dual_interface(CACHE* c) {(void)c;}
 
     void initialize_replacement() override {}
-    long find_victim(uint32_t, uint64_t, long, const CACHE::BLOCK*, champsim::address, champsim::address, access_type) override
+    long find_victim(champsim::origin, uint64_t, long, const CACHE::BLOCK*, champsim::address, champsim::address, access_type) override
     {
       ::victim_interface_discerner[parent_] = 1;
       return 0;
     }
 
-    void update_replacement_state(uint32_t, long, long, champsim::address, champsim::address, champsim::address, access_type, bool) override
+    void update_replacement_state(champsim::origin, long, long, champsim::address, champsim::address, champsim::address, access_type, bool) override
     {
       ::update_interface_discerner[parent_] = 1;
     }
 
-    void replacement_cache_fill(uint32_t, long, long, champsim::address, champsim::address, champsim::address, access_type) override {}
+    void replacement_cache_fill(champsim::origin, long, long, champsim::address, champsim::address, champsim::address, access_type) override {}
     void replacement_final_stats() override {}
 
     dual_interface(champsim::modules::ModuleBuilder builder)
@@ -47,17 +47,17 @@ struct dual_interface : champsim::modules::replacement {
     fill_selection(CACHE* c) {(void)c;}
 
     void initialize_replacement() override {}
-    long find_victim(uint32_t, uint64_t, long, const CACHE::BLOCK*, champsim::address, champsim::address, access_type) override
+    long find_victim(champsim::origin, uint64_t, long, const CACHE::BLOCK*, champsim::address, champsim::address, access_type) override
     {
       return 0;
     }
 
-    void update_replacement_state(uint32_t, long, long, champsim::address, champsim::address, champsim::address, access_type, bool) override
+    void update_replacement_state(champsim::origin, long, long, champsim::address, champsim::address, champsim::address, access_type, bool) override
     {
       ::update_interface_discerner[parent_] = 1;
     }
 
-    void replacement_cache_fill(uint32_t, long, long, champsim::address, champsim::address, champsim::address, access_type) override
+    void replacement_cache_fill(champsim::origin, long, long, champsim::address, champsim::address, champsim::address, access_type) override
     {
       ::fill_override_interface_discerner[parent_] = 1;
     }
@@ -104,7 +104,7 @@ SCENARIO("The simulator selects the address-based victim finder in replacement p
       decltype(mock_ul)::request_type seed;
       seed.address = champsim::address{0xdeadbeef};
       seed.is_translated = true;
-      seed.cpu = 0;
+      seed.origin = champsim::origin{0, 0};
       auto seed_result = mock_ul.issue(seed);
 
       THEN("The issue is received") { REQUIRE(seed_result); }
@@ -126,7 +126,7 @@ SCENARIO("The simulator selects the address-based victim finder in replacement p
           decltype(mock_ul)::request_type test;
           test.address = champsim::address{0xcafebabe};
           test.is_translated = true;
-          test.cpu = 0;
+          test.origin = champsim::origin{0, 0};
           auto test_result = mock_ul.issue(test);
 
           THEN("The issue is received") { REQUIRE(test_result); }
@@ -179,7 +179,7 @@ SCENARIO("The simulator selects the address-based update function in replacement
     decltype(mock_ul)::request_type test;
     test.address = champsim::address{0xdeadbeef};
     test.address = champsim::address{0xdeadbeef};
-    test.cpu = 0;
+    test.origin = champsim::origin{0, 0};
     test.type = type;
     auto test_result = mock_ul.issue(test);
 
@@ -247,7 +247,7 @@ SCENARIO("The simulator selects the cache fill function if it is available")
       decltype(mock_ul)::request_type test;
       test.address = champsim::address{0xdeadbeef};
       test.address = champsim::address{0xdeadbeef};
-      test.cpu = 0;
+      test.origin = champsim::origin{0, 0};
       test.type = type;
       auto test_result = mock_ul.issue(test);
 

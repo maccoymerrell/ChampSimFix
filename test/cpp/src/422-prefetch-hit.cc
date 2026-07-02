@@ -29,7 +29,7 @@ SCENARIO("A prefetch can hit the cache")
     decltype(mock_ul)::request_type seed;
     seed.address = champsim::address{0xdeadbeef};
     seed.instr_id = 1;
-    seed.cpu = 0;
+    seed.origin = champsim::origin{0, 0};
 
     auto seed_result = mock_ul.issue(seed);
     REQUIRE(seed_result);
@@ -77,7 +77,7 @@ SCENARIO("A prefetch not intended to fill this level that would hit the cache is
     decltype(mock_ul)::request_type seed;
     seed.address = champsim::address{0xdeadbeef};
     seed.instr_id = 1;
-    seed.cpu = 0;
+    seed.origin = champsim::origin{0, 0};
 
     auto seed_result = mock_ul.issue(seed);
     REQUIRE(seed_result);

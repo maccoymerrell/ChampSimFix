@@ -31,7 +31,6 @@
 #include "defaults.hpp"
 #include "environment.h"
 #include "legacy_environment.h"
-#include "event_listeners.h"
 #include "modules.h"
 #include "ooo_cpu.h" // for O3_CPU
 #include "phase_info.h"
@@ -133,12 +132,10 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   // ModuleBuilder::globals() during its construction.
   std::size_t num_cpus = config_json.value("num_cores", 1u);
 
-  // Apply heartbeat printout frequency from the config (root-level
-  // ``heartbeat_frequency``).  Environment-agnostic: both the explicit and
-  // legacy environments share the global Heartbeat listener.
-  if (config_json.contains("heartbeat_frequency")) {
-    std::get<Heartbeat>(listeners).cycles_between_printouts = config_json.value("heartbeat_frequency", uint64_t{10000000});
-  }
+  // Root-level "cycle_skip" (default true) lets idle operables skip cycles
+  // via operable::poll_cycle(). Set false to force every operable to run
+  // operate() each cycle — the A/B switch for behavior verification.
+  champsim::operable::set_skip_enabled(config_json.value("cycle_skip", true));
 
   // Scan config for $varname references not covered by explicit CLI options.
   // Each unique varname becomes a --varname option in the second pass and is
@@ -188,8 +185,6 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 
   CLI11_PARSE(app2, argc, argv);
 
-  init_event_listeners(requested_listeners);
-
   const bool warmup_given = (warmup_instr_option->count() > 0) || (deprec_warmup_instr_option->count() > 0);
   const bool simulation_given = (sim_instr_option->count() > 0) || (deprec_sim_instr_option->count() > 0);
 
@@ -234,36 +229,55 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 
   if (knob_dump) fmt::print("=== End Module Builder Dump ===\n");
 
-  if (hide_heartbeat) {
-    for (champsim::modules::core_module& cpu : gen_environment->typed_view<champsim::modules::core_module>("core")) {
-      cpu.quiet(true);
-    }
+  // Assemble the active listener set: listener modules declared in the
+  // config, plus any models requested via --listeners. When the config
+  // declares none, a default HEARTBEAT listener is created (interval from
+  // the root "heartbeat_frequency" key) unless --hide-heartbeat suppresses it.
+  std::vector<champsim::modules::listener*> active_listeners;
+  for (champsim::modules::listener& l : gen_environment->typed_view<champsim::modules::listener>("listener")) {
+    active_listeners.push_back(&l);
   }
+  const bool config_declared_listeners = !active_listeners.empty();
+  for (const auto& model_name : requested_listeners) {
+    if (!champsim::modules::listener::has_model(model_name)) {
+      fmt::print("WARNING: Listener \"{}\" not found\n", model_name);
+      continue;
+    }
+    auto listener_builder = champsim::modules::ModuleBuilder(model_name, model_name);
+    active_listeners.push_back(champsim::modules::listener::create_instance(listener_builder, gen_environment));
+  }
+  if (!config_declared_listeners && !hide_heartbeat) {
+    auto heartbeat_builder = champsim::modules::ModuleBuilder("heartbeat", "HEARTBEAT")
+      .add_parameter("interval", config_json.value("heartbeat_frequency", uint64_t{10000000}));
+    active_listeners.push_back(champsim::modules::listener::create_instance(heartbeat_builder, gen_environment));
+  }
+  champsim::modules::set_active_listeners(std::move(active_listeners));
 
-  // Try to get the phase list from the phase controller in the environment.
-  // If the controller defines phases (explicit config), use those.
+  // Try to get the phase list from the phase controllers in the environment.
+  // The first controller that defines a non-empty phase list owns the run
+  // structure; a second non-empty list that disagrees is a config error.
   // Otherwise fall back to the classic two-phase structure driven by -w/-i.
   std::vector<champsim::phase_info> phases;
-  auto pc_view = gen_environment->typed_view<champsim::modules::phase_controller>("phase_controller");
-  if (!pc_view.empty()) {
-    phases = pc_view.front().get().get_phases();
+  for (champsim::modules::phase_controller& pc : gen_environment->typed_view<champsim::modules::phase_controller>("phase_controller")) {
+    auto controller_phases = pc.get_phases();
+    if (controller_phases.empty()) continue;
+    if (phases.empty()) {
+      phases = std::move(controller_phases);
+    } else if (controller_phases.size() != phases.size()
+               || !std::equal(phases.begin(), phases.end(), controller_phases.begin(), [](const auto& a, const auto& b) {
+                    return a.name == b.name && a.is_warmup == b.is_warmup && a.length == b.length;
+                  })) {
+      fmt::print("ERROR: multiple phase controllers declare conflicting phase lists\n");
+      return 1;
+    }
   }
 
   if (phases.empty()) {
     // Classic fallback: Warmup + Simulation driven by CLI -w/-i
     phases = {
-      champsim::phase_info{"Warmup",     true,  static_cast<uint64_t>(warmup_instructions),    {}, {}},
-      champsim::phase_info{"Simulation", false, static_cast<uint64_t>(simulation_instructions), {}, {}},
+      champsim::phase_info{"Warmup",     true,  false, static_cast<uint64_t>(warmup_instructions)},
+      champsim::phase_info{"Simulation", false, true,  static_cast<uint64_t>(simulation_instructions)},
     };
-  }
-
-  // Attach the CLI trace list to every phase so collect_phase_stats can
-  // surface the trace names in the JSON output regardless of who built the
-  // phase list (CLI fallback or phase_controller).
-  for (auto& p : phases) {
-    p.trace_names = trace_names;
-    p.trace_index.resize(trace_names.size());
-    std::iota(std::begin(p.trace_index), std::end(p.trace_index), 0);
   }
 
   // Print header: find warmup/sim lengths by is_warmup flag
@@ -274,7 +288,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   }
   fmt::print("\n*** ChampSim Multicore Out-of-Order Simulator ***\nWarmup Instructions: {}\nSimulation Instructions: {}\nNumber of CPUs: {}\nTrace sources: {}\nPage size: {}\n\n",
              printed_warmup, printed_sim, gen_environment->get_num("core"),
-             gen_environment->get_num("source_consumer"), gen_environment->get_page_size());
+             gen_environment->get_num("workload_source"), gen_environment->get_page_size());
 
   auto phase_stats = champsim::main(*gen_environment, phases);
 

@@ -57,8 +57,7 @@ class PageTableWalker : public champsim::modules::page_table_walker_module, publ
     std::vector<std::deque<response_type>*> to_return{};
 
     uint32_t pf_metadata = 0;
-    uint32_t cpu = std::numeric_limits<uint32_t>::max();
-    uint8_t asid[2] = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
+    champsim::origin origin{};
 
     std::size_t translation_level = 0;
 
@@ -92,6 +91,7 @@ public:
   explicit PageTableWalker(champsim::modules::ModuleBuilder builder);
 
   long operate() final;
+  long poll_cycle() final;
 
   void begin_phase(bool warmup, bool roi) override;
   void end_phase() override {}

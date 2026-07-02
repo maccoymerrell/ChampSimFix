@@ -39,7 +39,7 @@ SCENARIO("The va_ampm_lite prefetcher issues prefetches when addresses stride in
     seed.v_address = seed.address;
     seed.ip = champsim::address{0xcafecafe};
     seed.instr_id = id++;
-    seed.cpu = 0;
+    seed.origin = champsim::origin{0, 0};
     seed.is_translated = false;
 
     // Issue it to the uut

@@ -108,6 +108,77 @@ long MEMORY_CONTROLLER::operate()
   return progress;
 }
 
+long MEMORY_CONTROLLER::poll_cycle()
+{
+  // Skippable only when no request is waiting on any upper channel and no
+  // DRAM channel has pending or timer-due work this cycle (bank activity,
+  // dbus activity, a due refresh, or an unsettled write mode). Skip at most
+  // 1 cycle: new work can arrive on the upper channels at any cycle.
+  const bool uppers_idle = std::all_of(std::cbegin(queues), std::cend(queues), [](auto* ul) {
+    return std::empty(ul->get_rq()) && std::empty(ul->get_wq()) && std::empty(ul->get_pq());
+  });
+  if (!uppers_idle) {
+    return 0;
+  }
+  // Channels are parent-ticked and lag one period behind this controller's
+  // (already-advanced) current_time; probe them at the time they would reach.
+  const bool channels_idle = std::all_of(std::cbegin(channels), std::cend(channels),
+                                         [](const auto& chan) { return !chan.would_do_work_at(chan.current_time + chan.clock_period); });
+  if (!channels_idle) {
+    return 0;
+  }
+
+  // Parent-ticked nested operables: keep the channels' clocks in lockstep
+  // across the skipped cycle, or their refresh timers and timestamps would
+  // fall permanently behind.
+  for (auto& channel : channels) {
+    channel.current_time += channel.clock_period;
+  }
+  return 1;
+}
+
+bool DRAM_CHANNEL::has_pending_work() const
+{
+  // Timer-scheduled work only: refreshes in flight (or queued behind a busy
+  // bank), banks occupied until a known ready_time, or an active data-bus
+  // transfer. Queued-but-unscheduled packets are excluded — with free banks
+  // they schedule (and count progress) on the very next operated cycle.
+  return active_request != std::cend(bank_request)
+         || std::any_of(std::cbegin(bank_request), std::cend(bank_request),
+                        [](const auto& b_req) { return b_req.valid || b_req.need_refresh || b_req.under_refresh; });
+}
+
+bool MEMORY_CONTROLLER::has_pending_work() const
+{
+  return std::any_of(std::cbegin(channels), std::cend(channels), [](const auto& chan) { return chan.has_pending_work(); });
+}
+
+bool DRAM_CHANNEL::would_do_work_at(champsim::chrono::clock::time_point t) const
+{
+  // A due refresh mutates bank state and counts progress.
+  if (t >= last_refresh + tREF) {
+    return true;
+  }
+  // An unsettled write burst: swap_write_mode() switches to read mode on the
+  // next operated cycle even with empty queues, stamping dbus_cycle_available.
+  // Run that cycle for real so the turn-around penalty lands at the same time
+  // it would without skipping.
+  if (write_mode) {
+    return true;
+  }
+  // Any bank or data-bus activity in flight.
+  if (active_request != std::cend(bank_request)) {
+    return true;
+  }
+  if (std::any_of(std::cbegin(bank_request), std::cend(bank_request),
+                  [](const auto& b_req) { return b_req.valid || b_req.need_refresh || b_req.under_refresh; })) {
+    return true;
+  }
+  // Any queued request.
+  return std::any_of(std::cbegin(RQ), std::cend(RQ), [](const auto& entry) { return entry.has_value(); })
+         || std::any_of(std::cbegin(WQ), std::cend(WQ), [](const auto& entry) { return entry.has_value(); });
+}
+
 long DRAM_CHANNEL::operate()
 {
   long progress{0};
@@ -137,7 +208,7 @@ long DRAM_CHANNEL::operate()
   check_read_collision();
   progress += finish_dbus_request();
   swap_write_mode();
-  progress += schedule_refresh();
+  schedule_refresh();
   progress += populate_dbus();
   progress += service_packet(schedule_packet());
 
@@ -165,11 +236,9 @@ long DRAM_CHANNEL::finish_dbus_request()
   return progress;
 }
 
-long DRAM_CHANNEL::schedule_refresh()
+void DRAM_CHANNEL::schedule_refresh()
 {
-  long progress = {0};
   // check if we reached refresh cycle
-
   bool schedule_refresh = current_time >= last_refresh + tREF;
   // if so, record stats
   if (schedule_refresh) {
@@ -180,7 +249,11 @@ long DRAM_CHANNEL::schedule_refresh()
       refresh_row -= address_mapping.rows();
   }
 
-  // go through each bank, and handle refreshes
+  // Go through each bank, and handle refreshes. Refresh is housekeeping, not
+  // workload progress: it contributes nothing to the liveness signal the
+  // deadlock detector consumes. Requests stalled behind an in-flight refresh
+  // are protected instead by has_pending_work() — the refresh completes at a
+  // known future time without external input.
   for (auto& b_req : bank_request) {
     // refresh is now needed for this bank
     if (schedule_refresh) {
@@ -196,13 +269,8 @@ long DRAM_CHANNEL::schedule_refresh()
     else if (b_req.under_refresh && b_req.ready_time <= current_time) {
       b_req.under_refresh = false;
       b_req.open_row.reset();
-      progress++;
     }
-
-    if (b_req.under_refresh)
-      progress++;
   }
-  return (progress);
 }
 
 void DRAM_CHANNEL::swap_write_mode()
@@ -511,8 +579,7 @@ void MEMORY_CONTROLLER::initiate_requests()
 DRAM_CHANNEL::request_type::request_type(const champsim::request& req)
     : pf_metadata(req.pf_metadata), address(req.address), v_address(req.address), data(req.data), instr_depend_on_me(req.instr_depend_on_me)
 {
-  asid[0] = req.asid[0];
-  asid[1] = req.asid[1];
+  origin = req.origin;
 }
 
 bool MEMORY_CONTROLLER::add_rq(const request_type& packet, champsim::modules::channel_module* ul)

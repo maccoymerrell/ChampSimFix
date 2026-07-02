@@ -45,6 +45,12 @@ class environment final : public champsim::modules::environment_module {
   std::map<std::string, std::any> modules_by_name_;
   std::map<std::string, std::string> module_interfaces_;
 
+  // Nested instances (created inside parent modules and announced via
+  // enroll_nested_instance), appended after top-level modules in views so
+  // top-level ordering is preserved.
+  std::vector<std::pair<std::string, std::string>> nested_order_; // (name, iface)
+  std::map<std::string, std::vector<std::any>> nested_by_type_;
+
   // Builder params for test snooping
   std::map<std::string, champsim::modules::ModuleBuilder> builder_params_;
 
@@ -52,12 +58,11 @@ public:
   explicit environment(champsim::modules::ModuleBuilder builder);
 
   std::vector<std::any> view(const std::string& interface_type) const override;
+  void enroll_nested_instance(const std::string& interface_name, const std::string& name, std::any instance) override;
 
-  size_t get_num(const std::string& interface_name) const override {
-    auto it = modules_by_type_.find(interface_name);
-    if (it != modules_by_type_.end()) return it->second.size();
-    return 0;
-  }
+  // Aggregate keys ("operable", "source_consumer") exist only in view();
+  // delegate so counts and views always agree.
+  size_t get_num(const std::string& interface_name) const override { return view(interface_name).size(); }
   unsigned get_block_size() const override { return block_size_; }
   unsigned get_page_size() const override { return page_size_; }
   unsigned get_log2_block_size() const override { return champsim::lg2(block_size_); }

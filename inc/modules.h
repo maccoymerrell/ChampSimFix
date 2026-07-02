@@ -79,6 +79,10 @@ struct ModuleBuilder {
   std::string module_name = "";
   std::string model = "";
   std::any parent = nullptr;
+  // The environment that should be told about this instance when it is
+  // created (nested-instance enrollment). Set only on submodule builders —
+  // top-level children are registered by the environment itself.
+  environment_module* owner_ = nullptr;
 
   template<typename T>
   void set_parent(T* new_parent) { parent = new_parent; }
@@ -134,8 +138,8 @@ struct ModuleBuilder {
     if constexpr (fmt::is_formattable<T>::value) {
       try { return fmt::format("  [{}] {} = {} ({})\n", mod, name, val, tag); }
       catch (...) {}
-    } else if constexpr (std::is_pointer_v<T>) {
-      try { return fmt::format("  [{}] {} = {} ({})\n", mod, name, std::vector<T>{val}, tag); }
+    } else if constexpr (std::is_pointer_v<T> && fmt::is_formattable<std::vector<value_type>>::value) {
+      try { return fmt::format("  [{}] {} = {} ({})\n", mod, name, std::vector<value_type>{val}, tag); }
       catch (...) {}
     }
     return fmt::format("  [{}] {} = <unprintable> ({})\n", mod, name, tag);
@@ -159,7 +163,7 @@ struct ModuleBuilder {
    * Process-wide fall-through builder. Any ``get_parameter`` call that
    * misses the local builder consults this one before failing/returning
    * the default. Use it for system-wide settings (block_size, page_size,
-   * num_cpus, etc.) that every module should be able to read without
+   * num_consumers, etc.) that every module should be able to read without
    * requiring the environment to inject them everywhere.
    */
   static ModuleBuilder& globals() {
@@ -299,6 +303,26 @@ public:
     return it != submodules_.end() && !it->second.empty();
   }
 
+  // ---- Nested-instance enrollment ----
+
+  // Recursively mark every submodule builder (but not this builder) as owned
+  // by the given environment. Instances created from owned builders announce
+  // themselves via environment_module::enroll_nested_instance, which is how
+  // submodule-created modules (workload sources, prefetchers, ...) become
+  // visible to the environment's views — and, when operable, get ticked
+  // automatically by the orchestrator.
+  ModuleBuilder& set_owner_of_submodules(environment_module* env) {
+    for (auto& [iface, subs] : submodules_) {
+      for (auto& sub : subs) {
+        sub.owner_ = env;
+        sub.set_owner_of_submodules(env);
+      }
+    }
+    return *this;
+  }
+
+  environment_module* get_owner() const { return owner_; }
+
   // Get the full submodule map (read-only).
   const std::map<std::string, std::vector<ModuleBuilder>>& get_all_submodules() const {
     return submodules_;
@@ -332,7 +356,8 @@ public:
   struct interface_info {
     std::function<std::any(ModuleBuilder, std::any)> create;
     std::function<std::any(const std::vector<std::any>&)> make_vector;
-    // Returns operable* from a typed any, or nullptr if the interface is not operable
+    // Returns operable* from a typed any via a per-instance dynamic_cast, or
+    // nullptr if that specific instance does not inherit operable.
     std::function<champsim::operable*(const std::any&)> to_operable;
     // Returns source_consumer* from a typed any, or nullptr if the interface doesn't inherit source_consumer
     std::function<source_consumer*(const std::any&)> to_source_consumer;
@@ -461,6 +486,12 @@ struct module_base {
         static std::map<std::string,std::vector<std::unique_ptr<B>>> map;
         return map;
     }
+    // The interface name this specialization was registered under (set by
+    // register_interface); used to label nested-instance enrollments.
+    static std::string& registered_interface_name() {
+        static std::string name;
+        return name;
+    }
 
     static void add_module(std::string name, std::function<std::unique_ptr<B>(ModuleBuilder builder)> module_constructor) {
         if(module_map().find(name) != module_map().end()) {
@@ -492,6 +523,12 @@ struct module_base {
           instance_ptr->NAME =  builder.get_name();
           instance_ptr->MODEL = builder.get_model();
           instance_ptr->bind(builder.get_parent<C>());
+          // Nested-instance enrollment: submodule builders carry the owning
+          // environment; announce the new instance so environment views (and
+          // operable auto-discovery) cover modules created inside parents.
+          if (auto* owner = builder.get_owner(); owner != nullptr) {
+            owner->enroll_nested_instance(registered_interface_name(), builder.get_name(), std::any{instance_ptr});
+          }
           if (ModuleBuilder::is_dump_enabled()) {
             auto line = fmt::format("  [{}] created_module = {} (set)\n", builder.get_name(), builder.get_model());
             ModuleBuilder::append_dump_log(line);
@@ -517,6 +554,9 @@ struct module_base {
           exit(-1);
         }
     }
+
+    // True if a model with this name has been registered for this interface.
+    static bool has_model(const std::string& model_name) { return module_map().count(model_name) > 0; }
 
     template<typename T>
     static T* get_instance(std::string name) {
@@ -563,9 +603,18 @@ struct module_base {
     // This allows the explicit environment to create modules by interface name string.
     struct register_interface {
       register_interface(std::string interface_name) {
+        registered_interface_name() = interface_name;
         interface_registry::interface_info info;
-        info.create = [](ModuleBuilder builder, std::any parent) -> std::any {
-          return create_instance(std::move(builder), std::any_cast<C*>(parent));
+        info.create = [interface_name](ModuleBuilder builder, std::any parent) -> std::any {
+          auto module_name = builder.get_name();
+          try {
+            return create_instance(std::move(builder), std::any_cast<C*>(parent));
+          } catch (const std::bad_any_cast&) {
+            fmt::print("[MODULE] [{}] ERROR: interface {} cannot be created here: its parent type does not match "
+                       "(submodule interfaces must be declared as children of their parent module)\n",
+                       module_name, interface_name);
+            exit(-1);
+          }
         };
         info.make_vector = [](const std::vector<std::any>& elements) -> std::any {
           std::vector<B*> vec;
@@ -574,16 +623,19 @@ struct module_base {
           }
           return vec;
         };
-        if constexpr (std::is_base_of_v<champsim::operable, B>) {
-          info.to_operable = [](const std::any& a) -> champsim::operable* {
-            return static_cast<champsim::operable*>(std::any_cast<B*>(a));
-          };
-        }
-        if constexpr (std::is_base_of_v<source_consumer, B>) {
-          info.to_source_consumer = [](const std::any& a) -> source_consumer* {
-            return static_cast<source_consumer*>(std::any_cast<B*>(a));
-          };
-        }
+        // Per-instance dynamic_cast: works even when only the implementation
+        // (not the interface) inherits operable. This lets a specific model
+        // be operable while other models of the same interface (e.g. the
+        // default channel) are not.
+        info.to_operable = [](const std::any& a) -> champsim::operable* {
+          return dynamic_cast<champsim::operable*>(std::any_cast<B*>(a));
+        };
+        // Per-instance dynamic_cast (matching to_operable / to_module_phase): a
+        // specific model can be a source_consumer even when the interface is not
+        // (e.g. a channel model that drives phase completion).
+        info.to_source_consumer = [](const std::any& a) -> source_consumer* {
+          return dynamic_cast<source_consumer*>(std::any_cast<B*>(a));
+        };
         // Per-instance dynamic_cast: works even when only the implementation
         // (not the interface) inherits module_phase / module_stat.
         info.to_module_phase = [](const std::any& a) -> champsim::module_phase* {
@@ -611,21 +663,54 @@ struct module_base {
   struct source_consumer {
     virtual ~source_consumer() = default;
 
+    // Health as judged by the consumer itself. The consumer knows its own
+    // expected progress rate (instructions retired for a core, packets
+    // delivered for a network consumer, ...), so livelock policy lives here —
+    // not in the phase controller, which only aggregates.
+    enum class source_health { healthy, warning, critical, stalled };
+
     // True when all attached workload sources are exhausted.
     virtual bool source_eof() const { return true; }
 
-    // Entity index for phase tracking (-1 = not tracked as a phase entity).
-    virtual int entity_index() const { return -1; }
+    // Consumer id: this consumer's hardware-context identity (-1 = not
+    // tracked as a phase source). Ids must be unique and dense in
+    // [0, num_consumers) across the consumers of a simulation; they key
+    // per-consumer resources (replacement tables, stats, phase tracking)
+    // and default the stream id of attached sources. See origin.h.
+    virtual int consumer_id() const { return -1; }
 
-    // Progress metric for phase completion (e.g. instructions retired).
-    // Return 0 to indicate no progress tracking (complete only on EOF).
+    // Progress metric for phase completion, in tokens (e.g. instructions
+    // retired). Return 0 to indicate no progress tracking (complete only on EOF).
     virtual uint64_t sim_progress() const { return 0; }
 
-    // Called when this consumer's entity finishes a phase. Return empty to suppress.
+    // Periodic self-check, driven by the phase controller every health
+    // period. elapsed is the number of controller cycles since the last
+    // check (or reset_health). Return stalled to abort the simulation.
+    virtual source_health check_health(uint64_t /*elapsed*/) { return source_health::healthy; }
+
+    // Re-baseline health tracking; called by the controller at phase start.
+    virtual void reset_health() {}
+
+    // True when this consumer knows more work is scheduled to arrive later
+    // (e.g. a paced source waiting out a scheduled gap). While any consumer
+    // reports pending work, zero global progress is not a deadlock.
+    virtual bool has_pending_work() const { return false; }
+
+    // Called when this consumer's source finishes a phase. Return empty to suppress.
     virtual std::string source_finish_message(const std::string& /*phase_name*/) const { return {}; }
 
     // Called at the end of a phase for summary output. Return empty to suppress.
     virtual std::string phase_complete_message(const std::string& /*phase_name*/) const { return {}; }
+
+    // Format a periodic progress report (driven by a heartbeat-style
+    // listener, which owns the interval bookkeeping and supplies the
+    // numbers). The consumer owns the wording because it knows its own
+    // token unit. Return empty to suppress.
+    virtual std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const
+    {
+      return fmt::format("Heartbeat source {} tokens: {} cycles: {} rate: {:.4} cumulative rate: {:.4}", consumer_id(), total_progress, total_cycles,
+                         interval_rate, cumulative_rate);
+    }
   };
 
   /**
@@ -640,13 +725,10 @@ struct module_base {
     virtual std::size_t instructions_requested() = 0;
     core_module(champsim::chrono::picoseconds clock_period_) : operable(clock_period_) {}
     virtual ~core_module() = default;
-    virtual void quiet(bool enable) = 0;
     /** \endcond */
 
     /** Return the number of instructions simulated so far. */
     virtual uint64_t sim_instr() const = 0;
-    /** Return this core's CPU index. */
-    virtual uint8_t get_cpu_num() const = 0;
     /** Return the number of cycles simulated so far. */
     virtual uint64_t sim_cycle() const = 0;
 
@@ -660,11 +742,23 @@ struct module_base {
     static std::vector<std::string> format_plaintext(const stats_type& stats);
     static void format_json(const stats_type& stats, champsim::json_stat_builder& b);
 
-    // source_consumer hooks: core_module provides CPU-specific messages
-    int entity_index() const override;
+    // source_consumer hooks: core_module provides CPU-specific messages.
+    // Every core model must provide its consumer id (its "CPU number").
+    int consumer_id() const override = 0;
     uint64_t sim_progress() const override;
     std::string source_finish_message(const std::string& phase_name) const override;
     std::string phase_complete_message(const std::string& phase_name) const override;
+    std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const override;
+
+    // Health policy for instruction consumers: progress rate (instructions
+    // per cycle) over the check window against retirement-rate floors.
+    // These are the former phase-controller livelock thresholds, now owned
+    // by the consumer that knows its own progress unit.
+    source_health check_health(uint64_t elapsed) override;
+    void reset_health() override;
+
+  private:
+    uint64_t health_last_progress_ = 0;
   };
 
   /**
@@ -679,7 +773,7 @@ struct module_base {
     cache_module(champsim::chrono::picoseconds clock_period_) : operable(clock_period_) {}
     virtual ~cache_module() = default;
     virtual champsim::bandwidth::maximum_type get_max_tag_bandwidth() const = 0;
-    virtual void impl_update_replacement_state(uint32_t triggering_cpu, long set, long way, champsim::address full_addr, champsim::address ip,
+    virtual void impl_update_replacement_state(champsim::origin origin, long set, long way, champsim::address full_addr, champsim::address ip,
                                        champsim::address victim_addr, access_type type, bool hit) const = 0;
     virtual void impl_prefetcher_branch_operate(champsim::address ip, uint8_t branch_type, champsim::address target) const = 0;
     /** \endcond */
@@ -827,8 +921,10 @@ struct module_base {
   struct vmem_module: public module_base<vmem_module,environment_module> {
     virtual ~vmem_module() = default;
     virtual std::size_t available_ppages() const = 0;
-    virtual std::pair<champsim::page_number, champsim::chrono::clock::duration> va_to_pa(uint32_t cpu_num, champsim::page_number vaddr) = 0;
-    virtual std::pair<champsim::address, champsim::chrono::clock::duration> get_pte_pa(uint32_t cpu_num, champsim::page_number vaddr, std::size_t level) = 0;
+    // Address spaces are keyed by the origin's stream (origin.asid()): one
+    // physical address space, many streams.
+    virtual std::pair<champsim::page_number, champsim::chrono::clock::duration> va_to_pa(champsim::origin origin, champsim::page_number vaddr) = 0;
+    virtual std::pair<champsim::address, champsim::chrono::clock::duration> get_pte_pa(champsim::origin origin, champsim::page_number vaddr, std::size_t level) = 0;
     virtual champsim::data::bits shamt(std::size_t level) const = 0;
     virtual uint64_t get_offset(champsim::address vaddr, std::size_t level) const = 0;
     virtual std::size_t get_pt_levels() const = 0;
@@ -921,9 +1017,15 @@ struct module_base {
       /** \overload */
       bool prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata) const;
 
+  protected:
+      // The parent cache. Bound by the framework after construction. Exposed to
+      // subclasses (protected) so prefetchers ported from upstream ChampSim,
+      // which query dynamic cache state (MSHR occupancy, queue sizes, current
+      // cycle) via intern_, work unchanged.
+      cache_module* intern_ = nullptr;
+
   private:
       friend struct module_base<prefetcher, cache_module>;
-      cache_module* intern_ = nullptr;
       void bind(cache_module* parent) { intern_ = parent; }
   };
 
@@ -948,7 +1050,9 @@ struct module_base {
       /**
        * Called when a cache miss requires eviction.
        *
-       * \param triggering_cpu The core index that initiated this access.
+       * \param origin The provenance of the access: origin.cpu() is the
+       *        consumer (hardware context) that initiated it, origin.asid()
+       *        the address space it belongs to.
        * \param instr_id Instruction count for examining program order of requests.
        * \param set The cache set being accessed.
        * \param current_set A pointer to the beginning of the set being accessed.
@@ -958,13 +1062,13 @@ struct module_base {
        * \param type The access type (LOAD, RFO, PREFETCH, WRITE, or TRANSLATION).
        * \return The way index to evict, or the total number of ways to bypass.
        */
-      virtual long find_victim(uint32_t triggering_cpu, uint64_t instr_id, long set, const champsim::cache_block* current_set, champsim::address ip,
+      virtual long find_victim(champsim::origin origin, uint64_t instr_id, long set, const champsim::cache_block* current_set, champsim::address ip,
                                       champsim::address full_addr, access_type type) = 0;
 
       /**
        * Called when a tag check completes (on both hits and misses).
        *
-       * \param triggering_cpu The core index that initiated this access.
+       * \param origin The provenance of the access (see find_victim).
        * \param set The cache set.
        * \param way The cache way.
        * \param full_addr The address of the packet.
@@ -973,7 +1077,7 @@ struct module_base {
        * \param type The access type.
        * \param hit True if the packet hit the cache.
        */
-      virtual void update_replacement_state(uint32_t triggering_cpu, long set, long way, champsim::address full_addr,
+      virtual void update_replacement_state(champsim::origin origin, long set, long way, champsim::address full_addr,
                                                   champsim::address ip, champsim::address victim_addr, access_type type, bool hit) = 0;
 
 
@@ -983,7 +1087,7 @@ struct module_base {
        * This is called with the same timing as find_victim(), and is
        * additionally called when filling an invalid way.
        *
-       * \param triggering_cpu The core index that initiated this fill.
+       * \param origin The provenance of the fill (see find_victim).
        * \param set The cache set.
        * \param way The cache way.
        * \param full_addr The address of the filled block.
@@ -991,7 +1095,7 @@ struct module_base {
        * \param victim_addr The address of the evicted block (zero on hits).
        * \param type The access type.
        */
-      virtual void replacement_cache_fill(uint32_t triggering_cpu, long set, long way, champsim::address full_addr, 
+      virtual void replacement_cache_fill(champsim::origin origin, long set, long way, champsim::address full_addr,
                                                   champsim::address ip, champsim::address victim_addr, access_type type) = 0;
 
       /**
@@ -1085,22 +1189,76 @@ struct module_base {
   };
 
   /**
-   * Workload source interface — provides instructions to a source_consumer.
+   * Workload source interface — provides discrete units of work ("tokens")
+   * to a source_consumer.
    *
-   * Attach as a submodule of any module that inherits source_consumer
-   * (e.g. core_module). The default implementation (TRACE_WORKLOAD_SOURCE)
-   * wraps a tracereader. Override for execution-driven simulation or synthetic
-   * workloads.
+   * Attach as a submodule of any module that inherits source_consumer.
+   * This base carries only the token-agnostic lifecycle that the
+   * orchestration layer needs; the typed pull protocol lives on
+   * typed_workload_source<Token>. A consumer and its sources agree on the
+   * token type by construction: a core consumes instruction_source
+   * (Token = ooo_model_instr), a memory-stream source feeds a cache-side
+   * consumer records, a network consumer would take packets — all meshing
+   * in one run because the orchestrator never sees the token type.
    */
   struct workload_source : public module_base<workload_source, source_consumer> {
     virtual ~workload_source() = default;
 
-    // Provide the next instruction. Called by the core when it has input queue space.
-    virtual ooo_model_instr next_instruction() = 0;
-
-    // True when the source has no more instructions to provide.
+    // True when the source will never provide another token.
     [[nodiscard]] virtual bool eof() const = 0;
 
+    // Human-readable identity for reports (e.g. the trace path). Empty to suppress.
+    virtual std::string describe() const { return {}; }
+
+  protected:
+    // The consumer this source feeds. Bound by the framework after
+    // construction; sources stamp tokens with origin{consumer, stream},
+    // where the stream defaults to the consumer's id (see origin.h).
+    source_consumer* consumer_ = nullptr;
+
+  private:
+    friend struct module_base<workload_source, source_consumer>;
+    void bind(source_consumer* parent) { consumer_ = parent; }
+  };
+
+  /**
+   * Typed pull protocol for workload sources.
+   *
+   * peek() materializes the next token without consuming it (so paced
+   * consumers can wait until it is due), returning nullptr when no token is
+   * available — the safe emptiness signal, valid to call at any time.
+   * consume() discards the peeked token; next() is the one-shot form.
+   *
+   * \tparam Token The discrete unit of work this source provides.
+   */
+  template <typename Token>
+  struct typed_workload_source : workload_source {
+    // The next token, or nullptr if none is available now. The pointer is
+    // valid until consume() or the next peek().
+    virtual const Token* peek() = 0;
+
+    // Discard the current peeked token. Only valid after a non-null peek().
+    virtual void consume() = 0;
+
+    // Retrieve and consume the next token, if one is available.
+    std::optional<Token> next()
+    {
+      if (const Token* token = peek(); token != nullptr) {
+        auto retval = std::optional<Token>{*token};
+        consume();
+        return retval;
+      }
+      return std::nullopt;
+    }
+  };
+
+  /**
+   * Instruction-stream source — the token type consumed by core modules.
+   *
+   * The default implementation (TRACE_WORKLOAD_SOURCE) wraps a tracereader.
+   * Override for execution-driven simulation or synthetic workloads.
+   */
+  struct instruction_source : typed_workload_source<ooo_model_instr> {
     // Execution-driven feedback hooks (no-ops by default).
     // Called by the core at the appropriate pipeline stage.
     virtual void retire_instruction([[maybe_unused]] const ooo_model_instr& instr) {}
@@ -1112,10 +1270,13 @@ struct module_base {
    * Phase controller interface — manages phase completion and health monitoring.
    *
    * The phase controller owns the per-phase loop conditions: it observes
-   * cycle progress, drives deadlock/livelock detection, and signals when
-   * each entity (typically a CPU) has completed its share of the phase.
-   * If the controller exposes a non-empty phase list via get_phases(),
-   * the simulator runs that list instead of the default warmup+sim pair.
+   * cycle progress, drives deadlock detection, aggregates the health that
+   * each source consumer reports about itself, and signals when each source
+   * has completed its share of the phase. Source EOF is observed by polling
+   * source_consumer::source_eof() directly — there is no external EOF
+   * notification. If the controller exposes a non-empty phase list via
+   * get_phases(), the simulator runs that list instead of the default
+   * warmup+sim pair.
    */
   struct phase_controller : public module_base<phase_controller, environment_module> {
     virtual ~phase_controller() = default;
@@ -1130,11 +1291,8 @@ struct module_base {
     // Returns CONTINUE, COMPLETE, or ABORT.
     virtual status advance(long progress) = 0;
 
-    // Get indices of entities that newly completed since last advance()
-    virtual std::vector<unsigned> newly_completed_entities() const = 0;
-
-    // Notify the controller that a trace reached EOF
-    virtual void notify_trace_eof() = 0;
+    // Get ids of sources that newly completed since last advance()
+    virtual std::vector<unsigned> newly_completed_sources() const = 0;
 
     // Called at end of phase for cleanup
     virtual void end_phase() = 0;
@@ -1146,6 +1304,33 @@ struct module_base {
   };
 
   /**
+   * Listener interface — observes run-wide events for reporting.
+   *
+   * Listeners are ordinary modules: declare them as top-level children in an
+   * explicit config (interface "listener"), request extra models via the
+   * --listeners CLI option, or rely on the default HEARTBEAT listener that
+   * main creates when a config declares none. Producers reach the active
+   * listeners through the emit_* free functions below.
+   */
+  struct listener : public module_base<listener, environment_module> {
+    virtual ~listener() = default;
+
+    // A new phase began (fired once per phase, before module phase hooks).
+    virtual void begin_phase(bool /*is_warmup*/) {}
+
+    // A source consumer advanced. Totals are cumulative counts in the
+    // consumer's own token unit and clock domain.
+    virtual void progress(const source_consumer& /*consumer*/, uint64_t /*total_progress*/, uint64_t /*total_cycles*/) {}
+  };
+
+  // Active listener dispatch (single-threaded). main assembles the list once
+  // at startup; producers emit through these free functions.
+  void set_active_listeners(std::vector<listener*> active);
+  const std::vector<listener*>& active_listeners();
+  void emit_begin_phase(bool is_warmup);
+  void emit_progress(const source_consumer& consumer, uint64_t total_progress, uint64_t total_cycles);
+
+  /**
    * Interface for the top-level environment module.
    *
    * The environment owns and constructs the entire simulation. It provides
@@ -1155,6 +1340,13 @@ struct module_base {
     // Single generic view function: returns all modules of the given interface type.
     // Special interface_type "operable" returns all operable modules across all interfaces.
     virtual std::vector<std::any> view(const std::string& interface_type) const = 0;
+
+    // Called by module_base::create_instance for instances whose builder was
+    // marked via ModuleBuilder::set_owner_of_submodules — i.e. modules
+    // constructed inside a parent module rather than by the environment.
+    // Implementations should append these to their views (after top-level
+    // modules, preserving top-level ordering). Default: ignore.
+    virtual void enroll_nested_instance(const std::string& /*interface_name*/, const std::string& /*name*/, std::any /*instance*/) {}
 
     // Typed convenience wrapper: casts the any values to T* and returns reference_wrappers.
     template<typename T>

@@ -10,11 +10,12 @@
 
 namespace {
 
-// Mock core with controllable instruction count
+// Mock core with controllable instruction count and EOF state
 struct mock_core : public champsim::modules::core_module {
   uint64_t instr_count = 0;
   uint64_t cycle_count = 0;
   uint8_t cpu_num_ = 0;
+  bool source_eof_ = false; // a live core with attached sources is not at EOF
 
   explicit mock_core(champsim::modules::ModuleBuilder builder)
     : core_module(champsim::chrono::picoseconds{250}) {
@@ -24,12 +25,12 @@ struct mock_core : public champsim::modules::core_module {
   void push_instruction(ooo_model_instr) override {}
   std::size_t instructions_requested() override { return 0; }
   uint64_t sim_instr() const override { return instr_count; }
-  uint8_t get_cpu_num() const override { return cpu_num_; }
+  int consumer_id() const override { return static_cast<int>(cpu_num_); }
   uint64_t sim_cycle() const override { return cycle_count; }
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return {}; }
   cpu_stats get_roi_stats() const override { return {}; }
-  void quiet(bool) override {}
+  bool source_eof() const override { return source_eof_; }
 };
 
 static champsim::modules::core_module::register_module<mock_core> mock_core_reg_910("MOCK_CORE_910");
@@ -100,26 +101,26 @@ TEST_CASE("Phase controller completes when all cores reach instruction count")
   // Neither core has completed
   auto s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
-  REQUIRE(pc->newly_completed_entities().empty());
+  REQUIRE(pc->newly_completed_sources().empty());
 
   // Core 0 reaches target
   mc0->instr_count = 100;
   s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
-  auto completed = pc->newly_completed_entities();
+  auto completed = pc->newly_completed_sources();
   REQUIRE(completed.size() == 1);
   REQUIRE(completed[0] == 0);
 
   // Core 0 should not re-fire
   s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
-  REQUIRE(pc->newly_completed_entities().empty());
+  REQUIRE(pc->newly_completed_sources().empty());
 
   // Core 1 reaches target -> phase complete
   mc1->instr_count = 100;
   s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::COMPLETE);
-  completed = pc->newly_completed_entities();
+  completed = pc->newly_completed_sources();
   REQUIRE(completed.size() == 1);
   REQUIRE(completed[0] == 1);
 
@@ -164,7 +165,7 @@ TEST_CASE("Phase controller detects deadlock on stalled cycles")
   pc->end_phase();
 }
 
-TEST_CASE("Phase controller handles trace EOF")
+TEST_CASE("Phase controller completes all sources when one source hits EOF (complete_all)")
 {
   auto env_builder = champsim::modules::ModuleBuilder("test_env_eof", "MOCK_ENV_910");
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
@@ -174,7 +175,13 @@ TEST_CASE("Phase controller handles trace EOF")
     .add_parameter("cpu_num", uint8_t{0});
   auto* core0 = champsim::modules::core_module::create_instance(core0_builder, env);
   auto* mc0 = dynamic_cast<mock_core*>(core0);
-  mock_env->cores_ = {mc0};
+
+  auto core1_builder = champsim::modules::ModuleBuilder("core_eof1", "MOCK_CORE_910")
+    .add_parameter("cpu_num", uint8_t{1});
+  auto* core1 = champsim::modules::core_module::create_instance(core1_builder, env);
+  auto* mc1 = dynamic_cast<mock_core*>(core1);
+
+  mock_env->cores_ = {mc0, mc1};
 
   auto pc_builder = champsim::modules::ModuleBuilder("pc_eof", "INSTRUCTION_PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 1000);
@@ -185,13 +192,100 @@ TEST_CASE("Phase controller handles trace EOF")
   auto s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
 
-  // Trace reaches EOF
-  pc->notify_trace_eof();
+  // Core 0's sources reach EOF: default policy ends the phase for everyone
+  mc0->source_eof_ = true;
   s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::COMPLETE);
-  auto completed = pc->newly_completed_entities();
+  auto completed = pc->newly_completed_sources();
+  REQUIRE(completed.size() == 2);
+
+  pc->end_phase();
+}
+
+TEST_CASE("Phase controller completes only the exhausted source under complete_source policy")
+{
+  auto env_builder = champsim::modules::ModuleBuilder("test_env_eofs", "MOCK_ENV_910");
+  auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
+  auto* mock_env = dynamic_cast<mock_environment*>(env);
+
+  auto core0_builder = champsim::modules::ModuleBuilder("core_eofs0", "MOCK_CORE_910")
+    .add_parameter("cpu_num", uint8_t{0});
+  auto* core0 = champsim::modules::core_module::create_instance(core0_builder, env);
+  auto* mc0 = dynamic_cast<mock_core*>(core0);
+
+  auto core1_builder = champsim::modules::ModuleBuilder("core_eofs1", "MOCK_CORE_910")
+    .add_parameter("cpu_num", uint8_t{1});
+  auto* core1 = champsim::modules::core_module::create_instance(core1_builder, env);
+  auto* mc1 = dynamic_cast<mock_core*>(core1);
+
+  mock_env->cores_ = {mc0, mc1};
+
+  auto pc_builder = champsim::modules::ModuleBuilder("pc_eofs", "INSTRUCTION_PHASE_CONTROLLER")
+    .add_parameter("deadlock_cycles", 1000)
+    .add_parameter("eof_policy", std::string{"complete_source"});
+  auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
+
+  pc->begin_phase("EOF Source Test", false, 100);
+
+  // Core 0's sources reach EOF: only source 0 completes
+  mc0->source_eof_ = true;
+  auto s = pc->advance(1);
+  REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
+  auto completed = pc->newly_completed_sources();
   REQUIRE(completed.size() == 1);
   REQUIRE(completed[0] == 0);
+
+  // Core 1 finishes by progress: phase completes
+  mc1->instr_count = 100;
+  s = pc->advance(1);
+  REQUIRE(s == champsim::modules::phase_controller::status::COMPLETE);
+  completed = pc->newly_completed_sources();
+  REQUIRE(completed.size() == 1);
+  REQUIRE(completed[0] == 1);
+
+  pc->end_phase();
+}
+
+TEST_CASE("Phase controller defers deadlock while a consumer reports pending work")
+{
+  // A consumer that reports scheduled future work (like a paced source's gap)
+  struct pending_core : mock_core {
+    using mock_core::mock_core;
+    bool pending_ = false;
+    bool has_pending_work() const override { return pending_; }
+  };
+
+  auto env_builder = champsim::modules::ModuleBuilder("test_env_pend", "MOCK_ENV_910");
+  auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
+  auto* mock_env = dynamic_cast<mock_environment*>(env);
+
+  static champsim::modules::core_module::register_module<pending_core> pending_core_reg("PENDING_CORE_910");
+  auto core0_builder = champsim::modules::ModuleBuilder("core_pend0", "PENDING_CORE_910")
+    .add_parameter("cpu_num", uint8_t{0});
+  auto* core0 = champsim::modules::core_module::create_instance(core0_builder, env);
+  auto* mc0 = dynamic_cast<pending_core*>(core0);
+  mock_env->cores_ = {mc0};
+
+  auto pc_builder = champsim::modules::ModuleBuilder("pc_pend", "PHASE_CONTROLLER")
+    .add_parameter("deadlock_cycles", 5);
+  auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
+
+  pc->begin_phase("Pending Test", false, 1000);
+
+  // Zero progress but pending work scheduled: never aborts
+  mc0->pending_ = true;
+  for (int i = 0; i < 20; ++i) {
+    auto s = pc->advance(0);
+    REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
+  }
+
+  // Pending work gone: the stall is real and the abort fires
+  mc0->pending_ = false;
+  champsim::modules::phase_controller::status s{};
+  for (int i = 0; i < 5; ++i) {
+    s = pc->advance(0);
+  }
+  REQUIRE(s == champsim::modules::phase_controller::status::ABORT);
 
   pc->end_phase();
 }
