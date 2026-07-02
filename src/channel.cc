@@ -40,9 +40,8 @@ bool champsim::channel::do_add_queue(R& queue, std::size_t queue_size, const typ
     return false; // cannot handle this request
   }
 
-  // Insert the packet ahead of the translation misses
-  auto fwd_pkt = packet;
-  queue.push_back(fwd_pkt);
+  // One copy into the queue (the local staging copy was a second, dead one)
+  queue.push_back(packet);
 
   return true;
 }
@@ -96,8 +95,7 @@ bool champsim::channel::add_pq(const request_type& packet)
 
   sim_stats.PQ_ACCESS++;
 
-  auto fwd_pkt = packet;
-  auto result = do_add_queue(PQ, PQ_SIZE, fwd_pkt);
+  auto result = do_add_queue(PQ, PQ_SIZE, packet);
   if (result) {
     sim_stats.PQ_TO_CACHE++;
   } else {

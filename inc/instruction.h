@@ -120,7 +120,6 @@ struct ooo_model_instr : champsim::program_ordered<ooo_model_instr> {
   bool completed = false;
 
   unsigned completed_mem_ops = 0;
-  int num_reg_dependent = 0;
 
   std::vector<PHYSICAL_REGISTER_ID> destination_registers = {}; // output registers
   std::vector<PHYSICAL_REGISTER_ID> source_registers = {};      // input registers
@@ -128,8 +127,6 @@ struct ooo_model_instr : champsim::program_ordered<ooo_model_instr> {
   std::vector<champsim::address> destination_memory = {};
   std::vector<champsim::address> source_memory = {};
 
-  // these are indices of instructions in the ROB that depend on me
-  std::vector<std::reference_wrapper<ooo_model_instr>> registers_instrs_depend_on_me;
 
 private:
   template <typename T>

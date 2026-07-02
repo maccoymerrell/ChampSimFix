@@ -158,6 +158,10 @@ struct DRAM_CHANNEL final : public champsim::operable {
   champsim::chrono::clock::time_point last_refresh{};
   std::size_t DRAM_ROWS_PER_REFRESH;
 
+  // Hoisted write-burst watermarks (WQ capacity is fixed at construction)
+  std::size_t write_high_wm_ = 0;
+  std::size_t write_low_wm_ = 0;
+
   using stats_type = dram_stats;
   stats_type roi_stats, sim_stats;
 

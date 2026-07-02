@@ -61,6 +61,8 @@ DRAM_CHANNEL::DRAM_CHANNEL(champsim::chrono::picoseconds dbus_period, champsim::
   request_array_type br(address_mapping.ranks() * address_mapping.banks() * address_mapping.bankgroups());
   bank_request = br;
   active_request = std::end(bank_request);
+  write_high_wm_ = (std::size(WQ) * 7) >> 3; // 7/8th
+  write_low_wm_ = (std::size(WQ) * 6) >> 3;  // 6/8th
 }
 
 DRAM_ADDRESS_MAPPING::DRAM_ADDRESS_MAPPING(champsim::data::bytes channel_width_, std::size_t pref_size_, std::size_t channels_, std::size_t bankgroups_,
@@ -275,10 +277,10 @@ void DRAM_CHANNEL::schedule_refresh()
 
 void DRAM_CHANNEL::swap_write_mode()
 {
-  // these values control when to send out a burst of writes
-  const std::size_t DRAM_WRITE_HIGH_WM = ((std::size(WQ) * 7) >> 3); // 7/8th
-  const std::size_t DRAM_WRITE_LOW_WM = ((std::size(WQ) * 6) >> 3);  // 6/8th
-  // const std::size_t MIN_DRAM_WRITES_PER_SWITCH = ((std::size(WQ) * 1) >> 2); // 1/4
+  // these values control when to send out a burst of writes (WQ capacity is
+  // fixed at construction, so the watermarks are constants)
+  const std::size_t DRAM_WRITE_HIGH_WM = write_high_wm_;
+  const std::size_t DRAM_WRITE_LOW_WM = write_low_wm_;
 
   // Check queue occupancy
   auto wq_occu = static_cast<std::size_t>(std::count_if(std::begin(WQ), std::end(WQ), [](const auto& x) { return x.has_value(); }));
@@ -571,8 +573,9 @@ void MEMORY_CONTROLLER::initiate_requests()
     }
 
     // Initiate write requests
-    auto [wq_begin, wq_end] = champsim::get_span_p(std::cbegin(ul->get_wq()), std::cend(ul->get_wq()), [this](const auto& pkt) { return this->add_wq(pkt); });
-    ul->get_wq().erase(wq_begin, wq_end);
+    auto& wq = ul->get_wq();
+    auto [wq_begin, wq_end] = champsim::get_span_p(std::cbegin(wq), std::cend(wq), [this](const auto& pkt) { return this->add_wq(pkt); });
+    wq.erase(wq_begin, wq_end);
   }
 }
 

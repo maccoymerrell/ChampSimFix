@@ -154,11 +154,14 @@ long PageTableWalker::operate()
   auto is_ready = [time = current_time](const auto& pkt) {
     return pkt.data.is_ready_at(time);
   };
-  std::for_each(std::cbegin(lower_level->get_returned()), std::cend(lower_level->get_returned()), [this](const auto& pkt) { this->finish_packet(pkt); });
-  progress += std::distance(std::cbegin(lower_level->get_returned()), std::cend(lower_level->get_returned()));
-  lower_level->get_returned().clear();
+  auto& returned = lower_level->get_returned();
+  std::for_each(std::cbegin(returned), std::cend(returned), [this](const auto& pkt) { this->finish_packet(pkt); });
+  progress += std::distance(std::cbegin(returned), std::cend(returned));
+  returned.clear();
 
-  std::vector<mshr_type> next_steps{};
+  // Scratch vector reused across cycles to avoid a per-cycle allocation
+  auto& next_steps = next_steps_scratch_;
+  next_steps.clear();
 
   champsim::bandwidth fill_bw{MAX_FILL};
   auto [complete_begin, complete_end] = champsim::get_span_p(std::cbegin(completed), std::cend(completed), fill_bw, is_ready);

@@ -155,6 +155,11 @@ public:
 private:
   bool warmup_ = true;
   [[maybe_unused]] bool roi_ = false;
+  // Number of free LQ slots, maintained at the four LQ mutation sites so
+  // dispatch does not re-count 128 optionals per loop iteration.
+  long lq_free_slots_ = 0;
+  // Post-EOF drain latch for poll_cycle (see there).
+  bool drained_latch_ = false;
 public:
   bool is_warmup() const { return warmup_; }
   bool is_roi() const    { return roi_; }
@@ -238,6 +243,8 @@ public:
     // Construct BTB submodules
     for (const auto& sub : builder.get_submodules("btb"))
       btb_module_pimpl.push_back(champsim::modules::btb::create_instance(sub, static_cast<champsim::modules::core_module*>(this)));
+
+    lq_free_slots_ = static_cast<long>(std::size(LQ));
 
     // Cores must always have at least one workload source attached, and a
     // core consumes instruction tokens: reject sources of any other token type.

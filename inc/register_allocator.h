@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <list>
@@ -27,14 +28,30 @@ public:
   RegisterAllocator(size_t num_physical_registers);
   PHYSICAL_REGISTER_ID rename_dest_register(int16_t reg, champsim::program_ordered<ooo_model_instr>::id_type producer_id);
   PHYSICAL_REGISTER_ID rename_src_register(int16_t reg);
-  void complete_dest_register(PHYSICAL_REGISTER_ID physreg);
   void retire_dest_register(PHYSICAL_REGISTER_ID physreg);
   void free_register(PHYSICAL_REGISTER_ID physreg);
-  bool isValid(PHYSICAL_REGISTER_ID physreg) const;
-  bool isAllocated(PHYSICAL_REGISTER_ID archreg) const;
-  unsigned long count_free_registers() const;
-  int count_reg_dependencies(const ooo_model_instr& instr) const;
   void reset_frontend_RAT();
   void print_deadlock();
+
+  // Hot accessors, defined inline: the scheduler and execute stages poll
+  // these per candidate instruction per cycle; out-of-line definitions cost
+  // a real function call per poll.
+  void complete_dest_register(PHYSICAL_REGISTER_ID physreg) { physical_register_file.at(physreg).valid = true; }
+
+  bool isValid(PHYSICAL_REGISTER_ID physreg) const
+  {
+    if (physreg < 0 || static_cast<size_t>(physreg) >= physical_register_file.size())
+      return false;
+    return physical_register_file[physreg].valid;
+  }
+
+  bool isAllocated(PHYSICAL_REGISTER_ID archreg) const { return frontend_RAT[archreg] != -1; }
+
+  unsigned long count_free_registers() const { return std::size(free_registers); }
+
+  int count_reg_dependencies(const ooo_model_instr& instr) const
+  {
+    return static_cast<int>(std::count_if(std::begin(instr.source_registers), std::end(instr.source_registers), [this](auto reg) { return !isValid(reg); }));
+  }
 };
 #endif

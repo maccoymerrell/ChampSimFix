@@ -68,6 +68,9 @@ class PageTableWalker : public champsim::modules::page_table_walker_module, publ
   std::deque<mshr_type> finished;
   std::deque<mshr_type> completed;
 
+  // Per-cycle scratch (reused to avoid an allocation per operated cycle)
+  std::vector<mshr_type> next_steps_scratch_;
+
   std::vector<channel_type*> upper_levels;
   channel_type* lower_level;
 

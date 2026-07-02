@@ -38,6 +38,13 @@ long O3_CPU::poll_cycle()
   // structure empty and nothing left to fetch. This matters for multi-core
   // runs where an early-finishing core would otherwise burn a full pipeline
   // walk every cycle until the last core completes its phase.
+  //
+  // Drained is a latch: once the sources are exhausted and the pipeline is
+  // empty, operate() never runs again this phase, so nothing can
+  // re-populate it — skip the re-check on every subsequent cycle.
+  if (drained_latch_) {
+    return 1;
+  }
   const bool drained = std::empty(ROB) && std::empty(IFETCH_BUFFER) && std::empty(DIB_HIT_BUFFER)
                        && std::empty(DECODE_BUFFER) && std::empty(DISPATCH_BUFFER)
                        && std::empty(input_queue) && std::empty(SQ)
@@ -45,6 +52,7 @@ long O3_CPU::poll_cycle()
                        && std::empty(L1I_bus.lower_level->get_returned())
                        && std::empty(L1D_bus.lower_level->get_returned())
                        && source_eof();
+  drained_latch_ = drained;
   return drained ? 1 : 0;
 }
 
@@ -81,6 +89,7 @@ void O3_CPU::begin_phase(bool warmup, bool roi)
 {
   warmup_ = warmup;
   roi_ = roi;
+  drained_latch_ = false;
   begin_phase_instr = num_retired;
   begin_phase_time = current_time;
 
@@ -116,7 +125,7 @@ void O3_CPU::initialize_instruction()
     stop_fetch = do_init_instruction(input_queue.front());
 
     // Add to IFETCH_BUFFER
-    IFETCH_BUFFER.push_back(input_queue.front());
+    IFETCH_BUFFER.push_back(std::move(input_queue.front()));
     input_queue.pop_front();
 
     IFETCH_BUFFER.back().ready_time = current_time;
@@ -189,7 +198,7 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
 
 void O3_CPU::push_instruction(ooo_model_instr instr)
 {
-  input_queue.push_back(instr);
+  input_queue.push_back(std::move(instr));
 }
 
 std::size_t O3_CPU::instructions_requested()
@@ -307,9 +316,9 @@ long O3_CPU::promote_to_decode()
       std::min(FETCH_WIDTH, std::min(champsim::bandwidth::maximum_type{static_cast<long>(DIB_HIT_BUFFER_SIZE - std::size(DIB_HIT_BUFFER))},
                                      champsim::bandwidth::maximum_type{static_cast<long>(DECODE_BUFFER_SIZE - std::size(DECODE_BUFFER))}))};
 
-  auto fetched_check_end = std::find_if(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), [](const ooo_model_instr& x) { return !x.fetch_completed; });
-  // find the first not fetch completed
-  auto [window_begin, window_end] = champsim::get_span_p(std::begin(IFETCH_BUFFER), fetched_check_end, available_fetch_bandwidth, fetch_complete_and_ready);
+  // No pre-scan needed: the predicate requires fetch_completed, so
+  // get_span_p stops at exactly the entry a find_if bound would have found.
+  auto [window_begin, window_end] = champsim::get_span_p(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), available_fetch_bandwidth, fetch_complete_and_ready);
   auto decoded_window_end = std::stable_partition(window_begin, window_end, is_decoded); // reorder instructions
   auto mark_for_decode = [time = current_time, lat = DECODE_LATENCY, warmup = is_warmup()](auto& x) {
     return x.ready_time = time + (warmup ? champsim::chrono::clock::duration{} : lat);
@@ -422,8 +431,7 @@ long O3_CPU::dispatch_instruction()
   // dispatch DISPATCH_WIDTH instructions into the ROB
   while (available_dispatch_bandwidth.has_remaining() && !std::empty(DISPATCH_BUFFER) && DISPATCH_BUFFER.front().ready_time <= current_time
          && std::size(ROB) != ROB_SIZE
-         && ((std::size_t)std::count_if(std::begin(LQ), std::end(LQ), [](const auto& lq_entry) { return !lq_entry.has_value(); })
-             >= std::size(DISPATCH_BUFFER.front().source_memory))
+         && (static_cast<std::size_t>(lq_free_slots_) >= std::size(DISPATCH_BUFFER.front().source_memory))
          && ((std::size(DISPATCH_BUFFER.front().destination_memory) + std::size(SQ)) <= SQ_SIZE)) {
     ROB.push_back(std::move(DISPATCH_BUFFER.front()));
     DISPATCH_BUFFER.pop_front();
@@ -498,17 +506,22 @@ void O3_CPU::do_execution(ooo_model_instr& instr)
   instr.executed = true;
   instr.ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
 
-  // Mark LQ entries as ready to translate
-  for (auto& lq_entry : LQ) {
-    if (lq_entry.has_value() && lq_entry->instr_id == instr.instr_id) {
-      lq_entry->ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
+  // Mark LQ entries as ready to translate. Entries for this instruction can
+  // only exist if it has source memory ops; ~3 in 4 instructions have none.
+  if (!std::empty(instr.source_memory)) {
+    for (auto& lq_entry : LQ) {
+      if (lq_entry.has_value() && lq_entry->instr_id == instr.instr_id) {
+        lq_entry->ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
+      }
     }
   }
 
-  // Mark SQ entries as ready to translate
-  for (auto& sq_entry : SQ) {
-    if (sq_entry.instr_id == instr.instr_id) {
-      sq_entry.ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
+  // Mark SQ entries as ready to translate (only present for stores)
+  if (!std::empty(instr.destination_memory)) {
+    for (auto& sq_entry : SQ) {
+      if (sq_entry.instr_id == instr.instr_id) {
+        sq_entry.ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
+      }
     }
   }
 
@@ -524,6 +537,7 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
     auto q_entry = std::find_if_not(std::begin(LQ), std::end(LQ), [](const auto& lq_entry) { return lq_entry.has_value(); });
     assert(q_entry != std::end(LQ));
     q_entry->emplace(smem, instr.instr_id, instr.ip, instr.origin); // add it to the load queue
+    --lq_free_slots_;
 
     // Check for forwarding
     auto sq_it = std::max_element(std::begin(SQ), std::end(SQ), [smem](const auto& lhs, const auto& rhs) {
@@ -533,6 +547,7 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
       if (sq_it->fetch_issued) { // Store already executed
         (*q_entry)->finish(instr);
         q_entry->reset();
+        ++lq_free_slots_;
       } else {
         assert(sq_it->instr_id < instr.instr_id);      // The found SQ entry is a prior store
         sq_it->lq_depend_on_me.emplace_back(*q_entry); // Forward the load when the store finishes
@@ -582,7 +597,10 @@ long O3_CPU::operate_lsq()
   champsim::bandwidth load_bw{LQ_WIDTH};
 
   for (auto& lq_entry : LQ) {
-    if (load_bw.has_remaining() && lq_entry.has_value() && lq_entry->producer_id == std::numeric_limits<uint64_t>::max() && !lq_entry->fetch_issued
+    if (!load_bw.has_remaining()) {
+      break;
+    }
+    if (lq_entry.has_value() && lq_entry->producer_id == std::numeric_limits<uint64_t>::max() && !lq_entry->fetch_issued
         && lq_entry->ready_time < current_time) {
       auto success = execute_load(*lq_entry);
       if (success) {
@@ -610,6 +628,7 @@ void O3_CPU::do_finish_store(const LSQ_ENTRY& sq_entry)
 
     dependent->finish(std::begin(ROB), std::end(ROB));
     dependent.reset();
+    ++lq_free_slots_;
   }
 }
 
@@ -707,6 +726,7 @@ long O3_CPU::handle_memory_return()
       if (lq_entry.has_value() && lq_entry->fetch_issued && champsim::block_number{lq_entry->virtual_address} == champsim::block_number{l1d_it->v_address}) {
         lq_entry->finish(std::begin(ROB), std::end(ROB));
         lq_entry.reset();
+        ++lq_free_slots_;
         ++progress;
       }
     }

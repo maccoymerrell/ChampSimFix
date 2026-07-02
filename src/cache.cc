@@ -425,17 +425,20 @@ long CACHE::operate()
   fill_bw.consume(std::distance(fill_begin, complete_end));
   inflight_fills.erase(fill_begin, complete_end);
 
-  // Initiate tag checks
-  const champsim::bandwidth::maximum_type bandwidth_from_tag_checks{champsim::to_underlying(MAX_TAG) * (long)(HIT_LATENCY / clock_period)
-                                                                    - (long)std::size(inflight_tag_check)};
+  // Initiate tag checks (window limit hoisted: MAX_TAG * hit-latency cycles
+  // is invariant after construction)
+  const champsim::bandwidth::maximum_type bandwidth_from_tag_checks{tag_check_window_limit_ - (long)std::size(inflight_tag_check)};
   champsim::bandwidth initiate_tag_bw{std::clamp(bandwidth_from_tag_checks, champsim::bandwidth::maximum_type{0}, MAX_TAG)};
   auto can_translate = [avail = (std::size(translation_stash) < static_cast<std::size_t>(MSHR_SIZE))](const auto& entry) {
     return avail || entry.is_translated;
   };
-  auto stash_bandwidth_consumed =
-      champsim::transform_while_n(translation_stash, std::back_inserter(inflight_tag_check), initiate_tag_bw, is_translated, initiate_tag_check<false>());
-  initiate_tag_bw.consume(stash_bandwidth_consumed);
-  std::vector<long long> channels_bandwidth_consumed{};
+  [[maybe_unused]] long stash_bandwidth_consumed = 0;
+  if (lower_translate != nullptr) {
+    stash_bandwidth_consumed =
+        champsim::transform_while_n(translation_stash, std::back_inserter(inflight_tag_check), initiate_tag_bw, is_translated, initiate_tag_check<false>());
+    initiate_tag_bw.consume(stash_bandwidth_consumed);
+  }
+  [[maybe_unused]] std::vector<long long> channels_bandwidth_consumed{};
 
   if (std::size(upper_levels) > 1) {
     std::rotate(upper_levels.begin(), upper_levels.begin() + 1, upper_levels.end());
@@ -454,7 +457,9 @@ long CACHE::operate()
       champsim::bandwidth per_upper_tag_bw{std::min(per_upper_bandwidth, champsim::bandwidth::maximum_type{initiate_tag_bw.amount_remaining()})};
       auto bandwidth_consumed =
           champsim::transform_while_n(q.get(), std::back_inserter(inflight_tag_check), per_upper_tag_bw, can_translate, initiate_tag_check<true>(ul));
-      channels_bandwidth_consumed.push_back(bandwidth_consumed);
+      if constexpr (champsim::debug_print) {
+        channels_bandwidth_consumed.push_back(bandwidth_consumed);
+      }
       initiate_tag_bw.consume(bandwidth_consumed);
     }
   }
@@ -464,14 +469,18 @@ long CACHE::operate()
   initiate_tag_bw.consume(pq_bandwidth_consumed);
 
   // Issue translations
-  std::for_each(std::begin(inflight_tag_check), std::end(inflight_tag_check), [this](auto& x) { this->issue_translation(x); });
-  std::for_each(std::begin(translation_stash), std::end(translation_stash), [this](auto& x) { this->issue_translation(x); });
+  if (lower_translate != nullptr) {
+    std::for_each(std::begin(inflight_tag_check), std::end(inflight_tag_check), [this](auto& x) { this->issue_translation(x); });
+    std::for_each(std::begin(translation_stash), std::end(translation_stash), [this](auto& x) { this->issue_translation(x); });
+  }
 
   // Find entries that would be ready except that they have not finished translation, move them to the stash
-  auto [last_not_missed, stash_end] = champsim::extract_if(std::begin(inflight_tag_check), std::end(inflight_tag_check), std::back_inserter(translation_stash),
-                                                           [is_ready, is_translated](const auto& x) { return is_ready(x) && !is_translated(x); });
-  progress += std::distance(last_not_missed, std::end(inflight_tag_check));
-  inflight_tag_check.erase(last_not_missed, std::end(inflight_tag_check));
+  if (lower_translate != nullptr) {
+    auto [last_not_missed, stash_end] = champsim::extract_if(std::begin(inflight_tag_check), std::end(inflight_tag_check), std::back_inserter(translation_stash),
+                                                             [is_ready, is_translated](const auto& x) { return is_ready(x) && !is_translated(x); });
+    progress += std::distance(last_not_missed, std::end(inflight_tag_check));
+    inflight_tag_check.erase(last_not_missed, std::end(inflight_tag_check));
+  }
 
   // Perform tag checks
   auto do_handle_miss = [this](const auto& pkt) {
@@ -883,7 +892,7 @@ void CACHE::end_simulation() { impl_prefetcher_final_stats(); impl_replacement_f
 template <typename T>
 bool CACHE::should_activate_prefetcher(const T& pkt) const
 {
-  return !pkt.prefetch_from_this && std::count(std::begin(pref_activate_mask), std::end(pref_activate_mask), pkt.type) > 0;
+  return !pkt.prefetch_from_this && pref_activate_lut_[champsim::to_underlying(pkt.type)];
 }
 
 // LCOV_EXCL_START Exclude the following function from LCOV

@@ -193,6 +193,12 @@ private:
   // Snapshot of the warmup/ROI flags for the current phase.
   bool warmup_ = true;
   [[maybe_unused]] bool roi_ = false;
+  // Hoisted invariants (set once at construction):
+  // MAX_TAG * (HIT_LATENCY / clock_period) — the tag-check window limit
+  long tag_check_window_limit_ = 0;
+  // per-access-type prefetcher activation lookup (replaces a std::count
+  // over pref_activate_mask on every tag check)
+  std::array<bool, static_cast<std::size_t>(access_type::NUM_TYPES)> pref_activate_lut_{};
 public:
   bool is_warmup() const { return warmup_; }
   bool is_roi() const    { return roi_; }
@@ -274,6 +280,11 @@ public:
         FILL_LATENCY(builder.get_parameter<uint64_t>("fill_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), OFFSET_BITS(builder.get_parameter<champsim::data::bits>("offset_bits")), MAX_TAG(builder.get_parameter<champsim::bandwidth::maximum_type>("max_tag_bandwidth")), MAX_FILL(builder.get_parameter<champsim::bandwidth::maximum_type>("max_fill_bandwidth")),
         prefetch_as_load(builder.get_parameter<bool>("prefetch_as_load")), match_offset_bits(builder.get_parameter<bool>("match_offset_bits")), virtual_prefetch(builder.get_parameter<bool>("virtual_prefetch")), pref_activate_mask(builder.get_parameter<std::vector<access_type>>("pref_activate_mask"))
   {
+    // Hoisted invariants for the per-cycle path
+    tag_check_window_limit_ = champsim::to_underlying(MAX_TAG) * static_cast<long>(HIT_LATENCY / clock_period);
+    for (auto type : pref_activate_mask)
+      pref_activate_lut_[static_cast<std::size_t>(champsim::to_underlying(type))] = true;
+
     // Construct prefetcher submodules
     for (const auto& sub : builder.get_submodules("prefetcher", true))
       pref_module_pimpl.push_back(champsim::modules::prefetcher::create_instance(sub, static_cast<champsim::modules::cache_module*>(this)));

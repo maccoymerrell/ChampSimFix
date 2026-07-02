@@ -17,7 +17,11 @@
 #ifndef BANDWIDTH_H
 #define BANDWIDTH_H
 
+#include <stdexcept>
+#include <string>
 #include <fmt/format.h>
+
+#include "util/to_underlying.h"
 
 namespace champsim
 {
@@ -50,40 +54,50 @@ public:
    * \param delta The amount of bandwidth to consume
    *
    * \throws std::range_error if more than the maximum amount of bandwidth will have been consumed.
+   *
+   * These members are defined inline: they are one-instruction bodies called
+   * hundreds of times per simulated cycle from every scan loop, and an
+   * out-of-line definition costs a real function call per check.
    */
-  void consume(underlying_type delta);
+  void consume(underlying_type delta)
+  {
+    value_ -= delta;
+    if (value_ < 0) {
+      throw std::range_error{"Exceeded bandwidth of " + std::to_string(champsim::to_underlying(maximum_))};
+    }
+  }
 
   /**
    * Consume one unit of bandwidth.
    *
    * \throws std::range_error if more than the maximum amount of bandwidth will have been consumed.
    */
-  void consume();
+  void consume() { consume(1); }
 
   /**
    * Report if the bandwidth has one or more unit remaining.
    */
-  bool has_remaining() const;
+  bool has_remaining() const { return amount_remaining() > 0; }
 
   /**
    * Report the amount of bandwidth that has been consumed
    */
-  underlying_type amount_consumed() const;
+  underlying_type amount_consumed() const { return champsim::to_underlying(maximum_) - value_; }
 
   /**
    * Report the amount of bandwidth that remains
    */
-  underlying_type amount_remaining() const;
+  underlying_type amount_remaining() const { return value_; }
 
   /**
    * Reset the bandwidth, so that it can be used again.
    */
-  void reset();
+  void reset() { value_ = champsim::to_underlying(maximum_); }
 
   /**
    * Initialize a bandwidth with the specified maximum.
    */
-  explicit bandwidth(maximum_type maximum);
+  explicit bandwidth(maximum_type maximum) : value_(champsim::to_underlying(maximum)), maximum_(maximum) {}
 };
 
 inline auto format_as(champsim::bandwidth::maximum_type val) {

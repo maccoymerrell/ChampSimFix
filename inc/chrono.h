@@ -38,8 +38,9 @@ public:
   using period = typename duration::period;
 
   constexpr static bool is_steady = false;
-  time_point now() const noexcept;
-  void tick(duration amount);
+  // Inline: now() is read in every operable's catch-up loop every cycle.
+  time_point now() const noexcept { return m_now; }
+  void tick(duration amount) { m_now += amount; }
 
 private:
   time_point m_now{};
