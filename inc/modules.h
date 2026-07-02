@@ -1017,14 +1017,15 @@ struct module_base {
       /** \overload */
       bool prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata) const;
 
-  protected:
-      // The parent cache. Bound by the framework after construction. Exposed to
-      // subclasses (protected) so prefetchers ported from upstream ChampSim,
-      // which query dynamic cache state (MSHR occupancy, queue sizes, current
-      // cycle) via intern_, work unchanged.
-      cache_module* intern_ = nullptr;
-
   private:
+      // The parent cache, for the framework's own prefetch_line delegation
+      // only. Modules that need parent access should capture it themselves at
+      // construction — the parent is set on the builder before the
+      // constructor runs — and store it locally:
+      //
+      //     my_pref(ModuleBuilder builder)
+      //       : cache_(builder.get_parent<champsim::modules::cache_module>()) {}
+      cache_module* intern_ = nullptr;
       friend struct module_base<prefetcher, cache_module>;
       void bind(cache_module* parent) { intern_ = parent; }
   };
