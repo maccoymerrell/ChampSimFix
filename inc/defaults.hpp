@@ -235,7 +235,6 @@ inline champsim::modules::ModuleBuilder default_ptw()
 {
     return champsim::modules::ModuleBuilder{}
                               .add_parameter("clock_period", champsim::chrono::picoseconds{250})
-                              .add_parameter("asid", uint32_t{0})
                               .add_parameter("mshr_size", uint32_t{5})
                               .add_parameter("max_tag_check", champsim::bandwidth::maximum_type{2})
                               .add_parameter("max_fill", champsim::bandwidth::maximum_type{2})

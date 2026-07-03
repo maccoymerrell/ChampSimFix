@@ -36,14 +36,23 @@ class PageTableWalker : public champsim::modules::page_table_walker_module, publ
     champsim::address vaddr;
     champsim::address ptw_addr;
     std::size_t level;
+    // The address space this cached walk step belongs to. A walker is
+    // hardware owned by a consumer, not by an address space: entries are
+    // stream-tagged so concurrent streams never hit each other's steps.
+    champsim::origin::id_type stream = 0;
   };
 
   struct pscl_indexer {
     champsim::data::bits shamt;
-    auto operator()(const pscl_entry& entry) const { return entry.vaddr.slice_upper(shamt); }
+    auto operator()(const pscl_entry& entry) const { return entry.vaddr.to<uint64_t>() >> champsim::to_underlying(shamt); }
   };
 
-  using pscl_type = champsim::msl::lru_table<pscl_entry, pscl_indexer, pscl_indexer>;
+  struct pscl_tagger {
+    champsim::data::bits shamt;
+    auto operator()(const pscl_entry& entry) const { return std::pair{entry.vaddr.to<uint64_t>() >> champsim::to_underlying(shamt), entry.stream}; }
+  };
+
+  using pscl_type = champsim::msl::lru_table<pscl_entry, pscl_indexer, pscl_tagger>;
   using channel_type = champsim::modules::channel_module;
   using request_type = typename champsim::request;
   using response_type = typename champsim::response;
@@ -88,8 +97,7 @@ public:
 
   std::vector<pscl_type> pscl;
   champsim::modules::vmem_module* vmem;
-
-  const champsim::address CR3_addr;
+  std::size_t pt_levels_;
 
   explicit PageTableWalker(champsim::modules::ModuleBuilder builder);
 

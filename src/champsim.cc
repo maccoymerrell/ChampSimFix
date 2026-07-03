@@ -239,6 +239,17 @@ void assign_identities(modules::environment_module& env)
       src.get().set_stream_id(it->second);
     }
   }
+
+  // Warm each stream's page-table root in stream order. Roots would
+  // otherwise be allocated at each stream's first walk, making physical
+  // page assignment depend on runtime timing; allocating here keeps it a
+  // pure function of the configuration (and matches the historical
+  // construction-time allocation order).
+  for (auto& vm : env.typed_view<modules::vmem_module>("vmem")) {
+    for (uint32_t stream = 0; stream < next_stream; ++stream) {
+      (void)vm.get().get_pte_pa(champsim::origin{champsim::origin::invalid_id, stream}, champsim::page_number{}, vm.get().get_pt_levels());
+    }
+  }
 }
 
 // simulation entry point

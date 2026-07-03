@@ -33,7 +33,7 @@ PageTableWalker::PageTableWalker(champsim::modules::ModuleBuilder builder)
       MSHR_SIZE(builder.get_parameter<uint32_t>("mshr_size")),
       MAX_READ(builder.get_parameter<champsim::bandwidth::maximum_type>("max_tag_check")),
       MAX_FILL(builder.get_parameter<champsim::bandwidth::maximum_type>("max_fill")),
-      HIT_LATENCY(builder.get_parameter<unsigned>("latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), vmem(builder.get_parameter<champsim::modules::vmem_module*>("vmem")), CR3_addr(vmem->get_pte_pa(champsim::origin{champsim::origin::invalid_id, builder.get_parameter<uint32_t>("asid")}, champsim::page_number{}, vmem->get_pt_levels()).first)
+      HIT_LATENCY(builder.get_parameter<unsigned>("latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), vmem(builder.get_parameter<champsim::modules::vmem_module*>("vmem")), pt_levels_(vmem->get_pt_levels())
 {
   log2_page_size_ = builder.get_parameter<unsigned>("log2_page_size");
   auto local_pscl_dims = builder.get_parameter<std::vector<std::array<uint32_t, 3>>>("pscl_dims");
@@ -60,7 +60,7 @@ PageTableWalker::PageTableWalker(champsim::modules::ModuleBuilder builder)
   std::sort(std::begin(local_pscl_dims), std::end(local_pscl_dims), std::greater{});
 
   for (auto [level, sets, ways] : local_pscl_dims) {
-    pscl.emplace_back(sets, ways, pscl_indexer{vmem->shamt(level)}, pscl_indexer{vmem->shamt(level)});
+    pscl.emplace_back(sets, ways, pscl_indexer{vmem->shamt(level)}, pscl_tagger{vmem->shamt(level)});
   }
 }
 
@@ -72,7 +72,11 @@ PageTableWalker::mshr_type::mshr_type(const request_type& req, std::size_t level
 
 auto PageTableWalker::handle_read(const request_type& handle_pkt, channel_type* ul) -> std::optional<mshr_type>
 {
-  pscl_entry walk_init = {handle_pkt.v_address, CR3_addr, std::size(pscl)};
+  // The walk's address space comes from the request, not from the walker:
+  // this is hardware owned by a consumer, serving whatever streams reach it.
+  // The root (CR3) is the requesting stream's, resolved per walk.
+  const auto walk_root = vmem->get_pte_pa(handle_pkt.origin, champsim::page_number{}, pt_levels_).first;
+  pscl_entry walk_init = {handle_pkt.v_address, walk_root, std::size(pscl), handle_pkt.origin.stream()};
   std::vector<std::optional<pscl_entry>> pscl_hits;
   std::transform(std::begin(pscl), std::end(pscl), std::back_inserter(pscl_hits), [walk_init](auto& x) { return x.check_hit(walk_init); });
   walk_init =
@@ -107,7 +111,7 @@ auto PageTableWalker::handle_fill(const mshr_type& fill_mshr) -> std::optional<m
   }
 
   const auto pscl_idx = std::size(pscl) - fill_mshr.translation_level;
-  pscl.at(pscl_idx).fill({fill_mshr.v_address, *fill_mshr.data, fill_mshr.translation_level});
+  pscl.at(pscl_idx).fill({fill_mshr.v_address, *fill_mshr.data, fill_mshr.translation_level, fill_mshr.origin.stream()});
 
   mshr_type fwd_mshr = fill_mshr;
   fwd_mshr.address = *fill_mshr.data;

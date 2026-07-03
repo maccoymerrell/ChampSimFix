@@ -674,7 +674,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
       ptw_ul_channels.push_back(channels.at(idx));
     ptw_builder.add_parameter("upper_levels", ptw_ul_channels);
     ptw_builder.add_parameter("vmem", vmem);
-    ptw_builder.add_parameter("asid", pc.cpu_index);
+
     ptw_builder.add_parameter("lower_level", channels.at(find_ul_index(pc.lower_level, pc.name)));
     ptw_builder.add_parameter("clock_period", champsim::chrono::picoseconds{freq_to_period(pc.frequency)});
 
