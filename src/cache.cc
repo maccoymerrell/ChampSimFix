@@ -414,6 +414,7 @@ void CACHE::skip_tick()
   //    same first tag-check cycle it would get without skipping.
   if (std::size(upper_levels) > 1) {
     std::rotate(upper_levels.begin(), upper_levels.begin() + 1, upper_levels.end());
+    std::rotate(upper_views_.begin(), upper_views_.begin() + 1, upper_views_.end());
   }
   impl_prefetcher_cycle_operate();
 }
@@ -481,6 +482,7 @@ long CACHE::operate()
 
   if (std::size(upper_levels) > 1) {
     std::rotate(upper_levels.begin(), upper_levels.begin() + 1, upper_levels.end());
+    std::rotate(upper_views_.begin(), upper_views_.begin() + 1, upper_views_.end());
   }
 
   // upper levels get an equal portion of the remaining bandwidth
@@ -489,8 +491,9 @@ long CACHE::operate()
           ? (champsim::bandwidth::maximum_type)std::max((size_t)initiate_tag_bw.amount_remaining() / std::size(upper_levels), size_t{1})
           : champsim::bandwidth::maximum_type{};
 
-  for (auto* ul : upper_levels) {
-    for (auto q : {std::ref(ul->get_wq()), std::ref(ul->get_rq()), std::ref(ul->get_pq())}) {
+  for (auto& uv : upper_views_) {
+    auto* ul = uv.ch;
+    for (auto q : {std::ref(*uv.wq), std::ref(*uv.rq), std::ref(*uv.pq)}) {
       // this needs to be in this loop, we need to ensure that for cases where bandwidth doesn't divide nicely across upstreams,
       // we don't accidentally consume more bandwidth than expected
       champsim::bandwidth per_upper_tag_bw{std::min(per_upper_bandwidth, champsim::bandwidth::maximum_type{initiate_tag_bw.amount_remaining()})};

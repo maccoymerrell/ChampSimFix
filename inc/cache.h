@@ -190,6 +190,14 @@ public:
   long operate() final;
   long poll_cycle() final;
   void skip_tick() final;
+
+  struct upper_queues_view {
+    std::deque<request_type>* wq;
+    std::deque<request_type>* rq;
+    std::deque<request_type>* pq;
+    champsim::modules::channel_module* ch;
+  };
+  std::vector<upper_queues_view> upper_views_{};
   void initialize() final;
   void begin_phase(bool warmup, bool roi) override;
   void end_phase() override;
@@ -307,6 +315,16 @@ public:
     }
     if (lower_translate != nullptr) {
       lower_translate->set_response_watcher(this);
+    }
+
+    // Cached direct views of the upper channels' queues: the intake loop
+    // runs every operated cycle and previously paid three virtual accessor
+    // calls per upper level per cycle. The deque objects are stable channel
+    // members; the views rotate in lockstep with upper_levels so the
+    // arbitration order (and the stats printers that follow it) is
+    // unchanged.
+    for (auto* ul : upper_levels) {
+      upper_views_.push_back({&ul->get_wq(), &ul->get_rq(), &ul->get_pq(), ul});
     }
 
     // Hoisted invariants for the per-cycle path
