@@ -10,6 +10,8 @@
 
 #include "environment.h"
 
+#include <set>
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -146,13 +148,26 @@ void add_param(ModuleBuilder& builder, const std::string& key, const json& val,
 void populate_builder(const json& node, ModuleBuilder& builder,
                       const std::map<std::string, std::any>& modules_by_name,
                       const std::map<std::string, std::string>& module_interfaces,
-                      const json& cli_args)
+                      const json& cli_args, std::vector<ModuleBuilder::scope_frame_type> frames)
 {
   const std::string& name = builder.get_name();
 
+  // A "globals" object on a module opens a lexical scope: its keys are
+  // visible to this module and everything constructed beneath it, unless
+  // shadowed by a more local definition. Ordinary module parameters stay
+  // module-local; only this block is inherited.
+  if (auto it = node.find("globals"); it != node.end() && it->is_object()) {
+    ModuleBuilder frame_builder{name + ".globals", "<scope>"};
+    for (auto& [key, val] : it->items()) {
+      add_param(frame_builder, key, val, name, modules_by_name, module_interfaces, cli_args);
+    }
+    frames.insert(std::begin(frames), std::make_shared<const std::map<std::string, std::any>>(frame_builder.get_parameters()));
+  }
+  builder.inherit_scope(frames);
+
   // Process all JSON parameters (skip reserved keys)
   for (auto& [key, val] : node.items()) {
-    if (key == "name" || key == "module" || key == "model" || key == "children" || key == "_comment") continue;
+    if (key == "name" || key == "module" || key == "model" || key == "children" || key == "_comment" || key == "globals") continue;
     add_param(builder, key, val, name, modules_by_name, module_interfaces, cli_args);
   }
 
@@ -168,7 +183,7 @@ void populate_builder(const json& node, ModuleBuilder& builder,
       std::string sub_model = sub["model"].get<std::string>();
 
       ModuleBuilder child_builder{sub_name, sub_model};
-      populate_builder(sub, child_builder, modules_by_name, module_interfaces, cli_args);
+      populate_builder(sub, child_builder, modules_by_name, module_interfaces, cli_args, frames);
       builder.add_submodule(sub_iface, std::move(child_builder));
     }
   }
@@ -219,8 +234,33 @@ champsim::environment::environment(ModuleBuilder builder)
   num_consumers = config.value("num_consumers", num_consumers);
 
   // Publish system-wide params to the globals before module construction.
+  //
+  // Every non-reserved top-level scalar in the config becomes a global,
+  // visible to any module through get_parameter fall-through (a root
+  // "globals" object works too, for those who prefer it spelled out).
+  // Reserved names are the config's structural and orchestration keys.
   {
     auto& g = ModuleBuilder::globals();
+
+    static const std::set<std::string> reserved{"children", "name",       "module",    "model",     "_comment",           "_description", "environment",
+                                                "num_cores", "cycle_skip", "phases",    "listeners", "heartbeat_frequency", "globals"};
+    ModuleBuilder root_scope{"<root>", "<scope>"};
+    for (auto& [key, val] : config.items()) {
+      if (reserved.count(key) != 0 || val.is_structured() || val.is_null()) {
+        continue;
+      }
+      add_param(root_scope, key, val, "<root>", modules_by_name_, module_interfaces_, cli_args);
+    }
+    if (auto it = config.find("globals"); it != config.end() && it->is_object()) {
+      for (auto& [key, val] : it->items()) {
+        add_param(root_scope, key, val, "<root>", modules_by_name_, module_interfaces_, cli_args);
+      }
+    }
+    for (const auto& [key, val] : root_scope.get_parameters()) {
+      g.add_raw_parameter(key, val);
+    }
+
+    // Canonical system-wide values (derived where not configured)
     g.add_parameter("block_size",      block_size_);
     g.add_parameter("page_size",       page_size_);
     g.add_parameter("log2_block_size", static_cast<unsigned>(champsim::lg2(block_size_)));
@@ -244,7 +284,7 @@ champsim::environment::environment(ModuleBuilder builder)
 
     auto mod_builder = ModuleBuilder{name, model};
 
-    populate_builder(child, mod_builder, modules_by_name_, module_interfaces_, cli_args);
+    populate_builder(child, mod_builder, modules_by_name_, module_interfaces_, cli_args, {});
 
     // Submodule builders self-enroll their instances (enroll_nested_instance)
     // so nested modules join the views; the top-level module itself is

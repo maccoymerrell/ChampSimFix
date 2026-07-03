@@ -73,8 +73,20 @@ struct environment_module;
  * - Query the module's name and model via get_name() and get_model().
  */
 struct ModuleBuilder {
+  public:
+  /**
+   * One level of lexical scope: a frozen map of named values visible to a
+   * module and everything constructed beneath it in the config tree.
+   * Shared, immutable frames make builder copies cheap and lifetime-safe.
+   */
+  using scope_frame_type = std::shared_ptr<const std::map<std::string, std::any>>;
+
   private:
   std::map<std::string,std::any> parameters;
+  // Enclosing lexical scopes, innermost first. Parameter lookup resolves
+  // local parameters, then these frames in order, then the process-wide
+  // globals() (the outermost scope).
+  std::vector<scope_frame_type> scope_frames_;
   std::map<std::string, std::vector<ModuleBuilder>> submodules_; // keyed by interface type
   std::string module_name = "";
   std::string model = "";
@@ -215,6 +227,11 @@ private:
     };
     if (auto it = parameters.find(name); it != parameters.end())
       return {try_cast(it->second), false};
+    // Enclosing scopes, innermost first (treated like globals for dump
+    // suppression: scope hits are ambient values, not per-module settings)
+    for (const auto& frame : scope_frames_) {
+      if (auto it = frame->find(name); it != frame->end()) return {try_cast(it->second), true};
+    }
     if (this != &globals()) {
       const auto& g = globals().parameters;
       if (auto it = g.find(name); it != g.end()) return {try_cast(it->second), true};
@@ -266,6 +283,18 @@ public:
     parameters[name] = std::move(value);
     return *this;
   }
+
+  /** Prepend an innermost enclosing scope frame. */
+  ModuleBuilder& push_scope_frame(scope_frame_type frame) {
+    scope_frames_.insert(std::begin(scope_frames_), std::move(frame));
+    return *this;
+  }
+  /** Replace the enclosing-scope chain (used when deriving child builders). */
+  ModuleBuilder& inherit_scope(std::vector<scope_frame_type> frames) {
+    scope_frames_ = std::move(frames);
+    return *this;
+  }
+  const std::vector<scope_frame_type>& scope_frames() const { return scope_frames_; }
 
   // ---- Submodule management (keyed by interface type) ----
 
