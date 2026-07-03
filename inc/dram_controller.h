@@ -113,6 +113,13 @@ struct DRAM_CHANNEL final : public champsim::operable {
     champsim::address data{};
     champsim::chrono::clock::time_point ready_time = champsim::chrono::clock::time_point::max();
 
+    // Memoized address decompositions (pure functions of `address`, computed
+    // once at insertion). The scheduler comparator previously recomputed the
+    // full rank/bankgroup/bank swizzle for every waiting request, every cycle.
+    std::size_t bank_req_idx = 0;
+    std::size_t bankgroup_req_idx = 0;
+    std::size_t row_idx = 0;
+
     std::vector<uint64_t> instr_depend_on_me{};
     std::vector<std::deque<response_type>*> to_return{};
 

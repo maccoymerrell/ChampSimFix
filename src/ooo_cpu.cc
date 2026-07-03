@@ -416,8 +416,11 @@ long O3_CPU::decode_instruction()
 
   long progress{std::distance(dib_hit_buffer_begin, dib_hit_buffer_end) + std::distance(decode_buffer_begin, decode_buffer_end)};
 
-  std::merge(dib_hit_buffer_begin, dib_hit_buffer_end, decode_buffer_begin, decode_buffer_end, std::back_inserter(DISPATCH_BUFFER),
-             ooo_model_instr::program_order);
+  // Move the merged windows: both source ranges are erased immediately
+  // below, and the comparator reads only instr_id (untouched by moving the
+  // instruction's vectors).
+  std::merge(std::make_move_iterator(dib_hit_buffer_begin), std::make_move_iterator(dib_hit_buffer_end), std::make_move_iterator(decode_buffer_begin),
+             std::make_move_iterator(decode_buffer_end), std::back_inserter(DISPATCH_BUFFER), ooo_model_instr::program_order);
   DECODE_BUFFER.erase(decode_buffer_begin, decode_buffer_end);
   DIB_HIT_BUFFER.erase(dib_hit_buffer_begin, dib_hit_buffer_end);
 
@@ -816,13 +819,22 @@ long O3_CPU::handle_memory_return()
 {
   long progress{0};
 
-  for (champsim::bandwidth fetch_bw{FETCH_WIDTH}, l1i_bw{L1I_BANDWIDTH};
-       fetch_bw.has_remaining() && l1i_bw.has_remaining() && !L1I_bus.lower_level->get_returned().empty(); l1i_bw.consume()) {
-    auto& l1i_entry = L1I_bus.lower_level->get_returned().front();
+  auto& l1i_returned = L1I_bus.lower_level->get_returned();
+  for (champsim::bandwidth fetch_bw{FETCH_WIDTH}, l1i_bw{L1I_BANDWIDTH}; fetch_bw.has_remaining() && l1i_bw.has_remaining() && !l1i_returned.empty();
+       l1i_bw.consume()) {
+    auto& l1i_entry = l1i_returned.front();
 
-    while (fetch_bw.has_remaining() && !l1i_entry.instr_depend_on_me.empty()) {
-      auto fetched = std::find_if(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), ooo_model_instr::matches_id(l1i_entry.instr_depend_on_me.front()));
-      if (fetched != std::end(IFETCH_BUFFER) && champsim::block_number{fetched->ip} == champsim::block_number{l1i_entry.v_address} && fetched->fetch_issued) {
+    // Each iteration consumes one dependent id; bandwidth is spent only on
+    // matches. The consumed prefix is erased once, after the loop (the old
+    // per-element front-erase made this quadratic in the dependent count),
+    // and the buffer search is a partition_point: IFETCH_BUFFER is sorted by
+    // instr_id (appended in program order, erased only at the front).
+    std::size_t consumed = 0;
+    while (fetch_bw.has_remaining() && consumed < std::size(l1i_entry.instr_depend_on_me)) {
+      const auto depend_id = l1i_entry.instr_depend_on_me[consumed];
+      auto fetched = std::partition_point(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), ooo_model_instr::precedes(depend_id));
+      if (fetched != std::end(IFETCH_BUFFER) && fetched->instr_id == depend_id
+          && champsim::block_number{fetched->ip} == champsim::block_number{l1i_entry.v_address} && fetched->fetch_issued) {
         fetched->fetch_completed = true;
         fetch_bw.consume();
         ++progress;
@@ -832,12 +844,13 @@ long O3_CPU::handle_memory_return()
         }
       }
 
-      l1i_entry.instr_depend_on_me.erase(std::begin(l1i_entry.instr_depend_on_me));
+      ++consumed;
     }
+    l1i_entry.instr_depend_on_me.erase(std::begin(l1i_entry.instr_depend_on_me), std::next(std::begin(l1i_entry.instr_depend_on_me), static_cast<long>(consumed)));
 
     // remove this entry if we have serviced all of its instructions
     if (l1i_entry.instr_depend_on_me.empty()) {
-      L1I_bus.lower_level->get_returned().pop_front();
+      l1i_returned.pop_front();
       ++progress;
     }
   }

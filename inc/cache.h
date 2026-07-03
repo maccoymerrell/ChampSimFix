@@ -205,6 +205,9 @@ private:
   // Hoisted invariants (set once at construction):
   // MAX_TAG * (HIT_LATENCY / clock_period) — the tag-check window limit
   long tag_check_window_limit_ = 0;
+  // set index = (address >> shift) & mask (NUM_SET is a power of two)
+  unsigned set_index_shift_ = 0;
+  uint64_t set_index_mask_ = 0;
   // per-access-type prefetcher activation lookup (replaces a std::count
   // over pref_activate_mask on every tag check)
   std::array<bool, static_cast<std::size_t>(access_type::NUM_TYPES)> pref_activate_lut_{};
@@ -291,6 +294,8 @@ public:
   {
     // Hoisted invariants for the per-cycle path
     tag_check_window_limit_ = champsim::to_underlying(MAX_TAG) * static_cast<long>(HIT_LATENCY / clock_period);
+    set_index_shift_ = static_cast<unsigned>(champsim::to_underlying(OFFSET_BITS));
+    set_index_mask_ = NUM_SET - 1;
     // Admission bandwidth is clamped to (limit - size), so occupancy never
     // exceeds the window limit; MAX_TAG of headroom is pure paranoia.
     inflight_tag_check.set_capacity(static_cast<std::size_t>(tag_check_window_limit_ + champsim::to_underlying(MAX_TAG)));

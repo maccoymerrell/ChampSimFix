@@ -364,7 +364,7 @@ long DRAM_CHANNEL::populate_dbus()
       // Put this request on the data bus
 
       // get which bankgroup we are in
-      auto op_bankgroup = bankgroup_request_index(iter_next_process->pkt->value().address);
+      auto op_bankgroup = iter_next_process->pkt->value().bankgroup_req_idx;
       auto bankgroup_ready_time = bankgroup_readytime[op_bankgroup];
 
       active_request = iter_next_process;
@@ -433,8 +433,8 @@ DRAM_CHANNEL::queue_type::iterator DRAM_CHANNEL::schedule_packet()
       return false;
     }
 
-    auto lop_idx = this->bank_request_index(lhs.value().address);
-    auto rop_idx = this->bank_request_index(rhs.value().address);
+    auto lop_idx = lhs.value().bank_req_idx;
+    auto rop_idx = rhs.value().bank_req_idx;
     auto rready = !this->bank_request[rop_idx].valid;
     auto lready = !this->bank_request[lop_idx].valid;
     return (rready == lready) ? lhs.value().ready_time <= rhs.value().ready_time : lready;
@@ -452,8 +452,8 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
 {
   long progress{0};
   if (pkt->has_value() && pkt->value().ready_time <= current_time) {
-    auto op_row = address_mapping.get_row(pkt->value().address);
-    auto op_idx = bank_request_index(pkt->value().address);
+    auto op_row = pkt->value().row_idx;
+    auto op_idx = pkt->value().bank_req_idx;
 
     if (!bank_request[op_idx].valid && !bank_request[op_idx].under_refresh) {
       bool row_buffer_hit = (bank_request[op_idx].open_row.has_value() && *(bank_request[op_idx].open_row) == op_row);
@@ -647,6 +647,9 @@ DRAM_CHANNEL::request_type::request_type(const champsim::request& req)
 bool DRAM_CHANNEL::insert_rq(request_type entry)
 {
   if (auto rq_it = std::find_if_not(std::begin(RQ), std::end(RQ), [](const auto& pkt) { return pkt.has_value(); }); rq_it != std::end(RQ)) {
+    entry.bank_req_idx = bank_request_index(entry.address);
+    entry.bankgroup_req_idx = bankgroup_request_index(entry.address);
+    entry.row_idx = address_mapping.get_row(entry.address);
     ++rq_occupancy_ct;
     if (!entry.forward_checked) {
       ++rq_unchecked_ct;
@@ -660,6 +663,9 @@ bool DRAM_CHANNEL::insert_rq(request_type entry)
 bool DRAM_CHANNEL::insert_wq(request_type entry)
 {
   if (auto wq_it = std::find_if_not(std::begin(WQ), std::end(WQ), [](const auto& pkt) { return pkt.has_value(); }); wq_it != std::end(WQ)) {
+    entry.bank_req_idx = bank_request_index(entry.address);
+    entry.bankgroup_req_idx = bankgroup_request_index(entry.address);
+    entry.row_idx = address_mapping.get_row(entry.address);
     ++wq_occupancy_ct;
     if (!entry.forward_checked) {
       ++wq_unchecked_ct;

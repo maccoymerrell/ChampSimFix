@@ -104,7 +104,10 @@ public:
   // instruction buffer
   struct dib_shift {
     champsim::data::bits shamt;
-    auto operator()(champsim::address val) const { return val.slice_upper(shamt); }
+    // Integer projection: equality of the shifted values matches equality of
+    // the upper-slice objects the DIB previously stored, without building a
+    // dynamic-extent slice per lookup (two lookups per fetched instruction).
+    auto operator()(champsim::address val) const { return val.to<uint64_t>() >> champsim::to_underlying(shamt); }
   };
   using dib_type = champsim::msl::lru_table<champsim::address, dib_shift, dib_shift>;
   dib_type DIB;

@@ -537,7 +537,13 @@ long CACHE::operate()
 uint64_t CACHE::get_set(uint64_t address) const { return static_cast<uint64_t>(get_set_index(champsim::address{address})); }
 // LCOV_EXCL_STOP
 
-long CACHE::get_set_index(champsim::address address) const { return address.slice(champsim::dynamic_extent{OFFSET_BITS, champsim::lg2(NUM_SET)}).to<long>(); }
+long CACHE::get_set_index(champsim::address address) const
+{
+  // Same value as slicing lg2(NUM_SET) bits above OFFSET_BITS, without
+  // constructing a dynamic-extent slice per lookup (this is called for every
+  // tag check, fill, and replacement update).
+  return static_cast<long>((address.to<uint64_t>() >> set_index_shift_) & set_index_mask_);
+}
 
 template <typename It>
 std::pair<It, It> get_span(It anchor, typename std::iterator_traits<It>::difference_type set_idx, typename std::iterator_traits<It>::difference_type num_way)

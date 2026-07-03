@@ -132,13 +132,28 @@ private:
   template <typename T>
   ooo_model_instr(T instr, champsim::origin local_origin) : ip(instr.ip), is_branch(instr.is_branch), branch_taken(instr.branch_taken), origin(local_origin)
   {
+    // Reserve the exact element counts: growth through back_inserter cost up
+    // to three reallocations per vector, per instruction read from the trace.
+    auto count_nonzero = [](const auto& arr) { return static_cast<std::size_t>(std::count_if(std::begin(arr), std::end(arr), [](auto x) { return x != 0; })); };
+    if (auto n = count_nonzero(instr.destination_registers); n != 0) {
+      this->destination_registers.reserve(n);
+    }
+    if (auto n = count_nonzero(instr.source_registers); n != 0) {
+      this->source_registers.reserve(n);
+    }
     std::remove_copy(std::begin(instr.destination_registers), std::end(instr.destination_registers), std::back_inserter(this->destination_registers), 0);
     std::remove_copy(std::begin(instr.source_registers), std::end(instr.source_registers), std::back_inserter(this->source_registers), 0);
 
     auto dmem_end = std::remove(std::begin(instr.destination_memory), std::end(instr.destination_memory), uint64_t{0});
+    if (auto n = std::distance(std::begin(instr.destination_memory), dmem_end); n != 0) {
+      this->destination_memory.reserve(static_cast<std::size_t>(n));
+    }
     std::transform(std::begin(instr.destination_memory), dmem_end, std::back_inserter(this->destination_memory), [](auto x) { return champsim::address{x}; });
 
     auto smem_end = std::remove(std::begin(instr.source_memory), std::end(instr.source_memory), uint64_t{0});
+    if (auto n = std::distance(std::begin(instr.source_memory), smem_end); n != 0) {
+      this->source_memory.reserve(static_cast<std::size_t>(n));
+    }
     std::transform(std::begin(instr.source_memory), smem_end, std::back_inserter(this->source_memory), [](auto x) { return champsim::address{x}; });
 
     bool writes_sp = std::count(std::begin(destination_registers), std::end(destination_registers), champsim::REG_STACK_POINTER);
