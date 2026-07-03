@@ -20,7 +20,6 @@
 #include <cassert>
 #include <cmath>
 #include <iomanip>
-#include <cstdlib>
 #include <numeric>
 #include <fmt/core.h>
 
@@ -73,7 +72,7 @@ CACHE::fill_type::fill_type(tag_lookup_type&& req, champsim::chrono::clock::time
 CACHE::fill_type CACHE::fill_type::merge(fill_type predecessor, fill_type successor)
 {
   std::vector<uint64_t> merged_instr{};
-  std::vector<champsim::modules::channel_module*> merged_return{};
+  std::vector<std::deque<response_type>*> merged_return{};
 
   std::set_union(std::begin(predecessor.instr_depend_on_me), std::end(predecessor.instr_depend_on_me), std::begin(successor.instr_depend_on_me),
                  std::end(successor.instr_depend_on_me), std::back_inserter(merged_instr));
@@ -208,7 +207,7 @@ bool CACHE::handle_fill(const fill_type& fill)
 
   response_type response{fill.address, fill.v_address, fill.data_promise->data, metadata_thru, fill.instr_depend_on_me};
   for (auto* ret : fill.to_return) {
-    ret->return_response(response);
+    ret->push_back(response);
   }
 
   return true;
@@ -245,7 +244,7 @@ bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
 
     response_type response{handle_pkt.address, handle_pkt.v_address, way->data, metadata_thru, handle_pkt.instr_depend_on_me};
     for (auto* ret : handle_pkt.to_return) {
-      ret->return_response(response);
+      ret->push_back(response);
     }
 
     way->dirty |= (handle_pkt.type == access_type::WRITE);
@@ -350,7 +349,6 @@ bool CACHE::handle_write(tag_lookup_type& handle_pkt)
 
   fill_type to_allocate{std::move(handle_pkt), current_time}; // entry is consumed by the caller
   to_allocate.data_promise.ready_at(current_time + (is_warmup() ? champsim::chrono::clock::duration{} : FILL_LATENCY));
-  note_busier(); // enters inflight_fills (the consumed tag entry's erase is counted at the partition erase)
   inflight_fills.push_back(std::move(to_allocate));
 
   sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.origin.cpu()}); // scalars, unaffected by the move
@@ -373,7 +371,7 @@ auto CACHE::initiate_tag_check(champsim::modules::channel_module* ul)
 
     if constexpr (UpdateRequest) {
       if (response_requested) {
-        retval.to_return = {ul};
+        retval.to_return = {&ul->get_returned()};
       }
     } else {
       (void)ul; // supress warning about ul being unused
@@ -390,9 +388,10 @@ auto CACHE::initiate_tag_check(champsim::modules::channel_module* ul)
 
 long CACHE::poll_cycle()
 {
-  // Superseded by inline wake (busy_count_, registered in the constructor);
-  // kept as the definition of idleness for the debug cross-check in
-  // operate(). The contractual per-skipped-cycle work lives in skip_tick().
+  // Skip a cycle only when nothing is pending anywhere: no responses to
+  // finish, no inflight work, and no requests waiting on any upper channel.
+  // MSHR-only-pending state is skippable — the wake event is an arrival on
+  // lower_level->get_returned(), which is re-checked here every cycle.
   const bool idle = std::empty(lower_level->get_returned())
                     && (lower_translate == nullptr || std::empty(lower_translate->get_returned()))
                     && std::empty(inflight_fills) && std::empty(inflight_tag_check)
@@ -400,38 +399,26 @@ long CACHE::poll_cycle()
                     && std::all_of(std::cbegin(upper_levels), std::cend(upper_levels), [](auto* ul) {
                          return std::empty(ul->get_rq()) && std::empty(ul->get_wq()) && std::empty(ul->get_pq());
                        });
-  return idle ? 1 : 0;
-}
+  if (!idle) {
+    return 0;
+  }
 
-void CACHE::skip_tick()
-{
-  // Per-cycle bookkeeping that operate() would have done must still happen
-  // on skipped cycles so the observable cycle stream is unchanged:
+  // Per-cycle bookkeeping that operate() would have done must still happen on
+  // skipped cycles so the observable cycle stream is unchanged:
   //  - the upper-level round-robin keeps its arbitration alignment, and
   //  - prefetchers keep their contractual once-per-cycle hook (internal
   //    clocks, lookahead machines). A prefetch issued here lands in
-  //    internal_PQ, bumping busy_count_, so the next cycle simulates — the
-  //    same first tag-check cycle it would get without skipping.
+  //    internal_PQ, so the next poll returns 0 — the same first
+  //    tag-check cycle it would get without skipping.
   if (std::size(upper_levels) > 1) {
     std::rotate(upper_levels.begin(), upper_levels.begin() + 1, upper_levels.end());
   }
   impl_prefetcher_cycle_operate();
+  return 1;
 }
 
 long CACHE::operate()
 {
-  // Self-check: the inline wake counter must mirror the idle predicate
-  // exactly. Runtime-gated (the test harness sets it) so production runs
-  // pay one predictable branch, not the predicate.
-  static const bool wake_selfcheck = std::getenv("CHAMPSIM_WAKE_SELFCHECK") != nullptr;
-  if (wake_selfcheck && (busy_count_ == 0) != (poll_cycle() == 1)) {
-    fmt::print(stderr, "[WAKE-MISMATCH] {} busy={} lowret={} trret={} fills={} tag={} stash={} ipq={} uppers={}\n", NAME, busy_count_,
-               std::size(lower_level->get_returned()), lower_translate ? std::size(lower_translate->get_returned()) : 0, std::size(inflight_fills),
-               std::size(inflight_tag_check), std::size(translation_stash), std::size(internal_PQ),
-               std::accumulate(std::cbegin(upper_levels), std::cend(upper_levels), std::size_t{0},
-                               [](auto acc, auto* ul) { return acc + std::size(ul->get_rq()) + std::size(ul->get_wq()) + std::size(ul->get_pq()); }));
-    assert(false);
-  }
   long progress{0};
 
   auto is_ready = [time = current_time](const auto& entry) {
@@ -444,14 +431,12 @@ long CACHE::operate()
   // Finish returns
   std::for_each(std::cbegin(lower_level->get_returned()), std::cend(lower_level->get_returned()), [this](const auto& pkt) { this->finish_packet(pkt); });
   progress += std::distance(std::cbegin(lower_level->get_returned()), std::cend(lower_level->get_returned()));
-  note_idler(std::distance(std::cbegin(lower_level->get_returned()), std::cend(lower_level->get_returned())));
   lower_level->get_returned().clear();
 
   // Finish translations
   if (lower_translate != nullptr) {
     std::for_each(std::cbegin(lower_translate->get_returned()), std::cend(lower_translate->get_returned()), [this](const auto& pkt) { this->finish_translation(pkt); });
     progress += std::distance(std::cbegin(lower_translate->get_returned()), std::cend(lower_translate->get_returned()));
-    note_idler(std::distance(std::cbegin(lower_translate->get_returned()), std::cend(lower_translate->get_returned())));
     lower_translate->get_returned().clear();
   }
 
@@ -461,7 +446,6 @@ long CACHE::operate()
                                                      [time = current_time](const auto& x) { return x.data_promise.is_ready_at(time); });
   auto complete_end = std::find_if_not(fill_begin, fill_end, [this](const auto& x) { return this->handle_fill(x); });
   fill_bw.consume(std::distance(fill_begin, complete_end));
-  note_idler(std::distance(fill_begin, complete_end));
   inflight_fills.erase(fill_begin, complete_end);
 
   // Initiate tag checks (window limit hoisted: MAX_TAG * hit-latency cycles
@@ -535,7 +519,6 @@ long CACHE::operate()
   auto hits_end = champsim::stable_partition_small(tag_check_ready_begin, tag_check_ready_end, [this](const auto& pkt) { return this->try_hit(pkt); });
   auto finish_tag_check_end = champsim::stable_partition_small(hits_end, tag_check_ready_end, do_handle_miss);
   tag_check_bw.consume(std::distance(tag_check_ready_begin, finish_tag_check_end));
-  note_idler(std::distance(tag_check_ready_begin, finish_tag_check_end));
   inflight_tag_check.erase(tag_check_ready_begin, finish_tag_check_end);
 
   impl_prefetcher_cycle_operate();
@@ -620,7 +603,6 @@ bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint3
   pf_packet.v_address = virtual_prefetch ? pf_addr : champsim::address{};
   pf_packet.is_translated = !virtual_prefetch;
 
-  note_busier(); // enters internal_PQ
   internal_PQ.emplace_back(pf_packet, true, !fill_this_level);
   ++sim_stats.pf_issued;
 
@@ -659,7 +641,6 @@ void CACHE::finish_packet(const response_type& packet)
   }
 
   std::iter_swap(mshr_entry, std::begin(MSHR));
-  note_busier(); // MSHR (uncounted) -> inflight_fills (counted)
   inflight_fills.push_back(MSHR.front());
   MSHR.pop_front();
 }

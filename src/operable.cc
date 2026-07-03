@@ -40,15 +40,7 @@ long champsim::operable::operate_on(const champsim::chrono::clock& clock)
     // same end-of-cycle timestamp that operate() does (matching _operate()).
     current_time += clock_period;
     if (skip_enabled_) {
-      if (wake_inline_) {
-        // Zero-overhead wake check: a plain field read decides the skip.
-        if (busy_count_ == 0) {
-          if (has_skip_tick_) {
-            skip_tick();
-          }
-          continue;
-        }
-      } else if (long skip = poll_cycle(); skip > 0) {
+      if (long skip = poll_cycle(); skip > 0) {
         current_time += (skip - 1) * clock_period; // this cycle plus (skip - 1) more
         continue;
       }

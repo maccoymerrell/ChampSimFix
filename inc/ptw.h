@@ -63,7 +63,7 @@ class PageTableWalker : public champsim::modules::page_table_walker_module, publ
     champsim::waitable<champsim::address> data{};
 
     std::vector<uint64_t> instr_depend_on_me{};
-    std::vector<champsim::modules::channel_module*> to_return{};
+    std::vector<std::deque<response_type>*> to_return{};
 
     uint32_t pf_metadata = 0;
     champsim::origin origin{};

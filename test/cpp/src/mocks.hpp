@@ -76,7 +76,7 @@ public:
 
     for (auto& pkt : ready_packets) {
       if (pkt.response_requested)
-        queues.return_response(champsim::channel::response_type{pkt});
+        queues.returned.push_back(champsim::channel::response_type{pkt});
     }
     ready_packets.clear();
 
@@ -132,7 +132,7 @@ public:
 
     for (auto& pkt : ready_packets) {
       if (pkt.response_requested)
-        queues.return_response(champsim::channel::response_type{pkt});
+        queues.returned.push_back(champsim::channel::response_type{pkt});
     }
     ready_packets.clear();
 
@@ -184,7 +184,7 @@ public:
   {
     for (const auto& pkt : packets) {
       if (pkt.response_requested)
-        queues.return_response(champsim::channel::response_type{pkt});
+        queues.returned.push_back(champsim::channel::response_type{pkt});
     }
     packets.clear();
   }
@@ -194,7 +194,7 @@ public:
     auto pkt_it = std::partition(std::begin(packets), std::end(packets), [addr](auto x) { return x.address != addr; });
     std::for_each(pkt_it, std::end(packets), [&](const auto& pkt) {
       if (pkt.response_requested)
-        queues.return_response(champsim::channel::response_type{pkt});
+        queues.returned.push_back(champsim::channel::response_type{pkt});
     });
     packets.erase(pkt_it, std::end(packets));
   }

@@ -131,7 +131,7 @@ ifdef TEST_NUM
 selected_test = -\# "[$(addprefix \#,$(filter $(addsuffix %,$(TEST_NUM)), $(patsubst %.cc,%,$(notdir $(test_sources)))))]"
 endif
 test: $(test_main_name)
-	CHAMPSIM_WAKE_SELFCHECK=1 $(test_main_name) $(selected_test)
+	$(test_main_name) $(selected_test)
 
 ### Clean
 clean: compile_commands_clean

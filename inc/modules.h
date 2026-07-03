@@ -964,17 +964,6 @@ struct module_base {
     // recorded, without paying for n request constructions.
     virtual void record_rejected_rq(long n) { (void)n; }
 
-    // Deliver a response to this channel's returned queue. All response
-    // producers route through here (rather than pushing the deque raw) so
-    // the implementation can notify the consumer's inline wake state.
-    virtual void return_response(const response_type& r) { get_returned().push_back(r); }
-
-    // Inline-wake watcher hooks: the module consuming this channel's
-    // request queues / returned responses registers itself so producers
-    // increment its busy count on arrival (see operable::note_busier).
-    virtual void set_request_watcher(champsim::operable* op) { (void)op; }
-    virtual void set_response_watcher(champsim::operable* op) { (void)op; }
-
     virtual std::size_t rq_occupancy() const = 0;
     virtual std::size_t wq_occupancy() const = 0;
     virtual std::size_t pq_occupancy() const = 0;

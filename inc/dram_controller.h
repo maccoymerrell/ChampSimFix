@@ -121,7 +121,7 @@ struct DRAM_CHANNEL final : public champsim::operable {
     std::size_t row_idx = 0;
 
     std::vector<uint64_t> instr_depend_on_me{};
-    std::vector<champsim::modules::channel_module*> to_return{};
+    std::vector<std::deque<response_type>*> to_return{};
 
     explicit request_type(const champsim::request& req);
   };

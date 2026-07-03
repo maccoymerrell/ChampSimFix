@@ -33,8 +33,6 @@
 
 namespace champsim
 {
-class operable;
-
 
 class channel: public champsim::modules::channel_module
 {
@@ -56,11 +54,6 @@ public:
   std::deque<request_type> RQ{}, PQ{}, WQ{};
   std::deque<response_type> returned{};
 
-  // Inline-wake watchers (see channel_module): the request consumer and the
-  // response consumer of this channel.
-  champsim::operable* request_watcher_ = nullptr;
-  champsim::operable* response_watcher_ = nullptr;
-
   stats_type sim_stats{}, roi_stats{};
 
   channel();
@@ -68,9 +61,6 @@ public:
 
   bool add_rq(const request_type& packet) override;
   void record_rejected_rq(long n) override;
-  void return_response(const response_type& r) override;
-  void set_request_watcher(champsim::operable* op) override { request_watcher_ = op; }
-  void set_response_watcher(champsim::operable* op) override { response_watcher_ = op; }
   bool add_wq(const request_type& packet) override;
   bool add_pq(const request_type& packet) override;
 

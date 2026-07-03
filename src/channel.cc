@@ -16,8 +16,6 @@
 
 #include "channel.h"
 
-#include "operable.h"
-
 #include <cassert>
 #include <fmt/core.h>
 
@@ -44,9 +42,6 @@ bool champsim::channel::do_add_queue(R& queue, std::size_t queue_size, const typ
 
   // One copy into the queue (the local staging copy was a second, dead one)
   queue.push_back(packet);
-  if (request_watcher_ != nullptr) {
-    request_watcher_->note_busier();
-  }
 
   return true;
 }
@@ -69,14 +64,6 @@ bool champsim::channel::add_rq(const request_type& packet)
   }
 
   return result;
-}
-
-void champsim::channel::return_response(const response_type& r)
-{
-  returned.push_back(r);
-  if (response_watcher_ != nullptr) {
-    response_watcher_->note_busier();
-  }
 }
 
 void champsim::channel::record_rejected_rq(long n)

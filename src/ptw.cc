@@ -16,8 +16,6 @@
 
 #include "ptw.h"
 
-#include <cstdlib>
-
 #include <cmath>
 #include <numeric>
 #include <fmt/chrono.h>
@@ -38,18 +36,6 @@ PageTableWalker::PageTableWalker(champsim::modules::ModuleBuilder builder)
       HIT_LATENCY(builder.get_parameter<unsigned>("latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), vmem(builder.get_parameter<champsim::modules::vmem_module*>("vmem")), pt_levels_(vmem->get_pt_levels())
 {
   log2_page_size_ = builder.get_parameter<unsigned>("log2_page_size");
-
-  // Inline wake: busy_count_ tracks |lower returned| + |completed| +
-  // |finished| + upper request populations. Arrivals bump it through the
-  // channel watchers; MSHR entries awaiting responses are deliberately
-  // uncounted (response arrival is the wake event), matching the old poll.
-  wake_inline_ = true;
-  for (auto* ul : upper_levels) {
-    ul->set_request_watcher(this);
-  }
-  if (lower_level != nullptr) { // default-built test walkers may be unwired
-    lower_level->set_response_watcher(this);
-  }
   auto local_pscl_dims = builder.get_parameter<std::vector<std::array<uint32_t, 3>>>("pscl_dims");
   auto pt_levels = vmem->get_pt_levels();
   // Valid PSCL levels are [2, pt_levels]. Level 1 is never cached (handle_fill
@@ -104,7 +90,7 @@ auto PageTableWalker::handle_read(const request_type& handle_pkt, channel_type* 
   fwd_mshr.address = champsim::address{champsim::splice(champsim::page_number{walk_init.ptw_addr}, champsim::page_offset{walk_offset})};
   fwd_mshr.v_address = handle_pkt.address;
   if (handle_pkt.response_requested) {
-    fwd_mshr.to_return = {ul};
+    fwd_mshr.to_return = {&ul->get_returned()};
   }
 
   if constexpr (champsim::debug_print) {
@@ -154,8 +140,11 @@ auto PageTableWalker::step_translation(const mshr_type& source) -> std::optional
 
 long PageTableWalker::poll_cycle()
 {
-  // Superseded by inline wake (busy_count_, see the constructor); kept as
-  // the definition of idleness for the debug cross-check in operate().
+  // Skip only when no walk state exists anywhere: nothing returned from
+  // below, no in-flight walk steps, and no requests on any upper channel.
+  // MSHR entries awaiting a lower-level response are skippable — the wake
+  // event is an arrival on lower_level->get_returned(), re-checked here
+  // every cycle.
   const bool idle = std::empty(lower_level->get_returned()) && std::empty(finished) && std::empty(completed)
                     && std::all_of(std::cbegin(upper_levels), std::cend(upper_levels),
                                    [](auto* ul) { return std::empty(ul->get_rq()); });
@@ -164,9 +153,6 @@ long PageTableWalker::poll_cycle()
 
 long PageTableWalker::operate()
 {
-  // Self-check (runtime-gated; see CACHE::operate)
-  static const bool wake_selfcheck = std::getenv("CHAMPSIM_WAKE_SELFCHECK") != nullptr;
-  assert(!wake_selfcheck || (busy_count_ == 0) == (poll_cycle() == 1));
   long progress{0};
 
   auto is_ready = [time = current_time](const auto& pkt) {
@@ -175,7 +161,6 @@ long PageTableWalker::operate()
   auto& returned = lower_level->get_returned();
   std::for_each(std::cbegin(returned), std::cend(returned), [this](const auto& pkt) { this->finish_packet(pkt); });
   progress += std::distance(std::cbegin(returned), std::cend(returned));
-  note_idler(std::distance(std::cbegin(returned), std::cend(returned)));
   returned.clear();
 
   // Scratch vector reused across cycles to avoid a per-cycle allocation
@@ -185,12 +170,11 @@ long PageTableWalker::operate()
   champsim::bandwidth fill_bw{MAX_FILL};
   auto [complete_begin, complete_end] = champsim::get_span_p(std::cbegin(completed), std::cend(completed), fill_bw, is_ready);
   std::for_each(complete_begin, complete_end, [](auto& mshr_entry) {
-    for (auto* ret : mshr_entry.to_return) {
-      ret->return_response({mshr_entry.v_address, mshr_entry.v_address, *mshr_entry.data, mshr_entry.pf_metadata, mshr_entry.instr_depend_on_me});
+    for (auto ret : mshr_entry.to_return) {
+      ret->emplace_back(mshr_entry.v_address, mshr_entry.v_address, *mshr_entry.data, mshr_entry.pf_metadata, mshr_entry.instr_depend_on_me);
     }
   });
   fill_bw.consume(std::distance(complete_begin, complete_end));
-  note_idler(std::distance(complete_begin, complete_end));
   completed.erase(complete_begin, complete_end);
 
   auto [mshr_begin, mshr_end] = champsim::get_span_p(std::cbegin(finished), std::cend(finished), fill_bw, is_ready);
@@ -202,7 +186,6 @@ long PageTableWalker::operate()
     return result.has_value();
   });
   fill_bw.consume(std::distance(mshr_begin, mshr_end));
-  note_idler(std::distance(mshr_begin, mshr_end));
   finished.erase(mshr_begin, mshr_end);
 
   champsim::bandwidth tag_bw{MAX_READ};
@@ -215,7 +198,6 @@ long PageTableWalker::operate()
       return result.has_value();
     });
     tag_bw.consume(std::distance(rq_begin, rq_end));
-    note_idler(std::distance(rq_begin, rq_end));
     ul->get_rq().erase(rq_begin, rq_end);
   }
 
@@ -271,7 +253,6 @@ void PageTableWalker::finish_packet(const response_type& packet)
     mshr_entry.data = is_last_step(mshr_entry) ? finish_last_step(mshr_entry) : finish_step(mshr_entry);
   });
 
-  note_busier(std::distance(std::begin(MSHR), last_finished)); // MSHR (uncounted) -> completed/finished (counted)
   std::partition_copy(std::begin(MSHR), last_finished, std::back_inserter(completed), std::back_inserter(finished), is_last_step);
   MSHR.erase(std::begin(MSHR), last_finished);
 }

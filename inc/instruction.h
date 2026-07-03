@@ -30,7 +30,6 @@
 #include "chrono.h"
 #include "origin.h"
 #include "trace_instruction.h"
-#include "util/bounded_array.h"
 
 // branch types
 enum branch_type {
@@ -122,30 +121,39 @@ struct ooo_model_instr : champsim::program_ordered<ooo_model_instr> {
 
   unsigned completed_mem_ops = 0;
 
-  // Operand collections are bounded by the trace record layout (at most
-  // NUM_INSTR_DESTINATIONS_SPARC destinations and NUM_INSTR_SOURCES
-  // sources), so they live inline: the instruction is one contiguous block,
-  // and decoding a record allocates nothing.
-  champsim::bounded_array<PHYSICAL_REGISTER_ID, NUM_INSTR_DESTINATIONS_SPARC> destination_registers{}; // output registers
-  champsim::bounded_array<PHYSICAL_REGISTER_ID, NUM_INSTR_SOURCES> source_registers{};                 // input registers
+  std::vector<PHYSICAL_REGISTER_ID> destination_registers = {}; // output registers
+  std::vector<PHYSICAL_REGISTER_ID> source_registers = {};      // input registers
 
-  champsim::bounded_array<champsim::address, NUM_INSTR_DESTINATIONS_SPARC> destination_memory{};
-  champsim::bounded_array<champsim::address, NUM_INSTR_SOURCES> source_memory{};
+  std::vector<champsim::address> destination_memory = {};
+  std::vector<champsim::address> source_memory = {};
 
 
 private:
   template <typename T>
   ooo_model_instr(T instr, champsim::origin local_origin) : ip(instr.ip), is_branch(instr.is_branch), branch_taken(instr.branch_taken), origin(local_origin)
   {
-    // Protocol-style decode: filter the record's fixed arrays straight into
-    // the inline operand arrays — no allocation, no transform buffers.
+    // Reserve the exact element counts: growth through back_inserter cost up
+    // to three reallocations per vector, per instruction read from the trace.
+    auto count_nonzero = [](const auto& arr) { return static_cast<std::size_t>(std::count_if(std::begin(arr), std::end(arr), [](auto x) { return x != 0; })); };
+    if (auto n = count_nonzero(instr.destination_registers); n != 0) {
+      this->destination_registers.reserve(n);
+    }
+    if (auto n = count_nonzero(instr.source_registers); n != 0) {
+      this->source_registers.reserve(n);
+    }
     std::remove_copy(std::begin(instr.destination_registers), std::end(instr.destination_registers), std::back_inserter(this->destination_registers), 0);
     std::remove_copy(std::begin(instr.source_registers), std::end(instr.source_registers), std::back_inserter(this->source_registers), 0);
 
     auto dmem_end = std::remove(std::begin(instr.destination_memory), std::end(instr.destination_memory), uint64_t{0});
+    if (auto n = std::distance(std::begin(instr.destination_memory), dmem_end); n != 0) {
+      this->destination_memory.reserve(static_cast<std::size_t>(n));
+    }
     std::transform(std::begin(instr.destination_memory), dmem_end, std::back_inserter(this->destination_memory), [](auto x) { return champsim::address{x}; });
 
     auto smem_end = std::remove(std::begin(instr.source_memory), std::end(instr.source_memory), uint64_t{0});
+    if (auto n = std::distance(std::begin(instr.source_memory), smem_end); n != 0) {
+      this->source_memory.reserve(static_cast<std::size_t>(n));
+    }
     std::transform(std::begin(instr.source_memory), smem_end, std::back_inserter(this->source_memory), [](auto x) { return champsim::address{x}; });
 
     bool writes_sp = std::count(std::begin(destination_registers), std::end(destination_registers), champsim::REG_STACK_POINTER);
