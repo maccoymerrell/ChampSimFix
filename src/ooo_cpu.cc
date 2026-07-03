@@ -690,21 +690,37 @@ long O3_CPU::operate_lsq()
   champsim::bandwidth load_bw{LQ_WIDTH};
 
   // Visit issue candidates (occupied, no producer, not yet issued) in index
-  // order — identical order and identical action set to a full scan.
+  // order — identical order and identical action set to a full scan. Every
+  // load targets the same L1D read queue, and nothing drains it inside this
+  // loop, so after one full-queue rejection every further attempt this
+  // cycle fails identically: count those instead of constructing and
+  // rejecting a request apiece (under backpressure hundreds of loads can be
+  // waiting). The counted attempts' queue accounting is replicated below.
+  bool rq_rejected = false;
+  long rejected_attempts = 0;
   for (std::size_t word = 0; word < std::size(lq_unissued_) && load_bw.has_remaining(); ++word) {
     for (uint64_t bits = lq_unissued_[word]; bits != 0 && load_bw.has_remaining(); bits &= bits - 1) {
       const std::size_t idx = word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits));
       auto& lq_entry = LQ[idx];
       if (lq_entry->producer_id == std::numeric_limits<uint64_t>::max() && !lq_entry->fetch_issued
           && lq_entry->ready_time < current_time) {
+        if (rq_rejected) {
+          ++rejected_attempts;
+          continue;
+        }
         auto success = execute_load(*lq_entry);
         if (success) {
           load_bw.consume();
           lq_entry->fetch_issued = true;
           lq_clear_unissued(idx);
+        } else {
+          rq_rejected = true;
         }
       }
     }
+  }
+  if (rejected_attempts > 0) {
+    L1D_bus.lower_level->record_rejected_rq(rejected_attempts);
   }
 
   return store_bw.amount_consumed() + load_bw.amount_consumed();

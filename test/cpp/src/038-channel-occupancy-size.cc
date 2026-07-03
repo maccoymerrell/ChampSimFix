@@ -80,3 +80,22 @@ TEST_CASE("A const channel can return its PQ size")
 
   REQUIRE(uut.pq_size() == pq_size);
 }
+
+TEST_CASE("Bulk-recorded rejections account exactly like real full-queue attempts")
+{
+  champsim::channel uut{champsim::modules::ModuleBuilder{"test_channel_38_rej", "DEFAULT_CHANNEL", champsim::defaults::default_channel()}};
+
+  // fill the RQ, then bounce one real attempt off the full queue
+  champsim::channel::request_type packet{};
+  packet.address = champsim::address{0xdeadbeef};
+  while (uut.add_rq(packet)) {
+  }
+  auto after_real = uut.get_sim_stats();
+
+  // five skipped attempts must account identically to five rejected calls
+  uut.record_rejected_rq(5);
+  auto after_bulk = uut.get_sim_stats();
+  CHECK(after_bulk.RQ_ACCESS == after_real.RQ_ACCESS + 5);
+  CHECK(after_bulk.RQ_FULL == after_real.RQ_FULL + 5);
+  CHECK(after_bulk.RQ_TO_CACHE == after_real.RQ_TO_CACHE);
+}

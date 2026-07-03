@@ -958,6 +958,12 @@ struct module_base {
     virtual bool add_wq(const request_type& packet) = 0;
     virtual bool add_pq(const request_type& packet) = 0;
 
+    // Record n read requests that were not attempted because a rejection
+    // this cycle proves the queue is full: the accounting (accesses and
+    // full-rejections) must match what n real add_rq calls would have
+    // recorded, without paying for n request constructions.
+    virtual void record_rejected_rq(long n) { (void)n; }
+
     virtual std::size_t rq_occupancy() const = 0;
     virtual std::size_t wq_occupancy() const = 0;
     virtual std::size_t pq_occupancy() const = 0;

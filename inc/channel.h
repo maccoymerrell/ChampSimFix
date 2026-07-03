@@ -60,6 +60,7 @@ public:
   channel(champsim::modules::ModuleBuilder builder);
 
   bool add_rq(const request_type& packet) override;
+  void record_rejected_rq(long n) override;
   bool add_wq(const request_type& packet) override;
   bool add_pq(const request_type& packet) override;
 
