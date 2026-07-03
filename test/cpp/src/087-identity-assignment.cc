@@ -2,6 +2,7 @@
 #include <nlohmann/json.hpp>
 
 #include "environment.h"
+#include "identity_registry.h"
 #include "instr.h"
 #include "modules.h"
 
@@ -108,5 +109,18 @@ TEST_CASE("Identities are assigned internally: dense consumers, per-source strea
   SECTION("Sources sharing a label share one stream, across consumers")
   {
     REQUIRE(c0.sources_.at(0)->stream_id() == c2.sources_.at(0)->stream_id());
+  }
+
+  SECTION("The identity registry translates ids to configured names and back")
+  {
+    REQUIRE(champsim::identities().consumer_name(1) == std::optional<std::string>{"c1"});
+    REQUIRE(champsim::identities().consumer_id("c2") == std::optional<int>{2});
+    REQUIRE(champsim::identities().stream_id("c1_a") == std::optional<uint32_t>{c1.sources_.at(0)->stream_id()});
+
+    auto shared = champsim::identities().stream_sources(c0.sources_.at(0)->stream_id());
+    REQUIRE_THAT(shared, Catch::Matchers::UnorderedEquals(std::vector<std::string>{"c0_a", "c2_a"}));
+
+    REQUIRE_FALSE(champsim::identities().consumer_name(99).has_value());
+    REQUIRE_FALSE(champsim::identities().consumer_id("nonesuch").has_value());
   }
 }

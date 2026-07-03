@@ -63,6 +63,8 @@
 namespace champsim::modules {
 
 struct environment_module;
+struct source_consumer;
+struct workload_source;
 
 /**
  * Provides configuration parameters and parent access to modules during construction.
@@ -551,6 +553,12 @@ struct module_base {
           //It seems sketchy for the module wrapper to be tracking these separately from the module itself, can we fix this?
           instance_ptr->NAME =  builder.get_name();
           instance_ptr->MODEL = builder.get_model();
+          if (auto* as_consumer = dynamic_cast<source_consumer*>(instance_ptr); as_consumer != nullptr) {
+            as_consumer->set_identity_name(builder.get_name());
+          }
+          if (auto* as_source = dynamic_cast<workload_source*>(instance_ptr); as_source != nullptr) {
+            as_source->set_identity_name(builder.get_name());
+          }
           instance_ptr->bind(builder.get_parent<C>());
           // Nested-instance enrollment: submodule builders carry the owning
           // environment; announce the new instance so environment views (and
@@ -709,6 +717,10 @@ struct module_base {
     // sources. See origin.h. Standalone instances (unit tests) keep the
     // default of 0, matching the historical single-core default.
     int consumer_id() const { return consumer_id_; }
+    // The instance name this consumer was configured under (set by the
+    // module factory). Use champsim::identities() for id <-> name lookups.
+    const std::string& consumer_name() const { return identity_name_; }
+    void set_identity_name(std::string name) { identity_name_ = std::move(name); }
     void set_consumer_id(int id)
     {
       if (!consumer_id_pinned_) {
@@ -729,6 +741,7 @@ struct module_base {
   private:
     int consumer_id_ = 0;
     bool consumer_id_pinned_ = false;
+    std::string identity_name_{};
 
   public:
 
@@ -1278,6 +1291,10 @@ struct module_base {
     void set_stream_id(uint32_t id) { stream_id_ = id; }
     // The configuration's "stream" sharing label; empty when unlabeled.
     const std::string& stream_label() const { return stream_label_; }
+    // The instance name this source was configured under (set by the module
+    // factory). Use champsim::identities() for id <-> name lookups.
+    const std::string& source_name() const { return identity_name_; }
+    void set_identity_name(std::string name) { identity_name_ = std::move(name); }
 
   protected:
     // Set by concrete sources that accept the optional "stream" label.
@@ -1290,6 +1307,7 @@ struct module_base {
 
   private:
     std::optional<uint32_t> stream_id_{};
+    std::string identity_name_{};
 
   private:
     friend struct module_base<workload_source, source_consumer>;

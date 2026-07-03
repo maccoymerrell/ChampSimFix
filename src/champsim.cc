@@ -31,6 +31,7 @@
 #include "json_stat_builder.h"
 #include "operable.h"
 #include "phase_info.h"
+#include "identity_registry.h"
 
 const auto start_time = std::chrono::steady_clock::now();
 
@@ -209,12 +210,16 @@ static phase_stats collect_phase_stats(const phase_info& phase, modules::environ
 // Configurations never contain the numbers; only origins carry them.
 void assign_identities(modules::environment_module& env)
 {
+  identities().clear();
+
   int next_consumer = 0;
   for (auto& sc : env.typed_view<modules::source_consumer>("source_consumer")) {
     if (sc.get().consumer_id_pinned()) {
       continue; // mirrors another consumer's identity; owns no slot
     }
-    sc.get().set_consumer_id(next_consumer++);
+    sc.get().set_consumer_id(next_consumer);
+    identities().register_consumer(next_consumer, sc.get().consumer_name());
+    ++next_consumer;
   }
 
   auto num_consumers = modules::ModuleBuilder::globals().get_parameter<std::size_t>("num_consumers", true, std::size_t{0});
@@ -230,13 +235,16 @@ void assign_identities(modules::environment_module& env)
   for (auto& src : env.typed_view<modules::workload_source>("workload_source")) {
     const auto& label = src.get().stream_label();
     if (label.empty()) {
-      src.get().set_stream_id(next_stream++);
+      src.get().set_stream_id(next_stream);
+      identities().register_source(next_stream, src.get().source_name());
+      ++next_stream;
     } else {
       auto [it, fresh] = stream_labels.try_emplace(label, next_stream);
       if (fresh) {
         ++next_stream;
       }
       src.get().set_stream_id(it->second);
+      identities().register_source(it->second, src.get().source_name());
     }
   }
 
@@ -250,6 +258,12 @@ void assign_identities(modules::environment_module& env)
       (void)vm.get().get_pte_pa(champsim::origin{champsim::origin::invalid_id, stream}, champsim::page_number{}, vm.get().get_pt_levels());
     }
   }
+}
+
+identity_registry& identities()
+{
+  static identity_registry registry;
+  return registry;
 }
 
 // simulation entry point
