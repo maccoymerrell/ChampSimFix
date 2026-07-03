@@ -112,20 +112,22 @@ public:
   dib_type DIB;
 
   // reorder buffer, load/store queue, register file
-  std::deque<ooo_model_instr> IFETCH_BUFFER;
   std::deque<ooo_model_instr> DISPATCH_BUFFER;
   std::deque<ooo_model_instr> DECODE_BUFFER;
   std::deque<ooo_model_instr> DIB_HIT_BUFFER;
 
 private:
-  // The ROB and LQ carry incrementally maintained bookkeeping (scheduled
-  // prefix, stage change-detectors, occupancy bitmap); they are private so
-  // no outside mutation can desynchronize it. Inspect through rob()/lq();
-  // mutate through modify_rob()/modify_lq(), which re-derive the state.
-  // Contiguous fixed-capacity FIFO: the backend stages walk this structure
+  // The ROB, LQ, and IFETCH_BUFFER carry incrementally maintained
+  // bookkeeping (scheduled prefix, stage change-detectors, occupancy and
+  // readiness bitmaps, frontend scan positions); they are private so no
+  // outside mutation can desynchronize it. Inspect through
+  // rob()/lq()/ifetch_buffer(); mutate through the modify_* counterparts,
+  // which re-derive the state.
+  // The ROB is a contiguous fixed-capacity FIFO: the backend stages walk it
   // every operated cycle, and deque chunk-map iteration was a measured cost.
   champsim::ring_buffer<ooo_model_instr> ROB;
   std::vector<std::optional<LSQ_ENTRY>> LQ;
+  std::deque<ooo_model_instr> IFETCH_BUFFER;
 
   std::deque<LSQ_ENTRY> SQ;
 
@@ -134,6 +136,7 @@ public:
   const champsim::ring_buffer<ooo_model_instr>& rob() const { return ROB; }
   const std::vector<std::optional<LSQ_ENTRY>>& lq() const { return LQ; }
   const std::deque<LSQ_ENTRY>& sq() const { return SQ; }
+  const std::deque<ooo_model_instr>& ifetch_buffer() const { return IFETCH_BUFFER; }
 
   // Apply an arbitrary mutation, then re-derive all dependent bookkeeping.
   // This is the sanctioned way to reach into these structures from outside
@@ -155,6 +158,12 @@ public:
   {
     std::forward<F>(fn)(SQ);
     resync_sq_bookkeeping();
+  }
+  template <typename F>
+  void modify_ifetch_buffer(F&& fn)
+  {
+    std::forward<F>(fn)(IFETCH_BUFFER);
+    resync_ifetch_bookkeeping();
   }
 
   // Constants
@@ -217,6 +226,15 @@ private:
   std::deque<std::pair<champsim::chrono::clock::time_point, uint32_t>> lq_pending_ready_;
   // Post-EOF drain latch for poll_cycle (see there).
   bool drained_latch_ = false;
+
+  // Frontend scan positions over IFETCH_BUFFER. dib_checked entries form a
+  // strict prefix (checked in window order, erased only at the front), so
+  // ifetch_dib_checked_ is its exact length. ifetch_fetch_scan_ is a
+  // monotone lower bound on the first fetch-ready entry (flags are
+  // monotone and unchecked entries form a suffix); the scan advances it
+  // lazily, so each buffer position is walked O(1) times amortized.
+  long ifetch_dib_checked_ = 0;
+  long ifetch_fetch_scan_ = 0;
 
   // Length of the scheduled prefix of the ROB. Scheduled entries always form
   // a strict prefix: dispatch appends unscheduled entries with monotone
@@ -319,6 +337,19 @@ private:
     for (auto& sq_entry : SQ) {
       sq_store_index_[sq_entry.virtual_address.to<uint64_t>()].push_back(&sq_entry);
     }
+  }
+
+  void resync_ifetch_bookkeeping()
+  {
+    ifetch_dib_checked_ = 0;
+    for (const auto& entry : IFETCH_BUFFER) {
+      if (!entry.dib_checked) {
+        break;
+      }
+      ++ifetch_dib_checked_;
+    }
+    ifetch_fetch_scan_ = 0; // always-valid lower bound; the scan re-advances
+    drained_latch_ = false;
   }
 
   // Recompute all derived state from the underlying structures (used by the

@@ -222,10 +222,13 @@ bool O3_CPU::do_init_instruction(ooo_model_instr& arch_instr)
 
 long O3_CPU::check_dib()
 {
-  // scan through IFETCH_BUFFER to find instructions that hit in the decoded instruction buffer
-  auto begin = std::find_if(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), [](const ooo_model_instr& x) { return !x.dib_checked; });
+  // dib_checked entries form a strict prefix of IFETCH_BUFFER, so the first
+  // unchecked instruction sits exactly at the maintained prefix length —
+  // no scan needed.
+  auto begin = std::next(std::begin(IFETCH_BUFFER), std::min(ifetch_dib_checked_, static_cast<long>(std::size(IFETCH_BUFFER))));
   auto [window_begin, window_end] = champsim::get_span(begin, std::end(IFETCH_BUFFER), champsim::bandwidth{FETCH_WIDTH});
   std::for_each(window_begin, window_end, [this](auto& ifetch_entry) { this->do_check_dib(ifetch_entry); });
+  ifetch_dib_checked_ += std::distance(window_begin, window_end);
   return std::distance(window_begin, window_end);
 }
 
@@ -266,7 +269,17 @@ long O3_CPU::fetch_instruction()
     return champsim::block_number{lhs.ip} != champsim::block_number{rhs.ip};
   };
 
-  auto l1i_req_begin = std::find_if(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), fetch_ready);
+  // The first fetch-ready entry can only move forward (flags are monotone,
+  // unchecked entries form a suffix, erases are front-anchored), so resume
+  // the scan from the maintained position instead of the buffer front, and
+  // advance the position to the first match: each buffer slot is walked
+  // O(1) times amortized instead of once per cycle.
+  auto scan_begin = std::next(std::begin(IFETCH_BUFFER), std::min(ifetch_fetch_scan_, static_cast<long>(std::size(IFETCH_BUFFER))));
+  auto l1i_req_begin = std::find_if(scan_begin, std::end(IFETCH_BUFFER), fetch_ready);
+  // Advance only over permanently non-matching entries: checked-and-issued
+  // ones. Unchecked entries (at and beyond the dib prefix) can become
+  // fetch-ready later, so the position must never pass the prefix boundary.
+  ifetch_fetch_scan_ = std::min(std::distance(std::begin(IFETCH_BUFFER), l1i_req_begin), ifetch_dib_checked_);
   for (champsim::bandwidth l1i_bw{L1I_BANDWIDTH}; l1i_bw.has_remaining() && l1i_req_begin != std::end(IFETCH_BUFFER); l1i_bw.consume()) {
     auto l1i_req_end = std::adjacent_find(l1i_req_begin, std::end(IFETCH_BUFFER), no_match_ip);
     if (l1i_req_end != std::end(IFETCH_BUFFER)) {
@@ -339,6 +352,8 @@ long O3_CPU::promote_to_decode()
   std::move(decoded_window_end, window_end, std::back_inserter(DECODE_BUFFER));
 
   long progress{std::distance(window_begin, window_end)};
+  ifetch_dib_checked_ = std::max(ifetch_dib_checked_ - std::distance(window_begin, window_end), long{0});
+  ifetch_fetch_scan_ = std::max(ifetch_fetch_scan_ - std::distance(window_begin, window_end), long{0});
   IFETCH_BUFFER.erase(window_begin, window_end);
   return progress;
 }

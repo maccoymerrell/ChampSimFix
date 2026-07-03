@@ -78,7 +78,7 @@ SCENARIO("Instructions that hit the DIB do not reorder ahead of instructions tha
                       instruction_generator(champsim::splice(root_page + cycle, seed_base_addr), static_cast<uint64_t>(1 + 100 * cycle)));
     }
 
-    uut.IFETCH_BUFFER.insert(std::end(uut.IFETCH_BUFFER), std::begin(seed_instructions), std::end(seed_instructions));
+    uut.modify_ifetch_buffer([&](auto& buf) { buf.insert(std::end(buf), std::begin(seed_instructions), std::end(seed_instructions)); });
 
     for (auto i = 0; i < 1000; i++) {
       for (auto op : std::array<champsim::operable*, 3>{{&uut, &mock_L1I, &mock_L1D}})
@@ -97,7 +97,7 @@ SCENARIO("Instructions that hit the DIB do not reorder ahead of instructions tha
                                                    static_cast<uint64_t>(101 + 100 * cycle)));
       }
 
-      uut.IFETCH_BUFFER.insert(std::end(uut.IFETCH_BUFFER), std::begin(test_instructions), std::end(test_instructions));
+      uut.modify_ifetch_buffer([&](auto& buf) { buf.insert(std::end(buf), std::begin(test_instructions), std::end(test_instructions)); });
 
       for (auto i = 0; i < 1000; i++) {
         for (auto op : std::array<champsim::operable*, 3>{{&uut, &mock_L1I, &mock_L1D}})
