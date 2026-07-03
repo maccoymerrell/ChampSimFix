@@ -286,3 +286,36 @@ your config. This is useful for verifying that modules are connected correctly::
     bin/champsim --config my_config.json --dump
 
 This prints every module, its parameters, and its connections to stderr.
+
+----------------------------------
+Globals and Lexical Scoping
+----------------------------------
+
+Every non-reserved top-level scalar in the config is a *global*: any module can read it
+through ``get_parameter`` fall-through, exactly like a locally-declared parameter. A
+top-level ``"globals"`` object is equivalent for those who prefer it spelled out::
+
+    {
+        "l2_prefetch_degree": 4,
+        "globals": {"trace_warmup_fraction": 0.2},
+        "children": [ ... ]
+    }
+
+A ``"globals"`` object on any module opens a *lexical scope*: its keys are visible to
+that module and everything beneath it in the tree, shadowing outer scopes, and shadowed
+by local parameters. Ordinary module parameters remain module-local by design — a
+submodule can never accidentally capture its parent's ``sets`` or ``latency``::
+
+    {
+        "name": "cpu0_L2C", "module": "cache", "model": "DEFAULT_CACHE",
+        "globals": {"prefetch_degree": 8},
+        "children": [
+            {"name": "pf_a", "module": "prefetcher", "model": "my_pref"},
+            {"name": "pf_b", "module": "prefetcher", "model": "my_pref",
+             "prefetch_degree": 2}
+        ]
+    }
+
+Here ``pf_a`` resolves ``prefetch_degree`` to 8 from the cache's scope; ``pf_b``'s local
+value of 2 shadows it. Resolution order is always: local parameter, then enclosing
+scopes innermost-first, then the root globals.

@@ -77,8 +77,9 @@ plus the execution-driven feedback hooks (``retire_instruction``, ``squash_instr
 ``branch_mispredict``). The shipped ``TRACE_WORKLOAD_SOURCE`` model reads a trace file:
 
 * ``trace_file`` (string) — path to the trace
-* ``stream_id`` (optional) — the stream / address-space id stamped on this source's
-  tokens; defaults to the owning consumer's id (see :ref:`Orch_Origin`)
+* ``stream`` (optional string) — sharing label: sources with the same label share one
+  framework-assigned stream (address space); unlabeled sources each get their own
+  (see :ref:`Orch_Origin`)
 * ``cloudsuite``, ``repeat`` (optional booleans)
 
 Sources are declared as ``children`` of their consumer and are bound to it after
@@ -93,7 +94,7 @@ mixin. It is the orchestration layer's entire view of "the thing doing work":
 .. code-block:: cpp
 
     struct source_consumer {
-      virtual int consumer_id() const;             // hardware-context id; -1 = untracked
+      int consumer_id() const;                     // hardware-context id, framework-assigned
       virtual uint64_t sim_progress() const;       // cumulative tokens completed
       virtual bool source_eof() const;             // all attached sources exhausted
       virtual source_health check_health(uint64_t elapsed);  // periodic self-check
@@ -114,8 +115,11 @@ Two contracts deserve emphasis:
   gap). While any consumer — or any operable, see below — reports pending work, zero
   global progress does not advance the deadlock counter.
 
-``consumer_id`` values must be unique and dense in ``[0, num_consumers)``; this is
-validated at startup. The ``num_consumers`` global (readable by any module through the
+Consumer ids are assigned at startup by enumeration in configuration order — they are
+unique and dense in ``[0, num_consumers)`` by construction and never appear in a
+configuration. Consumers that mirror another consumer's identity rather than being
+hardware contexts of their own may ``pin_consumer_id``; pinned consumers are skipped by
+the enumeration. The ``num_consumers`` global (readable by any module through the
 ``ModuleBuilder`` fall-through) sizes per-consumer tables such as ``ship`` and ``drrip``
 replacement state. The explicit environment derives it by counting workload sources in
 the config; override it with a root-level ``"num_consumers"`` key when consumers hold
@@ -148,13 +152,17 @@ The methods are the patch point: schemes read the coordinate they mean, and futu
 behaviors (remapping, validation, virtualization layers) can be added without touching
 every access site.
 
-**Stamping rules.** A source stamps tokens with ``{consumer, stream}``. The stream
-defaults to the owning consumer's id, so in the classic one-trace-per-core shape the two
-coordinates are numerically equal and behavior matches historic ChampSim exactly. A
-config may override a source's ``stream_id`` (two traces into one core = one consumer,
-two address spaces), and cloudsuite trace records override the stream with their own
+**Stamping rules.** A source stamps tokens with ``{consumer, stream}``. Both ids are
+assigned by the framework at startup: consumers enumerate densely in configuration
+order, and every source receives its own stream (its own address space) unless sources
+share a ``stream`` label, in which case they share one id. In the classic
+one-trace-per-core shape the enumeration makes the two coordinates numerically equal,
+matching historic ChampSim exactly. Two traces into one core means one consumer and two
+address spaces by default; cloudsuite trace records override the stream with their own
 asid. Replacement hooks receive the full ``origin``; virtual memory is keyed by
-``origin.asid()``.
+``origin.asid()``. Page-table walkers resolve each walk's root from the requesting
+token's stream and tag their PSCLs with it, so one walker serves any number of address
+spaces — it is hardware owned by a consumer, not by an address space.
 
 ------------------------------------------
 Phase Controllers
@@ -329,3 +337,6 @@ Root Configuration Key Reference
     Override the derived consumer count used to size per-consumer tables.
 ``block_size``, ``page_size``
     System-wide geometry, published to all modules via the builder globals.
+
+Any other non-reserved top-level scalar is likewise published as a global; see
+:doc:`Explicit-configuration-format` for globals and lexical scoping.
