@@ -118,7 +118,7 @@ SCENARIO("A prefetch MSHR that gets hit is promoted")
         champsim::channel::response_type response{testbed.uut.MSHR.front().address, testbed.uut.MSHR.front().v_address,
                                                   testbed.uut.MSHR.front().data_promise->data, 0, testbed.uut.MSHR.front().instr_depend_on_me};
 
-        testbed.uut.lower_level->get_returned().push_back(response);
+        testbed.uut.lower_level->return_response(response);
         for (uint64_t i = 0; i < 8 * (testbed.hit_latency); ++i)
           for (auto elem : testbed.elements)
             elem->_operate();

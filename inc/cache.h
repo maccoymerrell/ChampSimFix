@@ -77,7 +77,7 @@ class CACHE : public champsim::modules::cache_module, public champsim::module_ph
     champsim::chrono::clock::time_point event_cycle = champsim::chrono::clock::time_point::max();
 
     std::vector<uint64_t> instr_depend_on_me{};
-    std::vector<std::deque<response_type>*> to_return{};
+    std::vector<champsim::modules::channel_module*> to_return{};
 
     explicit tag_lookup_type(request_type req) : tag_lookup_type(std::move(req), false, false) {}
     tag_lookup_type(const request_type& req, bool local_pref, bool skip);
@@ -105,7 +105,7 @@ public:
     champsim::chrono::clock::time_point time_enqueued;
 
     std::vector<uint64_t> instr_depend_on_me{};
-    std::vector<std::deque<response_type>*> to_return{};
+    std::vector<champsim::modules::channel_module*> to_return{};
 
     fill_type(const tag_lookup_type& req, champsim::chrono::clock::time_point _time_enqueued);
     // Move form: steals the dependency and return vectors from a tag entry
@@ -189,6 +189,7 @@ public:
 
   long operate() final;
   long poll_cycle() final;
+  void skip_tick() final;
   void initialize() final;
   void begin_phase(bool warmup, bool roi) override;
   void end_phase() override;
@@ -292,6 +293,22 @@ public:
         FILL_LATENCY(builder.get_parameter<uint64_t>("fill_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), OFFSET_BITS(builder.get_parameter<champsim::data::bits>("offset_bits")), MAX_TAG(builder.get_parameter<champsim::bandwidth::maximum_type>("max_tag_bandwidth")), MAX_FILL(builder.get_parameter<champsim::bandwidth::maximum_type>("max_fill_bandwidth")),
         prefetch_as_load(builder.get_parameter<bool>("prefetch_as_load")), match_offset_bits(builder.get_parameter<bool>("match_offset_bits")), virtual_prefetch(builder.get_parameter<bool>("virtual_prefetch")), pref_activate_mask(builder.get_parameter<std::vector<access_type>>("pref_activate_mask"))
   {
+    // Inline wake: busy_count_ tracks the population of every wake-relevant
+    // container (upper queues, returned responses, tag checks, fills,
+    // stash, internal PQ). Producers bump it through the channel watchers;
+    // MSHR-only-pending state is uncounted (response arrival wakes).
+    wake_inline_ = true;
+    has_skip_tick_ = true;
+    for (auto* ul : upper_levels) {
+      ul->set_request_watcher(this);
+    }
+    if (lower_level != nullptr) { // default-built test caches may be unwired
+      lower_level->set_response_watcher(this);
+    }
+    if (lower_translate != nullptr) {
+      lower_translate->set_response_watcher(this);
+    }
+
     // Hoisted invariants for the per-cycle path
     tag_check_window_limit_ = champsim::to_underlying(MAX_TAG) * static_cast<long>(HIT_LATENCY / clock_period);
     set_index_shift_ = static_cast<unsigned>(champsim::to_underlying(OFFSET_BITS));

@@ -193,7 +193,6 @@ public:
 
   void initialize() final;
   long operate() final;
-  long poll_cycle() final;
   void begin_phase(bool warmup, bool roi) override;
   void end_phase() override;
 
@@ -224,7 +223,7 @@ private:
   // re-checking hundreds of waiting candidates every cycle.
   std::vector<uint64_t> lq_ready_;
   std::deque<std::pair<champsim::chrono::clock::time_point, uint32_t>> lq_pending_ready_;
-  // Post-EOF drain latch for poll_cycle (see there).
+  // Post-EOF drain latch (see the drain evaluation at the end of operate()).
   bool drained_latch_ = false;
 
   // Frontend scan positions over IFETCH_BUFFER. dib_checked entries form a
@@ -485,6 +484,8 @@ public:
       btb_module_pimpl.push_back(champsim::modules::btb::create_instance(sub, static_cast<champsim::modules::core_module*>(this)));
 
     ROB.set_capacity(ROB_SIZE);
+    wake_inline_ = true; // busy until drained (see operate()); no per-cycle poll call
+    busy_count_ = 1;
     exec_candidates_.assign((ROB.capacity() + 63) / 64, 0);
     complete_candidates_.assign((ROB.capacity() + 63) / 64, 0);
     lq_free_slots_ = static_cast<long>(std::size(LQ));

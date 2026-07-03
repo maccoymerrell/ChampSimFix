@@ -184,7 +184,7 @@ long DRAM_CHANNEL::operate()
         if (entry.has_value()) {
           response_type response{entry->address, entry->v_address, entry->data, entry->pf_metadata, entry->instr_depend_on_me};
           for (auto* ret : entry.value().to_return) {
-            ret->push_back(response);
+            ret->return_response(response);
           }
 
           ++progress;
@@ -234,7 +234,7 @@ long DRAM_CHANNEL::finish_dbus_request()
     response_type response{active_request->pkt->value().address, active_request->pkt->value().v_address, active_request->pkt->value().data,
                            active_request->pkt->value().pf_metadata, active_request->pkt->value().instr_depend_on_me};
     for (auto* ret : active_request->pkt->value().to_return) {
-      ret->push_back(response);
+      ret->return_response(response);
     }
 
     active_request->valid = false;
@@ -578,7 +578,7 @@ void DRAM_CHANNEL::check_read_collision()
         response_type response{rq_it->value().address, rq_it->value().v_address, wq_it->value().data, rq_it->value().pf_metadata,
                                rq_it->value().instr_depend_on_me};
         for (auto* ret : rq_it->value().to_return) {
-          ret->push_back(response);
+          ret->return_response(response);
         }
 
         rq_it->reset();
@@ -697,7 +697,7 @@ bool MEMORY_CONTROLLER::add_rq(const request_type& packet, champsim::modules::ch
   entry.scheduled = false;
   entry.ready_time = current_time;
   if (packet.response_requested)
-    entry.to_return = {&ul->get_returned()};
+    entry.to_return = {ul};
 
   return channel.insert_rq(std::move(entry));
 }

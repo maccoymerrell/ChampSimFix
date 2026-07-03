@@ -31,6 +31,13 @@ public:
   virtual ~operable() = default;
   explicit operable(champsim::chrono::picoseconds clock_period);
 
+protected:
+  long busy_count_ = 0;
+  bool wake_inline_ = false;
+  bool has_skip_tick_ = false;
+
+public:
+
   long _operate();
   long operate_on(const champsim::chrono::clock& clock);
 
@@ -62,6 +69,24 @@ public:
    * root key "cycle_skip") — used for A/B behavior verification.
    */
   virtual long poll_cycle() { return 0; } // LCOV_EXCL_LINE
+
+  /**
+   * Inline wake state: the zero-overhead form of poll_cycle().
+   *
+   * An operable that opts in (wake_inline_) maintains busy_count_ as the
+   * exact population of its wake-relevant containers — every arrival
+   * (channel push, returned response) increments it, every departure
+   * decrements it, and moves between counted containers are net zero.
+   * operate_on() then decides skip-vs-simulate by reading the field
+   * directly: no virtual call, no per-cycle predicate walk. Producers bump
+   * a consumer through the channel watcher hooks (see channel_module).
+   *
+   * Modules with contractual per-cycle submodule hooks additionally set
+   * has_skip_tick_ and receive skip_tick() on each skipped cycle.
+   */
+  void note_busier(long n = 1) { busy_count_ += n; }
+  void note_idler(long n = 1) { busy_count_ -= n; }
+  virtual void skip_tick() {} // LCOV_EXCL_LINE
 
   /**
    * True when this operable holds self-scheduled work that will complete at

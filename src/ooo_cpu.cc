@@ -31,32 +31,6 @@
 #include "util/algorithm.h"
 #include "util/span.h"
 
-long O3_CPU::poll_cycle()
-{
-  // A live core is never idle: fill_from_sources() refills the input queue
-  // every cycle until every workload source is exhausted. Skipping is
-  // therefore only possible in the post-EOF drain state — every pipeline
-  // structure empty and nothing left to fetch. This matters for multi-core
-  // runs where an early-finishing core would otherwise burn a full pipeline
-  // walk every cycle until the last core completes its phase.
-  //
-  // Drained is a latch: once the sources are exhausted and the pipeline is
-  // empty, operate() never runs again this phase, so nothing can
-  // re-populate it — skip the re-check on every subsequent cycle.
-  if (drained_latch_) {
-    return 1;
-  }
-  const bool drained = std::empty(ROB) && std::empty(IFETCH_BUFFER) && std::empty(DIB_HIT_BUFFER)
-                       && std::empty(DECODE_BUFFER) && std::empty(DISPATCH_BUFFER)
-                       && std::empty(input_queue) && std::empty(SQ)
-                       && std::all_of(std::cbegin(lq_occupied_), std::cend(lq_occupied_), [](uint64_t bits) { return bits == 0; })
-                       && std::empty(L1I_bus.lower_level->get_returned())
-                       && std::empty(L1D_bus.lower_level->get_returned())
-                       && source_eof();
-  drained_latch_ = drained;
-  return drained ? 1 : 0;
-}
-
 long O3_CPU::operate()
 {
   long progress{0};
@@ -76,6 +50,21 @@ long O3_CPU::operate()
   fill_from_sources();
   initialize_instruction();
 
+  // Inline wake: a core is busy every cycle until it drains (multi-core
+  // runs where an early-finishing core would otherwise burn full pipeline
+  // walks until the last core completes). The full drain predicate is
+  // evaluated only on zero-progress cycles with an empty ROB and input
+  // queue — two field reads on ordinary cycles.
+  if (progress == 0 && !drained_latch_ && std::empty(ROB) && std::empty(input_queue)) {
+    const bool drained = std::empty(IFETCH_BUFFER) && std::empty(DIB_HIT_BUFFER) && std::empty(DECODE_BUFFER) && std::empty(DISPATCH_BUFFER)
+                         && std::empty(SQ) && std::all_of(std::cbegin(lq_occupied_), std::cend(lq_occupied_), [](uint64_t bits) { return bits == 0; })
+                         && std::empty(L1I_bus.lower_level->get_returned()) && std::empty(L1D_bus.lower_level->get_returned()) && source_eof();
+    if (drained) {
+      drained_latch_ = true;
+      busy_count_ = 0;
+    }
+  }
+
   return progress;
 }
 
@@ -91,6 +80,7 @@ void O3_CPU::begin_phase(bool warmup, bool roi)
   warmup_ = warmup;
   roi_ = roi;
   drained_latch_ = false;
+  busy_count_ = 1;
   begin_phase_instr = num_retired;
   begin_phase_time = current_time;
 
@@ -201,6 +191,7 @@ void O3_CPU::push_instruction(ooo_model_instr instr)
 {
   input_queue.push_back(std::move(instr));
   drained_latch_ = false; // new work arrived; the core is no longer drained
+  busy_count_ = 1;
 }
 
 std::size_t O3_CPU::instructions_requested()
