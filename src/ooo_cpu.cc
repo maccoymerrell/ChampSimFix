@@ -48,7 +48,7 @@ long O3_CPU::poll_cycle()
   const bool drained = std::empty(ROB) && std::empty(IFETCH_BUFFER) && std::empty(DIB_HIT_BUFFER)
                        && std::empty(DECODE_BUFFER) && std::empty(DISPATCH_BUFFER)
                        && std::empty(input_queue) && std::empty(SQ)
-                       && std::all_of(std::cbegin(LQ), std::cend(LQ), [](const auto& lq_entry) { return !lq_entry.has_value(); })
+                       && std::all_of(std::cbegin(lq_occupied_), std::cend(lq_occupied_), [](uint64_t bits) { return bits == 0; })
                        && std::empty(L1I_bus.lower_level->get_returned())
                        && std::empty(L1D_bus.lower_level->get_returned())
                        && source_eof();
@@ -446,6 +446,20 @@ long O3_CPU::dispatch_instruction()
 
 long O3_CPU::schedule_instruction()
 {
+  // Scheduled entries form a strict ROB prefix, and unscheduled entries keep
+  // their dispatch-assigned (monotone) ready_times. If there is no
+  // unscheduled entry, or the first one is not yet ready, the walk below
+  // cannot call do_scheduling — and it has no other side effects — so skip it.
+  if (num_scheduled_ >= static_cast<long>(std::size(ROB))) {
+    return 0;
+  }
+  // The guard on .scheduled is defensive: in normal operation the entry at
+  // the prefix boundary is never scheduled; externally injected ROB state
+  // (unit tests) falls through to the always-correct full walk.
+  if (const auto& first = ROB[static_cast<std::size_t>(num_scheduled_)]; !first.scheduled && first.ready_time > current_time) {
+    return 0;
+  }
+
   champsim::bandwidth search_bw{SCHEDULER_SIZE};
   int progress{0};
   for (auto rob_it = std::begin(ROB); rob_it != std::end(ROB) && search_bw.has_remaining(); ++rob_it) {
@@ -457,6 +471,7 @@ long O3_CPU::schedule_instruction()
     }
     if (!rob_it->scheduled && rob_it->ready_time <= current_time) {
       do_scheduling(*rob_it);
+      ++num_scheduled_;
       ++progress;
     }
 
@@ -482,20 +497,44 @@ void O3_CPU::do_scheduling(ooo_model_instr& instr)
   }
 
   instr.scheduled = true;
+  exec_stage_clean_ = false; // a new execute candidate exists
 }
 
 long O3_CPU::execute_instruction()
 {
+  // The walk is side-effect-free unless it issues. Its outcome changes only
+  // when an instruction becomes scheduled (do_scheduling), a register becomes
+  // valid (do_complete_execution), or time reaches a pending ready_time —
+  // exec_stage_clean_/exec_stage_wake_ track exactly those events, so a
+  // clean stage before its wake point provably issues nothing.
+  if (exec_stage_clean_ && current_time < exec_stage_wake_) {
+    return 0;
+  }
+
   champsim::bandwidth exec_bw{EXEC_WIDTH};
-  for (auto rob_it = std::begin(ROB); rob_it != std::end(ROB) && exec_bw.has_remaining(); ++rob_it) {
-    if (rob_it->scheduled && !rob_it->executed && rob_it->ready_time <= current_time) {
-      bool ready = std::all_of(std::begin(rob_it->source_registers), std::end(rob_it->source_registers),
-                               [&alloc = std::as_const(reg_allocator)](auto srcreg) { return alloc.isValid(srcreg); });
-      if (ready) {
-        do_execution(*rob_it);
-        exec_bw.consume();
+  auto wake = champsim::chrono::clock::time_point::max();
+  auto rob_it = std::begin(ROB);
+  for (; rob_it != std::end(ROB) && exec_bw.has_remaining(); ++rob_it) {
+    if (rob_it->scheduled && !rob_it->executed) {
+      if (rob_it->ready_time <= current_time) {
+        bool ready = std::all_of(std::begin(rob_it->source_registers), std::end(rob_it->source_registers),
+                                 [&alloc = std::as_const(reg_allocator)](auto srcreg) { return alloc.isValid(srcreg); });
+        if (ready) {
+          do_execution(*rob_it);
+          exec_bw.consume();
+        }
+      } else {
+        wake = std::min(wake, rob_it->ready_time);
       }
     }
+  }
+  if (rob_it == std::end(ROB)) {
+    // Full traversal: every remaining candidate either waits on a register
+    // (covered by the completion dirty flag) or on a recorded wake time.
+    exec_stage_clean_ = true;
+    exec_stage_wake_ = wake;
+  } else {
+    exec_stage_clean_ = false; // bandwidth exhausted before seeing the tail
   }
 
   return exec_bw.amount_consumed();
@@ -505,13 +544,17 @@ void O3_CPU::do_execution(ooo_model_instr& instr)
 {
   instr.executed = true;
   instr.ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
+  complete_stage_clean_ = false; // a new completion candidate exists
 
   // Mark LQ entries as ready to translate. Entries for this instruction can
   // only exist if it has source memory ops; ~3 in 4 instructions have none.
   if (!std::empty(instr.source_memory)) {
-    for (auto& lq_entry : LQ) {
-      if (lq_entry.has_value() && lq_entry->instr_id == instr.instr_id) {
-        lq_entry->ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
+    for (std::size_t word = 0; word < std::size(lq_occupied_); ++word) {
+      for (uint64_t bits = lq_occupied_[word]; bits != 0; bits &= bits - 1) {
+        auto& lq_entry = LQ[word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits))];
+        if (lq_entry->instr_id == instr.instr_id) {
+          lq_entry->ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
+        }
       }
     }
   }
@@ -534,10 +577,19 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
 {
   // load
   for (auto& smem : instr.source_memory) {
-    auto q_entry = std::find_if_not(std::begin(LQ), std::end(LQ), [](const auto& lq_entry) { return lq_entry.has_value(); });
+    // Lowest free slot from the occupancy bitmap — identical to a
+    // find_if_not scan from the front, without visiting occupied slots.
+    std::size_t free_idx = 0;
+    for (std::size_t word = 0; word < std::size(lq_occupied_); ++word) {
+      if (~lq_occupied_[word] != 0) {
+        free_idx = word * 64 + static_cast<std::size_t>(__builtin_ctzll(~lq_occupied_[word]));
+        break;
+      }
+    }
+    auto q_entry = std::next(std::begin(LQ), static_cast<long>(std::min(free_idx, std::size(LQ))));
     assert(q_entry != std::end(LQ));
     q_entry->emplace(smem, instr.instr_id, instr.ip, instr.origin); // add it to the load queue
-    --lq_free_slots_;
+    lq_set_occupied(static_cast<std::size_t>(std::distance(std::begin(LQ), q_entry)));
 
     // Check for forwarding
     auto sq_it = std::max_element(std::begin(SQ), std::end(SQ), [smem](const auto& lhs, const auto& rhs) {
@@ -546,8 +598,9 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
     if (sq_it != std::end(SQ) && sq_it->virtual_address == smem) {
       if (sq_it->fetch_issued) { // Store already executed
         (*q_entry)->finish(instr);
+        complete_stage_clean_ = false; // a memory op finished
         q_entry->reset();
-        ++lq_free_slots_;
+        lq_clear_occupied(static_cast<std::size_t>(std::distance(std::begin(LQ), q_entry)));
       } else {
         assert(sq_it->instr_id < instr.instr_id);      // The found SQ entry is a prior store
         sq_it->lq_depend_on_me.emplace_back(*q_entry); // Forward the load when the store finishes
@@ -596,16 +649,17 @@ long O3_CPU::operate_lsq()
 
   champsim::bandwidth load_bw{LQ_WIDTH};
 
-  for (auto& lq_entry : LQ) {
-    if (!load_bw.has_remaining()) {
-      break;
-    }
-    if (lq_entry.has_value() && lq_entry->producer_id == std::numeric_limits<uint64_t>::max() && !lq_entry->fetch_issued
-        && lq_entry->ready_time < current_time) {
-      auto success = execute_load(*lq_entry);
-      if (success) {
-        load_bw.consume();
-        lq_entry->fetch_issued = true;
+  // Visit occupied LQ slots in index order (identical to a full scan)
+  for (std::size_t word = 0; word < std::size(lq_occupied_) && load_bw.has_remaining(); ++word) {
+    for (uint64_t bits = lq_occupied_[word]; bits != 0 && load_bw.has_remaining(); bits &= bits - 1) {
+      auto& lq_entry = LQ[word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits))];
+      if (lq_entry->producer_id == std::numeric_limits<uint64_t>::max() && !lq_entry->fetch_issued
+          && lq_entry->ready_time < current_time) {
+        auto success = execute_load(*lq_entry);
+        if (success) {
+          load_bw.consume();
+          lq_entry->fetch_issued = true;
+        }
       }
     }
   }
@@ -620,6 +674,7 @@ void O3_CPU::do_finish_store(const LSQ_ENTRY& sq_entry)
   }
 
   sq_entry.finish(std::begin(ROB), std::end(ROB));
+  complete_stage_clean_ = false; // a memory op finished
 
   // Release dependent loads
   for (std::optional<LSQ_ENTRY>& dependent : sq_entry.lq_depend_on_me) {
@@ -628,7 +683,7 @@ void O3_CPU::do_finish_store(const LSQ_ENTRY& sq_entry)
 
     dependent->finish(std::begin(ROB), std::end(ROB));
     dependent.reset();
-    ++lq_free_slots_;
+    lq_clear_occupied(static_cast<std::size_t>(&dependent - LQ.data()));
   }
 }
 
@@ -664,6 +719,7 @@ bool O3_CPU::execute_load(const LSQ_ENTRY& lq_entry)
 
 void O3_CPU::do_complete_execution(ooo_model_instr& instr)
 {
+  exec_stage_clean_ = false; // registers become valid: execute candidates may wake
   for (auto dreg : instr.destination_registers) {
     // mark physical register's data as valid
     reg_allocator.complete_dest_register(dreg);
@@ -678,13 +734,34 @@ void O3_CPU::do_complete_execution(ooo_model_instr& instr)
 
 long O3_CPU::complete_inflight_instruction()
 {
+  // Same detector pattern as execute_instruction: candidates are created by
+  // do_execution, by memory-op finishes (LSQ_ENTRY::finish call sites), or by
+  // time reaching a pending ready_time.
+  if (complete_stage_clean_ && current_time < complete_stage_wake_) {
+    return 0;
+  }
+
   // update ROB entries with completed executions
   champsim::bandwidth complete_bw{EXEC_WIDTH};
-  for (auto rob_it = std::begin(ROB); rob_it != std::end(ROB) && complete_bw.has_remaining(); ++rob_it) {
-    if (rob_it->executed && !rob_it->completed && (rob_it->ready_time <= current_time) && rob_it->completed_mem_ops == rob_it->num_mem_ops()) {
-      do_complete_execution(*rob_it);
-      complete_bw.consume();
+  auto wake = champsim::chrono::clock::time_point::max();
+  auto rob_it = std::begin(ROB);
+  for (; rob_it != std::end(ROB) && complete_bw.has_remaining(); ++rob_it) {
+    if (rob_it->executed && !rob_it->completed) {
+      if (rob_it->ready_time <= current_time) {
+        if (rob_it->completed_mem_ops == rob_it->num_mem_ops()) {
+          do_complete_execution(*rob_it);
+          complete_bw.consume();
+        }
+      } else {
+        wake = std::min(wake, rob_it->ready_time);
+      }
     }
+  }
+  if (rob_it == std::end(ROB)) {
+    complete_stage_clean_ = true;
+    complete_stage_wake_ = wake;
+  } else {
+    complete_stage_clean_ = false;
   }
 
   return complete_bw.amount_consumed();
@@ -720,19 +797,26 @@ long O3_CPU::handle_memory_return()
     }
   }
 
-  auto l1d_it = std::begin(L1D_bus.lower_level->get_returned());
-  for (champsim::bandwidth l1d_bw{L1D_BANDWIDTH}; l1d_bw.has_remaining() && l1d_it != std::end(L1D_bus.lower_level->get_returned()); l1d_bw.consume(), ++l1d_it) {
-    for (auto& lq_entry : LQ) {
-      if (lq_entry.has_value() && lq_entry->fetch_issued && champsim::block_number{lq_entry->virtual_address} == champsim::block_number{l1d_it->v_address}) {
-        lq_entry->finish(std::begin(ROB), std::end(ROB));
-        lq_entry.reset();
-        ++lq_free_slots_;
-        ++progress;
+  auto& l1d_returned = L1D_bus.lower_level->get_returned();
+  auto l1d_it = std::begin(l1d_returned);
+  for (champsim::bandwidth l1d_bw{L1D_BANDWIDTH}; l1d_bw.has_remaining() && l1d_it != std::end(l1d_returned); l1d_bw.consume(), ++l1d_it) {
+    // Visit occupied LQ slots in index order (identical order to a full scan)
+    for (std::size_t word = 0; word < std::size(lq_occupied_); ++word) {
+      for (uint64_t bits = lq_occupied_[word]; bits != 0; bits &= bits - 1) {
+        const std::size_t idx = word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits));
+        auto& lq_entry = LQ[idx];
+        if (lq_entry->fetch_issued && champsim::block_number{lq_entry->virtual_address} == champsim::block_number{l1d_it->v_address}) {
+          lq_entry->finish(std::begin(ROB), std::end(ROB));
+          complete_stage_clean_ = false; // a memory op finished
+          lq_entry.reset();
+          lq_clear_occupied(idx);
+          ++progress;
+        }
       }
     }
     ++progress;
   }
-  L1D_bus.lower_level->get_returned().erase(std::begin(L1D_bus.lower_level->get_returned()), l1d_it);
+  l1d_returned.erase(std::begin(l1d_returned), l1d_it);
 
   return progress;
 }
@@ -757,6 +841,9 @@ long O3_CPU::retire_rob()
   }
 
   auto retire_count = std::distance(retire_begin, retire_end);
+  // Retired entries are completed, hence scheduled. Clamp for robustness
+  // against externally injected ROB state (unit tests).
+  num_scheduled_ = std::max(num_scheduled_ - retire_count, long{0});
   num_retired += retire_count;
   if (retire_count > 0) {
     uint64_t cycles = static_cast<uint64_t>(current_time.time_since_epoch() / clock_period);

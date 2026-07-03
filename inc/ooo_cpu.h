@@ -158,8 +158,30 @@ private:
   // Number of free LQ slots, maintained at the four LQ mutation sites so
   // dispatch does not re-count 128 optionals per loop iteration.
   long lq_free_slots_ = 0;
+  // Occupied-slot bitmap for the LQ, maintained at the same four sites.
+  // Iterating set bits ascending visits exactly the occupied slots in index
+  // order — the same order as a full scan of the vector.
+  std::vector<uint64_t> lq_occupied_;
   // Post-EOF drain latch for poll_cycle (see there).
   bool drained_latch_ = false;
+
+  // Length of the scheduled prefix of the ROB. Scheduled entries always form
+  // a strict prefix: dispatch appends unscheduled entries with monotone
+  // ready_times, schedule_instruction walks from the front and stops at the
+  // first failure, and retire pops completed (hence scheduled) entries.
+  long num_scheduled_ = 0;
+
+  // Stage change-detectors: a walk of execute/complete that issues nothing
+  // is side-effect-free, and its outcome can only change through the events
+  // that dirty these flags (a new scheduling, a register completion, a
+  // memory-op finish) or through time reaching the recorded wake point.
+  bool exec_stage_clean_ = false;
+  champsim::chrono::clock::time_point exec_stage_wake_{};
+  bool complete_stage_clean_ = false;
+  champsim::chrono::clock::time_point complete_stage_wake_{};
+
+  void lq_set_occupied(std::size_t idx) { lq_occupied_[idx >> 6] |= (uint64_t{1} << (idx & 63)); --lq_free_slots_; }
+  void lq_clear_occupied(std::size_t idx) { lq_occupied_[idx >> 6] &= ~(uint64_t{1} << (idx & 63)); ++lq_free_slots_; }
 public:
   bool is_warmup() const { return warmup_; }
   bool is_roi() const    { return roi_; }
@@ -245,6 +267,7 @@ public:
       btb_module_pimpl.push_back(champsim::modules::btb::create_instance(sub, static_cast<champsim::modules::core_module*>(this)));
 
     lq_free_slots_ = static_cast<long>(std::size(LQ));
+    lq_occupied_.assign((std::size(LQ) + 63) / 64, 0);
 
     // Cores must always have at least one workload source attached, and a
     // core consumes instruction tokens: reject sources of any other token type.
