@@ -462,24 +462,37 @@ long O3_CPU::schedule_instruction()
     return 0;
   }
 
+  // The scheduler window: in-flight (scheduled, unexecuted) instructions
+  // occupy slots, so pre-charge the budget with their count rather than
+  // re-walking them. The free-register rename gate is evaluated only for
+  // instructions actually being renamed this cycle — their source_registers
+  // still hold architectural ids, so the check is meaningful. (Historical
+  // note: the gate used to sit in a walk from the ROB front and re-evaluated
+  // already-renamed instructions, whose operands are physical ids; that
+  // stalled rename on a semantically arbitrary condition.)
   champsim::bandwidth search_bw{SCHEDULER_SIZE};
+  search_bw.consume(std::min(scheduler_occupancy_, champsim::to_underlying(SCHEDULER_SIZE)));
+
   int progress{0};
-  for (auto rob_it = std::begin(ROB); rob_it != std::end(ROB) && search_bw.has_remaining(); ++rob_it) {
-    // if there aren't enough physical registers available for the next instruction, stop scheduling
+  for (auto rob_it = std::next(std::begin(ROB), num_scheduled_); rob_it != std::end(ROB) && search_bw.has_remaining(); ++rob_it) {
+    // In-order rename: stop if this instruction cannot claim the physical
+    // registers it needs.
     unsigned long sources_to_allocate = std::count_if(rob_it->source_registers.begin(), rob_it->source_registers.end(),
                                                       [&alloc = std::as_const(reg_allocator)](auto srcreg) { return !alloc.isAllocated(srcreg); });
     if (reg_allocator.count_free_registers() < (sources_to_allocate + rob_it->destination_registers.size())) {
       break;
     }
-    if (!rob_it->scheduled && rob_it->ready_time <= current_time) {
+    // Unscheduled ready_times are monotone (dispatch order), so the first
+    // not-yet-ready instruction ends this cycle's work.
+    if (rob_it->ready_time > current_time) {
+      break;
+    }
+    if (!rob_it->scheduled) { // always true in normal operation; guards injected state
       do_scheduling(*rob_it);
       ++num_scheduled_;
       ++progress;
     }
-
-    if (!rob_it->executed) {
-      search_bw.consume();
-    }
+    search_bw.consume(); // the newly scheduled instruction occupies a slot
   }
 
   return progress;
@@ -499,6 +512,7 @@ void O3_CPU::do_scheduling(ooo_model_instr& instr)
   }
 
   instr.scheduled = true;
+  ++scheduler_occupancy_;
   exec_stage_clean_ = false; // a new execute candidate exists
 }
 
@@ -545,6 +559,7 @@ long O3_CPU::execute_instruction()
 void O3_CPU::do_execution(ooo_model_instr& instr)
 {
   instr.executed = true;
+  --scheduler_occupancy_; // leaves the scheduler window
   instr.ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
   complete_stage_clean_ = false; // a new completion candidate exists
 

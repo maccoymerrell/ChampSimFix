@@ -202,9 +202,13 @@ private:
 
   // Length of the scheduled prefix of the ROB. Scheduled entries always form
   // a strict prefix: dispatch appends unscheduled entries with monotone
-  // ready_times, schedule_instruction walks from the front and stops at the
-  // first failure, and retire pops completed (hence scheduled) entries.
+  // ready_times, schedule_instruction schedules in order from the prefix
+  // boundary, and retire pops completed (hence scheduled) entries.
   long num_scheduled_ = 0;
+  // Scheduler-window occupancy: scheduled-but-unexecuted instructions hold
+  // scheduler slots. Maintained by do_scheduling/do_execution; pre-charges
+  // the SCHEDULER_SIZE budget so the rename walk need not revisit them.
+  long scheduler_occupancy_ = 0;
 
   // Stage change-detectors: a walk of execute/complete that issues nothing
   // is side-effect-free, and its outcome can only change through the events
@@ -240,6 +244,7 @@ private:
       }
       ++num_scheduled_;
     }
+    scheduler_occupancy_ = std::count_if(std::cbegin(ROB), std::cend(ROB), [](const auto& entry) { return entry.scheduled && !entry.executed; });
     exec_stage_clean_ = false;
     complete_stage_clean_ = false;
   }
