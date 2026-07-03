@@ -3,8 +3,9 @@
  * Wraps a champsim::tracereader to provide instruction tokens from a trace file.
  * Parameters (from ModuleBuilder):
  *   - trace_file (std::string): path to the trace file
- *   - stream_id (uint32, optional): stream / address-space id stamped on this
- *     source's tokens. Defaults to the owning consumer's id (see origin.h).
+ *   - stream (string, optional): sharing label. Sources with the same label
+ *     share one framework-assigned stream (address space); unlabeled sources
+ *     each get their own. Numeric ids are never configured (see origin.h).
  *   - cloudsuite (bool, optional): use cloudsuite trace format (default: false)
  *   - repeat (bool, optional): loop the trace on EOF (default: false)
  */
@@ -21,7 +22,6 @@ namespace
 
 struct trace_workload_source : public champsim::modules::instruction_source {
   std::string trace_path_;
-  std::optional<uint32_t> stream_id_;
   bool cloudsuite_;
   bool repeat_;
 
@@ -35,17 +35,14 @@ struct trace_workload_source : public champsim::modules::instruction_source {
       cloudsuite_(builder.get_parameter<bool>("cloudsuite", true, false)),
       repeat_(builder.get_parameter<bool>("repeat", true, false))
   {
-    if (builder.has_parameter("stream_id")) {
-      stream_id_ = builder.get_parameter<uint32_t>("stream_id");
-    }
+    stream_label_ = builder.get_parameter<std::string>("stream", true, std::string{});
   }
 
   champsim::tracereader& reader()
   {
     if (!reader_.has_value()) {
       auto consumer_id = static_cast<champsim::origin::id_type>(consumer_ != nullptr ? consumer_->consumer_id() : -1);
-      auto stream_id = stream_id_.value_or(consumer_id); // a source inherits its consumer's id as its stream unless told otherwise
-      reader_.emplace(get_tracereader(trace_path_, champsim::origin{consumer_id, stream_id}, cloudsuite_, repeat_));
+      reader_.emplace(get_tracereader(trace_path_, champsim::origin{consumer_id, stream_id()}, cloudsuite_, repeat_));
     }
     return *reader_;
   }

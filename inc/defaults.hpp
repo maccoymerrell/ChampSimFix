@@ -32,7 +32,6 @@ inline champsim::modules::ModuleBuilder default_core()
 {
     return champsim::modules::ModuleBuilder{}
         .add_parameter("clock_period", champsim::chrono::picoseconds{250})
-        .add_parameter("consumer_id", uint32_t{0})
         .add_parameter("dib_set", uint32_t{32})
         .add_parameter("dib_way", uint32_t{8})
         .add_parameter("dib_window", std::size_t{16})

@@ -701,12 +701,36 @@ struct module_base {
     // True when all attached workload sources are exhausted.
     virtual bool source_eof() const { return true; }
 
-    // Consumer id: this consumer's hardware-context identity (-1 = not
-    // tracked as a phase source). Ids must be unique and dense in
-    // [0, num_consumers) across the consumers of a simulation; they key
-    // per-consumer resources (replacement tables, stats, phase tracking)
-    // and default the stream id of attached sources. See origin.h.
-    virtual int consumer_id() const { return -1; }
+    // Consumer id: this consumer's hardware-context identity. Assigned by
+    // the framework at startup, by enumeration in configuration order —
+    // never written in a configuration. Ids are unique and dense in
+    // [0, num_consumers); they key per-consumer resources (replacement
+    // tables, stats, phase tracking) and default the stream of attached
+    // sources. See origin.h. Standalone instances (unit tests) keep the
+    // default of 0, matching the historical single-core default.
+    int consumer_id() const { return consumer_id_; }
+    void set_consumer_id(int id)
+    {
+      if (!consumer_id_pinned_) {
+        consumer_id_ = id;
+      }
+    }
+    // Consumers that mirror another consumer's identity (rather than being
+    // hardware contexts of their own — e.g. a shadow/replay channel) may pin
+    // their id; pinned consumers are skipped by the startup enumeration and
+    // do not occupy an id slot.
+    void pin_consumer_id(int id)
+    {
+      consumer_id_ = id;
+      consumer_id_pinned_ = true;
+    }
+    bool consumer_id_pinned() const { return consumer_id_pinned_; }
+
+  private:
+    int consumer_id_ = 0;
+    bool consumer_id_pinned_ = false;
+
+  public:
 
     // Progress metric for phase completion, in tokens (e.g. instructions
     // retired). Return 0 to indicate no progress tracking (complete only on EOF).
@@ -772,8 +796,6 @@ struct module_base {
     static void format_json(const stats_type& stats, champsim::json_stat_builder& b);
 
     // source_consumer hooks: core_module provides CPU-specific messages.
-    // Every core model must provide its consumer id (its "CPU number").
-    int consumer_id() const override = 0;
     uint64_t sim_progress() const override;
     std::string source_finish_message(const std::string& phase_name) const override;
     std::string phase_complete_message(const std::string& phase_name) const override;
@@ -1240,11 +1262,34 @@ struct module_base {
     // Human-readable identity for reports (e.g. the trace path). Empty to suppress.
     virtual std::string describe() const { return {}; }
 
+    // Stream id: the address-space identity stamped on this source's tokens.
+    // Assigned by the framework at startup: every source gets its own stream
+    // unless sources share a "stream" label in the configuration, in which
+    // case they share one id. Never written as a number in a configuration.
+    // Standalone instances (unit tests) fall back to the owning consumer's
+    // id, the historical default.
+    uint32_t stream_id() const
+    {
+      if (stream_id_.has_value()) {
+        return *stream_id_;
+      }
+      return static_cast<uint32_t>(consumer_ != nullptr ? consumer_->consumer_id() : 0);
+    }
+    void set_stream_id(uint32_t id) { stream_id_ = id; }
+    // The configuration's "stream" sharing label; empty when unlabeled.
+    const std::string& stream_label() const { return stream_label_; }
+
   protected:
+    // Set by concrete sources that accept the optional "stream" label.
+    std::string stream_label_{};
+
     // The consumer this source feeds. Bound by the framework after
     // construction; sources stamp tokens with origin{consumer, stream},
     // where the stream defaults to the consumer's id (see origin.h).
     source_consumer* consumer_ = nullptr;
+
+  private:
+    std::optional<uint32_t> stream_id_{};
 
   private:
     friend struct module_base<workload_source, source_consumer>;

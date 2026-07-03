@@ -40,6 +40,7 @@
 namespace champsim
 {
 std::vector<phase_stats> main(modules::environment_module& env, std::vector<phase_info>& phases);
+void assign_identities(modules::environment_module& env);
 }
 
 // Collect all $varname references from a JSON document (recursive).

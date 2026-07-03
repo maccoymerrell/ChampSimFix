@@ -96,7 +96,7 @@ void O3_CPU::begin_phase(bool warmup, bool roi)
 
   // Record where the next phase begins
   stats_type stats;
-  stats.name = "CPU " + std::to_string(cpu);
+  stats.name = "CPU " + std::to_string(consumer_id());
   stats.begin_instrs = num_retired;
   stats.begin_cycles = begin_phase_time.time_since_epoch() / clock_period;
   sim_stats = stats;
@@ -963,7 +963,7 @@ std::pair<champsim::address, bool> O3_CPU::impl_btb_prediction(champsim::address
 // LCOV_EXCL_START Exclude the following function from LCOV
 void O3_CPU::print_deadlock()
 {
-  fmt::print("DEADLOCK! CPU {} cycle {}\n", cpu, current_time.time_since_epoch() / clock_period);
+  fmt::print("DEADLOCK! CPU {} cycle {}\n", consumer_id(), current_time.time_since_epoch() / clock_period);
 
   auto instr_pack = [period = clock_period, this](const auto& entry) {
     return std::tuple{entry.instr_id,
@@ -978,10 +978,10 @@ void O3_CPU::print_deadlock()
   };
   std::string_view instr_fmt{
       "instr_id: {} fetch_issued: {} fetch_completed: {} scheduled: {} executed: {} completed: {} num_reg_dependent: {} num_mem_ops: {} event: {}"};
-  champsim::range_print_deadlock(IFETCH_BUFFER, "cpu" + std::to_string(cpu) + "_IFETCH", instr_fmt, instr_pack);
-  champsim::range_print_deadlock(DECODE_BUFFER, "cpu" + std::to_string(cpu) + "_DECODE", instr_fmt, instr_pack);
-  champsim::range_print_deadlock(DISPATCH_BUFFER, "cpu" + std::to_string(cpu) + "_DISPATCH", instr_fmt, instr_pack);
-  champsim::range_print_deadlock(ROB, "cpu" + std::to_string(cpu) + "_ROB", instr_fmt, instr_pack);
+  champsim::range_print_deadlock(IFETCH_BUFFER, "cpu" + std::to_string(consumer_id()) + "_IFETCH", instr_fmt, instr_pack);
+  champsim::range_print_deadlock(DECODE_BUFFER, "cpu" + std::to_string(consumer_id()) + "_DECODE", instr_fmt, instr_pack);
+  champsim::range_print_deadlock(DISPATCH_BUFFER, "cpu" + std::to_string(consumer_id()) + "_DISPATCH", instr_fmt, instr_pack);
+  champsim::range_print_deadlock(ROB, "cpu" + std::to_string(consumer_id()) + "_ROB", instr_fmt, instr_pack);
 
   // print occupied physical registers
   reg_allocator.print_deadlock();
@@ -1003,8 +1003,8 @@ void O3_CPU::print_deadlock()
     return std::tuple{entry.instr_id, entry.virtual_address, entry.fetch_issued, entry.ready_time.time_since_epoch() / period, depend_ids};
   };
   std::string_view sq_fmt{"instr_id: {} address: {} fetch_issued: {} event_cycle: {} LQ waiting: {}"};
-  champsim::range_print_deadlock(LQ, "cpu" + std::to_string(cpu) + "_LQ", lq_fmt, lq_pack);
-  champsim::range_print_deadlock(SQ, "cpu" + std::to_string(cpu) + "_SQ", sq_fmt, sq_pack);
+  champsim::range_print_deadlock(LQ, "cpu" + std::to_string(consumer_id()) + "_LQ", lq_fmt, lq_pack);
+  champsim::range_print_deadlock(SQ, "cpu" + std::to_string(consumer_id()) + "_SQ", sq_fmt, sq_pack);
 }
 // LCOV_EXCL_STOP
 

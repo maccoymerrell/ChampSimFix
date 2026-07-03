@@ -932,7 +932,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
     auto trace_names = builder.get_parameter<std::vector<std::string>>("traces", true, std::vector<std::string>{});
     auto ws_model = builder.get_parameter<std::string>("workload_source_model", true, std::string{"TRACE_WORKLOAD_SOURCE"});
     auto src_builder = ModuleBuilder{cc.name + ".workload_source", ws_model};
-    src_builder.add_parameter("stream_id", static_cast<uint32_t>(cc.index));
+
     if (ws_model == "TRACE_WORKLOAD_SOURCE") {
       if (static_cast<std::size_t>(cc.index) >= trace_names.size()) {
         fmt::print(stderr, "[LEGACY_ENVIRONMENT] ERROR: no trace provided for cpu{}\n", cc.index);
@@ -943,7 +943,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
       src_builder.add_parameter("repeat", builder.get_parameter<bool>("repeat", true, false));
     }
     core_builder.add_submodule("workload_source", std::move(src_builder));
-    core_builder.add_parameter("consumer_id", cc.index);
+
     core_builder.add_parameter("clock_period", champsim::chrono::picoseconds{freq_to_period(cc.frequency)});
 
     // Forward all JSON scalar overrides (buffer sizes, latencies, etc.)

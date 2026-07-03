@@ -20,12 +20,12 @@ struct mock_core : public champsim::modules::core_module {
   explicit mock_core(champsim::modules::ModuleBuilder builder)
     : core_module(champsim::chrono::picoseconds{250}) {
     cpu_num_ = builder.get_parameter<uint8_t>("cpu_num", true, uint8_t{0});
+    set_consumer_id(static_cast<int>(cpu_num_));
   }
 
   void push_instruction(ooo_model_instr) override {}
   std::size_t instructions_requested() override { return 0; }
   uint64_t sim_instr() const override { return instr_count; }
-  int consumer_id() const override { return static_cast<int>(cpu_num_); }
   uint64_t sim_cycle() const override { return cycle_count; }
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return {}; }

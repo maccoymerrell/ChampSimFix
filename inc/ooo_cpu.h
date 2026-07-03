@@ -86,7 +86,6 @@ class O3_CPU : public champsim::modules::core_module, public champsim::module_ph
 public:
   // This core's consumer id (its "CPU number"): hardware-context identity
   // for provenance stamping, tables, stats, and phase tracking.
-  uint32_t cpu = 0;
 
   // cycle
   champsim::chrono::clock::time_point begin_phase_time{};
@@ -388,7 +387,6 @@ public:
   [[nodiscard]] auto roi_cycle() const { return roi_stats.cycles(); }
   [[nodiscard]] uint64_t sim_instr() const final { return num_retired - begin_phase_instr; }
   [[nodiscard]] uint64_t sim_cycle() const final { return (current_time.time_since_epoch() / clock_period) - sim_stats.begin_cycles; }
-  int consumer_id() const final { return static_cast<int>(cpu); }
   stats_type get_sim_stats() const final { return sim_stats; }
   stats_type get_roi_stats() const final { return roi_stats; }
 
@@ -414,7 +412,7 @@ public:
   virtual ~O3_CPU() noexcept = default;
 
   explicit O3_CPU(champsim::modules::ModuleBuilder builder)
-      : core_module(builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), cpu(builder.get_parameter<uint32_t>("consumer_id")),
+      : core_module(builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
         DIB(builder.get_parameter<uint32_t>("dib_set"), builder.get_parameter<uint32_t>("dib_way"), {champsim::data::bits{champsim::lg2(builder.get_parameter<std::size_t>("dib_window"))}}, {champsim::data::bits{champsim::lg2(builder.get_parameter<std::size_t>("dib_window"))}}),
         LQ(builder.get_parameter<uint32_t>("lq_size")), IFETCH_BUFFER_SIZE(builder.get_parameter<uint32_t>("ifetch_buffer_size")), DISPATCH_BUFFER_SIZE(builder.get_parameter<uint32_t>("dispatch_buffer_size")), DECODE_BUFFER_SIZE(builder.get_parameter<uint32_t>("decode_buffer_size")),
         REGISTER_FILE_SIZE(builder.get_parameter<uint32_t>("register_file_size")), ROB_SIZE(builder.get_parameter<uint32_t>("rob_size")), SQ_SIZE(builder.get_parameter<uint32_t>("sq_size")), DIB_HIT_BUFFER_SIZE(builder.get_parameter<uint32_t>("dib_hit_buffer_size")),

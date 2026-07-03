@@ -60,7 +60,6 @@ struct mock_core_913 : public champsim::modules::core_module {
   void push_instruction(ooo_model_instr instr) override { received_.push_back(instr); }
   std::size_t instructions_requested() override { return 4; }
   uint64_t sim_instr() const override { return 0; }
-  int consumer_id() const override { return static_cast<int>(0); }
   uint64_t sim_cycle() const override { return 0; }
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return {}; }

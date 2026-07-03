@@ -11,9 +11,7 @@ namespace
 
 // The consumer whose identity the source should inherit.
 struct probe_consumer : champsim::modules::source_consumer {
-  int id_;
-  explicit probe_consumer(int id) : id_(id) {}
-  int consumer_id() const override { return id_; }
+  explicit probe_consumer(int id) { set_consumer_id(id); }
 };
 
 // One valid 64-byte input_instr record (same bytes as 080-tracereader).
@@ -65,15 +63,15 @@ TEST_CASE("A trace source stamps tokens with its consumer's id, stream defaultin
   std::remove(path.c_str());
 }
 
-TEST_CASE("A trace source's stream_id parameter overrides the default stream")
+TEST_CASE("A framework-assigned stream overrides the default")
 {
   auto path = write_trace("override");
   probe_consumer consumer{3};
 
   auto builder = champsim::modules::ModuleBuilder{"t086_src_override", "TRACE_WORKLOAD_SOURCE"}
-    .add_parameter("trace_file", path)
-    .add_parameter("stream_id", uint32_t{7});
+    .add_parameter("trace_file", path);
   auto* uut = champsim::modules::workload_source::create_instance(builder, &consumer);
+  uut->set_stream_id(7); // as the startup identity pass would
   auto* typed = dynamic_cast<champsim::modules::instruction_source*>(uut);
   REQUIRE(typed != nullptr);
 

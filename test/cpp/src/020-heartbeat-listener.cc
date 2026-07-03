@@ -10,12 +10,10 @@ namespace
 
 // A minimal consumer that reports core-style heartbeat lines.
 struct hb_consumer : champsim::modules::source_consumer {
-  int id_;
-  explicit hb_consumer(int id) : id_(id) {}
-  int consumer_id() const override { return id_; }
+  explicit hb_consumer(int id) { set_consumer_id(id); }
   std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const override
   {
-    return fmt::format("Heartbeat CPU {} instructions: {} cycles: {} heartbeat IPC: {:.4} cumulative IPC: {:.4}", id_, total_progress, total_cycles,
+    return fmt::format("Heartbeat CPU {} instructions: {} cycles: {} heartbeat IPC: {:.4} cumulative IPC: {:.4}", consumer_id(), total_progress, total_cycles,
                        interval_rate, cumulative_rate);
   }
 };
@@ -176,7 +174,7 @@ TEST_CASE("The heartbeat baseline advances by whole intervals when retires overs
 
 TEST_CASE("The default progress message is token-generic") {
     champsim::modules::source_consumer generic{};
-    // Untracked consumers (source_id -1) still format; listeners skip them upstream
+    // Standalone consumers default to id 0 until the startup pass assigns one
     auto msg = generic.progress_message(100, 50, 2.0, 2.0);
-    REQUIRE_THAT(msg, Catch::Matchers::StartsWith("Heartbeat source -1 tokens: 100 cycles: 50 "));
+    REQUIRE_THAT(msg, Catch::Matchers::StartsWith("Heartbeat source 0 tokens: 100 cycles: 50 "));
 }

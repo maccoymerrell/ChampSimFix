@@ -202,33 +202,49 @@ static phase_stats collect_phase_stats(const phase_info& phase, modules::environ
   return stats;
 }
 
+// Assign identities. Consumer ids and stream ids are framework-internal:
+// consumers enumerate densely in configuration order, and every workload
+// source gets its own stream (its own address space) unless sources share
+// a "stream" label in the configuration, in which case they share one id.
+// Configurations never contain the numbers; only origins carry them.
+void assign_identities(modules::environment_module& env)
+{
+  int next_consumer = 0;
+  for (auto& sc : env.typed_view<modules::source_consumer>("source_consumer")) {
+    if (sc.get().consumer_id_pinned()) {
+      continue; // mirrors another consumer's identity; owns no slot
+    }
+    sc.get().set_consumer_id(next_consumer++);
+  }
+
+  auto num_consumers = modules::ModuleBuilder::globals().get_parameter<std::size_t>("num_consumers", true, std::size_t{0});
+  if (num_consumers > 0 && static_cast<std::size_t>(next_consumer) > num_consumers) {
+    fmt::print("ERROR: {} consumers found but num_consumers is {} — per-consumer tables would index out of bounds. "
+               "Remove or raise the root config key \"num_consumers\".\n",
+               next_consumer, num_consumers);
+    std::exit(-1);
+  }
+
+  uint32_t next_stream = 0;
+  std::map<std::string, uint32_t> stream_labels;
+  for (auto& src : env.typed_view<modules::workload_source>("workload_source")) {
+    const auto& label = src.get().stream_label();
+    if (label.empty()) {
+      src.get().set_stream_id(next_stream++);
+    } else {
+      auto [it, fresh] = stream_labels.try_emplace(label, next_stream);
+      if (fresh) {
+        ++next_stream;
+      }
+      src.get().set_stream_id(it->second);
+    }
+  }
+}
+
 // simulation entry point
 std::vector<phase_stats> main(modules::environment_module& env, std::vector<phase_info>& phases)
 {
-  // Consumer ids are the contract for per-consumer resources (replacement
-  // tables sized by num_consumers, listener tracking, phase completion):
-  // they must be unique, and within [0, num_consumers). Fail loudly at
-  // startup instead of silently sharing slots or indexing out of bounds.
-  {
-    auto num_consumers = modules::ModuleBuilder::globals().get_parameter<std::size_t>("num_consumers", true, std::size_t{0});
-    std::set<int> seen_ids;
-    for (auto& sc : env.typed_view<modules::source_consumer>("source_consumer")) {
-      int id = sc.get().consumer_id();
-      if (id < 0) {
-        continue; // untracked consumer
-      }
-      if (!seen_ids.insert(id).second) {
-        fmt::print("ERROR: duplicate consumer id {} — consumer ids must be unique\n", id);
-        std::exit(-1);
-      }
-      if (num_consumers > 0 && static_cast<std::size_t>(id) >= num_consumers) {
-        fmt::print("ERROR: consumer id {} is outside [0, num_consumers={}) — per-consumer tables would index out of bounds. "
-                   "Set ids densely from 0, or override the root config key \"num_consumers\".\n",
-                   id, num_consumers);
-        std::exit(-1);
-      }
-    }
-  }
+  assign_identities(env);
 
   for (champsim::operable& op : env.typed_view<champsim::operable>("operable")) {
     op.initialize();

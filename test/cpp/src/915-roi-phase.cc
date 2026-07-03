@@ -41,7 +41,6 @@ struct mock_core_915 : public champsim::modules::core_module {
   long operate() override { ++instr_count; return 1; }
   cpu_stats get_sim_stats() const override { return {}; }
   cpu_stats get_roi_stats() const override { return {}; }
-  int consumer_id() const override { return 0; }
   bool source_eof() const override { return false; }
 };
 static champsim::modules::core_module::register_module<mock_core_915> core_reg_915("MOCK_CORE_915");

@@ -20,7 +20,6 @@ struct mock_core_914 : public champsim::modules::core_module {
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return {}; }
   cpu_stats get_roi_stats() const override { return {}; }
-  int consumer_id() const override { return 0; }
   bool source_eof() const override { return false; }
 };
 
