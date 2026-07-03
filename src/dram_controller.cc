@@ -145,9 +145,7 @@ bool DRAM_CHANNEL::has_pending_work() const
   // bank), banks occupied until a known ready_time, or an active data-bus
   // transfer. Queued-but-unscheduled packets are excluded — with free banks
   // they schedule (and count progress) on the very next operated cycle.
-  return active_request != std::cend(bank_request)
-         || std::any_of(std::cbegin(bank_request), std::cend(bank_request),
-                        [](const auto& b_req) { return b_req.valid || b_req.need_refresh || b_req.under_refresh; });
+  return active_request != std::cend(bank_request) || valid_bank_count > 0 || refresh_pending_banks > 0;
 }
 
 bool MEMORY_CONTROLLER::has_pending_work() const
@@ -169,16 +167,11 @@ bool DRAM_CHANNEL::would_do_work_at(champsim::chrono::clock::time_point t) const
     return true;
   }
   // Any bank or data-bus activity in flight.
-  if (active_request != std::cend(bank_request)) {
-    return true;
-  }
-  if (std::any_of(std::cbegin(bank_request), std::cend(bank_request),
-                  [](const auto& b_req) { return b_req.valid || b_req.need_refresh || b_req.under_refresh; })) {
+  if (active_request != std::cend(bank_request) || valid_bank_count > 0 || refresh_pending_banks > 0) {
     return true;
   }
   // Any queued request.
-  return std::any_of(std::cbegin(RQ), std::cend(RQ), [](const auto& entry) { return entry.has_value(); })
-         || std::any_of(std::cbegin(WQ), std::cend(WQ), [](const auto& entry) { return entry.has_value(); });
+  return rq_occupancy_ct > 0 || wq_occupancy_ct > 0;
 }
 
 long DRAM_CHANNEL::operate()
@@ -186,23 +179,35 @@ long DRAM_CHANNEL::operate()
   long progress{0};
 
   if (warmup) {
-    for (auto& entry : RQ) {
-      if (entry.has_value()) {
-        response_type response{entry->address, entry->v_address, entry->data, entry->pf_metadata, entry->instr_depend_on_me};
-        for (auto* ret : entry.value().to_return) {
-          ret->push_back(response);
-        }
+    if (rq_occupancy_ct > 0) {
+      for (auto& entry : RQ) {
+        if (entry.has_value()) {
+          response_type response{entry->address, entry->v_address, entry->data, entry->pf_metadata, entry->instr_depend_on_me};
+          for (auto* ret : entry.value().to_return) {
+            ret->push_back(response);
+          }
 
-        ++progress;
-        entry.reset();
+          ++progress;
+          if (!entry->forward_checked) {
+            --rq_unchecked_ct;
+          }
+          entry.reset();
+          --rq_occupancy_ct;
+        }
       }
     }
 
-    for (auto& entry : WQ) {
-      if (entry.has_value()) {
-        ++progress;
+    if (wq_occupancy_ct > 0) {
+      for (auto& entry : WQ) {
+        if (entry.has_value()) {
+          ++progress;
+          if (!entry->forward_checked) {
+            --wq_unchecked_ct;
+          }
+          --wq_occupancy_ct;
+        }
+        entry.reset();
       }
-      entry.reset();
     }
   }
 
@@ -212,7 +217,11 @@ long DRAM_CHANNEL::operate()
   swap_write_mode();
   schedule_refresh();
   progress += populate_dbus();
-  progress += service_packet(schedule_packet());
+  // With the active queue empty, schedule_packet's scan selects nothing and
+  // service_packet no-ops — skip both.
+  if ((write_mode ? wq_occupancy_ct : rq_occupancy_ct) > 0) {
+    progress += service_packet(schedule_packet());
+  }
 
   return progress;
 }
@@ -229,8 +238,14 @@ long DRAM_CHANNEL::finish_dbus_request()
     }
 
     active_request->valid = false;
+    --valid_bank_count;
 
+    if (active_request->pkt->has_value() && !active_request->pkt->value().forward_checked) {
+      // scheduled entries are always checked; defensive for injected state
+      (active_request->pkt_is_write ? wq_unchecked_ct : rq_unchecked_ct)--;
+    }
     active_request->pkt->reset();
+    (active_request->pkt_is_write ? wq_occupancy_ct : rq_occupancy_ct)--;
     active_request = std::end(bank_request);
     ++progress;
   }
@@ -242,6 +257,12 @@ void DRAM_CHANNEL::schedule_refresh()
 {
   // check if we reached refresh cycle
   bool schedule_refresh = current_time >= last_refresh + tREF;
+
+  // With no refresh due and none pending, every iteration of the bank loop
+  // below is a provable no-op — skip the walk.
+  if (!schedule_refresh && refresh_pending_banks == 0) {
+    return;
+  }
   // if so, record stats
   if (schedule_refresh) {
     last_refresh = current_time;
@@ -259,6 +280,9 @@ void DRAM_CHANNEL::schedule_refresh()
   for (auto& b_req : bank_request) {
     // refresh is now needed for this bank
     if (schedule_refresh) {
+      if (!b_req.need_refresh && !b_req.under_refresh) {
+        ++refresh_pending_banks;
+      }
       b_req.need_refresh = true;
     }
     // refresh is being scheduled for this bank
@@ -271,6 +295,9 @@ void DRAM_CHANNEL::schedule_refresh()
     else if (b_req.under_refresh && b_req.ready_time <= current_time) {
       b_req.under_refresh = false;
       b_req.open_row.reset();
+      if (!b_req.need_refresh) {
+        --refresh_pending_banks;
+      }
     }
   }
 }
@@ -282,9 +309,9 @@ void DRAM_CHANNEL::swap_write_mode()
   const std::size_t DRAM_WRITE_HIGH_WM = write_high_wm_;
   const std::size_t DRAM_WRITE_LOW_WM = write_low_wm_;
 
-  // Check queue occupancy
-  auto wq_occu = static_cast<std::size_t>(std::count_if(std::begin(WQ), std::end(WQ), [](const auto& x) { return x.has_value(); }));
-  auto rq_occu = static_cast<std::size_t>(std::count_if(std::begin(RQ), std::end(RQ), [](const auto& x) { return x.has_value(); }));
+  // Check queue occupancy (maintained counters; was a 128-slot scan per cycle)
+  auto wq_occu = static_cast<std::size_t>(wq_occupancy_ct);
+  auto rq_occu = static_cast<std::size_t>(rq_occupancy_ct);
 
   // Change modes if the queues are unbalanced
   if ((!write_mode && (wq_occu >= DRAM_WRITE_HIGH_WM || (rq_occu == 0 && wq_occu > 0)))
@@ -300,6 +327,7 @@ void DRAM_CHANNEL::swap_write_mode()
 
         // This bank is ready for another DRAM request
         it->valid = false;
+        --valid_bank_count;
         it->pkt->value().scheduled = false;
         it->pkt->value().ready_time = current_time;
       }
@@ -321,6 +349,12 @@ void DRAM_CHANNEL::swap_write_mode()
 long DRAM_CHANNEL::populate_dbus()
 {
   long progress{0};
+
+  // With no valid bank request, the min_element scan finds nothing and both
+  // branches below are unreachable — skip the walk.
+  if (valid_bank_count == 0) {
+    return progress;
+  }
 
   auto iter_next_process = std::min_element(std::begin(bank_request), std::end(bank_request),
                                             [](const auto& lhs, const auto& rhs) { return !rhs.valid || (lhs.valid && lhs.ready_time < rhs.ready_time); });
@@ -426,9 +460,17 @@ long DRAM_CHANNEL::service_packet(DRAM_CHANNEL::queue_type::iterator pkt)
 
       // this bank is now busy
       auto row_charge_delay = champsim::chrono::clock::duration{bank_request[op_idx].open_row.has_value() ? tRP + tRCD : tRCD};
+      if (bank_request[op_idx].need_refresh) {
+        // Cannot happen after schedule_refresh ran this cycle (need && !valid
+        // banks were converted to under_refresh, which the guard excludes);
+        // kept for counter integrity under any call order.
+        --refresh_pending_banks; // LCOV_EXCL_LINE
+      }
       bank_request[op_idx] = {true,  row_buffer_hit,        false,
                               false, std::optional{op_row}, current_time + tCAS + (row_buffer_hit ? champsim::chrono::clock::duration{} : row_charge_delay),
                               pkt};
+      bank_request[op_idx].pkt_is_write = write_mode;
+      ++valid_bank_count;
       pkt->value().scheduled = true;
       pkt->value().ready_time = champsim::chrono::clock::time_point::max();
 
@@ -494,6 +536,10 @@ bool DRAM_ADDRESS_MAPPING::is_collision(champsim::address a, champsim::address b
 
 void DRAM_CHANNEL::check_write_collision()
 {
+  // Only unchecked entries do anything in this pass
+  if (wq_unchecked_ct == 0) {
+    return;
+  }
   for (auto wq_it = std::begin(WQ); wq_it != std::end(WQ); ++wq_it) {
     if (wq_it->has_value() && !wq_it->value().forward_checked) {
       auto checker = [addr_map = address_mapping, check_val = wq_it->value().address](const auto& pkt) {
@@ -507,15 +553,21 @@ void DRAM_CHANNEL::check_write_collision()
 
       if (found != std::end(WQ)) {
         wq_it->reset();
+        --wq_occupancy_ct;
       } else {
         wq_it->value().forward_checked = true;
       }
+      --wq_unchecked_ct;
     }
   }
 }
 
 void DRAM_CHANNEL::check_read_collision()
 {
+  // Only unchecked entries do anything in this pass
+  if (rq_unchecked_ct == 0) {
+    return;
+  }
   for (auto rq_it = std::begin(RQ); rq_it != std::end(RQ); ++rq_it) {
     if (rq_it->has_value() && !rq_it->value().forward_checked) {
       auto checker = [addr_map = address_mapping, check_val = rq_it->value().address](const auto& x) {
@@ -530,6 +582,8 @@ void DRAM_CHANNEL::check_read_collision()
         }
 
         rq_it->reset();
+        --rq_occupancy_ct;
+        --rq_unchecked_ct;
 
       }
       // backwards check
@@ -543,6 +597,8 @@ void DRAM_CHANNEL::check_read_collision()
                        std::back_inserter(found->value().to_return));
 
         rq_it->reset();
+        --rq_occupancy_ct;
+        --rq_unchecked_ct;
 
       }
       // forwards check
@@ -556,8 +612,11 @@ void DRAM_CHANNEL::check_read_collision()
                        std::back_inserter(found->value().to_return));
 
         rq_it->reset();
+        --rq_occupancy_ct;
+        --rq_unchecked_ct;
       } else {
         rq_it->value().forward_checked = true;
+        --rq_unchecked_ct;
       }
     }
   }
@@ -585,37 +644,68 @@ DRAM_CHANNEL::request_type::request_type(const champsim::request& req)
   origin = req.origin;
 }
 
+bool DRAM_CHANNEL::insert_rq(request_type entry)
+{
+  if (auto rq_it = std::find_if_not(std::begin(RQ), std::end(RQ), [](const auto& pkt) { return pkt.has_value(); }); rq_it != std::end(RQ)) {
+    ++rq_occupancy_ct;
+    if (!entry.forward_checked) {
+      ++rq_unchecked_ct;
+    }
+    *rq_it = std::move(entry);
+    return true;
+  }
+  return false;
+}
+
+bool DRAM_CHANNEL::insert_wq(request_type entry)
+{
+  if (auto wq_it = std::find_if_not(std::begin(WQ), std::end(WQ), [](const auto& pkt) { return pkt.has_value(); }); wq_it != std::end(WQ)) {
+    ++wq_occupancy_ct;
+    if (!entry.forward_checked) {
+      ++wq_unchecked_ct;
+    }
+    *wq_it = std::move(entry);
+    return true;
+  }
+  return false;
+}
+
+void DRAM_CHANNEL::resync_counters()
+{
+  auto occupied = [](const auto& entry) { return entry.has_value(); };
+  auto unchecked = [](const auto& entry) { return entry.has_value() && !entry->forward_checked; };
+  rq_occupancy_ct = std::count_if(std::cbegin(RQ), std::cend(RQ), occupied);
+  wq_occupancy_ct = std::count_if(std::cbegin(WQ), std::cend(WQ), occupied);
+  rq_unchecked_ct = std::count_if(std::cbegin(RQ), std::cend(RQ), unchecked);
+  wq_unchecked_ct = std::count_if(std::cbegin(WQ), std::cend(WQ), unchecked);
+  valid_bank_count = std::count_if(std::cbegin(bank_request), std::cend(bank_request), [](const auto& b) { return b.valid; });
+  refresh_pending_banks = std::count_if(std::cbegin(bank_request), std::cend(bank_request), [](const auto& b) { return b.need_refresh || b.under_refresh; });
+}
+
 bool MEMORY_CONTROLLER::add_rq(const request_type& packet, champsim::modules::channel_module* ul)
 {
   auto& channel = channels[address_mapping.get_channel(packet.address)];
 
-  if (auto rq_it = std::find_if_not(std::begin(channel.RQ), std::end(channel.RQ), [this](const auto& pkt) { return pkt.has_value(); });
-      rq_it != std::end(channel.RQ)) {
-    *rq_it = DRAM_CHANNEL::request_type{packet};
-    rq_it->value().forward_checked = false;
-    rq_it->value().scheduled = false;
-    rq_it->value().ready_time = current_time;
-    if (packet.response_requested)
-      rq_it->value().to_return = {&ul->get_returned()};
+  DRAM_CHANNEL::request_type entry{packet};
+  entry.forward_checked = false;
+  entry.scheduled = false;
+  entry.ready_time = current_time;
+  if (packet.response_requested)
+    entry.to_return = {&ul->get_returned()};
 
-    return true;
-  }
-
-  return false;
+  return channel.insert_rq(std::move(entry));
 }
 
 bool MEMORY_CONTROLLER::add_wq(const request_type& packet)
 {
   auto& channel = channels[address_mapping.get_channel(packet.address)];
 
-  // search for the empty index
-  if (auto wq_it = std::find_if_not(std::begin(channel.WQ), std::end(channel.WQ), [](const auto& pkt) { return pkt.has_value(); });
-      wq_it != std::end(channel.WQ)) {
-    *wq_it = DRAM_CHANNEL::request_type{packet};
-    wq_it->value().forward_checked = false;
-    wq_it->value().scheduled = false;
-    wq_it->value().ready_time = current_time;
+  DRAM_CHANNEL::request_type entry{packet};
+  entry.forward_checked = false;
+  entry.scheduled = false;
+  entry.ready_time = current_time;
 
+  if (channel.insert_wq(std::move(entry))) {
     return true;
   }
 

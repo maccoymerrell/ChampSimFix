@@ -120,9 +120,17 @@ struct DRAM_CHANNEL final : public champsim::operable {
   };
   using value_type = request_type;
   using queue_type = std::vector<std::optional<value_type>>;
+
+private:
+  // The queues and bank state carry incrementally maintained counters (see
+  // below); they are private so that no outside mutation can desynchronize
+  // the bookkeeping. Inspect through rq()/wq()/bank_requests(); mutate
+  // through insert_rq()/insert_wq() or modify_rq()/modify_wq(), which
+  // re-derive the counters after arbitrary changes.
   queue_type WQ;
   queue_type RQ;
 
+public:
   /*
    * | row address | rank index | column address | bank index | channel | block
    * offset |
@@ -136,13 +144,20 @@ struct DRAM_CHANNEL final : public champsim::operable {
     champsim::chrono::clock::time_point ready_time{};
 
     queue_type::iterator pkt;
+    // Which queue pkt points into (set when the request is scheduled); used
+    // to maintain the occupancy counters when the slot is released.
+    bool pkt_is_write = false;
   };
 
   const champsim::data::bytes channel_width;
 
   using request_array_type = std::vector<BANK_REQUEST>;
+
+private:
   request_array_type bank_request;
   request_array_type::iterator active_request;
+
+public:
 
   // track bankgroup accesses
   std::vector<champsim::chrono::clock::time_point> bankgroup_readytime{address_mapping.ranks() * address_mapping.bankgroups(),
@@ -158,9 +173,54 @@ struct DRAM_CHANNEL final : public champsim::operable {
   champsim::chrono::clock::time_point last_refresh{};
   std::size_t DRAM_ROWS_PER_REFRESH;
 
+private:
   // Hoisted write-burst watermarks (WQ capacity is fixed at construction)
   std::size_t write_high_wm_ = 0;
   std::size_t write_low_wm_ = 0;
+
+  // Incrementally maintained state counters. Each replaces a full-capacity
+  // scan per cycle with O(1) reads. Every mutation of RQ/WQ/bank_request
+  // flows through member functions (or modify_*/resync_counters), so the
+  // counters cannot be desynchronized from outside.
+  long rq_occupancy_ct = 0;      // RQ slots with has_value
+  long wq_occupancy_ct = 0;      // WQ slots with has_value
+  long rq_unchecked_ct = 0;      // occupied RQ slots with !forward_checked
+  long wq_unchecked_ct = 0;      // occupied WQ slots with !forward_checked
+  long valid_bank_count = 0;     // bank_request entries with valid
+  long refresh_pending_banks = 0; // bank_request entries with need_refresh || under_refresh
+
+  // Recompute every counter from the underlying structures.
+  void resync_counters();
+
+public:
+  // Inspection
+  const queue_type& rq() const { return RQ; }
+  const queue_type& wq() const { return WQ; }
+  const request_array_type& bank_requests() const { return bank_request; }
+
+  // Place a fully formed request into the first free slot (the caller
+  // controls all fields, including ready_time and the checked/scheduled
+  // flags). Returns false if the queue is full. Counters are maintained.
+  bool insert_rq(request_type entry);
+  bool insert_wq(request_type entry);
+
+  // Apply an arbitrary mutation to a queue, then re-derive the counters.
+  // This is the sanctioned way for tests (or future code) to reach into the
+  // queues; it cannot leave the bookkeeping inconsistent. Note: bank_request
+  // holds iterators into the queues, so entries referenced by in-flight bank
+  // requests must not be relocated.
+  template <typename F>
+  void modify_rq(F&& fn)
+  {
+    std::forward<F>(fn)(RQ);
+    resync_counters();
+  }
+  template <typename F>
+  void modify_wq(F&& fn)
+  {
+    std::forward<F>(fn)(WQ);
+    resync_counters();
+  }
 
   using stats_type = dram_stats;
   stats_type roi_stats, sim_stats;

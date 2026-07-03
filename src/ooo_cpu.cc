@@ -199,6 +199,7 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
 void O3_CPU::push_instruction(ooo_model_instr instr)
 {
   input_queue.push_back(std::move(instr));
+  drained_latch_ = false; // new work arrived; the core is no longer drained
 }
 
 std::size_t O3_CPU::instructions_requested()

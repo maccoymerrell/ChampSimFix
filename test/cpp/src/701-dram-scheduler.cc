@@ -11,16 +11,15 @@ std::vector<uint64_t> dram_test(MEMORY_CONTROLLER* uut, std::vector<champsim::ch
 {
   auto start_time = uut->current_time;
 
-  auto ins_begin = std::begin(uut->channels[0].RQ);
-  // load requests into controller
-  std::transform(std::cbegin(*packet_stream), std::cend(*packet_stream), std::cbegin(*arriv_time), ins_begin,
-                 [period = uut->clock_period, start_time](auto pkt, uint64_t cycle) {
-                   auto r_pkt = DRAM_CHANNEL::request_type{pkt};
-                   r_pkt.forward_checked = false;
-                   r_pkt.scheduled = false;
-                   r_pkt.ready_time = start_time + cycle * period;
-                   return r_pkt;
-                 });
+  // load requests into controller (insert_rq fills consecutive free slots)
+  auto arriv_it = std::cbegin(*arriv_time);
+  for (auto pkt_it = std::cbegin(*packet_stream); pkt_it != std::cend(*packet_stream); ++pkt_it, ++arriv_it) {
+    auto r_pkt = DRAM_CHANNEL::request_type{*pkt_it};
+    r_pkt.forward_checked = false;
+    r_pkt.scheduled = false;
+    r_pkt.ready_time = start_time + *arriv_it * uut->clock_period;
+    REQUIRE(uut->channels[0].insert_rq(std::move(r_pkt)));
+  }
 
   // carry out operates, record request scheduling order
   std::vector<bool> last_scheduled(packet_stream->size(), false);
@@ -31,7 +30,7 @@ std::vector<uint64_t> dram_test(MEMORY_CONTROLLER* uut, std::vector<champsim::ch
     uut->_operate();
     // get scheduled requests
     std::vector<bool> next_scheduled{};
-    std::transform(std::begin(uut->channels[0].RQ), std::end(uut->channels[0].RQ), std::back_inserter(next_scheduled),
+    std::transform(std::begin(uut->channels[0].rq()), std::end(uut->channels[0].rq()), std::back_inserter(next_scheduled),
                    [](const auto& entry) { return ((entry.has_value() && entry.value().scheduled) || !entry.has_value()); });
 
     // search for newly scheduled requests

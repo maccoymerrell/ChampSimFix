@@ -111,11 +111,38 @@ public:
   std::deque<ooo_model_instr> IFETCH_BUFFER;
   std::deque<ooo_model_instr> DISPATCH_BUFFER;
   std::deque<ooo_model_instr> DECODE_BUFFER;
-  std::deque<ooo_model_instr> ROB;
   std::deque<ooo_model_instr> DIB_HIT_BUFFER;
 
+private:
+  // The ROB and LQ carry incrementally maintained bookkeeping (scheduled
+  // prefix, stage change-detectors, occupancy bitmap); they are private so
+  // no outside mutation can desynchronize it. Inspect through rob()/lq();
+  // mutate through modify_rob()/modify_lq(), which re-derive the state.
+  std::deque<ooo_model_instr> ROB;
   std::vector<std::optional<LSQ_ENTRY>> LQ;
+
+public:
   std::deque<LSQ_ENTRY> SQ;
+
+  // Inspection
+  const std::deque<ooo_model_instr>& rob() const { return ROB; }
+  const std::vector<std::optional<LSQ_ENTRY>>& lq() const { return LQ; }
+
+  // Apply an arbitrary mutation, then re-derive all dependent bookkeeping.
+  // This is the sanctioned way to reach into these structures from outside
+  // (tests, experiment harnesses); it cannot leave the state inconsistent.
+  template <typename F>
+  void modify_rob(F&& fn)
+  {
+    std::forward<F>(fn)(ROB);
+    resync_rob_bookkeeping();
+  }
+  template <typename F>
+  void modify_lq(F&& fn)
+  {
+    std::forward<F>(fn)(LQ);
+    resync_lq_bookkeeping();
+  }
 
   // Constants
   const std::size_t IFETCH_BUFFER_SIZE, DISPATCH_BUFFER_SIZE, DECODE_BUFFER_SIZE, REGISTER_FILE_SIZE, ROB_SIZE, SQ_SIZE, DIB_HIT_BUFFER_SIZE;
@@ -182,6 +209,32 @@ private:
 
   void lq_set_occupied(std::size_t idx) { lq_occupied_[idx >> 6] |= (uint64_t{1} << (idx & 63)); --lq_free_slots_; }
   void lq_clear_occupied(std::size_t idx) { lq_occupied_[idx >> 6] &= ~(uint64_t{1} << (idx & 63)); ++lq_free_slots_; }
+
+  // Recompute all derived state from the underlying structures (used by the
+  // modify_* mutation API).
+  void resync_rob_bookkeeping()
+  {
+    num_scheduled_ = 0;
+    for (const auto& entry : ROB) {
+      if (!entry.scheduled) {
+        break;
+      }
+      ++num_scheduled_;
+    }
+    exec_stage_clean_ = false;
+    complete_stage_clean_ = false;
+  }
+  void resync_lq_bookkeeping()
+  {
+    lq_occupied_.assign((std::size(LQ) + 63) / 64, 0);
+    lq_free_slots_ = static_cast<long>(std::size(LQ));
+    for (std::size_t idx = 0; idx < std::size(LQ); ++idx) {
+      if (LQ[idx].has_value()) {
+        lq_set_occupied(idx);
+      }
+    }
+    drained_latch_ = false;
+  }
 public:
   bool is_warmup() const { return warmup_; }
   bool is_roi() const    { return roi_; }
