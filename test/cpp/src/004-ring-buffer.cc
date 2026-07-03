@@ -89,6 +89,42 @@ SCENARIO("A ring buffer acts as a bounded FIFO")
       }
     }
 
+    WHEN("A tail-anchored range is erased")
+    {
+      for (int v : {1, 2, 3, 4})
+        uut.push_back(v);
+      uut.pop_front(); // wrap the contents
+      uut.push_back(5);
+      auto kept = uut.erase(std::next(uut.cbegin(), 2), uut.cend());
+
+      THEN("Only the prefix remains and the returned iterator is the new end")
+      {
+        REQUIRE(uut.size() == 2);
+        REQUIRE(kept == uut.end());
+        std::vector<int> seen(uut.begin(), uut.end());
+        REQUIRE_THAT(seen, Catch::Matchers::Equals(std::vector<int>{2, 3}));
+      }
+    }
+
+    WHEN("Elements are addressed by physical slot")
+    {
+      for (int v : {1, 2, 3, 4})
+        uut.push_back(v);
+      uut.pop_front();
+      uut.pop_front();
+      uut.push_back(5); // 5 reuses slot 0
+
+      THEN("Iterator slots are stable and at_slot returns the same element")
+      {
+        for (auto it = uut.begin(); it != uut.end(); ++it) {
+          REQUIRE(uut.at_slot(it.slot()) == *it);
+        }
+        REQUIRE(uut.head_slot() == 2);
+        REQUIRE(uut.slot_index(2) == 0); // logical 2 wrapped to physical 0
+        REQUIRE(uut.at_slot(0) == 5);
+      }
+    }
+
     WHEN("A front-anchored range is erased")
     {
       for (int v : {7, 8, 9})

@@ -112,6 +112,10 @@ class ring_buffer
 
     reference operator*() const { return *data_[phys_]; }
     pointer operator->() const { return &**this; }
+    /** The physical storage slot of the current element. Slots are stable
+     *  for an element's whole residency (only reused after it is popped),
+     *  so they can key side structures such as candidate bitmaps. */
+    std::size_t slot() const { return phys_; }
     reference operator[](difference_type n) const { return *(*this + n); }
 
     iterator_impl& operator++()
@@ -228,6 +232,21 @@ public:
     --count_;
   }
 
+  void pop_back()
+  {
+    assert(count_ > 0);
+    --count_;
+    storage_[physical(count_)].reset();
+  }
+
+  /** The physical slot of the logical front. */
+  size_type head_slot() const { return head_; }
+  /** The physical slot holding logical index idx. */
+  size_type slot_index(size_type idx) const { return physical(idx); }
+  /** Access an element by its physical slot (must be occupied). */
+  reference at_slot(size_type slot) { return *storage_[slot]; }
+  const_reference at_slot(size_type slot) const { return *storage_[slot]; }
+
   /**
    * Insert a range at the tail. Only end-anchored insertion is supported,
    * mirroring push_back (the position argument exists for interface
@@ -245,17 +264,25 @@ public:
   }
 
   /**
-   * Erase a prefix range [first, last). Only front-anchored ranges are
-   * supported: `first` must be begin(). This matches FIFO retirement.
+   * Erase a range that touches one end of the buffer: front-anchored
+   * (`first == begin()`, FIFO retirement) or tail-anchored (`last == end()`,
+   * compaction-style removal as used with extract_if/remove_if).
    */
   iterator erase(const_iterator first, const_iterator last)
   {
-    assert(first.pos_ == 0);
-    auto n = last - cbegin();
-    for (difference_type i = 0; i < n; ++i) {
-      pop_front();
+    assert(first.pos_ == 0 || last.pos_ == count_);
+    auto n = last - first;
+    if (first.pos_ == 0) {
+      for (difference_type i = 0; i < n; ++i) {
+        pop_front();
+      }
+      return begin();
     }
-    return begin();
+    auto retval_pos = first.pos_;
+    for (difference_type i = 0; i < n; ++i) {
+      pop_back();
+    }
+    return begin() + static_cast<difference_type>(retval_pos);
   }
 
   void clear()

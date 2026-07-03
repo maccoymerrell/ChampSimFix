@@ -489,6 +489,7 @@ long O3_CPU::schedule_instruction()
     }
     if (!rob_it->scheduled) { // always true in normal operation; guards injected state
       do_scheduling(*rob_it);
+      candidate_set(exec_candidates_, rob_it.slot());
       ++num_scheduled_;
       ++progress;
     }
@@ -529,22 +530,28 @@ long O3_CPU::execute_instruction()
 
   champsim::bandwidth exec_bw{EXEC_WIDTH};
   auto wake = champsim::chrono::clock::time_point::max();
-  auto rob_it = std::begin(ROB);
-  for (; rob_it != std::end(ROB) && exec_bw.has_remaining(); ++rob_it) {
-    if (rob_it->scheduled && !rob_it->executed) {
-      if (rob_it->ready_time <= current_time) {
-        bool ready = std::all_of(std::begin(rob_it->source_registers), std::end(rob_it->source_registers),
+  auto visit = [&](std::size_t slot) {
+    if (!exec_bw.has_remaining()) {
+      return false;
+    }
+    auto& instr = ROB.at_slot(slot);
+    if (instr.scheduled && !instr.executed) { // always true in normal operation; guards injected state
+      if (instr.ready_time <= current_time) {
+        bool ready = std::all_of(std::begin(instr.source_registers), std::end(instr.source_registers),
                                  [&alloc = std::as_const(reg_allocator)](auto srcreg) { return alloc.isValid(srcreg); });
         if (ready) {
-          do_execution(*rob_it);
+          do_execution(instr);
+          candidate_clear(exec_candidates_, slot);
+          candidate_set(complete_candidates_, slot);
           exec_bw.consume();
         }
       } else {
-        wake = std::min(wake, rob_it->ready_time);
+        wake = std::min(wake, instr.ready_time);
       }
     }
-  }
-  if (rob_it == std::end(ROB)) {
+    return true;
+  };
+  if (visit_candidates_in_age_order(exec_candidates_, visit)) {
     // Full traversal: every remaining candidate either waits on a register
     // (covered by the completion dirty flag) or on a recorded wake time.
     exec_stage_clean_ = true;
@@ -608,11 +615,12 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
     q_entry->emplace(smem, instr.instr_id, instr.ip, instr.origin); // add it to the load queue
     lq_set_occupied(static_cast<std::size_t>(std::distance(std::begin(LQ), q_entry)));
 
-    // Check for forwarding
-    auto sq_it = std::max_element(std::begin(SQ), std::end(SQ), [smem](const auto& lhs, const auto& rhs) {
-      return lhs.virtual_address != smem || (rhs.virtual_address == smem && LSQ_ENTRY::program_order(lhs, rhs));
-    });
-    if (sq_it != std::end(SQ) && sq_it->virtual_address == smem) {
+    // Check for forwarding: the youngest prior store to this exact address
+    // (the back of the per-address stack — identical to what the old
+    // max_element scan over the whole SQ selected)
+    auto fwd_it = sq_store_index_.find(smem.to<uint64_t>());
+    if (fwd_it != std::end(sq_store_index_)) {
+      auto* sq_it = fwd_it->second.back();
       if (sq_it->fetch_issued) { // Store already executed
         (*q_entry)->finish(instr);
         complete_stage_clean_ = false; // a memory op finished
@@ -634,6 +642,7 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
   // store
   for (auto& dmem : instr.destination_memory) {
     SQ.emplace_back(dmem, instr.instr_id, instr.ip, instr.origin); // add it to the store queue
+    sq_store_index_[dmem.to<uint64_t>()].push_back(&SQ.back());
   }
 
   if constexpr (champsim::debug_print) {
@@ -663,6 +672,16 @@ long O3_CPU::operate_lsq()
 
   auto [complete_begin, complete_end] = champsim::get_span_p(std::cbegin(SQ), std::cend(SQ), store_bw, do_complete);
   store_bw.consume(std::distance(complete_begin, complete_end));
+  std::for_each(complete_begin, complete_end, [this](const LSQ_ENTRY& sq_entry) {
+    // Completion is oldest-first, so the erased entry is the front of its
+    // per-address stack
+    auto idx_it = sq_store_index_.find(sq_entry.virtual_address.to<uint64_t>());
+    assert(idx_it != std::end(sq_store_index_) && idx_it->second.front() == &sq_entry);
+    idx_it->second.erase(std::begin(idx_it->second));
+    if (std::empty(idx_it->second)) {
+      sq_store_index_.erase(idx_it);
+    }
+  });
   SQ.erase(complete_begin, complete_end);
 
   champsim::bandwidth load_bw{LQ_WIDTH};
@@ -765,20 +784,25 @@ long O3_CPU::complete_inflight_instruction()
   // update ROB entries with completed executions
   champsim::bandwidth complete_bw{EXEC_WIDTH};
   auto wake = champsim::chrono::clock::time_point::max();
-  auto rob_it = std::begin(ROB);
-  for (; rob_it != std::end(ROB) && complete_bw.has_remaining(); ++rob_it) {
-    if (rob_it->executed && !rob_it->completed) {
-      if (rob_it->ready_time <= current_time) {
-        if (rob_it->completed_mem_ops == rob_it->num_mem_ops()) {
-          do_complete_execution(*rob_it);
+  auto visit = [&](std::size_t slot) {
+    if (!complete_bw.has_remaining()) {
+      return false;
+    }
+    auto& instr = ROB.at_slot(slot);
+    if (instr.executed && !instr.completed) { // always true in normal operation; guards injected state
+      if (instr.ready_time <= current_time) {
+        if (instr.completed_mem_ops == instr.num_mem_ops()) {
+          do_complete_execution(instr);
+          candidate_clear(complete_candidates_, slot);
           complete_bw.consume();
         }
       } else {
-        wake = std::min(wake, rob_it->ready_time);
+        wake = std::min(wake, instr.ready_time);
       }
     }
-  }
-  if (rob_it == std::end(ROB)) {
+    return true;
+  };
+  if (visit_candidates_in_age_order(complete_candidates_, visit)) {
     complete_stage_clean_ = true;
     complete_stage_wake_ = wake;
   } else {

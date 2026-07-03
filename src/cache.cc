@@ -62,6 +62,13 @@ CACHE::fill_type::fill_type(const tag_lookup_type& req, champsim::chrono::clock:
 {
 }
 
+CACHE::fill_type::fill_type(tag_lookup_type&& req, champsim::chrono::clock::time_point _time_enqueued)
+    : address(req.address), v_address(req.v_address), ip(req.ip), instr_id(req.instr_id), origin(req.origin), type(req.type),
+      prefetch_from_this(req.prefetch_from_this), time_enqueued(_time_enqueued), instr_depend_on_me(std::move(req.instr_depend_on_me)),
+      to_return(std::move(req.to_return))
+{
+}
+
 CACHE::fill_type CACHE::fill_type::merge(fill_type predecessor, fill_type successor)
 {
   std::vector<uint64_t> merged_instr{};
@@ -72,14 +79,18 @@ CACHE::fill_type CACHE::fill_type::merge(fill_type predecessor, fill_type succes
   std::set_union(std::begin(predecessor.to_return), std::end(predecessor.to_return), std::begin(successor.to_return), std::end(successor.to_return),
                  std::back_inserter(merged_return));
 
-  fill_type retval{(successor.type == access_type::PREFETCH) ? predecessor : successor};
-
   // set the time enqueued to the predecessor unless its a demand into prefetch, in which case we use the successor
-  retval.time_enqueued =
+  // (hoisted, along with the data promise, ahead of the moves below)
+  auto merged_time =
       ((successor.type != access_type::PREFETCH && predecessor.type == access_type::PREFETCH)) ? successor.time_enqueued : predecessor.time_enqueued;
-  retval.instr_depend_on_me = merged_instr;
-  retval.to_return = merged_return;
-  retval.data_promise = predecessor.data_promise;
+  auto merged_promise = predecessor.data_promise;
+
+  fill_type retval{(successor.type == access_type::PREFETCH) ? std::move(predecessor) : std::move(successor)};
+
+  retval.time_enqueued = merged_time;
+  retval.instr_depend_on_me = std::move(merged_instr);
+  retval.to_return = std::move(merged_return);
+  retval.data_promise = merged_promise;
 
   if constexpr (champsim::debug_print) {
     if (successor.type == access_type::PREFETCH) {
@@ -248,10 +259,8 @@ bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
   return hit;
 }
 
-auto CACHE::mshr_and_forward_packet(const tag_lookup_type& handle_pkt) -> std::pair<fill_type, request_type>
+auto CACHE::forward_packet(const tag_lookup_type& handle_pkt) -> request_type
 {
-  fill_type to_allocate{handle_pkt, current_time};
-
   request_type fwd_pkt;
 
   fwd_pkt.origin = handle_pkt.origin;
@@ -267,10 +276,10 @@ auto CACHE::mshr_and_forward_packet(const tag_lookup_type& handle_pkt) -> std::p
   fwd_pkt.instr_depend_on_me = handle_pkt.instr_depend_on_me;
   fwd_pkt.response_requested = (!handle_pkt.prefetch_from_this || !handle_pkt.skip_fill);
 
-  return std::pair{std::move(to_allocate), std::move(fwd_pkt)};
+  return fwd_pkt;
 }
 
-bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
+bool CACHE::handle_miss(tag_lookup_type& handle_pkt)
 {
   if constexpr (champsim::debug_print) {
     fmt::print("[{}] {} instr_id: {} address: {} v_address: {} type: {} local_prefetch: {} cycle: {}\n", NAME, __func__, handle_pkt.instr_id,
@@ -278,11 +287,7 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
                current_time.time_since_epoch() / clock_period);
   }
 
-  fill_type to_allocate{handle_pkt, current_time};
-
   last_served_origin = handle_pkt.origin;
-
-  auto mshr_pkt = mshr_and_forward_packet(handle_pkt);
 
   // check mshr
   auto fill_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(handle_pkt.address));
@@ -293,6 +298,10 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
     fill_entry = std::find_if(inflight_fills.begin(), inflight_fills.end(), matches_address(handle_pkt.address));
   }
 
+  // On the success paths below the tag entry is consumed (its caller erases
+  // it), so its vectors are moved into the allocated fill. Only scalar
+  // fields of handle_pkt are read after those moves. The failure paths
+  // return before any move, leaving the entry intact for retry.
   if (fill_entry != inflight_fills.end()) // miss or fill already inflight
   {
     if (fill_entry->type == access_type::PREFETCH && handle_pkt.type != access_type::PREFETCH) {
@@ -303,24 +312,25 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
     }
 
     // COLLECT STATS
-    sim_stats.miss_merge.increment(std::pair{to_allocate.type, to_allocate.origin.cpu()});
+    sim_stats.miss_merge.increment(std::pair{handle_pkt.type, handle_pkt.origin.cpu()});
 
-    *fill_entry = fill_type::merge(*fill_entry, to_allocate);
+    *fill_entry = fill_type::merge(std::move(*fill_entry), fill_type{std::move(handle_pkt), current_time});
   } else {
     if (mshr_full) { // not enough MSHR resource
       return false;  // TODO should we allow prefetches anyway if they will not be filled to this level?
     }
 
     const bool send_to_rq = (prefetch_as_load || handle_pkt.type != access_type::PREFETCH);
-    bool success = send_to_rq ? lower_level->add_rq(mshr_pkt.second) : lower_level->add_pq(mshr_pkt.second);
+    auto fwd_pkt = forward_packet(handle_pkt);
+    bool success = send_to_rq ? lower_level->add_rq(fwd_pkt) : lower_level->add_pq(fwd_pkt);
 
     if (!success) {
       return false;
     }
 
     // Allocate an MSHR
-    if (mshr_pkt.second.response_requested) {
-      MSHR.emplace_back(std::move(mshr_pkt.first));
+    if (fwd_pkt.response_requested) {
+      MSHR.emplace_back(fill_type{std::move(handle_pkt), current_time});
     }
   }
 
@@ -329,7 +339,7 @@ bool CACHE::handle_miss(const tag_lookup_type& handle_pkt)
   return true;
 }
 
-bool CACHE::handle_write(const tag_lookup_type& handle_pkt)
+bool CACHE::handle_write(tag_lookup_type& handle_pkt)
 {
   if constexpr (champsim::debug_print) {
     fmt::print("[{}] {} instr_id: {} address: {} v_address: {} type: {} local_prefetch: {} cycle: {}\n", NAME, __func__, handle_pkt.instr_id,
@@ -337,11 +347,11 @@ bool CACHE::handle_write(const tag_lookup_type& handle_pkt)
                current_time.time_since_epoch() / clock_period);
   }
 
-  fill_type to_allocate{handle_pkt, current_time};
+  fill_type to_allocate{std::move(handle_pkt), current_time}; // entry is consumed by the caller
   to_allocate.data_promise.ready_at(current_time + (is_warmup() ? champsim::chrono::clock::duration{} : FILL_LATENCY));
-  inflight_fills.push_back(to_allocate);
+  inflight_fills.push_back(std::move(to_allocate));
 
-  sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.origin.cpu()});
+  sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.origin.cpu()}); // scalars, unaffected by the move
 
   return true;
 }
@@ -496,7 +506,7 @@ long CACHE::operate()
   }
 
   // Perform tag checks
-  auto do_handle_miss = [this](const auto& pkt) {
+  auto do_handle_miss = [this](auto& pkt) {
     if (pkt.type == access_type::WRITE && !this->match_offset_bits) {
       return this->handle_write(pkt); // Treat writes (that is, writebacks) like fills
     }

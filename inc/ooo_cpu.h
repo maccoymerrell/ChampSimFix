@@ -29,6 +29,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <queue>
 #include <stdexcept>
 #include <type_traits>
@@ -124,12 +125,13 @@ private:
   champsim::ring_buffer<ooo_model_instr> ROB;
   std::vector<std::optional<LSQ_ENTRY>> LQ;
 
-public:
   std::deque<LSQ_ENTRY> SQ;
 
+public:
   // Inspection
   const champsim::ring_buffer<ooo_model_instr>& rob() const { return ROB; }
   const std::vector<std::optional<LSQ_ENTRY>>& lq() const { return LQ; }
+  const std::deque<LSQ_ENTRY>& sq() const { return SQ; }
 
   // Apply an arbitrary mutation, then re-derive all dependent bookkeeping.
   // This is the sanctioned way to reach into these structures from outside
@@ -145,6 +147,12 @@ public:
   {
     std::forward<F>(fn)(LQ);
     resync_lq_bookkeeping();
+  }
+  template <typename F>
+  void modify_sq(F&& fn)
+  {
+    std::forward<F>(fn)(SQ);
+    resync_sq_bookkeeping();
   }
 
   // Constants
@@ -210,6 +218,54 @@ private:
   // the SCHEDULER_SIZE budget so the rename walk need not revisit them.
   long scheduler_occupancy_ = 0;
 
+  // Stage candidate sets, as bitmaps over the ROB's stable physical slots:
+  // exec candidates are scheduled-and-unexecuted, complete candidates are
+  // executed-and-uncompleted. Bits are set/cleared at the exact state
+  // transitions (do_scheduling, do_execution, do_complete_execution), so
+  // the execute/complete walks visit only in-window instructions instead of
+  // the whole ROB. Iterated in age order (from the head slot, wrapping).
+  std::vector<uint64_t> exec_candidates_;
+  std::vector<uint64_t> complete_candidates_;
+
+  static void candidate_set(std::vector<uint64_t>& bits, std::size_t slot) { bits[slot >> 6] |= (uint64_t{1} << (slot & 63)); }
+  static void candidate_clear(std::vector<uint64_t>& bits, std::size_t slot) { bits[slot >> 6] &= ~(uint64_t{1} << (slot & 63)); }
+
+  // Visit the set bits of `bits` within physical slots [from, to), ascending.
+  // fn(slot) returns false to stop; returns false if stopped early.
+  template <typename F>
+  static bool visit_candidate_range(const std::vector<uint64_t>& bits, std::size_t from, std::size_t to, F& fn)
+  {
+    if (from >= to) {
+      return true;
+    }
+    const std::size_t first_word = from >> 6;
+    const std::size_t last_word = (to - 1) >> 6;
+    for (std::size_t word = first_word; word <= last_word; ++word) {
+      uint64_t bits_word = bits[word];
+      if (word == first_word) {
+        bits_word &= (~uint64_t{0}) << (from & 63);
+      }
+      if (word == last_word && ((to & 63) != 0)) {
+        bits_word &= (uint64_t{1} << (to & 63)) - 1;
+      }
+      for (; bits_word != 0; bits_word &= bits_word - 1) {
+        if (!fn(word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits_word)))) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  // Visit candidates in age order: physical slots wrap, so age order is
+  // [head, capacity) followed by [0, head).
+  template <typename F>
+  bool visit_candidates_in_age_order(const std::vector<uint64_t>& bits, F&& fn)
+  {
+    const std::size_t head = ROB.head_slot();
+    return visit_candidate_range(bits, head, ROB.capacity(), fn) && visit_candidate_range(bits, 0, head, fn);
+  }
+
   // Stage change-detectors: a walk of execute/complete that issues nothing
   // is side-effect-free, and its outcome can only change through the events
   // that dirty these flags (a new scheduling, a register completion, a
@@ -233,6 +289,23 @@ private:
   }
   void lq_clear_unissued(std::size_t idx) { lq_unissued_[idx >> 6] &= ~(uint64_t{1} << (idx & 63)); }
 
+  // Store-forwarding index: per (exact virtual address) stack of SQ entries,
+  // oldest first, youngest at the back. std::deque guarantees references to
+  // unerased elements survive push_back and front-erasure, and the SQ only
+  // grows at the back (dispatch, in program order) and shrinks at the front
+  // (completion, oldest first), so each stack stays age-ordered and the back
+  // is exactly the youngest store to that address — what the forwarding
+  // max_element scan previously searched for.
+  std::unordered_map<uint64_t, std::vector<LSQ_ENTRY*>> sq_store_index_;
+
+  void resync_sq_bookkeeping()
+  {
+    sq_store_index_.clear();
+    for (auto& sq_entry : SQ) {
+      sq_store_index_[sq_entry.virtual_address.to<uint64_t>()].push_back(&sq_entry);
+    }
+  }
+
   // Recompute all derived state from the underlying structures (used by the
   // modify_* mutation API).
   void resync_rob_bookkeeping()
@@ -245,6 +318,17 @@ private:
       ++num_scheduled_;
     }
     scheduler_occupancy_ = std::count_if(std::cbegin(ROB), std::cend(ROB), [](const auto& entry) { return entry.scheduled && !entry.executed; });
+    exec_candidates_.assign((ROB.capacity() + 63) / 64, 0);
+    complete_candidates_.assign((ROB.capacity() + 63) / 64, 0);
+    for (std::size_t idx = 0; idx < std::size(ROB); ++idx) {
+      const auto& entry = ROB[idx];
+      if (entry.scheduled && !entry.executed) {
+        candidate_set(exec_candidates_, ROB.slot_index(idx));
+      }
+      if (entry.executed && !entry.completed) {
+        candidate_set(complete_candidates_, ROB.slot_index(idx));
+      }
+    }
     exec_stage_clean_ = false;
     complete_stage_clean_ = false;
   }
@@ -348,6 +432,8 @@ public:
       btb_module_pimpl.push_back(champsim::modules::btb::create_instance(sub, static_cast<champsim::modules::core_module*>(this)));
 
     ROB.set_capacity(ROB_SIZE);
+    exec_candidates_.assign((ROB.capacity() + 63) / 64, 0);
+    complete_candidates_.assign((ROB.capacity() + 63) / 64, 0);
     lq_free_slots_ = static_cast<long>(std::size(LQ));
     lq_occupied_.assign((std::size(LQ) + 63) / 64, 0);
     lq_unissued_.assign((std::size(LQ) + 63) / 64, 0);

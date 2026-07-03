@@ -44,6 +44,7 @@
 #include "operable.h"
 #include "modules.h"
 #include "util/to_underlying.h" // for to_underlying
+#include "util/ring_buffer.h"
 #include "waitable.h"
 
 class CACHE : public champsim::modules::cache_module, public champsim::module_phase, public champsim::module_stat
@@ -107,14 +108,17 @@ public:
     std::vector<std::deque<response_type>*> to_return{};
 
     fill_type(const tag_lookup_type& req, champsim::chrono::clock::time_point _time_enqueued);
+    // Move form: steals the dependency and return vectors from a tag entry
+    // that is about to be erased from its queue.
+    fill_type(tag_lookup_type&& req, champsim::chrono::clock::time_point _time_enqueued);
     static fill_type merge(fill_type predecessor, fill_type successor);
   };
 
 private:
   bool try_hit(const tag_lookup_type& handle_pkt);
   bool handle_fill(const fill_type& fill);
-  bool handle_miss(const tag_lookup_type& handle_pkt);
-  bool handle_write(const tag_lookup_type& handle_pkt);
+  bool handle_miss(tag_lookup_type& handle_pkt);
+  bool handle_write(tag_lookup_type& handle_pkt);
   void finish_packet(const response_type& packet);
   void finish_translation(const response_type& packet);
 
@@ -141,10 +145,14 @@ private:
   champsim::address module_address(const T& element) const;
 
   auto matches_address(champsim::address address) const;
-  std::pair<fill_type, request_type> mshr_and_forward_packet(const tag_lookup_type& handle_pkt);
+  request_type forward_packet(const tag_lookup_type& handle_pkt);
 
   std::deque<tag_lookup_type> internal_PQ{};
-  std::deque<tag_lookup_type> inflight_tag_check{};
+  // Ring buffer: admission is bounded by tag_check_window_limit_, and all
+  // erasures are front-anchored (handled prefix) or tail-anchored
+  // (extract_if compaction), so a fixed-capacity ring replaces the deque's
+  // chunk churn. Capacity is set at construction.
+  champsim::ring_buffer<tag_lookup_type> inflight_tag_check{};
   std::deque<tag_lookup_type> translation_stash{};
 
   std::vector<champsim::modules::prefetcher*> pref_module_pimpl;
@@ -283,6 +291,9 @@ public:
   {
     // Hoisted invariants for the per-cycle path
     tag_check_window_limit_ = champsim::to_underlying(MAX_TAG) * static_cast<long>(HIT_LATENCY / clock_period);
+    // Admission bandwidth is clamped to (limit - size), so occupancy never
+    // exceeds the window limit; MAX_TAG of headroom is pure paranoia.
+    inflight_tag_check.set_capacity(static_cast<std::size_t>(tag_check_window_limit_ + champsim::to_underlying(MAX_TAG)));
     for (auto type : pref_activate_mask)
       pref_activate_lut_[static_cast<std::size_t>(champsim::to_underlying(type))] = true;
 
