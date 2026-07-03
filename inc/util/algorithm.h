@@ -47,6 +47,34 @@ long int transform_while_n(R& queue, Output out, bandwidth sz, F&& test_func, G&
   queue.erase(begin, end);
   return retval;
 }
+
+/**
+ * An in-place stable partition for small ranges.
+ *
+ * Behaves exactly like std::stable_partition — the predicate is applied
+ * exactly once per element, in first-to-last order (this matters: some
+ * callers use side-effectful predicates), and the relative order within both
+ * groups is preserved — but never acquires the temporary buffer that library
+ * implementations allocate per call. Cost is O(d*n) element moves, where d
+ * is the number of out-of-place elements; intended for the simulator's
+ * bandwidth-bounded windows (a handful of elements), where the hidden
+ * malloc/free pair costs more than the moves.
+ */
+template <typename It, typename Pred>
+It stable_partition_small(It first, It last, Pred pred)
+{
+  auto false_begin = std::find_if_not(first, last, pred);
+  if (false_begin == last) {
+    return false_begin;
+  }
+  for (auto it = std::next(false_begin); it != last; ++it) {
+    if (pred(*it)) {
+      std::rotate(false_begin, it, std::next(it));
+      ++false_begin;
+    }
+  }
+  return false_begin;
+}
 } // namespace champsim
 
 #endif

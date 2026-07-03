@@ -28,6 +28,7 @@
 #include "champsim.h"
 #include "deadlock.h"
 #include "instruction.h"
+#include "util/algorithm.h"
 #include "util/span.h"
 
 long O3_CPU::poll_cycle()
@@ -320,7 +321,7 @@ long O3_CPU::promote_to_decode()
   // No pre-scan needed: the predicate requires fetch_completed, so
   // get_span_p stops at exactly the entry a find_if bound would have found.
   auto [window_begin, window_end] = champsim::get_span_p(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), available_fetch_bandwidth, fetch_complete_and_ready);
-  auto decoded_window_end = std::stable_partition(window_begin, window_end, is_decoded); // reorder instructions
+  auto decoded_window_end = champsim::stable_partition_small(window_begin, window_end, is_decoded); // reorder instructions
   auto mark_for_decode = [time = current_time, lat = DECODE_LATENCY, warmup = is_warmup()](auto& x) {
     return x.ready_time = time + (warmup ? champsim::chrono::clock::duration{} : lat);
   };
@@ -606,6 +607,7 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
         assert(sq_it->instr_id < instr.instr_id);      // The found SQ entry is a prior store
         sq_it->lq_depend_on_me.emplace_back(*q_entry); // Forward the load when the store finishes
         (*q_entry)->producer_id = sq_it->instr_id;     // The load waits on the store to finish
+        lq_clear_unissued(static_cast<std::size_t>(std::distance(std::begin(LQ), q_entry)));
 
         if constexpr (champsim::debug_print) {
           fmt::print("[DISPATCH] {} instr_id: {} waits on: {}\n", __func__, instr.instr_id, sq_it->instr_id);
@@ -650,16 +652,19 @@ long O3_CPU::operate_lsq()
 
   champsim::bandwidth load_bw{LQ_WIDTH};
 
-  // Visit occupied LQ slots in index order (identical to a full scan)
-  for (std::size_t word = 0; word < std::size(lq_occupied_) && load_bw.has_remaining(); ++word) {
-    for (uint64_t bits = lq_occupied_[word]; bits != 0 && load_bw.has_remaining(); bits &= bits - 1) {
-      auto& lq_entry = LQ[word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits))];
+  // Visit issue candidates (occupied, no producer, not yet issued) in index
+  // order — identical order and identical action set to a full scan.
+  for (std::size_t word = 0; word < std::size(lq_unissued_) && load_bw.has_remaining(); ++word) {
+    for (uint64_t bits = lq_unissued_[word]; bits != 0 && load_bw.has_remaining(); bits &= bits - 1) {
+      const std::size_t idx = word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits));
+      auto& lq_entry = LQ[idx];
       if (lq_entry->producer_id == std::numeric_limits<uint64_t>::max() && !lq_entry->fetch_issued
           && lq_entry->ready_time < current_time) {
         auto success = execute_load(*lq_entry);
         if (success) {
           load_bw.consume();
           lq_entry->fetch_issued = true;
+          lq_clear_unissued(idx);
         }
       }
     }
@@ -956,7 +961,7 @@ LSQ_ENTRY::LSQ_ENTRY(champsim::address addr, champsim::program_ordered<LSQ_ENTRY
 {
 }
 
-void LSQ_ENTRY::finish(std::deque<ooo_model_instr>::iterator begin, std::deque<ooo_model_instr>::iterator end) const
+void LSQ_ENTRY::finish(champsim::ring_buffer<ooo_model_instr>::iterator begin, champsim::ring_buffer<ooo_model_instr>::iterator end) const
 {
   auto rob_entry = std::partition_point(begin, end, ooo_model_instr::precedes(this->instr_id));
   assert(rob_entry != end);

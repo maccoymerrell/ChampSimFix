@@ -42,6 +42,7 @@
 #include "modules.h"
 #include "operable.h"
 #include "register_allocator.h"
+#include "util/ring_buffer.h"
 #include "msl/lru_table.h"
 #include "util/to_underlying.h"
 
@@ -75,7 +76,7 @@ struct LSQ_ENTRY : champsim::program_ordered<LSQ_ENTRY> {
 
   LSQ_ENTRY(champsim::address addr, champsim::program_ordered<LSQ_ENTRY>::id_type id, champsim::address ip, champsim::origin origin);
   void finish(ooo_model_instr& rob_entry) const;
-  void finish(std::deque<ooo_model_instr>::iterator begin, std::deque<ooo_model_instr>::iterator end) const;
+  void finish(champsim::ring_buffer<ooo_model_instr>::iterator begin, champsim::ring_buffer<ooo_model_instr>::iterator end) const;
 };
 
 // cpu
@@ -118,14 +119,16 @@ private:
   // prefix, stage change-detectors, occupancy bitmap); they are private so
   // no outside mutation can desynchronize it. Inspect through rob()/lq();
   // mutate through modify_rob()/modify_lq(), which re-derive the state.
-  std::deque<ooo_model_instr> ROB;
+  // Contiguous fixed-capacity FIFO: the backend stages walk this structure
+  // every operated cycle, and deque chunk-map iteration was a measured cost.
+  champsim::ring_buffer<ooo_model_instr> ROB;
   std::vector<std::optional<LSQ_ENTRY>> LQ;
 
 public:
   std::deque<LSQ_ENTRY> SQ;
 
   // Inspection
-  const std::deque<ooo_model_instr>& rob() const { return ROB; }
+  const champsim::ring_buffer<ooo_model_instr>& rob() const { return ROB; }
   const std::vector<std::optional<LSQ_ENTRY>>& lq() const { return LQ; }
 
   // Apply an arbitrary mutation, then re-derive all dependent bookkeeping.
@@ -189,6 +192,11 @@ private:
   // Iterating set bits ascending visits exactly the occupied slots in index
   // order — the same order as a full scan of the vector.
   std::vector<uint64_t> lq_occupied_;
+  // Issue candidates: occupied slots with no producer and fetch not yet
+  // issued. When the LQ is full of in-flight loads the occupancy bitmap
+  // degenerates to a full scan; this one stays proportional to actionable
+  // entries.
+  std::vector<uint64_t> lq_unissued_;
   // Post-EOF drain latch for poll_cycle (see there).
   bool drained_latch_ = false;
 
@@ -207,8 +215,19 @@ private:
   bool complete_stage_clean_ = false;
   champsim::chrono::clock::time_point complete_stage_wake_{};
 
-  void lq_set_occupied(std::size_t idx) { lq_occupied_[idx >> 6] |= (uint64_t{1} << (idx & 63)); --lq_free_slots_; }
-  void lq_clear_occupied(std::size_t idx) { lq_occupied_[idx >> 6] &= ~(uint64_t{1} << (idx & 63)); ++lq_free_slots_; }
+  void lq_set_occupied(std::size_t idx)
+  {
+    lq_occupied_[idx >> 6] |= (uint64_t{1} << (idx & 63));
+    lq_unissued_[idx >> 6] |= (uint64_t{1} << (idx & 63)); // fresh entries have no producer and are unissued
+    --lq_free_slots_;
+  }
+  void lq_clear_occupied(std::size_t idx)
+  {
+    lq_occupied_[idx >> 6] &= ~(uint64_t{1} << (idx & 63));
+    lq_unissued_[idx >> 6] &= ~(uint64_t{1} << (idx & 63));
+    ++lq_free_slots_;
+  }
+  void lq_clear_unissued(std::size_t idx) { lq_unissued_[idx >> 6] &= ~(uint64_t{1} << (idx & 63)); }
 
   // Recompute all derived state from the underlying structures (used by the
   // modify_* mutation API).
@@ -227,10 +246,14 @@ private:
   void resync_lq_bookkeeping()
   {
     lq_occupied_.assign((std::size(LQ) + 63) / 64, 0);
+    lq_unissued_.assign((std::size(LQ) + 63) / 64, 0);
     lq_free_slots_ = static_cast<long>(std::size(LQ));
     for (std::size_t idx = 0; idx < std::size(LQ); ++idx) {
       if (LQ[idx].has_value()) {
         lq_set_occupied(idx);
+        if (!(LQ[idx]->producer_id == std::numeric_limits<uint64_t>::max() && !LQ[idx]->fetch_issued)) {
+          lq_clear_unissued(idx);
+        }
       }
     }
     drained_latch_ = false;
@@ -319,8 +342,10 @@ public:
     for (const auto& sub : builder.get_submodules("btb"))
       btb_module_pimpl.push_back(champsim::modules::btb::create_instance(sub, static_cast<champsim::modules::core_module*>(this)));
 
+    ROB.set_capacity(ROB_SIZE);
     lq_free_slots_ = static_cast<long>(std::size(LQ));
     lq_occupied_.assign((std::size(LQ) + 63) / 64, 0);
+    lq_unissued_.assign((std::size(LQ) + 63) / 64, 0);
 
     // Cores must always have at least one workload source attached, and a
     // core consumes instruction tokens: reject sources of any other token type.

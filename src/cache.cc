@@ -49,6 +49,13 @@ CACHE::tag_lookup_type::tag_lookup_type(const request_type& req, bool local_pref
 {
 }
 
+CACHE::tag_lookup_type::tag_lookup_type(request_type&& req, bool local_pref, bool skip)
+    : address(req.address), v_address(req.v_address), data(req.data), ip(req.ip), instr_id(req.instr_id), pf_metadata(req.pf_metadata), origin(req.origin),
+      type(req.type), prefetch_from_this(local_pref), skip_fill(skip), is_translated(req.is_translated),
+      instr_depend_on_me(std::move(req.instr_depend_on_me))
+{
+}
+
 CACHE::fill_type::fill_type(const tag_lookup_type& req, champsim::chrono::clock::time_point _time_enqueued)
     : address(req.address), v_address(req.v_address), ip(req.ip), instr_id(req.instr_id), origin(req.origin), type(req.type),
       prefetch_from_this(req.prefetch_from_this), time_enqueued(_time_enqueued), instr_depend_on_me(req.instr_depend_on_me), to_return(req.to_return)
@@ -342,12 +349,18 @@ bool CACHE::handle_write(const tag_lookup_type& handle_pkt)
 template <bool UpdateRequest>
 auto CACHE::initiate_tag_check(champsim::modules::channel_module* ul)
 {
-  return [time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : HIT_LATENCY), ul](const auto& entry) {
-    CACHE::tag_lookup_type retval{entry};
+  return [time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : HIT_LATENCY), ul](auto& entry) {
+    // The transformed entry is erased from its queue immediately after this
+    // functor runs, so its vectors can be moved rather than copied.
+    [[maybe_unused]] bool response_requested = false;
+    if constexpr (UpdateRequest) {
+      response_requested = entry.response_requested;
+    }
+    CACHE::tag_lookup_type retval{std::move(entry)};
     retval.event_cycle = time;
 
     if constexpr (UpdateRequest) {
-      if (entry.response_requested) {
+      if (response_requested) {
         retval.to_return = {&ul->get_returned()};
       }
     } else {
@@ -493,8 +506,8 @@ long CACHE::operate()
   auto [tag_check_ready_begin, tag_check_ready_end] =
       champsim::get_span_p(std::begin(inflight_tag_check), std::end(inflight_tag_check), tag_check_bw,
                            [is_ready, is_translated](const auto& pkt) { return is_ready(pkt) && is_translated(pkt); });
-  auto hits_end = std::stable_partition(tag_check_ready_begin, tag_check_ready_end, [this](const auto& pkt) { return this->try_hit(pkt); });
-  auto finish_tag_check_end = std::stable_partition(hits_end, tag_check_ready_end, do_handle_miss);
+  auto hits_end = champsim::stable_partition_small(tag_check_ready_begin, tag_check_ready_end, [this](const auto& pkt) { return this->try_hit(pkt); });
+  auto finish_tag_check_end = champsim::stable_partition_small(hits_end, tag_check_ready_end, do_handle_miss);
   tag_check_bw.consume(std::distance(tag_check_ready_begin, finish_tag_check_end));
   inflight_tag_check.erase(tag_check_ready_begin, finish_tag_check_end);
 
@@ -634,7 +647,7 @@ void CACHE::finish_translation(const response_type& packet)
 
   // Restart stashed translations
   auto finish_begin = std::find_if_not(std::begin(translation_stash), std::end(translation_stash), [](const auto& x) { return x.is_translated; });
-  auto finish_end = std::stable_partition(finish_begin, std::end(translation_stash), matches_vpage);
+  auto finish_end = champsim::stable_partition_small(finish_begin, std::end(translation_stash), matches_vpage);
   std::for_each(finish_begin, finish_end, mark_translated);
 
   // Find all packets that match the page of the returned packet

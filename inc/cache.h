@@ -78,8 +78,9 @@ class CACHE : public champsim::modules::cache_module, public champsim::module_ph
     std::vector<uint64_t> instr_depend_on_me{};
     std::vector<std::deque<response_type>*> to_return{};
 
-    explicit tag_lookup_type(request_type req) : tag_lookup_type(req, false, false) {}
+    explicit tag_lookup_type(request_type req) : tag_lookup_type(std::move(req), false, false) {}
     tag_lookup_type(const request_type& req, bool local_pref, bool skip);
+    tag_lookup_type(request_type&& req, bool local_pref, bool skip);
   };
 
 public:
