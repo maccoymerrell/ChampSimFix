@@ -578,9 +578,17 @@ void O3_CPU::do_execution(ooo_model_instr& instr)
   if (!std::empty(instr.source_memory)) {
     for (std::size_t word = 0; word < std::size(lq_occupied_); ++word) {
       for (uint64_t bits = lq_occupied_[word]; bits != 0; bits &= bits - 1) {
-        auto& lq_entry = LQ[word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits))];
+        const std::size_t idx = word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits));
+        auto& lq_entry = LQ[idx];
         if (lq_entry->instr_id == instr.instr_id) {
           lq_entry->ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
+          // Enroll issue candidates for readiness promotion. Producer-waiting
+          // entries never issue through operate_lsq's walk, so only unissued
+          // candidates enroll; enrollment times are monotone (current_time
+          // plus a constant), keeping the pending queue promotion a FIFO pop.
+          if ((lq_unissued_[word] >> (idx & 63)) & 1U) {
+            lq_pending_ready_.emplace_back(lq_entry->ready_time, static_cast<uint32_t>(idx));
+          }
         }
       }
     }
@@ -689,21 +697,42 @@ long O3_CPU::operate_lsq()
 
   champsim::bandwidth load_bw{LQ_WIDTH};
 
-  // Visit issue candidates (occupied, no producer, not yet issued) in index
-  // order — identical order and identical action set to a full scan. Every
-  // load targets the same L1D read queue, and nothing drains it inside this
-  // loop, so after one full-queue rejection every further attempt this
-  // cycle fails identically: count those instead of constructing and
-  // rejecting a request apiece (under backpressure hundreds of loads can be
-  // waiting). The counted attempts' queue accounting is replicated below.
-  bool rq_rejected = false;
-  long rejected_attempts = 0;
-  for (std::size_t word = 0; word < std::size(lq_unissued_) && load_bw.has_remaining(); ++word) {
-    for (uint64_t bits = lq_unissued_[word]; bits != 0 && load_bw.has_remaining(); bits &= bits - 1) {
-      const std::size_t idx = word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits));
-      auto& lq_entry = LQ[idx];
-      if (lq_entry->producer_id == std::numeric_limits<uint64_t>::max() && !lq_entry->fetch_issued
-          && lq_entry->ready_time < current_time) {
+  // Promote pending candidates whose ready_time has passed (a FIFO pop:
+  // enrollment times are monotone). The bit may have been cleared since
+  // enrollment (issued via forwarding, or the entry left the LQ) — promote
+  // only candidates still unissued.
+  while (!std::empty(lq_pending_ready_) && lq_pending_ready_.front().first < current_time) {
+    const auto idx = static_cast<std::size_t>(lq_pending_ready_.front().second);
+    lq_pending_ready_.pop_front();
+    if ((lq_unissued_[idx >> 6] >> (idx & 63)) & 1U) {
+      lq_ready_[idx >> 6] |= (uint64_t{1} << (idx & 63));
+    }
+  }
+
+  // The ready set is exactly the candidates the historical full scan would
+  // act on (occupied, no producer, unissued, ready), in the same slot
+  // order. Every load targets the same L1D read queue and nothing drains it
+  // inside this loop, so with the queue full every attempt this cycle fails
+  // identically: skip the walk and replicate the attempts' queue accounting
+  // (RQ_ACCESS/RQ_FULL) in bulk instead.
+  auto lq_ready_popcount = [this] {
+    long n = 0;
+    for (auto word : lq_ready_) {
+      n += __builtin_popcountll(word);
+    }
+    return n;
+  };
+  if (L1D_bus.lower_level->rq_occupancy() >= L1D_bus.lower_level->rq_size()) {
+    if (auto rejected = lq_ready_popcount(); rejected > 0) {
+      L1D_bus.lower_level->record_rejected_rq(rejected);
+    }
+  } else {
+    bool rq_rejected = false;
+    long rejected_attempts = 0;
+    for (std::size_t word = 0; word < std::size(lq_ready_) && load_bw.has_remaining(); ++word) {
+      for (uint64_t bits = lq_ready_[word]; bits != 0 && load_bw.has_remaining(); bits &= bits - 1) {
+        const std::size_t idx = word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits));
+        auto& lq_entry = LQ[idx];
         if (rq_rejected) {
           ++rejected_attempts;
           continue;
@@ -712,15 +741,15 @@ long O3_CPU::operate_lsq()
         if (success) {
           load_bw.consume();
           lq_entry->fetch_issued = true;
-          lq_clear_unissued(idx);
+          lq_clear_unissued(idx); // clears the ready bit too
         } else {
           rq_rejected = true;
         }
       }
     }
-  }
-  if (rejected_attempts > 0) {
-    L1D_bus.lower_level->record_rejected_rq(rejected_attempts);
+    if (rejected_attempts > 0) {
+      L1D_bus.lower_level->record_rejected_rq(rejected_attempts);
+    }
   }
 
   return store_bw.amount_consumed() + load_bw.amount_consumed();

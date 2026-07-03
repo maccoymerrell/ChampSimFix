@@ -207,6 +207,14 @@ private:
   // degenerates to a full scan; this one stays proportional to actionable
   // entries.
   std::vector<uint64_t> lq_unissued_;
+  // The subset of unissued candidates whose ready_time has passed — the
+  // exact set operate_lsq's walk would act on. Entries are promoted here
+  // from lq_pending_ready_ (enrolled at do_execution, ready_times monotone,
+  // so promotion is a FIFO pop) as the clock passes their ready_time. Under
+  // read-queue backpressure the walk becomes a popcount instead of
+  // re-checking hundreds of waiting candidates every cycle.
+  std::vector<uint64_t> lq_ready_;
+  std::deque<std::pair<champsim::chrono::clock::time_point, uint32_t>> lq_pending_ready_;
   // Post-EOF drain latch for poll_cycle (see there).
   bool drained_latch_ = false;
 
@@ -287,9 +295,14 @@ private:
   {
     lq_occupied_[idx >> 6] &= ~(uint64_t{1} << (idx & 63));
     lq_unissued_[idx >> 6] &= ~(uint64_t{1} << (idx & 63));
+    lq_ready_[idx >> 6] &= ~(uint64_t{1} << (idx & 63));
     ++lq_free_slots_;
   }
-  void lq_clear_unissued(std::size_t idx) { lq_unissued_[idx >> 6] &= ~(uint64_t{1} << (idx & 63)); }
+  void lq_clear_unissued(std::size_t idx)
+  {
+    lq_unissued_[idx >> 6] &= ~(uint64_t{1} << (idx & 63));
+    lq_ready_[idx >> 6] &= ~(uint64_t{1} << (idx & 63));
+  }
 
   // Store-forwarding index: per (exact virtual address) stack of SQ entries,
   // oldest first, youngest at the back. std::deque guarantees references to
@@ -338,15 +351,23 @@ private:
   {
     lq_occupied_.assign((std::size(LQ) + 63) / 64, 0);
     lq_unissued_.assign((std::size(LQ) + 63) / 64, 0);
+    lq_ready_.assign((std::size(LQ) + 63) / 64, 0);
+    lq_pending_ready_.clear();
     lq_free_slots_ = static_cast<long>(std::size(LQ));
     for (std::size_t idx = 0; idx < std::size(LQ); ++idx) {
       if (LQ[idx].has_value()) {
         lq_set_occupied(idx);
         if (!(LQ[idx]->producer_id == std::numeric_limits<uint64_t>::max() && !LQ[idx]->fetch_issued)) {
           lq_clear_unissued(idx);
+        } else if (LQ[idx]->ready_time < current_time) {
+          lq_ready_[idx >> 6] |= (uint64_t{1} << (idx & 63));
+        } else {
+          lq_pending_ready_.emplace_back(LQ[idx]->ready_time, static_cast<uint32_t>(idx));
         }
       }
     }
+    // promotion pops from the front in time order
+    std::sort(std::begin(lq_pending_ready_), std::end(lq_pending_ready_));
     drained_latch_ = false;
   }
 public:
@@ -438,6 +459,7 @@ public:
     lq_free_slots_ = static_cast<long>(std::size(LQ));
     lq_occupied_.assign((std::size(LQ) + 63) / 64, 0);
     lq_unissued_.assign((std::size(LQ) + 63) / 64, 0);
+    lq_ready_.assign((std::size(LQ) + 63) / 64, 0);
 
     // Cores must always have at least one workload source attached, and a
     // core consumes instruction tokens: reject sources of any other token type.
