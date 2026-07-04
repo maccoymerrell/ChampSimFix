@@ -727,43 +727,25 @@ long O3_CPU::operate_lsq()
   // The ready set is exactly the candidates the historical full scan would
   // act on (occupied, no producer, unissued, ready), in the same slot
   // order. Every load targets the same L1D read queue and nothing drains it
-  // inside this loop, so with the queue full every attempt this cycle fails
-  // identically: skip the walk and replicate the attempts' queue accounting
-  // (RQ_ACCESS/RQ_FULL) in bulk instead.
-  auto lq_ready_popcount = [this] {
-    long n = 0;
-    for (auto word : lq_ready_) {
-      n += __builtin_popcountll(word);
-    }
-    return n;
-  };
-  if (L1D_bus.lower_level->rq_occupancy() >= L1D_bus.lower_level->rq_size()) {
-    if (auto rejected = lq_ready_popcount(); rejected > 0) {
-      L1D_bus.lower_level->record_rejected_rq(rejected);
-    }
-  } else {
-    bool rq_rejected = false;
-    long rejected_attempts = 0;
-    for (std::size_t word = 0; word < std::size(lq_ready_) && load_bw.has_remaining(); ++word) {
-      for (uint64_t bits = lq_ready_[word]; bits != 0 && load_bw.has_remaining(); bits &= bits - 1) {
-        const std::size_t idx = word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits));
-        auto& lq_entry = LQ[idx];
-        if (rq_rejected) {
-          ++rejected_attempts;
-          continue;
-        }
-        auto success = execute_load(*lq_entry);
-        if (success) {
-          load_bw.consume();
-          lq_entry->fetch_issued = true;
-          lq_clear_unissued(idx); // clears the ready bit too
-        } else {
-          rq_rejected = true;
-        }
+  // inside this loop, so once one admission is rejected every further
+  // attempt this cycle would fail identically: stop at the first rejection,
+  // as hardware would — a full signal gates issue; the queue is not
+  // re-presented with every waiting load each cycle. All queue accounting
+  // stays inside the channel's own add_rq path, where its full-queue
+  // counters read as cycles-blocked.
+  bool rq_rejected = false;
+  for (std::size_t word = 0; word < std::size(lq_ready_) && load_bw.has_remaining() && !rq_rejected; ++word) {
+    for (uint64_t bits = lq_ready_[word]; bits != 0 && load_bw.has_remaining(); bits &= bits - 1) {
+      const std::size_t idx = word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits));
+      auto& lq_entry = LQ[idx];
+      auto success = execute_load(*lq_entry);
+      if (!success) {
+        rq_rejected = true;
+        break;
       }
-    }
-    if (rejected_attempts > 0) {
-      L1D_bus.lower_level->record_rejected_rq(rejected_attempts);
+      load_bw.consume();
+      lq_entry->fetch_issued = true;
+      lq_clear_unissued(idx); // clears the ready bit too
     }
   }
 

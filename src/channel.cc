@@ -66,12 +66,6 @@ bool champsim::channel::add_rq(const request_type& packet)
   return result;
 }
 
-void champsim::channel::record_rejected_rq(long n)
-{
-  // Identical accounting to n add_rq calls against a full queue
-  sim_stats.RQ_ACCESS += static_cast<uint64_t>(n);
-  sim_stats.RQ_FULL += static_cast<uint64_t>(n);
-}
 
 bool champsim::channel::add_wq(const request_type& packet)
 {
