@@ -64,6 +64,7 @@ namespace champsim::modules {
 
 struct environment_module;
 struct source_consumer;
+struct stream_source;
 struct workload_source;
 
 /**
@@ -376,6 +377,7 @@ public:
 
 // Forward declaration for mixin used in interface_info
 struct source_consumer;
+struct stream_source;
 
 // Registry for module interfaces: maps interface name strings to factory functions.
 // This allows runtime lookup of which module_base specialization to use for creation.
@@ -398,11 +400,15 @@ public:
     std::function<champsim::module_stat*(const std::any&)> to_module_stat;
     // Returns the registered model name and the instance NAME for an instance any.
     std::function<instance_id(const std::any&)> identify;
-    // True when the named model's implementation class is a source_consumer.
-    // Recorded at register_module time (statically, via is_base_of), so
-    // environments can count consumers from a config before constructing
-    // any module.
+    // True when the named model's implementation class is a source_consumer
+    // / stream_source. Recorded at register_module time (statically, via
+    // is_base_of), so environments can count consumers and sources from a
+    // config before constructing any module.
     std::function<bool(const std::string&)> model_is_consumer;
+    std::function<bool(const std::string&)> model_is_source;
+    // Per-instance dynamic_cast to the stream_source mixin (matching
+    // to_source_consumer): any model of any interface may hold a stream.
+    std::function<stream_source*(const std::any&)> to_stream_source;
     // Creates a typed null pointer wrapped in std::any
     std::function<std::any()> make_null_pointer;
   };
@@ -420,6 +426,14 @@ public:
       exit(-1);
     }
     registry()[name] = std::move(info);
+  }
+
+  static bool model_is_source(const std::string& interface_name, const std::string& model_name) {
+    auto it = registry().find(interface_name);
+    if (it == registry().end() || !it->second.model_is_source) {
+      return false;
+    }
+    return it->second.model_is_source(model_name);
   }
 
   static bool model_is_consumer(const std::string& interface_name, const std::string& model_name) {
@@ -460,6 +474,14 @@ public:
   }
 
   // Get the to_source_consumer converter for an interface, or nullptr if not a source_consumer
+  static std::function<stream_source*(const std::any&)> get_to_stream_source(const std::string& interface_name) {
+    auto it = registry().find(interface_name);
+    if (it == registry().end()) {
+      return nullptr;
+    }
+    return it->second.to_stream_source;
+  }
+
   static std::function<source_consumer*(const std::any&)> get_to_source_consumer(const std::string& interface_name) {
     auto it = registry().find(interface_name);
     if (it == registry().end()) return nullptr;
@@ -545,6 +567,7 @@ struct module_base {
     struct model_record {
       std::function<std::unique_ptr<B>(ModuleBuilder builder)> create;
       bool is_consumer = false;
+      bool is_source = false;
     };
 
     static void add_module(std::string name, model_record record) {
@@ -579,7 +602,7 @@ struct module_base {
           if (auto* as_consumer = dynamic_cast<source_consumer*>(instance_ptr); as_consumer != nullptr) {
             as_consumer->set_identity_name(builder.get_name());
           }
-          if (auto* as_source = dynamic_cast<workload_source*>(instance_ptr); as_source != nullptr) {
+          if (auto* as_source = dynamic_cast<stream_source*>(instance_ptr); as_source != nullptr) {
             as_source->set_identity_name(builder.get_name());
           }
           instance_ptr->bind(builder.get_parent<C>());
@@ -654,7 +677,7 @@ struct module_base {
        */
       register_module(std::string model_name) {
           add_module(model_name, model_record{[](ModuleBuilder builder){return std::unique_ptr<B>(new D(builder));},
-                                              std::is_base_of_v<source_consumer, D>});
+                                              std::is_base_of_v<source_consumer, D>, std::is_base_of_v<stream_source, D>});
       }
     };
 
@@ -714,6 +737,13 @@ struct module_base {
         info.model_is_consumer = [](const std::string& model_name) -> bool {
           auto it = module_map().find(model_name);
           return it != module_map().end() && std::any_cast<const model_record&>(it->second).is_consumer;
+        };
+        info.model_is_source = [](const std::string& model_name) -> bool {
+          auto it = module_map().find(model_name);
+          return it != module_map().end() && std::any_cast<const model_record&>(it->second).is_source;
+        };
+        info.to_stream_source = [](const std::any& a) -> stream_source* {
+          return dynamic_cast<stream_source*>(std::any_cast<B*>(a));
         };
         interface_registry::register_interface(interface_name, std::move(info));
       }
@@ -1293,29 +1323,42 @@ struct module_base {
    * consumer records, a network consumer would take packets — all meshing
    * in one run because the orchestrator never sees the token type.
    */
-  struct workload_source : public module_base<workload_source, source_consumer> {
-    virtual ~workload_source() = default;
-
-    // True when the source will never provide another token.
-    [[nodiscard]] virtual bool eof() const = 0;
-
-    // Human-readable identity for reports (e.g. the trace path). Empty to suppress.
-    virtual std::string describe() const { return {}; }
+  // Mixin for any module that holds a stream identity — the address-space
+  // tag stamped on the tokens it produces. The exact counterpart of
+  // source_consumer: any model of any interface may inherit it (the
+  // workload_source interface does, but so may e.g. a channel model that
+  // synthesizes requests), it is enumerated by the same startup pass, and
+  // it supports the same pinning affordance for models that mirror another
+  // holder's identity rather than owning a slot.
+  struct stream_source {
+    virtual ~stream_source() = default;
 
     // Stream id: the address-space identity stamped on this source's tokens.
     // Assigned by the framework at startup: every source gets its own stream
     // unless sources share a "stream" label in the configuration, in which
     // case they share one id. Never written as a number in a configuration.
-    // Standalone instances (unit tests) fall back to the owning consumer's
-    // id, the historical default.
     uint32_t stream_id() const
     {
       if (stream_id_.has_value()) {
         return *stream_id_;
       }
-      return static_cast<uint32_t>(consumer_ != nullptr ? consumer_->consumer_id() : 0);
+      return default_stream();
     }
-    void set_stream_id(uint32_t id) { stream_id_ = id; }
+    void set_stream_id(uint32_t id)
+    {
+      if (!stream_id_pinned_) {
+        stream_id_ = id;
+      }
+    }
+    // Sources that mirror another holder's stream (rather than owning an
+    // address space of their own) may pin; pinned sources are skipped by the
+    // startup enumeration and do not occupy a stream slot.
+    void pin_stream_id(uint32_t id)
+    {
+      stream_id_ = id;
+      stream_id_pinned_ = true;
+    }
+    bool stream_id_pinned() const { return stream_id_pinned_; }
     // The configuration's "stream" sharing label; empty when unlabeled.
     const std::string& stream_label() const { return stream_label_; }
     // The instance name this source was configured under (set by the module
@@ -1326,15 +1369,34 @@ struct module_base {
   protected:
     // Set by concrete sources that accept the optional "stream" label.
     std::string stream_label_{};
+    // Fallback identity for standalone instances (unit tests) when the
+    // startup enumeration has not assigned one.
+    virtual uint32_t default_stream() const { return 0; }
 
+  private:
+    std::optional<uint32_t> stream_id_{};
+    bool stream_id_pinned_ = false;
+    std::string identity_name_{};
+  };
+
+  struct workload_source : public module_base<workload_source, source_consumer>, public stream_source {
+    virtual ~workload_source() = default;
+
+    // True when the source will never provide another token.
+    [[nodiscard]] virtual bool eof() const = 0;
+
+    // Human-readable identity for reports (e.g. the trace path). Empty to suppress.
+    virtual std::string describe() const { return {}; }
+
+  protected:
     // The consumer this source feeds. Bound by the framework after
     // construction; sources stamp tokens with origin{consumer, stream},
     // where the stream defaults to the consumer's id (see origin.h).
     source_consumer* consumer_ = nullptr;
 
-  private:
-    std::optional<uint32_t> stream_id_{};
-    std::string identity_name_{};
+    // Standalone instances (unit tests) fall back to the owning consumer's
+    // id, the historical default.
+    uint32_t default_stream() const override { return static_cast<uint32_t>(consumer_ != nullptr ? consumer_->consumer_id() : 0); }
 
   private:
     friend struct module_base<workload_source, source_consumer>;

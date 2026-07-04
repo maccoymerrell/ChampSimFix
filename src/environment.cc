@@ -221,11 +221,21 @@ champsim::environment::environment(ModuleBuilder builder)
   // override with a root-level "num_consumers" key.
   std::size_t num_consumers = 0;
   std::size_t num_sources = 0;
+  std::size_t num_streams = 0;
+  std::set<std::string> stream_labels_seen;
   std::function<void(const json&)> count_identities = [&](const json& node) {
-    if (node.value("module", "") == "workload_source") {
+    const auto module_key = node.value("module", "");
+    const auto model_key = node.value("model", "");
+    if (modules::interface_registry::model_is_source(module_key, model_key)) {
       ++num_sources;
+      // Streams follow the assignment rule: labeled sources share one id per
+      // distinct "stream" label, unlabeled sources get their own.
+      const auto label = node.value("stream", "");
+      if (label.empty() || stream_labels_seen.insert(label).second) {
+        ++num_streams;
+      }
     }
-    if (modules::interface_registry::model_is_consumer(node.value("module", ""), node.value("model", ""))) {
+    if (modules::interface_registry::model_is_consumer(module_key, model_key)) {
       ++num_consumers;
     }
     if (node.contains("children")) {
@@ -238,6 +248,7 @@ champsim::environment::environment(ModuleBuilder builder)
     count_identities(child);
   }
   num_consumers = config.value("num_consumers", num_consumers);
+  num_streams = config.value("num_streams", num_streams);
 
   // Publish system-wide params to the globals before module construction.
   //
@@ -273,6 +284,7 @@ champsim::environment::environment(ModuleBuilder builder)
     g.add_parameter("log2_page_size",  static_cast<unsigned>(champsim::lg2(page_size_)));
     g.add_parameter("num_consumers",   num_consumers);
     g.add_parameter("num_sources",     num_sources);
+    g.add_parameter("num_streams",     num_streams);
   }
   // Sync the cached address extents (page_number, block_offset, etc.) with
   // the freshly-published globals so the hot path doesn't pay a lookup per
@@ -382,6 +394,10 @@ auto champsim::environment::view(const std::string& interface_type) const -> std
 
   if (interface_type == "source_consumer") {
     return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_source_consumer(iface); });
+  }
+
+  if (interface_type == "stream_source") {
+    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_stream_source(iface); });
   }
 
   std::vector<std::any> result;

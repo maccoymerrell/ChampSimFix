@@ -164,6 +164,18 @@ asid. Replacement hooks receive the full ``origin``; virtual memory is keyed by
 token's stream and tag their PSCLs with it, so one walker serves any number of address
 spaces — it is hardware owned by a consumer, not by an address space.
 
+**Identity mixins.** Consumer-ness and source-ness are symmetric mixins, attachable to
+any model of any interface: ``source_consumer`` marks a hardware context that consumes
+workloads (a core; also e.g. a replay channel that drives phase completion), and
+``stream_source`` marks a holder of a stream identity (every ``workload_source``; also
+any model that synthesizes its own address-space traffic). Both are enumerated by the
+same startup pass, and both support pinning for models that mirror another holder's
+identity rather than owning a slot. The environment publishes three globals before
+construction — ``num_consumers``, ``num_sources``, and ``num_streams`` (distinct
+stream ids after label sharing) — each counted in its own space and each overridable by
+a root config key of the same name; the startup enumeration cross-checks the consumer
+and stream counts so per-identity tables can never be silently undersized.
+
 ------------------------------------------
 Phase Controllers
 ------------------------------------------

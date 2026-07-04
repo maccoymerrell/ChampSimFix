@@ -281,6 +281,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
     g.add_parameter("log2_page_size",  log2_page_size);
     g.add_parameter("num_consumers",   num_cores_cfg);
     g.add_parameter("num_sources",     num_cores_cfg);
+    g.add_parameter("num_streams",     num_cores_cfg); // one unlabeled source per core: streams == sources
   }
   // Sync the cached address extents with the freshly-published globals.
   champsim::refresh_address_extents();
@@ -1088,6 +1089,30 @@ auto champsim::legacy_environment::view(const std::string& interface_type) const
       if (!to_sc) continue;
       if (auto* sc = to_sc(nested_by_name_.at(name))) {
         result.push_back(static_cast<champsim::modules::source_consumer*>(sc));
+      }
+    }
+    return result;
+  }
+
+  if (interface_type == "stream_source") {
+    // Mirrors the source_consumer aggregate above: per-instance dynamic_cast
+    // over every interface, null-filtered, top-level then nested.
+    std::vector<std::any> result;
+    std::map<std::string, std::size_t> type_idx;
+    for (auto& [name, iface] : module_order_) {
+      auto to_ss = champsim::modules::interface_registry::get_to_stream_source(iface);
+      if (!to_ss) continue;
+      auto& vec = modules_by_type_.at(iface);
+      auto idx = type_idx[iface]++;
+      if (auto* ss = to_ss(vec.at(idx))) {
+        result.push_back(static_cast<champsim::modules::stream_source*>(ss));
+      }
+    }
+    for (auto& [name, iface] : nested_order_) {
+      auto to_ss = champsim::modules::interface_registry::get_to_stream_source(iface);
+      if (!to_ss) continue;
+      if (auto* ss = to_ss(nested_by_name_.at(name))) {
+        result.push_back(static_cast<champsim::modules::stream_source*>(ss));
       }
     }
     return result;

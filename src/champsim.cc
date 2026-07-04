@@ -232,7 +232,10 @@ void assign_identities(modules::environment_module& env)
 
   uint32_t next_stream = 0;
   std::map<std::string, uint32_t> stream_labels;
-  for (auto& src : env.typed_view<modules::workload_source>("workload_source")) {
+  for (auto& src : env.typed_view<modules::stream_source>("stream_source")) {
+    if (src.get().stream_id_pinned()) {
+      continue; // mirrors another source's stream; owns no slot
+    }
     const auto& label = src.get().stream_label();
     if (label.empty()) {
       src.get().set_stream_id(next_stream);
@@ -246,6 +249,14 @@ void assign_identities(modules::environment_module& env)
       src.get().set_stream_id(it->second);
       identities().register_source(it->second, src.get().source_name());
     }
+  }
+
+  auto num_streams = modules::ModuleBuilder::globals().get_parameter<std::size_t>("num_streams", true, std::size_t{0});
+  if (num_streams > 0 && static_cast<std::size_t>(next_stream) > num_streams) {
+    fmt::print("ERROR: {} streams found but num_streams is {} — per-stream tables would index out of bounds. "
+               "Remove or raise the root config key \"num_streams\".\n",
+               next_stream, num_streams);
+    std::exit(-1);
   }
 
   // Warm each stream's page-table root in stream order. Roots would
