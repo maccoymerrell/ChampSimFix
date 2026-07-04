@@ -184,8 +184,12 @@ public:
 
   stats_type sim_stats, roi_stats;
 
-  std::deque<fill_type> MSHR;
-  std::deque<fill_type> inflight_fills;
+  // MSHR admission is gated at MSHR_SIZE, so that is its exact capacity.
+  // inflight_fills has no admission gate (writebacks and closed MSHR entries
+  // land here unconditionally and drain at MAX_FILL, subject to lower-level
+  // backpressure), so pushes go through the growing calls.
+  champsim::ring_buffer<fill_type> MSHR;
+  champsim::ring_buffer<fill_type> inflight_fills;
 
   long operate() final;
   long poll_cycle() final;
@@ -299,6 +303,8 @@ public:
     // Admission bandwidth is clamped to (limit - size), so occupancy never
     // exceeds the window limit; MAX_TAG of headroom is pure paranoia.
     inflight_tag_check.set_capacity(static_cast<std::size_t>(tag_check_window_limit_ + champsim::to_underlying(MAX_TAG)));
+    MSHR.set_capacity(MSHR_SIZE);
+    inflight_fills.set_capacity(2 * static_cast<std::size_t>(MSHR_SIZE) + 8);
     for (auto type : pref_activate_mask)
       pref_activate_lut_[static_cast<std::size_t>(champsim::to_underlying(type))] = true;
 

@@ -289,20 +289,24 @@ bool CACHE::handle_miss(tag_lookup_type& handle_pkt)
 
   last_served_origin = handle_pkt.origin;
 
-  // check mshr
-  auto fill_entry = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(handle_pkt.address));
-  bool mshr_full = (MSHR.size() == MSHR_SIZE);
-
-  // check inflight fills
-  if (fill_entry == MSHR.end()) {
-    fill_entry = std::find_if(inflight_fills.begin(), inflight_fills.end(), matches_address(handle_pkt.address));
+  // check mshr, then inflight fills. Ring iterators compare by logical
+  // position and must not be compared across containers, so the found entry
+  // is carried as a pointer (stable: neither container mutates before the
+  // merge below).
+  fill_type* fill_entry = nullptr;
+  if (auto mshr_it = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(handle_pkt.address)); mshr_it != std::end(MSHR)) {
+    fill_entry = &*mshr_it;
+  } else if (auto inflight_it = std::find_if(std::begin(inflight_fills), std::end(inflight_fills), matches_address(handle_pkt.address));
+             inflight_it != std::end(inflight_fills)) {
+    fill_entry = &*inflight_it;
   }
+  bool mshr_full = (MSHR.size() == MSHR_SIZE);
 
   // On the success paths below the tag entry is consumed (its caller erases
   // it), so its vectors are moved into the allocated fill. Only scalar
   // fields of handle_pkt are read after those moves. The failure paths
   // return before any move, leaving the entry intact for retry.
-  if (fill_entry != inflight_fills.end()) // miss or fill already inflight
+  if (fill_entry != nullptr) // miss or fill already inflight
   {
     if (fill_entry->type == access_type::PREFETCH && handle_pkt.type != access_type::PREFETCH) {
       // Mark the prefetch as useful
@@ -349,7 +353,7 @@ bool CACHE::handle_write(tag_lookup_type& handle_pkt)
 
   fill_type to_allocate{std::move(handle_pkt), current_time}; // entry is consumed by the caller
   to_allocate.data_promise.ready_at(current_time + (is_warmup() ? champsim::chrono::clock::duration{} : FILL_LATENCY));
-  inflight_fills.push_back(std::move(to_allocate));
+  inflight_fills.push_back_grow(std::move(to_allocate));
 
   sim_stats.misses.increment(std::pair{handle_pkt.type, handle_pkt.origin.cpu()}); // scalars, unaffected by the move
 
@@ -641,7 +645,7 @@ void CACHE::finish_packet(const response_type& packet)
   }
 
   std::iter_swap(mshr_entry, std::begin(MSHR));
-  inflight_fills.push_back(MSHR.front());
+  inflight_fills.push_back_grow(std::move(MSHR.front()));
   MSHR.pop_front();
 }
 
