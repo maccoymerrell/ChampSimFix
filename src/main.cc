@@ -127,11 +127,14 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   // Parse config for system parameters
   std::string env_model = config_json.value("environment", std::string("LEGACY_ENVIRONMENT"));
   bool is_legacy_env = (env_model == "LEGACY_ENVIRONMENT");
-  // num_cores from the config is used purely for CLI trace-count validation
-  // when running the legacy env. The environment owns publishing all
-  // system-wide globals (block_size, page_size, log2_*, num_sources) into
-  // ModuleBuilder::globals() during its construction.
-  std::size_t num_cpus = config_json.value("num_cores", 1u);
+  // The CLI expects one trace per workload SOURCE, not per core. The legacy
+  // environment spawns exactly one workload source per core, so its source
+  // count is num_cores by construction — that identity lives here, not in
+  // the trace check itself. Explicit environments declare sources in the
+  // config and accept any trace count. The environment owns publishing all
+  // system-wide globals (block_size, page_size, log2_*, num_consumers,
+  // num_sources) into ModuleBuilder::globals() during its construction.
+  std::size_t legacy_num_sources = config_json.value("num_cores", 1u);
 
   // Root-level "cycle_skip" (default true) lets idle operables skip cycles
   // via operable::poll_cycle(). Set false to force every operable to run
@@ -175,11 +178,11 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
       app2.add_option("--json", json_file_name, "The name of the file to receive JSON output. If no name is specified, stdout will be used")->expected(0, 1);
   app2.add_option("--listeners", requested_listeners, "A list of the listeners to be attached to the run");
 
-  // Legacy env requires exactly num_cpus traces; explicit envs allow any number
+  // Legacy env requires exactly legacy_num_sources traces; explicit envs allow any number
   // (traces resolve via $traceN variables in the config).
   auto* trace_option = app2.add_option("traces", trace_names, "The paths to the traces");
   if (is_legacy_env) {
-    trace_option->required()->expected(static_cast<int>(num_cpus))->check(CLI::ExistingFile);
+    trace_option->required()->expected(static_cast<int>(legacy_num_sources))->check(CLI::ExistingFile);
   } else {
     trace_option->check(CLI::ExistingFile);
   }

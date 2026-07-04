@@ -398,6 +398,11 @@ public:
     std::function<champsim::module_stat*(const std::any&)> to_module_stat;
     // Returns the registered model name and the instance NAME for an instance any.
     std::function<instance_id(const std::any&)> identify;
+    // True when the named model's implementation class is a source_consumer.
+    // Recorded at register_module time (statically, via is_base_of), so
+    // environments can count consumers from a config before constructing
+    // any module.
+    std::function<bool(const std::string&)> model_is_consumer;
     // Creates a typed null pointer wrapped in std::any
     std::function<std::any()> make_null_pointer;
   };
@@ -415,6 +420,14 @@ public:
       exit(-1);
     }
     registry()[name] = std::move(info);
+  }
+
+  static bool model_is_consumer(const std::string& interface_name, const std::string& model_name) {
+    auto it = registry().find(interface_name);
+    if (it == registry().end() || !it->second.model_is_consumer) {
+      return false;
+    }
+    return it->second.model_is_consumer(model_name);
   }
 
   static std::any create(const std::string& interface_name, ModuleBuilder builder, std::any parent) {
@@ -632,9 +645,18 @@ struct module_base {
       register_module(std::string model_name) {
           
           std::function<std::unique_ptr<B>(ModuleBuilder builder)> create_module([](ModuleBuilder builder){return std::unique_ptr<B>(new D(builder));});
+          consumer_traits()[model_name] = std::is_base_of_v<source_consumer, D>;
           add_module(model_name,create_module);
       }
     };
+
+    // Per-model consumer trait, recorded at registration where the concrete
+    // type is known statically. Same-specialization storage, so it does not
+    // depend on static-initialization order against the interface entry.
+    static std::map<std::string, bool>& consumer_traits() {
+      static std::map<std::string, bool> t;
+      return t;
+    }
 
     // Register this module_base specialization as a named interface in the interface_registry.
     // This allows the explicit environment to create modules by interface name string.
@@ -688,6 +710,11 @@ struct module_base {
         };
         info.make_null_pointer = []() -> std::any {
           return static_cast<B*>(nullptr);
+        };
+        info.model_is_consumer = [](const std::string& model_name) -> bool {
+          const auto& traits = consumer_traits();
+          auto it = traits.find(model_name);
+          return it != traits.end() && it->second;
         };
         interface_registry::register_interface(interface_name, std::move(info));
       }

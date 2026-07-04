@@ -210,26 +210,32 @@ champsim::environment::environment(ModuleBuilder builder)
 
   auto& children = config["children"];
 
-  // Pre-construction: count workload_source children so we can publish
-  // num_consumers to the globals before any module is constructed. Modules
-  // that need the consumer count (e.g. ship/drrip for per-consumer tables)
-  // read it via builder.get_parameter fall-through. The textual source count
-  // is a safe stand-in (>= the consumer count when consumers hold multiple
-  // sources); configs may override with a root-level "num_consumers" key.
-  std::function<std::size_t(const json&)> count_workload_sources = [&](const json& node) -> std::size_t {
-    std::size_t n = 0;
+  // Pre-construction: count consumers and sources so both can be published
+  // to the globals before any module is constructed. Modules that size
+  // per-consumer tables (e.g. ship/drrip, indexed by origin's consumer id)
+  // read num_consumers via builder.get_parameter fall-through, so it must
+  // be the exact consumer count — the same space assign_identities later
+  // enumerates. Consumer-ness is a per-model trait recorded at
+  // register_module time (a model can be a source_consumer even when its
+  // interface is not), queried here by (module, model) name. Configs may
+  // override with a root-level "num_consumers" key.
+  std::size_t num_consumers = 0;
+  std::size_t num_sources = 0;
+  std::function<void(const json&)> count_identities = [&](const json& node) {
+    if (node.value("module", "") == "workload_source") {
+      ++num_sources;
+    }
+    if (modules::interface_registry::model_is_consumer(node.value("module", ""), node.value("model", ""))) {
+      ++num_consumers;
+    }
     if (node.contains("children")) {
       for (const auto& sub : node["children"]) {
-        if (sub.value("module", "") == "workload_source") ++n;
-        n += count_workload_sources(sub);
+        count_identities(sub);
       }
     }
-    return n;
   };
-  std::size_t num_consumers = 0;
   for (const auto& child : children) {
-    if (child.value("module", "") == "workload_source") ++num_consumers;
-    num_consumers += count_workload_sources(child);
+    count_identities(child);
   }
   num_consumers = config.value("num_consumers", num_consumers);
 
@@ -266,6 +272,7 @@ champsim::environment::environment(ModuleBuilder builder)
     g.add_parameter("log2_block_size", static_cast<unsigned>(champsim::lg2(block_size_)));
     g.add_parameter("log2_page_size",  static_cast<unsigned>(champsim::lg2(page_size_)));
     g.add_parameter("num_consumers",   num_consumers);
+    g.add_parameter("num_sources",     num_sources);
   }
   // Sync the cached address extents (page_number, block_offset, etc.) with
   // the freshly-published globals so the hot path doesn't pay a lookup per
