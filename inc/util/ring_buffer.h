@@ -52,14 +52,15 @@ namespace champsim
  * (amortized doubling) instead of failing.
  *
  * Iterator and reference invalidation:
- *  - push_back/emplace_back/insert: no iterator or reference is invalidated
- *    (the backing store never reallocates); past-the-end iterators become
+ *  - push_back/emplace_back: no iterator or reference is invalidated (the
+ *    backing store never reallocates); past-the-end iterators become
  *    dereferenceable as usual.
  *  - pop_front/pop_back/erase/clear: references to surviving elements remain
  *    valid, but ALL iterators are invalidated — an iterator carries its
  *    logical index from the front, which shifts when the head moves.
- *  - reserve and the _grow calls (when they enlarge the store): all
+ *  - reserve, insert, and the _grow calls, when they enlarge the store: all
  *    iterators, references, and physical slot indices are invalidated.
+ *    While within capacity, insert and the _grow calls behave as push_back.
  * In short: a reference or pointer to an element is stable for the element's
  * entire residency provided the backing store is never enlarged; iterators
  * are stable only across tail insertion.
@@ -333,7 +334,10 @@ public:
   /**
    * Insert a range at the tail. Only end-anchored insertion is supported,
    * mirroring push_back (the position argument exists for interface
-   * familiarity and must equal end()).
+   * familiarity and must equal end()). Unlike push_back, insertion beyond
+   * the capacity enlarges the backing store (with reserve()'s invalidation
+   * consequences): range insertion serves batch staging and external state
+   * injection, not admission-gated modeling.
    */
   template <typename InputIt>
   iterator insert(const_iterator pos, InputIt first, InputIt last)
@@ -341,7 +345,7 @@ public:
     assert(pos.pos_ == count_);
     (void)pos;
     for (; first != last; ++first) {
-      push_back(*first);
+      push_back_grow(*first);
     }
     return end();
   }

@@ -299,7 +299,7 @@ long O3_CPU::fetch_instruction()
   return progress;
 }
 
-bool O3_CPU::do_fetch_instruction(std::deque<ooo_model_instr>::iterator begin, std::deque<ooo_model_instr>::iterator end)
+bool O3_CPU::do_fetch_instruction(champsim::ring_buffer<ooo_model_instr>::iterator begin, champsim::ring_buffer<ooo_model_instr>::iterator end)
 {
   CacheBus::request_type fetch_packet;
   fetch_packet.origin = begin->origin;

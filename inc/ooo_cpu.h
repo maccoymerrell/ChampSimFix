@@ -112,9 +112,13 @@ public:
   dib_type DIB;
 
   // reorder buffer, load/store queue, register file
-  std::deque<ooo_model_instr> DISPATCH_BUFFER;
-  std::deque<ooo_model_instr> DECODE_BUFFER;
-  std::deque<ooo_model_instr> DIB_HIT_BUFFER;
+  // Frontend stage buffers: admission is gated at the configured sizes
+  // (promote_to_decode and decode_instruction clamp their bandwidth to the
+  // free space), and erasure is front-anchored, so fixed-capacity rings
+  // replace the deques' chunk churn.
+  champsim::ring_buffer<ooo_model_instr> DISPATCH_BUFFER;
+  champsim::ring_buffer<ooo_model_instr> DECODE_BUFFER;
+  champsim::ring_buffer<ooo_model_instr> DIB_HIT_BUFFER;
 
 private:
   // The ROB, LQ, and IFETCH_BUFFER carry incrementally maintained
@@ -127,16 +131,20 @@ private:
   // every operated cycle, and deque chunk-map iteration was a measured cost.
   champsim::ring_buffer<ooo_model_instr> ROB;
   std::vector<std::optional<LSQ_ENTRY>> LQ;
-  std::deque<ooo_model_instr> IFETCH_BUFFER;
+  champsim::ring_buffer<ooo_model_instr> IFETCH_BUFFER;
 
-  std::deque<LSQ_ENTRY> SQ;
+  // The SQ is a ring buffer: dispatch admits at the back (gated at SQ_SIZE),
+  // completion erases at the front, and sq_store_index_ holds pointers into
+  // it — ring elements never move for their whole residency (the buffer is
+  // never enlarged), so those pointers are as stable as the deque's were.
+  champsim::ring_buffer<LSQ_ENTRY> SQ;
 
 public:
   // Inspection
   const champsim::ring_buffer<ooo_model_instr>& rob() const { return ROB; }
   const std::vector<std::optional<LSQ_ENTRY>>& lq() const { return LQ; }
-  const std::deque<LSQ_ENTRY>& sq() const { return SQ; }
-  const std::deque<ooo_model_instr>& ifetch_buffer() const { return IFETCH_BUFFER; }
+  const champsim::ring_buffer<LSQ_ENTRY>& sq() const { return SQ; }
+  const champsim::ring_buffer<ooo_model_instr>& ifetch_buffer() const { return IFETCH_BUFFER; }
 
   // Apply an arbitrary mutation, then re-derive all dependent bookkeeping.
   // This is the sanctioned way to reach into these structures from outside
@@ -423,7 +431,7 @@ public:
   bool do_init_instruction(ooo_model_instr& instr);
   bool do_predict_branch(ooo_model_instr& instr);
   void do_check_dib(ooo_model_instr& instr);
-  bool do_fetch_instruction(std::deque<ooo_model_instr>::iterator begin, std::deque<ooo_model_instr>::iterator end);
+  bool do_fetch_instruction(champsim::ring_buffer<ooo_model_instr>::iterator begin, champsim::ring_buffer<ooo_model_instr>::iterator end);
   void do_dib_update(const ooo_model_instr& instr);
   void do_scheduling(ooo_model_instr& instr);
   void do_execution(ooo_model_instr& instr);
@@ -485,6 +493,11 @@ public:
       btb_module_pimpl.push_back(champsim::modules::btb::create_instance(sub, static_cast<champsim::modules::core_module*>(this)));
 
     ROB.set_capacity(ROB_SIZE);
+    IFETCH_BUFFER.set_capacity(IFETCH_BUFFER_SIZE);
+    DISPATCH_BUFFER.set_capacity(DISPATCH_BUFFER_SIZE);
+    DECODE_BUFFER.set_capacity(DECODE_BUFFER_SIZE);
+    DIB_HIT_BUFFER.set_capacity(DIB_HIT_BUFFER_SIZE);
+    SQ.set_capacity(SQ_SIZE);
     exec_candidates_.assign((ROB.capacity() + 63) / 64, 0);
     complete_candidates_.assign((ROB.capacity() + 63) / 64, 0);
     lq_free_slots_ = static_cast<long>(std::size(LQ));
