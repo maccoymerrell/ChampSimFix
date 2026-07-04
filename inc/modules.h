@@ -537,12 +537,22 @@ struct module_base {
         return name;
     }
 
-    static void add_module(std::string name, std::function<std::unique_ptr<B>(ModuleBuilder builder)> module_constructor) {
+    // Everything known about a registered model: its factory, plus the
+    // traits that must be queryable before any instance exists (a
+    // pre-construction consumer count cannot dynamic_cast what has not been
+    // constructed, so inheritance is recorded here, where the concrete type
+    // is known statically).
+    struct model_record {
+      std::function<std::unique_ptr<B>(ModuleBuilder builder)> create;
+      bool is_consumer = false;
+    };
+
+    static void add_module(std::string name, model_record record) {
         if(module_map().find(name) != module_map().end()) {
             fmt::print("[MODULE] ERROR: duplicate module name used: {}\n", name);
             exit(-1);
         }
-        module_map()[name] = module_constructor;
+        module_map()[name] = std::move(record);
     }
 
     public:
@@ -562,7 +572,7 @@ struct module_base {
             exit(-1);
         }
         try {
-          B* instance_ptr = instance_map()[builder.get_name()].emplace_back(std::any_cast<std::function<std::unique_ptr<B>(ModuleBuilder builder)>>(module_map()[builder.get_model()])(builder)).get();
+          B* instance_ptr = instance_map()[builder.get_name()].emplace_back(std::any_cast<model_record&>(module_map()[builder.get_model()]).create(builder)).get();
           //It seems sketchy for the module wrapper to be tracking these separately from the module itself, can we fix this?
           instance_ptr->NAME =  builder.get_name();
           instance_ptr->MODEL = builder.get_model();
@@ -643,20 +653,10 @@ struct module_base {
        * \param model_name The name used in JSON config to select this module.
        */
       register_module(std::string model_name) {
-          
-          std::function<std::unique_ptr<B>(ModuleBuilder builder)> create_module([](ModuleBuilder builder){return std::unique_ptr<B>(new D(builder));});
-          consumer_traits()[model_name] = std::is_base_of_v<source_consumer, D>;
-          add_module(model_name,create_module);
+          add_module(model_name, model_record{[](ModuleBuilder builder){return std::unique_ptr<B>(new D(builder));},
+                                              std::is_base_of_v<source_consumer, D>});
       }
     };
-
-    // Per-model consumer trait, recorded at registration where the concrete
-    // type is known statically. Same-specialization storage, so it does not
-    // depend on static-initialization order against the interface entry.
-    static std::map<std::string, bool>& consumer_traits() {
-      static std::map<std::string, bool> t;
-      return t;
-    }
 
     // Register this module_base specialization as a named interface in the interface_registry.
     // This allows the explicit environment to create modules by interface name string.
@@ -712,9 +712,8 @@ struct module_base {
           return static_cast<B*>(nullptr);
         };
         info.model_is_consumer = [](const std::string& model_name) -> bool {
-          const auto& traits = consumer_traits();
-          auto it = traits.find(model_name);
-          return it != traits.end() && it->second;
+          auto it = module_map().find(model_name);
+          return it != module_map().end() && std::any_cast<const model_record&>(it->second).is_consumer;
         };
         interface_registry::register_interface(interface_name, std::move(info));
       }
