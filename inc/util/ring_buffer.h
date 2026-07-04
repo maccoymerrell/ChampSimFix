@@ -17,27 +17,52 @@
 #ifndef UTIL_RING_BUFFER_H
 #define UTIL_RING_BUFFER_H
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <iterator>
 #include <optional>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace champsim
 {
 /**
- * A fixed-capacity FIFO with contiguous storage and random-access iterators.
+ * A bounded FIFO with contiguous storage and random-access iterators.
  *
- * This is a drop-in replacement for std::deque in the simulator's hot
- * structures (notably the ROB): push_back at the tail, erase at the front,
- * and index/iterate in insertion order — but over a single contiguous
- * allocation, so iteration costs one add and a wrap test per step instead of
- * the deque's chunk-map indirection.
+ * This is a general-purpose queue container, replacing std::deque wherever a
+ * structure has a known (or amortizable) capacity: push_back/emplace_back at
+ * the tail, pop_front at the head, and index/iterate in insertion order —
+ * but over a single contiguous allocation, so iteration costs one add and a
+ * wrap test per step instead of the deque's chunk-map indirection.
  *
- * Capacity is fixed after set_capacity() (structure sizes in the simulator
- * are configuration constants). Erasure is only supported at the front, in
- * keeping with FIFO retirement. Popped slots keep their objects alive until
- * the slot is reused; element types must not rely on prompt destruction.
+ * It supports the standard container calls its backing store allows:
+ * begin/end/cbegin/cend, size/empty, front/back, operator[]/at,
+ * push_back/emplace_back, pop_front/pop_back, clear, reserve, and the
+ * end-anchored subset of insert/erase (see those members). Mutation in the
+ * middle of the sequence is not part of the container's contract — elements
+ * leave in FIFO (or LIFO, via pop_back) order only.
+ *
+ * Capacity semantics: set_capacity() fixes the capacity while empty;
+ * push_back on a full buffer is a precondition violation (assert), so
+ * admission must be gated by full()/size() — the simulator's structure sizes
+ * are model parameters and overflow is a modeling bug. For queues with no
+ * modeled bound, the _grow insertion calls enlarge the backing store
+ * (amortized doubling) instead of failing.
+ *
+ * Iterator and reference invalidation:
+ *  - push_back/emplace_back/insert: no iterator or reference is invalidated
+ *    (the backing store never reallocates); past-the-end iterators become
+ *    dereferenceable as usual.
+ *  - pop_front/pop_back/erase/clear: references to surviving elements remain
+ *    valid, but ALL iterators are invalidated — an iterator carries its
+ *    logical index from the front, which shifts when the head moves.
+ *  - reserve and the _grow calls (when they enlarge the store): all
+ *    iterators, references, and physical slot indices are invalidated.
+ * In short: a reference or pointer to an element is stable for the element's
+ * entire residency provided the backing store is never enlarged; iterators
+ * are stable only across tail insertion.
  */
 template <typename T>
 class ring_buffer
@@ -160,6 +185,8 @@ public:
   using difference_type = std::ptrdiff_t;
   using reference = T&;
   using const_reference = const T&;
+  using pointer = T*;
+  using const_pointer = const T*;
   using iterator = iterator_impl<false>;
   using const_iterator = iterator_impl<true>;
 
@@ -178,6 +205,26 @@ public:
     count_ = 0;
   }
 
+  /**
+   * Enlarge the backing store to hold at least new_capacity elements,
+   * preserving the contents in order. No-op if the buffer is already at
+   * least that large. Unlike set_capacity(), this may be called while
+   * elements are present; when it enlarges the store it invalidates all
+   * iterators, references, and physical slot indices.
+   */
+  void reserve(size_type new_capacity)
+  {
+    if (new_capacity <= storage_.size()) {
+      return;
+    }
+    std::vector<std::optional<T>> new_storage(new_capacity);
+    for (size_type idx = 0; idx < count_; ++idx) {
+      new_storage[idx] = std::move(storage_[physical(idx)]);
+    }
+    storage_ = std::move(new_storage);
+    head_ = 0;
+  }
+
   size_type capacity() const { return storage_.size(); }
   size_type size() const { return count_; }
   [[nodiscard]] bool empty() const { return count_ == 0; }
@@ -187,12 +234,16 @@ public:
   const_reference operator[](size_type idx) const { return *storage_[physical(idx)]; }
   reference at(size_type idx)
   {
-    assert(idx < count_);
+    if (idx >= count_) {
+      throw std::out_of_range{"champsim::ring_buffer::at"};
+    }
     return (*this)[idx];
   }
   const_reference at(size_type idx) const
   {
-    assert(idx < count_);
+    if (idx >= count_) {
+      throw std::out_of_range{"champsim::ring_buffer::at"};
+    }
     return (*this)[idx];
   }
 
@@ -219,6 +270,38 @@ public:
     assert(!full());
     storage_[physical(count_)] = std::move(value);
     ++count_;
+  }
+  template <typename... Args>
+  reference emplace_back(Args&&... args)
+  {
+    assert(!full());
+    auto& slot = storage_[physical(count_)];
+    slot.emplace(std::forward<Args>(args)...);
+    ++count_;
+    return *slot;
+  }
+
+  /**
+   * Tail insertion for queues without a modeled capacity bound: as
+   * push_back/emplace_back, but a full buffer enlarges the backing store
+   * (amortized doubling) instead of asserting. When growth occurs, all
+   * iterators, references, and physical slot indices are invalidated.
+   */
+  void push_back_grow(const T& value)
+  {
+    grow_if_full();
+    push_back(value);
+  }
+  void push_back_grow(T&& value)
+  {
+    grow_if_full();
+    push_back(std::move(value));
+  }
+  template <typename... Args>
+  reference emplace_back_grow(Args&&... args)
+  {
+    grow_if_full();
+    return emplace_back(std::forward<Args>(args)...);
   }
 
   void pop_front()
@@ -287,8 +370,19 @@ public:
 
   void clear()
   {
+    for (size_type idx = 0; idx < count_; ++idx) {
+      storage_[physical(idx)].reset(); // release the elements' resources promptly
+    }
     head_ = 0;
     count_ = 0;
+  }
+
+private:
+  void grow_if_full()
+  {
+    if (full()) {
+      reserve(std::max<size_type>(2 * storage_.size(), 8));
+    }
   }
 };
 } // namespace champsim
