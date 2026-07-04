@@ -28,6 +28,7 @@
 #include "channel.h"
 #include "operable.h"
 #include "msl/lru_table.h"
+#include "util/ring_buffer.h"
 #include "waitable.h"
 
 class PageTableWalker : public champsim::modules::page_table_walker_module, public champsim::module_phase
@@ -63,7 +64,7 @@ class PageTableWalker : public champsim::modules::page_table_walker_module, publ
     champsim::waitable<champsim::address> data{};
 
     std::vector<uint64_t> instr_depend_on_me{};
-    std::vector<std::deque<response_type>*> to_return{};
+    std::vector<champsim::ring_buffer<response_type>*> to_return{};
 
     uint32_t pf_metadata = 0;
     champsim::origin origin{};

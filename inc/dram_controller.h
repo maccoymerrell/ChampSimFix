@@ -34,6 +34,7 @@
 #include "extent_set.h"
 #include "operable.h"
 #include "packet.h"
+#include "util/ring_buffer.h"
 
 struct DRAM_ADDRESS_MAPPING {
   constexpr static std::size_t SLICER_OFFSET_IDX = 0;
@@ -121,7 +122,7 @@ struct DRAM_CHANNEL final : public champsim::operable {
     std::size_t row_idx = 0;
 
     std::vector<uint64_t> instr_depend_on_me{};
-    std::vector<std::deque<response_type>*> to_return{};
+    std::vector<champsim::ring_buffer<response_type>*> to_return{};
 
     explicit request_type(const champsim::request& req);
   };

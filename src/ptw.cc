@@ -171,7 +171,7 @@ long PageTableWalker::operate()
   auto [complete_begin, complete_end] = champsim::get_span_p(std::cbegin(completed), std::cend(completed), fill_bw, is_ready);
   std::for_each(complete_begin, complete_end, [](auto& mshr_entry) {
     for (auto ret : mshr_entry.to_return) {
-      ret->emplace_back(mshr_entry.v_address, mshr_entry.v_address, *mshr_entry.data, mshr_entry.pf_metadata, mshr_entry.instr_depend_on_me);
+      ret->emplace_back_grow(mshr_entry.v_address, mshr_entry.v_address, *mshr_entry.data, mshr_entry.pf_metadata, mshr_entry.instr_depend_on_me);
     }
   });
   fill_bw.consume(std::distance(complete_begin, complete_end));

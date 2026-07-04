@@ -77,7 +77,7 @@ class CACHE : public champsim::modules::cache_module, public champsim::module_ph
     champsim::chrono::clock::time_point event_cycle = champsim::chrono::clock::time_point::max();
 
     std::vector<uint64_t> instr_depend_on_me{};
-    std::vector<std::deque<response_type>*> to_return{};
+    std::vector<champsim::ring_buffer<response_type>*> to_return{};
 
     explicit tag_lookup_type(request_type req) : tag_lookup_type(std::move(req), false, false) {}
     tag_lookup_type(const request_type& req, bool local_pref, bool skip);
@@ -105,7 +105,7 @@ public:
     champsim::chrono::clock::time_point time_enqueued;
 
     std::vector<uint64_t> instr_depend_on_me{};
-    std::vector<std::deque<response_type>*> to_return{};
+    std::vector<champsim::ring_buffer<response_type>*> to_return{};
 
     fill_type(const tag_lookup_type& req, champsim::chrono::clock::time_point _time_enqueued);
     // Move form: steals the dependency and return vectors from a tag entry

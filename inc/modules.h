@@ -43,6 +43,7 @@
 #include <any>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include "util/ring_buffer.h"
 #include "util/type_traits.h"
 #include "phase_info.h"
 #include "module_phase.h"
@@ -1023,11 +1024,18 @@ struct module_base {
     virtual std::size_t wq_size() const = 0;
     virtual std::size_t pq_size() const = 0;
 
+    /** The container type of the request queues (RQ/WQ/PQ). */
+    using request_queue_type = champsim::ring_buffer<request_type>;
+    /** The container type of the response queue. Producers push through
+     *  pointers to this queue with push_back_grow()/emplace_back_grow():
+     *  responses have no modeled capacity bound. */
+    using response_queue_type = champsim::ring_buffer<response_type>;
+
     // Queue accessors for upper-level iteration
-    virtual std::deque<request_type>& get_rq() = 0;
-    virtual std::deque<request_type>& get_wq() = 0;
-    virtual std::deque<request_type>& get_pq() = 0;
-    virtual std::deque<response_type>& get_returned() = 0;
+    virtual request_queue_type& get_rq() = 0;
+    virtual request_queue_type& get_wq() = 0;
+    virtual request_queue_type& get_pq() = 0;
+    virtual response_queue_type& get_returned() = 0;
 
     // Stats accessors
     virtual stats_type& get_sim_stats() = 0;

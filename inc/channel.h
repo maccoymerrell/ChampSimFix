@@ -19,7 +19,6 @@
 
 #include <array>
 #include <cstdint>
-#include <deque>
 #include <limits>
 #include <string_view>
 #include <vector>
@@ -30,6 +29,7 @@
 #include "champsim.h"
 #include "packet.h"
 #include "modules.h"
+#include "util/ring_buffer.h"
 
 namespace champsim
 {
@@ -51,8 +51,8 @@ public:
   using request_type = request;
   using stats_type = cache_queue_stats;
 
-  std::deque<request_type> RQ{}, PQ{}, WQ{};
-  std::deque<response_type> returned{};
+  champsim::ring_buffer<request_type> RQ{}, PQ{}, WQ{};
+  champsim::ring_buffer<response_type> returned{};
 
   stats_type sim_stats{}, roi_stats{};
 
@@ -71,10 +71,10 @@ public:
   [[nodiscard]] std::size_t wq_size() const override;
   [[nodiscard]] std::size_t pq_size() const override;
 
-  std::deque<request_type>& get_rq() override { return RQ; }
-  std::deque<request_type>& get_wq() override { return WQ; }
-  std::deque<request_type>& get_pq() override { return PQ; }
-  std::deque<response_type>& get_returned() override { return returned; }
+  champsim::ring_buffer<request_type>& get_rq() override { return RQ; }
+  champsim::ring_buffer<request_type>& get_wq() override { return WQ; }
+  champsim::ring_buffer<request_type>& get_pq() override { return PQ; }
+  champsim::ring_buffer<response_type>& get_returned() override { return returned; }
 
   stats_type& get_sim_stats() override { return sim_stats; }
   stats_type& get_roi_stats() override { return roi_stats; }

@@ -72,7 +72,7 @@ CACHE::fill_type::fill_type(tag_lookup_type&& req, champsim::chrono::clock::time
 CACHE::fill_type CACHE::fill_type::merge(fill_type predecessor, fill_type successor)
 {
   std::vector<uint64_t> merged_instr{};
-  std::vector<std::deque<response_type>*> merged_return{};
+  std::vector<champsim::ring_buffer<response_type>*> merged_return{};
 
   std::set_union(std::begin(predecessor.instr_depend_on_me), std::end(predecessor.instr_depend_on_me), std::begin(successor.instr_depend_on_me),
                  std::end(successor.instr_depend_on_me), std::back_inserter(merged_instr));
@@ -207,7 +207,7 @@ bool CACHE::handle_fill(const fill_type& fill)
 
   response_type response{fill.address, fill.v_address, fill.data_promise->data, metadata_thru, fill.instr_depend_on_me};
   for (auto* ret : fill.to_return) {
-    ret->push_back(response);
+    ret->push_back_grow(response);
   }
 
   return true;
@@ -244,7 +244,7 @@ bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
 
     response_type response{handle_pkt.address, handle_pkt.v_address, way->data, metadata_thru, handle_pkt.instr_depend_on_me};
     for (auto* ret : handle_pkt.to_return) {
-      ret->push_back(response);
+      ret->push_back_grow(response);
     }
 
     way->dirty |= (handle_pkt.type == access_type::WRITE);
