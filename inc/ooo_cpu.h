@@ -241,6 +241,38 @@ private:
   // finishes it. handle_memory_return's per-return lookup replaces the sweep
   // over every occupied LQ slot. Mirrors the sq_store_index_ idiom.
   std::unordered_map<uint64_t, std::vector<uint32_t>> hmr_block_index_;
+
+  // Allocation-free fixed-capacity vector for the per-instruction memory
+  // handles below: an instruction carries at most NUM_INSTR_SOURCES (4) memory
+  // loads and NUM_INSTR_DESTINATIONS_SPARC (4) memory stores.
+  template <typename T, std::size_t N>
+  struct bounded_array {
+    std::array<T, N> data_{};
+    std::size_t count_ = 0;
+    void clear() { count_ = 0; }
+    void push_back(const T& value)
+    {
+      assert(count_ < N);
+      data_[count_++] = value;
+    }
+    const T* begin() const { return data_.data(); }
+    const T* end() const { return data_.data() + count_; }
+    std::size_t size() const { return count_; }
+  };
+  // A dispatched instruction's own memory entries: the LQ slots it holds (live,
+  // non-immediately-forwarded loads only) and pointers to its SQ entries.
+  struct rob_mem_handle {
+    bounded_array<uint16_t, 4> lq_slots{};
+    bounded_array<LSQ_ENTRY*, 4> sq_entries{};
+  };
+  // Per-ROB-slot memory handles, keyed by the instruction's stable physical ROB
+  // slot. Recorded at do_memory_scheduling (the LQ/SQ entries it just created)
+  // and read at do_execution, so ready-time stamping visits <=4 recorded
+  // handles instead of scanning the whole LQ and SQ for a matching instr_id.
+  // Overwritten on every dispatch into a slot, so the resident instruction's
+  // handle is always current; rebuilt from LQ/SQ/ROB in the resync_* paths.
+  std::vector<rob_mem_handle> rob_mem_handles_;
+
   // Post-EOF drain latch for poll_cycle (see there).
   bool drained_latch_ = false;
 
@@ -356,12 +388,38 @@ private:
   // max_element scan previously searched for.
   std::unordered_map<uint64_t, std::vector<LSQ_ENTRY*>> sq_store_index_;
 
+  // Rebuild the ROB-slot-keyed memory handles from the live LQ, SQ, and ROB.
+  // The owner of each memory entry is found by instr_id (ROB is instr_id
+  // sorted). Only currently-occupied LQ slots are recorded, which is exactly
+  // the set do_execution's revalidation would act on, and slots are visited
+  // ascending / stores front-to-back to match the recording order of normal
+  // operation. Called from every resync_* path that can move these entries.
+  void rebuild_rob_mem_handles()
+  {
+    rob_mem_handles_.assign(ROB.capacity(), rob_mem_handle{});
+    for (std::size_t idx = 0; idx < std::size(LQ); ++idx) {
+      if (LQ[idx].has_value()) {
+        auto owner = std::partition_point(std::begin(ROB), std::end(ROB), ooo_model_instr::precedes(LQ[idx]->instr_id));
+        if (owner != std::end(ROB) && owner->instr_id == LQ[idx]->instr_id) {
+          rob_mem_handles_[owner.slot()].lq_slots.push_back(static_cast<uint16_t>(idx));
+        }
+      }
+    }
+    for (auto& sq_entry : SQ) {
+      auto owner = std::partition_point(std::begin(ROB), std::end(ROB), ooo_model_instr::precedes(sq_entry.instr_id));
+      if (owner != std::end(ROB) && owner->instr_id == sq_entry.instr_id) {
+        rob_mem_handles_[owner.slot()].sq_entries.push_back(&sq_entry);
+      }
+    }
+  }
+
   void resync_sq_bookkeeping()
   {
     sq_store_index_.clear();
     for (auto& sq_entry : SQ) {
       sq_store_index_[sq_entry.virtual_address.to<uint64_t>()].push_back(&sq_entry);
     }
+    rebuild_rob_mem_handles();
   }
 
   void resync_ifetch_bookkeeping()
@@ -402,6 +460,7 @@ private:
     }
     exec_stage_clean_ = false;
     complete_stage_clean_ = false;
+    rebuild_rob_mem_handles();
   }
   void resync_lq_bookkeeping()
   {
@@ -428,6 +487,7 @@ private:
     }
     // promotion pops from the front in time order
     std::sort(std::begin(lq_pending_ready_), std::end(lq_pending_ready_));
+    rebuild_rob_mem_handles();
     drained_latch_ = false;
   }
 public:
@@ -455,7 +515,7 @@ public:
   bool do_fetch_instruction(champsim::ring_buffer<ooo_model_instr>::iterator begin, champsim::ring_buffer<ooo_model_instr>::iterator end);
   void do_dib_update(const ooo_model_instr& instr);
   void do_scheduling(ooo_model_instr& instr);
-  void do_execution(ooo_model_instr& instr);
+  void do_execution(ooo_model_instr& instr, std::size_t rob_slot);
   void do_memory_scheduling(ooo_model_instr& instr);
   void do_complete_execution(ooo_model_instr& instr);
   void do_sq_forward_to_lq(LSQ_ENTRY& sq_entry, LSQ_ENTRY& lq_entry);
@@ -521,6 +581,7 @@ public:
     SQ.set_capacity(SQ_SIZE);
     exec_candidates_.assign((ROB.capacity() + 63) / 64, 0);
     complete_candidates_.assign((ROB.capacity() + 63) / 64, 0);
+    rob_mem_handles_.assign(ROB.capacity(), rob_mem_handle{});
     lq_free_slots_ = static_cast<long>(std::size(LQ));
     lq_occupied_.assign((std::size(LQ) + 63) / 64, 0);
     lq_unissued_.assign((std::size(LQ) + 63) / 64, 0);

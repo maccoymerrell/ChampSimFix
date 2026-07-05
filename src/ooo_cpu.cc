@@ -558,7 +558,7 @@ long O3_CPU::execute_instruction()
         bool ready = std::all_of(std::begin(instr.source_registers), std::end(instr.source_registers),
                                  [&alloc = std::as_const(reg_allocator)](auto srcreg) { return alloc.isValid(srcreg); });
         if (ready) {
-          do_execution(instr);
+          do_execution(instr, slot);
           candidate_clear(exec_candidates_, slot);
           candidate_set(complete_candidates_, slot);
           exec_bw.consume();
@@ -581,41 +581,39 @@ long O3_CPU::execute_instruction()
   return exec_bw.amount_consumed();
 }
 
-void O3_CPU::do_execution(ooo_model_instr& instr)
+void O3_CPU::do_execution(ooo_model_instr& instr, std::size_t rob_slot)
 {
   instr.executed = true;
   --scheduler_occupancy_; // leaves the scheduler window
   instr.ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
   complete_stage_clean_ = false; // a new completion candidate exists
 
-  // Mark LQ entries as ready to translate. Entries for this instruction can
-  // only exist if it has source memory ops; ~3 in 4 instructions have none.
-  if (!std::empty(instr.source_memory)) {
-    for (std::size_t word = 0; word < std::size(lq_occupied_); ++word) {
-      for (uint64_t bits = lq_occupied_[word]; bits != 0; bits &= bits - 1) {
-        const std::size_t idx = word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits));
-        auto& lq_entry = LQ[idx];
-        if (lq_entry->instr_id == instr.instr_id) {
-          lq_entry->ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
-          // Enroll issue candidates for readiness promotion. Producer-waiting
-          // entries never issue through operate_lsq's walk, so only unissued
-          // candidates enroll; enrollment times are monotone (current_time
-          // plus a constant), keeping the pending queue promotion a FIFO pop.
-          if ((lq_unissued_[word] >> (idx & 63)) & 1U) {
-            lq_pending_ready_.emplace_back(lq_entry->ready_time, static_cast<uint32_t>(idx));
-          }
-        }
+  const auto& handles = rob_mem_handles_[rob_slot];
+
+  // Mark this instruction's LQ entries as ready to translate. Each recorded
+  // slot is revalidated: a producer-waiting load may have been finished (and
+  // its slot reused by another instruction) via store forwarding since
+  // scheduling, so only slots still holding this instruction's load are
+  // stamped — exactly the instr_id test the old occupied-slot scan applied.
+  for (const auto idx : handles.lq_slots) {
+    auto& lq_entry = LQ[idx];
+    if (lq_entry.has_value() && lq_entry->instr_id == instr.instr_id) {
+      lq_entry->ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
+      // Enroll issue candidates for readiness promotion. Producer-waiting
+      // entries never issue through operate_lsq's walk, so only unissued
+      // candidates enroll; enrollment times are monotone (current_time plus a
+      // constant), keeping the pending queue promotion a FIFO pop.
+      if ((lq_unissued_[idx >> 6] >> (idx & 63)) & 1U) {
+        lq_pending_ready_.emplace_back(lq_entry->ready_time, static_cast<uint32_t>(idx));
       }
     }
   }
 
-  // Mark SQ entries as ready to translate (only present for stores)
-  if (!std::empty(instr.destination_memory)) {
-    for (auto& sq_entry : SQ) {
-      if (sq_entry.instr_id == instr.instr_id) {
-        sq_entry.ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
-      }
-    }
+  // Mark this instruction's SQ entries as ready to translate. The recorded
+  // pointers are valid: do_execution sets the store's ready_time, so before it
+  // runs the store cannot have been fetched, completed, or front-erased.
+  for (auto* sq_entry : handles.sq_entries) {
+    sq_entry->ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
   }
 
   if constexpr (champsim::debug_print) {
@@ -625,6 +623,13 @@ void O3_CPU::do_execution(ooo_model_instr& instr)
 
 void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
 {
+  // Record this instruction's memory entries against its just-dispatched ROB
+  // slot (it is ROB.back()); do_execution reads them back to stamp ready_time.
+  const auto rob_slot = ROB.slot_index(std::size(ROB) - 1);
+  auto& handles = rob_mem_handles_[rob_slot];
+  handles.lq_slots.clear();
+  handles.sq_entries.clear();
+
   // load
   for (auto& smem : instr.source_memory) {
     // Lowest free slot from the occupancy bitmap — identical to a
@@ -638,8 +643,10 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
     }
     auto q_entry = std::next(std::begin(LQ), static_cast<long>(std::min(free_idx, std::size(LQ))));
     assert(q_entry != std::end(LQ));
+    const auto lq_idx = static_cast<std::size_t>(std::distance(std::begin(LQ), q_entry));
     q_entry->emplace(smem, instr.instr_id, instr.ip, instr.origin); // add it to the load queue
-    lq_set_occupied(static_cast<std::size_t>(std::distance(std::begin(LQ), q_entry)));
+    lq_set_occupied(lq_idx);
+    bool live = true; // cleared if this slot is immediately store-forwarded and freed below
 
     // Check for forwarding: the youngest prior store to this exact address
     // (the back of the per-address stack — identical to what the old
@@ -651,17 +658,25 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
         (*q_entry)->finish(instr);
         complete_stage_clean_ = false; // a memory op finished
         q_entry->reset();
-        lq_clear_occupied(static_cast<std::size_t>(std::distance(std::begin(LQ), q_entry)));
+        lq_clear_occupied(lq_idx);
+        live = false; // freed immediately; recording it would double-enroll a reused slot
       } else {
         assert(sq_it->instr_id < instr.instr_id);      // The found SQ entry is a prior store
         sq_it->lq_depend_on_me.emplace_back(*q_entry); // Forward the load when the store finishes
         (*q_entry)->producer_id = sq_it->instr_id;     // The load waits on the store to finish
-        lq_clear_unissued(static_cast<std::size_t>(std::distance(std::begin(LQ), q_entry)));
+        lq_clear_unissued(lq_idx);
 
         if constexpr (champsim::debug_print) {
           fmt::print("[DISPATCH] {} instr_id: {} waits on: {}\n", __func__, instr.instr_id, sq_it->instr_id);
         }
       }
+    }
+
+    // Record only the live slot; a slot freed by immediate forwarding above
+    // (and possibly reused by a later source_memory op of this instruction)
+    // must not appear in the handle list.
+    if (live) {
+      handles.lq_slots.push_back(static_cast<uint16_t>(lq_idx));
     }
   }
 
@@ -669,6 +684,7 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
   for (auto& dmem : instr.destination_memory) {
     SQ.emplace_back(dmem, instr.instr_id, instr.ip, instr.origin); // add it to the store queue
     sq_store_index_[dmem.to<uint64_t>()].push_back(&SQ.back());
+    handles.sq_entries.push_back(&SQ.back());
   }
 
   if constexpr (champsim::debug_print) {
