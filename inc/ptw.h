@@ -18,7 +18,6 @@
 #define PTW_H
 
 #include <array>
-#include <deque>
 #include <limits>   // for numeric_limits
 #include <optional> // for optional
 #include <string>
@@ -74,9 +73,13 @@ class PageTableWalker : public champsim::modules::page_table_walker_module, publ
     mshr_type(const request_type& req, std::size_t level);
   };
 
-  std::deque<mshr_type> MSHR;
-  std::deque<mshr_type> finished;
-  std::deque<mshr_type> completed;
+  // Walk-state queues. None of them is admission-gated in this model (walk
+  // steps are accepted whenever the lower level accepts the read), so they
+  // start at MSHR_SIZE and enlarge on demand: MSHR through its growing
+  // range-insert, finished/completed through push_back_grow.
+  champsim::ring_buffer<mshr_type> MSHR;
+  champsim::ring_buffer<mshr_type> finished;
+  champsim::ring_buffer<mshr_type> completed;
 
   // Per-cycle scratch (reused to avoid an allocation per operated cycle)
   std::vector<mshr_type> next_steps_scratch_;

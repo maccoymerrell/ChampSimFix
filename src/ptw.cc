@@ -36,6 +36,9 @@ PageTableWalker::PageTableWalker(champsim::modules::ModuleBuilder builder)
       HIT_LATENCY(builder.get_parameter<unsigned>("latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), vmem(builder.get_parameter<champsim::modules::vmem_module*>("vmem")), pt_levels_(vmem->get_pt_levels())
 {
   log2_page_size_ = builder.get_parameter<unsigned>("log2_page_size");
+  MSHR.set_capacity(MSHR_SIZE);
+  finished.set_capacity(MSHR_SIZE);
+  completed.set_capacity(MSHR_SIZE);
   auto local_pscl_dims = builder.get_parameter<std::vector<std::array<uint32_t, 3>>>("pscl_dims");
   auto pt_levels = vmem->get_pt_levels();
   // Valid PSCL levels are [2, pt_levels]. Level 1 is never cached (handle_fill
@@ -253,7 +256,9 @@ void PageTableWalker::finish_packet(const response_type& packet)
     mshr_entry.data = is_last_step(mshr_entry) ? finish_last_step(mshr_entry) : finish_step(mshr_entry);
   });
 
-  std::partition_copy(std::begin(MSHR), last_finished, std::back_inserter(completed), std::back_inserter(finished), is_last_step);
+  std::for_each(std::begin(MSHR), last_finished, [&, is_last_step](auto& mshr_entry) {
+    (is_last_step(mshr_entry) ? completed : finished).push_back_grow(std::move(mshr_entry));
+  });
   MSHR.erase(std::begin(MSHR), last_finished);
 }
 
