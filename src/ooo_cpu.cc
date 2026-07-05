@@ -560,7 +560,6 @@ long O3_CPU::execute_instruction()
         if (ready) {
           do_execution(instr, slot);
           candidate_clear(exec_candidates_, slot);
-          candidate_set(complete_candidates_, slot);
           exec_bw.consume();
         }
       } else {
@@ -587,6 +586,13 @@ void O3_CPU::do_execution(ooo_model_instr& instr, std::size_t rob_slot)
   --scheduler_occupancy_; // leaves the scheduler window
   instr.ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
   complete_stage_clean_ = false; // a new completion candidate exists
+
+  // If every memory op is already done (none, or all immediately
+  // store-forwarded before execution), this instruction becomes a completion
+  // candidate now; otherwise the crossing finish() records it later.
+  if (instr.completed_mem_ops == instr.num_mem_ops()) {
+    candidate_set(mem_complete_candidates_, rob_slot);
+  }
 
   const auto& handles = rob_mem_handles_[rob_slot];
 
@@ -779,7 +785,13 @@ void O3_CPU::do_finish_store(const LSQ_ENTRY& sq_entry)
     fmt::print("[SQ] {} instr_id: {} vaddr: {}\n", __func__, sq_entry.instr_id, sq_entry.virtual_address);
   }
 
-  sq_entry.finish(ROB.at_slot(sq_entry.rob_slot));
+  {
+    auto& owner = ROB.at_slot(sq_entry.rob_slot);
+    sq_entry.finish(owner);
+    if (owner.executed && !owner.completed && owner.completed_mem_ops == owner.num_mem_ops()) {
+      candidate_set(mem_complete_candidates_, sq_entry.rob_slot);
+    }
+  }
   complete_stage_clean_ = false; // a memory op finished
 
   // Release dependent loads
@@ -787,7 +799,12 @@ void O3_CPU::do_finish_store(const LSQ_ENTRY& sq_entry)
     assert(dependent.has_value()); // LQ entry is still allocated
     assert(dependent->producer_id == sq_entry.instr_id);
 
-    dependent->finish(ROB.at_slot(dependent->rob_slot));
+    const auto dep_slot = dependent->rob_slot;
+    auto& dep_owner = ROB.at_slot(dep_slot);
+    dependent->finish(dep_owner);
+    if (dep_owner.executed && !dep_owner.completed && dep_owner.completed_mem_ops == dep_owner.num_mem_ops()) {
+      candidate_set(mem_complete_candidates_, dep_slot);
+    }
     dependent.reset();
     lq_clear_occupied(static_cast<std::size_t>(&dependent - LQ.data()));
   }
@@ -841,8 +858,11 @@ void O3_CPU::do_complete_execution(ooo_model_instr& instr)
 long O3_CPU::complete_inflight_instruction()
 {
   // Same detector pattern as execute_instruction: candidates are created by
-  // do_execution, by memory-op finishes (LSQ_ENTRY::finish call sites), or by
-  // time reaching a pending ready_time.
+  // do_execution, by the memory-op finish that crosses completed_mem_ops ==
+  // num_mem_ops (LSQ_ENTRY::finish call sites), or by time reaching a pending
+  // ready_time. mem_complete_candidates_ already excludes executed instructions
+  // still waiting on memory, so the walk visits only slots that can complete
+  // once their ready_time passes.
   if (complete_stage_clean_ && current_time < complete_stage_wake_) {
     return 0;
   }
@@ -855,11 +875,13 @@ long O3_CPU::complete_inflight_instruction()
       return false;
     }
     auto& instr = ROB.at_slot(slot);
-    if (instr.executed && !instr.completed) { // always true in normal operation; guards injected state
+    // The bitmap guarantees executed && !completed && mem-complete; the inner
+    // tests are always true in normal operation and only guard injected state.
+    if (instr.executed && !instr.completed) {
       if (instr.ready_time <= current_time) {
         if (instr.completed_mem_ops == instr.num_mem_ops()) {
           do_complete_execution(instr);
-          candidate_clear(complete_candidates_, slot);
+          candidate_clear(mem_complete_candidates_, slot);
           complete_bw.consume();
         }
       } else {
@@ -868,7 +890,7 @@ long O3_CPU::complete_inflight_instruction()
     }
     return true;
   };
-  if (visit_candidates_in_age_order(complete_candidates_, visit)) {
+  if (visit_candidates_in_age_order(mem_complete_candidates_, visit)) {
     complete_stage_clean_ = true;
     complete_stage_wake_ = wake;
   } else {
@@ -938,7 +960,12 @@ long O3_CPU::handle_memory_return()
     if (blk_it != std::end(hmr_block_index_)) {
       for (const auto idx : blk_it->second) {
         auto& lq_entry = LQ[idx];
-        lq_entry->finish(ROB.at_slot(lq_entry->rob_slot));
+        const auto owner_slot = lq_entry->rob_slot;
+        auto& owner = ROB.at_slot(owner_slot);
+        lq_entry->finish(owner);
+        if (owner.executed && !owner.completed && owner.completed_mem_ops == owner.num_mem_ops()) {
+          candidate_set(mem_complete_candidates_, owner_slot);
+        }
         complete_stage_clean_ = false; // a memory op finished
         lq_entry.reset();
         lq_clear_occupied(idx);

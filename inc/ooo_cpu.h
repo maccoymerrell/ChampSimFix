@@ -303,13 +303,17 @@ private:
   long scheduler_occupancy_ = 0;
 
   // Stage candidate sets, as bitmaps over the ROB's stable physical slots:
-  // exec candidates are scheduled-and-unexecuted, complete candidates are
-  // executed-and-uncompleted. Bits are set/cleared at the exact state
-  // transitions (do_scheduling, do_execution, do_complete_execution), so
-  // the execute/complete walks visit only in-window instructions instead of
-  // the whole ROB. Iterated in age order (from the head slot, wrapping).
+  // exec candidates are scheduled-and-unexecuted; mem-complete candidates are
+  // executed-and-uncompleted instructions whose memory ops have ALL finished
+  // (completed_mem_ops == num_mem_ops) — the exact subset complete_inflight can
+  // actually complete. Bits are set/cleared at the state transitions
+  // (do_scheduling; do_execution and the memory-op finish that crosses
+  // completed_mem_ops == num_mem_ops for an executed instruction;
+  // do_complete_execution), so the walks visit only actionable instructions
+  // instead of the whole ROB. Iterated in age order (from the head slot,
+  // wrapping).
   std::vector<uint64_t> exec_candidates_;
-  std::vector<uint64_t> complete_candidates_;
+  std::vector<uint64_t> mem_complete_candidates_;
 
   static void candidate_set(std::vector<uint64_t>& bits, std::size_t slot) { bits[slot >> 6] |= (uint64_t{1} << (slot & 63)); }
   static void candidate_clear(std::vector<uint64_t>& bits, std::size_t slot) { bits[slot >> 6] &= ~(uint64_t{1} << (slot & 63)); }
@@ -457,14 +461,14 @@ private:
     }
     scheduler_occupancy_ = std::count_if(std::cbegin(ROB), std::cend(ROB), [](const auto& entry) { return entry.scheduled && !entry.executed; });
     exec_candidates_.assign((ROB.capacity() + 63) / 64, 0);
-    complete_candidates_.assign((ROB.capacity() + 63) / 64, 0);
+    mem_complete_candidates_.assign((ROB.capacity() + 63) / 64, 0);
     for (std::size_t idx = 0; idx < std::size(ROB); ++idx) {
       const auto& entry = ROB[idx];
       if (entry.scheduled && !entry.executed) {
         candidate_set(exec_candidates_, ROB.slot_index(idx));
       }
-      if (entry.executed && !entry.completed) {
-        candidate_set(complete_candidates_, ROB.slot_index(idx));
+      if (entry.executed && !entry.completed && entry.completed_mem_ops == entry.num_mem_ops()) {
+        candidate_set(mem_complete_candidates_, ROB.slot_index(idx));
       }
     }
     exec_stage_clean_ = false;
@@ -589,7 +593,7 @@ public:
     DIB_HIT_BUFFER.set_capacity(DIB_HIT_BUFFER_SIZE);
     SQ.set_capacity(SQ_SIZE);
     exec_candidates_.assign((ROB.capacity() + 63) / 64, 0);
-    complete_candidates_.assign((ROB.capacity() + 63) / 64, 0);
+    mem_complete_candidates_.assign((ROB.capacity() + 63) / 64, 0);
     rob_mem_handles_.assign(ROB.capacity(), rob_mem_handle{});
     lq_free_slots_ = static_cast<long>(std::size(LQ));
     lq_occupied_.assign((std::size(LQ) + 63) / 64, 0);
