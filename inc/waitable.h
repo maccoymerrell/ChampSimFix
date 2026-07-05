@@ -76,6 +76,14 @@ public:
   bool is_ready_at(time_type cycle) const;
   bool has_unknown_readiness() const;
 
+  /**
+   * The time at which this becomes ready, or time_sentinel (== time_type::max())
+   * while no readiness time has been set. By construction is_ready_at(cycle) is
+   * exactly ready_time() <= cycle, so a time-ordered queue can read the event
+   * time here and still gate readiness identically to is_ready_at.
+   */
+  time_type ready_time() const { return event_cycle.value_or(time_sentinel); }
+
   auto& operator*();
   auto& operator*() const;
   auto operator->();

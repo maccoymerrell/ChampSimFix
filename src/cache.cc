@@ -457,13 +457,10 @@ long CACHE::operate()
     lower_translate->get_returned().clear();
   }
 
-  // Perform fills
+  // Perform fills: retire the ready prefix (promise ready by current_time) up to
+  // MAX_FILL, stopping before the first fill handle_fill declines.
   champsim::bandwidth fill_bw{MAX_FILL};
-  auto [fill_begin, fill_end] = champsim::get_span_p(std::cbegin(inflight_fills), std::cend(inflight_fills), fill_bw,
-                                                     [time = current_time](const auto& x) { return x.data_promise.is_ready_at(time); });
-  auto complete_end = std::find_if_not(fill_begin, fill_end, [this](const auto& x) { return this->handle_fill(x); });
-  fill_bw.consume(std::distance(fill_begin, complete_end));
-  inflight_fills.erase(fill_begin, complete_end);
+  inflight_fills.drain_ready(current_time, fill_bw, [this](const auto& x) { return this->handle_fill(x); });
 
   // Initiate tag checks (window limit hoisted: MAX_TAG * hit-latency cycles
   // is invariant after construction)

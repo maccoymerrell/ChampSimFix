@@ -27,6 +27,7 @@
 #include "channel.h"
 #include "operable.h"
 #include "msl/lru_table.h"
+#include "util/latency_queue.h"
 #include "util/ring_buffer.h"
 #include "waitable.h"
 
@@ -78,8 +79,10 @@ class PageTableWalker : public champsim::modules::page_table_walker_module, publ
   // start at MSHR_SIZE and enlarge on demand: MSHR through its growing
   // range-insert, finished/completed through push_back_grow.
   champsim::ring_buffer<mshr_type> MSHR;
-  champsim::ring_buffer<mshr_type> finished;
-  champsim::ring_buffer<mshr_type> completed;
+  // Time-ordered ready queues keyed on each walk step's data promise: finished
+  // steps and completed walks retire from the front once ready, up to MAX_FILL.
+  champsim::latency_queue<mshr_type, champsim::waitable_ready_time<&mshr_type::data>> finished;
+  champsim::latency_queue<mshr_type, champsim::waitable_ready_time<&mshr_type::data>> completed;
 
   // Per-cycle scratch (reused to avoid an allocation per operated cycle)
   std::vector<mshr_type> next_steps_scratch_;
