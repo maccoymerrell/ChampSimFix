@@ -54,6 +54,30 @@ struct waitable_ready_time {
 };
 
 /**
+ * A ready-time projection for entries whose readiness is a plain time_point
+ * member (as opposed to a champsim::waitable). Point it at the member with a
+ * pointer-to-member constant:
+ *
+ *   champsim::latency_queue<tag_lookup_type, champsim::member_ready_time<&tag_lookup_type::event_cycle>>
+ *
+ * The entry's ready-time is that member's value directly. Entries typically
+ * default the member to time_point::max() ("not yet scheduled"), so an
+ * unstamped entry is never ready; the stamping site sets it to the cycle the
+ * entry becomes eligible. This makes
+ *   member_ready_time{}(entry) <= now
+ * exactly the plain event_cycle <= now check the drain sites used before
+ * migrating onto this projection.
+ */
+template <auto TimeMember>
+struct member_ready_time {
+  template <typename Entry>
+  champsim::chrono::clock::time_point operator()(const Entry& entry) const
+  {
+    return entry.*TimeMember;
+  }
+};
+
+/**
  * A time-ordered ready queue: a bounded FIFO of entries that each carry a
  * ready-time, kept in nondecreasing ready-time order, drained from the front
  * under a bandwidth cap.

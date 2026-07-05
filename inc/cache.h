@@ -124,6 +124,38 @@ private:
 
   void issue_translation(tag_lookup_type& q_entry);
 
+  // Route a freshly-built tag-lookup entry into the correct pipeline stage.
+  // The single decision point for the PIPT timing fix (see inflight_tag_check):
+  //  - a translating cache (lower_translate != nullptr) with an untranslated
+  //    entry parks it in untranslated_tag_check with NO event_cycle; its tag
+  //    check is stamped later, additively, by finish_translation.
+  //  - everything else (already-translated entries, and every entry of a
+  //    non-translating cache such as a TLB) enters inflight_tag_check timed
+  //    from admission, keeping event_cycle = admission + HIT_LATENCY.
+  // Gating on (lower_translate != nullptr && !is_translated) is what confines
+  // the fix to physically-indexed data caches and leaves TLBs untouched.
+  void admit_tag_check(tag_lookup_type&& entry);
+
+  // Output iterator for operate()'s admission transform: forwards each
+  // transformed entry to admit_tag_check so the single-pass transform_while_n
+  // over each source queue can split entries across the two pipeline stages.
+  struct tag_check_router {
+    CACHE* self;
+    using iterator_category = std::output_iterator_tag;
+    using value_type = void;
+    using difference_type = std::ptrdiff_t;
+    using pointer = void;
+    using reference = void;
+    tag_check_router& operator*() { return *this; }
+    tag_check_router& operator++() { return *this; }
+    tag_check_router& operator++(int) { return *this; }
+    tag_check_router& operator=(tag_lookup_type&& entry)
+    {
+      self->admit_tag_check(std::move(entry));
+      return *this;
+    }
+  };
+
 public:
   using BLOCK = champsim::cache_block;
 
@@ -152,20 +184,41 @@ private:
   // at the tail and the initiate-tag-check transform retires them from the
   // front, so every erasure is front-anchored.
   champsim::ring_buffer<tag_lookup_type> internal_PQ{};
-  // Ring buffer: admission is bounded by tag_check_window_limit_, and all
-  // erasures are front-anchored (handled prefix) or tail-anchored
-  // (extract_if compaction), so a fixed-capacity ring replaces the deque's
-  // chunk churn. Capacity is set at construction.
-  champsim::ring_buffer<tag_lookup_type> inflight_tag_check{};
-  // Ring buffer: the ready-but-untranslated extraction moves entries here
-  // unconditionally, so unlike the gated queues it has no exact admission bound
-  // (the MSHR_SIZE throttle only limits *new* untranslated admissions, not the
-  // aged window entries moved in). It is seeded at its steady-state bound (the
-  // throttle plus one tag-check window) and grown if a burst exceeds that. The
-  // translated prefix is retired from the front (transform_while_n) and
-  // finish_translation only permutes the untranslated tail in place, so every
-  // erasure is front-anchored.
-  champsim::ring_buffer<tag_lookup_type> translation_stash{};
+  // The TRANSLATED tag-check pipeline. Every entry here carries a stamped
+  // event_cycle and becomes ready purely by the passage of time
+  // (event_cycle <= now), so it is a time-ordered latency_queue keyed on
+  // event_cycle. Two kinds of entry land here, both already holding a physical
+  // set index: (1) entries that arrived already translated, stamped at
+  // admission with event_cycle = admission + HIT_LATENCY; and (2) entries that
+  // arrived untranslated and whose translation has since completed, stamped by
+  // finish_translation with event_cycle = translation-complete + HIT_LATENCY.
+  // Because current_time is nondecreasing and every stamp is current_time +
+  // HIT_LATENCY, appends stay in nondecreasing event_cycle order, so the ready
+  // entries are always a front prefix (the latency_queue contract). Admission
+  // is bounded by tag_check_window_limit_; translation-completion moves are
+  // unbounded per cycle (bounded overall by the untranslated queue) and use the
+  // growing push, so capacity is seeded with headroom at construction. Erasures
+  // are front-anchored (the handled ready prefix).
+  //
+  // TIMING INVARIANT (physically-indexed / PIPT correctness): for a cache that
+  // translates (lower_translate != nullptr), the tag check of an entry that
+  // arrives untranslated begins strictly AFTER its translation completes — the
+  // physical set index does not exist until then. The translation latency is
+  // therefore additive (translation-complete + HIT_LATENCY), never hidden
+  // under HIT_LATENCY. An untranslated entry is never placed here; it waits in
+  // untranslated_tag_check below until finish_translation moves it across.
+  champsim::latency_queue<tag_lookup_type, champsim::member_ready_time<&tag_lookup_type::event_cycle>> inflight_tag_check{};
+  // The UNTRANSLATED tag-check staging buffer: entries that arrived
+  // is_translated == false in a translating cache and are awaiting their
+  // physical address. They carry NO event_cycle (it stays at its max()
+  // sentinel — not tag-check-ready) and are never tag-checked from here. The
+  // per-cycle issue_translation walk runs over this buffer, and
+  // finish_translation stamps event_cycle and moves matched entries into
+  // inflight_tag_check. New untranslated admissions are throttled at MSHR_SIZE
+  // occupancy (backpressure on slow translation), so this replaces the old
+  // translation_stash; entries are compacted front-anchored as their pages
+  // resolve.
+  champsim::ring_buffer<tag_lookup_type> untranslated_tag_check{};
 
   std::vector<champsim::modules::prefetcher*> pref_module_pimpl;
   std::vector<champsim::modules::replacement*> repl_module_pimpl;
@@ -229,17 +282,14 @@ private:
   // per-access-type prefetcher activation lookup (replaces a std::count
   // over pref_activate_mask on every tag check)
   std::array<bool, static_cast<std::size_t>(access_type::NUM_TYPES)> pref_activate_lut_{};
-  // Translation-pressure indices over inflight_tag_check + translation_stash
-  // (maintained only when lower_translate exists; both structures are
-  // private, so no outside mutation can desynchronize them):
-  //  - entries that still need a translation request issued
-  //    (!translate_issued && !is_translated). Grows only in the
-  //    initiate_tag_check transform; shrinks on issue success or when a
-  //    piggybacked translation lands first. Gates the per-cycle issue walks.
+  // Translation-pressure index over untranslated_tag_check (maintained only
+  // when lower_translate exists; the buffer is private, so no outside mutation
+  // can desynchronize it): the count of parked entries that still need a
+  // translation request issued (!translate_issued). Grows on untranslated
+  // admission (admit_tag_check); shrinks on issue success (issue_translation)
+  // or when a piggybacked translation lands first (finish_translation). Gates
+  // the per-cycle issue walk so a fully-issued backlog is not re-scanned.
   long untranslated_pending_issue_ = 0;
-  //  - entries in inflight_tag_check (only) that are not yet translated.
-  //    Gates the per-cycle ready-but-untranslated extraction to the stash.
-  long untranslated_in_tag_check_ = 0;
 public:
   bool is_warmup() const { return warmup_; }
   bool is_roi() const    { return roi_; }
@@ -325,16 +375,20 @@ public:
     tag_check_window_limit_ = champsim::to_underlying(MAX_TAG) * static_cast<long>(HIT_LATENCY / clock_period);
     set_index_shift_ = static_cast<unsigned>(champsim::to_underlying(OFFSET_BITS));
     set_index_mask_ = NUM_SET - 1;
-    // Admission bandwidth is clamped to (limit - size), so occupancy never
-    // exceeds the window limit; MAX_TAG of headroom is pure paranoia.
-    inflight_tag_check.set_capacity(static_cast<std::size_t>(tag_check_window_limit_ + champsim::to_underlying(MAX_TAG)));
+    // Direct admission is clamped to (limit - size), so admission alone never
+    // pushes occupancy past the window limit. Translation-completion moves can
+    // add up to the untranslated backlog (bounded by the MSHR_SIZE throttle) on
+    // top of that before admission backs off, so the capacity carries that
+    // headroom; the moves use the growing push and never assert regardless.
+    inflight_tag_check.set_capacity(static_cast<std::size_t>(tag_check_window_limit_ + champsim::to_underlying(MAX_TAG)) + static_cast<std::size_t>(MSHR_SIZE));
     MSHR.set_capacity(MSHR_SIZE);
     inflight_fills.set_capacity(2 * static_cast<std::size_t>(MSHR_SIZE) + 8);
     internal_PQ.set_capacity(PQ_SIZE);
-    // No exact admission bound (see the member's note): seed at the throttle
-    // plus one full tag-check window and let the ready-but-untranslated
-    // extraction grow it further if a burst ever exceeds that.
-    translation_stash.set_capacity(static_cast<std::size_t>(MSHR_SIZE) + inflight_tag_check.capacity());
+    // Untranslated admissions are throttled at MSHR_SIZE occupancy and grow by
+    // at most one cycle's admission bandwidth (MAX_TAG) before the throttle is
+    // re-read, so seed at that steady-state bound; the growing push covers any
+    // burst beyond it.
+    untranslated_tag_check.set_capacity(static_cast<std::size_t>(MSHR_SIZE) + static_cast<std::size_t>(champsim::to_underlying(MAX_TAG)));
     for (auto type : pref_activate_mask)
       pref_activate_lut_[static_cast<std::size_t>(champsim::to_underlying(type))] = true;
 

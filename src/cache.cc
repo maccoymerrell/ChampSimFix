@@ -391,16 +391,31 @@ auto CACHE::initiate_tag_check(champsim::modules::channel_module* ul)
                  retval.v_address, access_type_names.at(champsim::to_underlying(retval.type)), !std::empty(retval.to_return));
     }
 
-    // Maintain the translation-pressure indices. Entries restarted from the
-    // stash are already translated, so only fresh untranslated arrivals
-    // count; translate_issued is always false at construction.
-    if (this->lower_translate != nullptr && !retval.is_translated) {
-      ++this->untranslated_pending_issue_;
-      ++this->untranslated_in_tag_check_;
-    }
-
+    // event_cycle is provisionally stamped for the translated fast path
+    // (tag check timed from admission). admit_tag_check overrides it for the
+    // untranslated case, where the tag check must wait for the physical
+    // address, and owns the translation-pressure bookkeeping.
     return retval;
   };
+}
+
+void CACHE::admit_tag_check(tag_lookup_type&& entry)
+{
+  if (lower_translate != nullptr && !entry.is_translated) {
+    // Physically-indexed cache, untranslated arrival: the tag check cannot
+    // begin until translation yields the physical set index. Park the entry
+    // with no ready-time; finish_translation will stamp event_cycle =
+    // (translation-complete) + HIT_LATENCY and move it into the timed
+    // pipeline. translate_issued is always false at construction, so it always
+    // owes a translation request.
+    entry.event_cycle = champsim::chrono::clock::time_point::max();
+    ++untranslated_pending_issue_;
+    untranslated_tag_check.push_back_grow(std::move(entry));
+  } else {
+    // Already translated (or a non-translating cache such as a TLB): the tag
+    // check is timed from admission, event_cycle already == now + HIT_LATENCY.
+    inflight_tag_check.push_back_grow(std::move(entry));
+  }
 }
 
 long CACHE::poll_cycle()
@@ -412,7 +427,7 @@ long CACHE::poll_cycle()
   const bool idle = std::empty(lower_level->get_returned())
                     && (lower_translate == nullptr || std::empty(lower_translate->get_returned()))
                     && std::empty(inflight_fills) && std::empty(inflight_tag_check)
-                    && std::empty(translation_stash) && std::empty(internal_PQ)
+                    && std::empty(untranslated_tag_check) && std::empty(internal_PQ)
                     && std::all_of(std::cbegin(upper_levels), std::cend(upper_levels), [](auto* ul) {
                          return std::empty(ul->get_rq()) && std::empty(ul->get_wq()) && std::empty(ul->get_pq());
                        });
@@ -441,9 +456,6 @@ long CACHE::operate()
   auto is_ready = [time = current_time](const auto& entry) {
     return entry.event_cycle <= time;
   };
-  auto is_translated = [](const auto& entry) {
-    return entry.is_translated;
-  };
 
   // Finish returns
   std::for_each(std::cbegin(lower_level->get_returned()), std::cend(lower_level->get_returned()), [this](const auto& pkt) { this->finish_packet(pkt); });
@@ -462,19 +474,25 @@ long CACHE::operate()
   champsim::bandwidth fill_bw{MAX_FILL};
   inflight_fills.drain_ready(current_time, fill_bw, [this](const auto& x) { return this->handle_fill(x); });
 
-  // Initiate tag checks (window limit hoisted: MAX_TAG * hit-latency cycles
-  // is invariant after construction)
+  // Initiate tag checks: pull ready entries from the upper-level queues and the
+  // internal prefetch queue and route each into the tag-check pipeline via
+  // admit_tag_check (translated -> inflight_tag_check timed from now;
+  // untranslated -> untranslated_tag_check to await translation). The window
+  // limit bounds only the timed pipeline (inflight_tag_check); untranslated
+  // entries stage separately, throttled by their own occupancy below. (window
+  // limit hoisted: MAX_TAG * hit-latency cycles is invariant after construction)
   const champsim::bandwidth::maximum_type bandwidth_from_tag_checks{tag_check_window_limit_ - (long)std::size(inflight_tag_check)};
   champsim::bandwidth initiate_tag_bw{std::clamp(bandwidth_from_tag_checks, champsim::bandwidth::maximum_type{0}, MAX_TAG)};
-  auto can_translate = [avail = (std::size(translation_stash) < static_cast<std::size_t>(MSHR_SIZE))](const auto& entry) {
-    return avail || entry.is_translated;
+  tag_check_router router{this};
+  // Throttle NEW untranslated admissions once the staging buffer is full
+  // (backpressure on slow translation), exactly as the old stash throttle;
+  // already-translated entries (and every entry of a non-translating cache)
+  // are always admissible. Reading the live occupancy keeps the buffer bounded
+  // across the several source queues drained in this one cycle.
+  auto can_admit = [this](const auto& entry) {
+    return entry.is_translated || lower_translate == nullptr
+           || std::size(untranslated_tag_check) < static_cast<std::size_t>(MSHR_SIZE);
   };
-  [[maybe_unused]] long stash_bandwidth_consumed = 0;
-  if (lower_translate != nullptr) {
-    stash_bandwidth_consumed =
-        champsim::transform_while_n(translation_stash, std::back_inserter(inflight_tag_check), initiate_tag_bw, is_translated, initiate_tag_check<false>());
-    initiate_tag_bw.consume(stash_bandwidth_consumed);
-  }
   [[maybe_unused]] std::vector<long long> channels_bandwidth_consumed{};
 
   if (std::size(upper_levels) > 1) {
@@ -492,8 +510,7 @@ long CACHE::operate()
       // this needs to be in this loop, we need to ensure that for cases where bandwidth doesn't divide nicely across upstreams,
       // we don't accidentally consume more bandwidth than expected
       champsim::bandwidth per_upper_tag_bw{std::min(per_upper_bandwidth, champsim::bandwidth::maximum_type{initiate_tag_bw.amount_remaining()})};
-      auto bandwidth_consumed =
-          champsim::transform_while_n(q.get(), std::back_inserter(inflight_tag_check), per_upper_tag_bw, can_translate, initiate_tag_check<true>(ul));
+      auto bandwidth_consumed = champsim::transform_while_n(q.get(), router, per_upper_tag_bw, can_admit, initiate_tag_check<true>(ul));
       if constexpr (champsim::debug_print) {
         channels_bandwidth_consumed.push_back(bandwidth_consumed);
       }
@@ -501,36 +518,23 @@ long CACHE::operate()
     }
   }
 
-  auto pq_bandwidth_consumed =
-      champsim::transform_while_n(internal_PQ, std::back_inserter(inflight_tag_check), initiate_tag_bw, can_translate, initiate_tag_check<false>());
+  auto pq_bandwidth_consumed = champsim::transform_while_n(internal_PQ, router, initiate_tag_bw, can_admit, initiate_tag_check<false>());
   initiate_tag_bw.consume(pq_bandwidth_consumed);
 
-  // Issue translations. The pending-issue index counts exactly the entries
-  // these walks would act on; when it is zero the walks are no-ops.
+  // Issue translations for the parked entries. The pending-issue index counts
+  // exactly the entries this walk would act on; when it is zero the walk is a
+  // no-op. finish_translation moves resolved entries into inflight_tag_check,
+  // which is translated-only and is never scanned for translation here.
   if (lower_translate != nullptr && untranslated_pending_issue_ > 0) {
-    std::for_each(std::begin(inflight_tag_check), std::end(inflight_tag_check), [this](auto& x) { this->issue_translation(x); });
-    std::for_each(std::begin(translation_stash), std::end(translation_stash), [this](auto& x) { this->issue_translation(x); });
+    std::for_each(std::begin(untranslated_tag_check), std::end(untranslated_tag_check), [this](auto& x) { this->issue_translation(x); });
   }
 
-  // Find entries that would be ready except that they have not finished
-  // translation, move them to the stash. Only untranslated entries qualify,
-  // so the extraction is a no-op while the index is zero.
-  if (lower_translate != nullptr && untranslated_in_tag_check_ > 0) {
-    // extract_if appends up to size(inflight_tag_check) entries onto the stash
-    // through back_inserter (push_back), so grow the backing store to cover
-    // this cycle's worst case first: the stash has no exact admission bound and
-    // a burst can exceed the seeded capacity. reserve is a no-op once capacity
-    // has ratcheted to the stash's bounded steady state, and never shrinks it.
-    translation_stash.reserve(std::size(translation_stash) + std::size(inflight_tag_check));
-    auto [last_not_missed, stash_end] = champsim::extract_if(std::begin(inflight_tag_check), std::end(inflight_tag_check), std::back_inserter(translation_stash),
-                                                             [is_ready, is_translated](const auto& x) { return is_ready(x) && !is_translated(x); });
-    const auto moved_to_stash = std::distance(last_not_missed, std::end(inflight_tag_check));
-    untranslated_in_tag_check_ -= moved_to_stash;
-    progress += moved_to_stash;
-    inflight_tag_check.erase(last_not_missed, std::end(inflight_tag_check));
-  }
-
-  // Perform tag checks
+  // Perform tag checks. inflight_tag_check is translated-only and time-ordered,
+  // so readiness collapses to event_cycle <= now and the ready entries are a
+  // front prefix. (No untranslated entry is ever admitted here — see
+  // admit_tag_check — so the is_translated guard the drain used to carry is
+  // structurally redundant; the O(1) front check smoke-tests that invariant.)
+  assert(std::empty(inflight_tag_check) || inflight_tag_check.front().is_translated);
   auto do_handle_miss = [this](auto& pkt) {
     if (pkt.type == access_type::WRITE && !this->match_offset_bits) {
       return this->handle_write(pkt); // Treat writes (that is, writebacks) like fills
@@ -539,8 +543,7 @@ long CACHE::operate()
   };
   champsim::bandwidth tag_check_bw{MAX_TAG};
   auto [tag_check_ready_begin, tag_check_ready_end] =
-      champsim::get_span_p(std::begin(inflight_tag_check), std::end(inflight_tag_check), tag_check_bw,
-                           [is_ready, is_translated](const auto& pkt) { return is_ready(pkt) && is_translated(pkt); });
+      champsim::get_span_p(std::begin(inflight_tag_check), std::end(inflight_tag_check), tag_check_bw, is_ready);
   auto hits_end = champsim::stable_partition_small(tag_check_ready_begin, tag_check_ready_end, [this](const auto& pkt) { return this->try_hit(pkt); });
   auto finish_tag_check_end = champsim::stable_partition_small(hits_end, tag_check_ready_end, do_handle_miss);
   tag_check_bw.consume(std::distance(tag_check_ready_begin, finish_tag_check_end));
@@ -549,10 +552,9 @@ long CACHE::operate()
   impl_prefetcher_cycle_operate();
 
   if constexpr (champsim::debug_print) {
-    fmt::print("[{}] {} cycle completed: {} tags checked: {} remaining: {} stash consumed: {} remaining: {} channel consumed: {} pq consumed {} unused consume "
-               "bw {}\n",
-               NAME, __func__, current_time.time_since_epoch() / clock_period, tag_check_bw.amount_consumed(), std::size(inflight_tag_check),
-               stash_bandwidth_consumed, std::size(translation_stash), channels_bandwidth_consumed, pq_bandwidth_consumed, initiate_tag_bw.amount_remaining());
+    fmt::print("[{}] {} cycle completed: {} tags checked: {} remaining: {} untranslated: {} channel consumed: {} pq consumed {} unused consume bw {}\n", NAME,
+               __func__, current_time.time_since_epoch() / clock_period, tag_check_bw.amount_consumed(), std::size(inflight_tag_check),
+               std::size(untranslated_tag_check), channels_bandwidth_consumed, pq_bandwidth_consumed, initiate_tag_bw.amount_remaining());
   }
 
   return progress + fill_bw.amount_consumed() + initiate_tag_bw.amount_consumed() + tag_check_bw.amount_consumed();
@@ -675,37 +677,40 @@ void CACHE::finish_translation(const response_type& packet)
   auto matches_vpage = [page_num = champsim::page_number{packet.v_address}](const auto& entry) {
     return (champsim::page_number{entry.v_address} == page_num) && !entry.is_translated;
   };
-  auto mark_translated = [p_page = champsim::page_number{packet.data}, this](auto& entry) {
+  // The tag check of a physically-indexed cache begins only now that translation
+  // has produced the physical set index, so stamp its completion time
+  // ADDITIVELY: (translation-complete) + HIT_LATENCY, never overlapped with the
+  // translation latency. This is the crux of the PIPT correctness fix.
+  const auto tag_check_ready = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : HIT_LATENCY);
+  auto complete_translation = [p_page = champsim::page_number{packet.data}, tag_check_ready, this](auto& entry) {
     [[maybe_unused]] auto old_address = entry.address;
     entry.address = champsim::address{champsim::splice(p_page, champsim::page_offset{entry.v_address})}; // translated address
     entry.is_translated = true;                                                                          // This entry is now translated
-
-    if constexpr (champsim::debug_print) {
-      fmt::print("[{}_TRANSLATE] finish_translation old: {} paddr: {} vaddr: {} type: {} cycle: {}\n", this->NAME, old_address, entry.address, entry.v_address,
-                 access_type_names.at(champsim::to_underlying(entry.type)), this->current_time.time_since_epoch() / this->clock_period);
-    }
-  };
-
-  // Restart stashed translations
-  auto finish_begin = std::find_if_not(std::begin(translation_stash), std::end(translation_stash), [](const auto& x) { return x.is_translated; });
-  auto finish_end = champsim::stable_partition_small(finish_begin, std::end(translation_stash), matches_vpage);
-  std::for_each(finish_begin, finish_end, [&](auto& entry) {
+    entry.event_cycle = tag_check_ready;                                                                 // additive: tag check starts after translation
     if (!entry.translate_issued) {
       --untranslated_pending_issue_; // translation piggybacked before this entry issued its own
     }
-    mark_translated(entry);
-  });
 
-  // Find all packets that match the page of the returned packet
-  for (auto& entry : inflight_tag_check) {
-    if (matches_vpage(entry)) {
-      if (!entry.translate_issued) {
-        --untranslated_pending_issue_;
-      }
-      --untranslated_in_tag_check_;
-      mark_translated(entry);
+    if constexpr (champsim::debug_print) {
+      fmt::print("[{}_TRANSLATE] finish_translation old: {} paddr: {} vaddr: {} type: {} cycle: {} ready: {}\n", this->NAME, old_address, entry.address,
+                 entry.v_address, access_type_names.at(champsim::to_underlying(entry.type)), this->current_time.time_since_epoch() / this->clock_period,
+                 entry.event_cycle.time_since_epoch() / this->clock_period);
     }
-  }
+  };
+
+  // Group every parked entry whose page just resolved to the front, complete
+  // it, and move it into the timed tag-check pipeline. The remaining entries
+  // stay parked (awaiting their own translation). Both the erase from the
+  // staging buffer and the append to inflight_tag_check are order-preserving,
+  // and every append is stamped tag_check_ready == current_time + HIT_LATENCY,
+  // which is nondecreasing across cycles, so inflight_tag_check stays in
+  // event_cycle order (the latency_queue readiness-prefix contract).
+  auto matched_end = champsim::stable_partition_small(std::begin(untranslated_tag_check), std::end(untranslated_tag_check), matches_vpage);
+  std::for_each(std::begin(untranslated_tag_check), matched_end, [&](auto& entry) {
+    complete_translation(entry);
+    inflight_tag_check.push_back_grow(std::move(entry));
+  });
+  untranslated_tag_check.erase(std::begin(untranslated_tag_check), matched_end);
 }
 
 void CACHE::issue_translation(tag_lookup_type& q_entry)
@@ -978,7 +983,7 @@ void CACHE::print_deadlock()
 
   champsim::range_print_deadlock(MSHR, NAME + "_MSHR", mshr_write, mshr_pack);
   champsim::range_print_deadlock(inflight_tag_check, NAME + "_tags", tag_check_write, tag_check_pack);
-  champsim::range_print_deadlock(translation_stash, NAME + "_translation", tag_check_write, tag_check_pack);
+  champsim::range_print_deadlock(untranslated_tag_check, NAME + "_translation", tag_check_write, tag_check_pack);
 
   std::string_view q_writer{"instr_id: {} address: {} v_addr: {} type: {} translated: {}"};
   auto q_entry_pack = [](const auto& entry) {
