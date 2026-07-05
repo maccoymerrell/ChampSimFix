@@ -519,6 +519,12 @@ long CACHE::operate()
   // translation, move them to the stash. Only untranslated entries qualify,
   // so the extraction is a no-op while the index is zero.
   if (lower_translate != nullptr && untranslated_in_tag_check_ > 0) {
+    // extract_if appends up to size(inflight_tag_check) entries onto the stash
+    // through back_inserter (push_back), so grow the backing store to cover
+    // this cycle's worst case first: the stash has no exact admission bound and
+    // a burst can exceed the seeded capacity. reserve is a no-op once capacity
+    // has ratcheted to the stash's bounded steady state, and never shrinks it.
+    translation_stash.reserve(std::size(translation_stash) + std::size(inflight_tag_check));
     auto [last_not_missed, stash_end] = champsim::extract_if(std::begin(inflight_tag_check), std::end(inflight_tag_check), std::back_inserter(translation_stash),
                                                              [is_ready, is_translated](const auto& x) { return is_ready(x) && !is_translated(x); });
     const auto moved_to_stash = std::distance(last_not_missed, std::end(inflight_tag_check));

@@ -25,7 +25,6 @@
 #include <array>
 #include <cstddef> // for size_t
 #include <cstdint> // for uint64_t, uint32_t, uint8_t
-#include <deque>
 #include <iterator> // for size
 #include <limits>   // for numeric_limits
 #include <memory>
@@ -147,13 +146,25 @@ private:
   auto matches_address(champsim::address address) const;
   request_type forward_packet(const tag_lookup_type& handle_pkt);
 
-  std::deque<tag_lookup_type> internal_PQ{};
+  // Ring buffer: prefetch admission is gated at PQ_SIZE (prefetch_line refuses
+  // to emplace past it), so PQ_SIZE is its exact capacity; entries are appended
+  // at the tail and the initiate-tag-check transform retires them from the
+  // front, so every erasure is front-anchored.
+  champsim::ring_buffer<tag_lookup_type> internal_PQ{};
   // Ring buffer: admission is bounded by tag_check_window_limit_, and all
   // erasures are front-anchored (handled prefix) or tail-anchored
   // (extract_if compaction), so a fixed-capacity ring replaces the deque's
   // chunk churn. Capacity is set at construction.
   champsim::ring_buffer<tag_lookup_type> inflight_tag_check{};
-  std::deque<tag_lookup_type> translation_stash{};
+  // Ring buffer: the ready-but-untranslated extraction moves entries here
+  // unconditionally, so unlike the gated queues it has no exact admission bound
+  // (the MSHR_SIZE throttle only limits *new* untranslated admissions, not the
+  // aged window entries moved in). It is seeded at its steady-state bound (the
+  // throttle plus one tag-check window) and grown if a burst exceeds that. The
+  // translated prefix is retired from the front (transform_while_n) and
+  // finish_translation only permutes the untranslated tail in place, so every
+  // erasure is front-anchored.
+  champsim::ring_buffer<tag_lookup_type> translation_stash{};
 
   std::vector<champsim::modules::prefetcher*> pref_module_pimpl;
   std::vector<champsim::modules::replacement*> repl_module_pimpl;
@@ -316,6 +327,11 @@ public:
     inflight_tag_check.set_capacity(static_cast<std::size_t>(tag_check_window_limit_ + champsim::to_underlying(MAX_TAG)));
     MSHR.set_capacity(MSHR_SIZE);
     inflight_fills.set_capacity(2 * static_cast<std::size_t>(MSHR_SIZE) + 8);
+    internal_PQ.set_capacity(PQ_SIZE);
+    // No exact admission bound (see the member's note): seed at the throttle
+    // plus one full tag-check window and let the ready-but-untranslated
+    // extraction grow it further if a burst ever exceeds that.
+    translation_stash.set_capacity(static_cast<std::size_t>(MSHR_SIZE) + inflight_tag_check.capacity());
     for (auto type : pref_activate_mask)
       pref_activate_lut_[static_cast<std::size_t>(champsim::to_underlying(type))] = true;
 
