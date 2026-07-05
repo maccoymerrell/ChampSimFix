@@ -122,7 +122,7 @@ private:
   void finish_packet(const response_type& packet);
   void finish_translation(const response_type& packet);
 
-  void issue_translation(tag_lookup_type& q_entry) const;
+  void issue_translation(tag_lookup_type& q_entry);
 
 public:
   using BLOCK = champsim::cache_block;
@@ -215,6 +215,17 @@ private:
   // per-access-type prefetcher activation lookup (replaces a std::count
   // over pref_activate_mask on every tag check)
   std::array<bool, static_cast<std::size_t>(access_type::NUM_TYPES)> pref_activate_lut_{};
+  // Translation-pressure indices over inflight_tag_check + translation_stash
+  // (maintained only when lower_translate exists; both structures are
+  // private, so no outside mutation can desynchronize them):
+  //  - entries that still need a translation request issued
+  //    (!translate_issued && !is_translated). Grows only in the
+  //    initiate_tag_check transform; shrinks on issue success or when a
+  //    piggybacked translation lands first. Gates the per-cycle issue walks.
+  long untranslated_pending_issue_ = 0;
+  //  - entries in inflight_tag_check (only) that are not yet translated.
+  //    Gates the per-cycle ready-but-untranslated extraction to the stash.
+  long untranslated_in_tag_check_ = 0;
 public:
   bool is_warmup() const { return warmup_; }
   bool is_roi() const    { return roi_; }

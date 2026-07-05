@@ -77,8 +77,24 @@ static std::vector<module_stat_entry> collect_module_stat(modules::environment_m
   return out;
 }
 
-// Pure cycle operation: sort and operate all operables.
+// Pure cycle operation: order operables by simulation time, then operate all.
 // Operables vector is passed in to avoid re-querying the environment each cycle.
+//
+// The sort orders by current_time so the operables furthest behind (each runs
+// at its own clock period, so they drift apart) are operated first — a
+// functional ordering, not incidental. Cheap in practice: the vector is small
+// and near-sorted every cycle.
+//
+// CAVEAT (behavioral, load-bearing): std::sort is not stable, so operables at
+// the SAME current_time are permuted in an implementation-defined order once
+// the range exceeds libstdc++'s 16-element insertion-sort threshold. Their
+// operate order within a cycle is observable (a same-time producer/consumer
+// pair), so simulation results depend on that tie ordering. This is baked into
+// the reference outputs: making the sort stable, skipping it when "already
+// sorted", or building against a different standard library can all shift
+// results for configs with >16 operables (e.g. multi-core). Do not "fix" it
+// without deliberately re-baselining — the dependency is a known portability
+// fragility, not a correctness contract.
 long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables, champsim::chrono::clock& global_clock)
 {
   std::sort(std::begin(operables), std::end(operables),

@@ -368,7 +368,7 @@ bool CACHE::handle_write(tag_lookup_type& handle_pkt)
 template <bool UpdateRequest>
 auto CACHE::initiate_tag_check(champsim::modules::channel_module* ul)
 {
-  return [time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : HIT_LATENCY), ul](auto& entry) {
+  return [this, time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : HIT_LATENCY), ul](auto& entry) {
     // The transformed entry is erased from its queue immediately after this
     // functor runs, so its vectors can be moved rather than copied.
     [[maybe_unused]] bool response_requested = false;
@@ -389,6 +389,14 @@ auto CACHE::initiate_tag_check(champsim::modules::channel_module* ul)
     if constexpr (champsim::debug_print) {
       fmt::print("[TAG] initiate_tag_check instr_id: {} address: {} v_address: {} type: {} response_requested: {}\n", retval.instr_id, retval.address,
                  retval.v_address, access_type_names.at(champsim::to_underlying(retval.type)), !std::empty(retval.to_return));
+    }
+
+    // Maintain the translation-pressure indices. Entries restarted from the
+    // stash are already translated, so only fresh untranslated arrivals
+    // count; translate_issued is always false at construction.
+    if (this->lower_translate != nullptr && !retval.is_translated) {
+      ++this->untranslated_pending_issue_;
+      ++this->untranslated_in_tag_check_;
     }
 
     return retval;
@@ -500,17 +508,22 @@ long CACHE::operate()
       champsim::transform_while_n(internal_PQ, std::back_inserter(inflight_tag_check), initiate_tag_bw, can_translate, initiate_tag_check<false>());
   initiate_tag_bw.consume(pq_bandwidth_consumed);
 
-  // Issue translations
-  if (lower_translate != nullptr) {
+  // Issue translations. The pending-issue index counts exactly the entries
+  // these walks would act on; when it is zero the walks are no-ops.
+  if (lower_translate != nullptr && untranslated_pending_issue_ > 0) {
     std::for_each(std::begin(inflight_tag_check), std::end(inflight_tag_check), [this](auto& x) { this->issue_translation(x); });
     std::for_each(std::begin(translation_stash), std::end(translation_stash), [this](auto& x) { this->issue_translation(x); });
   }
 
-  // Find entries that would be ready except that they have not finished translation, move them to the stash
-  if (lower_translate != nullptr) {
+  // Find entries that would be ready except that they have not finished
+  // translation, move them to the stash. Only untranslated entries qualify,
+  // so the extraction is a no-op while the index is zero.
+  if (lower_translate != nullptr && untranslated_in_tag_check_ > 0) {
     auto [last_not_missed, stash_end] = champsim::extract_if(std::begin(inflight_tag_check), std::end(inflight_tag_check), std::back_inserter(translation_stash),
                                                              [is_ready, is_translated](const auto& x) { return is_ready(x) && !is_translated(x); });
-    progress += std::distance(last_not_missed, std::end(inflight_tag_check));
+    const auto moved_to_stash = std::distance(last_not_missed, std::end(inflight_tag_check));
+    untranslated_in_tag_check_ -= moved_to_stash;
+    progress += moved_to_stash;
     inflight_tag_check.erase(last_not_missed, std::end(inflight_tag_check));
   }
 
@@ -673,17 +686,26 @@ void CACHE::finish_translation(const response_type& packet)
   // Restart stashed translations
   auto finish_begin = std::find_if_not(std::begin(translation_stash), std::end(translation_stash), [](const auto& x) { return x.is_translated; });
   auto finish_end = champsim::stable_partition_small(finish_begin, std::end(translation_stash), matches_vpage);
-  std::for_each(finish_begin, finish_end, mark_translated);
+  std::for_each(finish_begin, finish_end, [&](auto& entry) {
+    if (!entry.translate_issued) {
+      --untranslated_pending_issue_; // translation piggybacked before this entry issued its own
+    }
+    mark_translated(entry);
+  });
 
   // Find all packets that match the page of the returned packet
   for (auto& entry : inflight_tag_check) {
     if (matches_vpage(entry)) {
+      if (!entry.translate_issued) {
+        --untranslated_pending_issue_;
+      }
+      --untranslated_in_tag_check_;
       mark_translated(entry);
     }
   }
 }
 
-void CACHE::issue_translation(tag_lookup_type& q_entry) const
+void CACHE::issue_translation(tag_lookup_type& q_entry)
 {
   if (!q_entry.translate_issued && !q_entry.is_translated) {
     request_type fwd_pkt;
@@ -700,6 +722,9 @@ void CACHE::issue_translation(tag_lookup_type& q_entry) const
     fwd_pkt.is_translated = true;
 
     q_entry.translate_issued = lower_translate->add_rq(fwd_pkt);
+    if (q_entry.translate_issued) {
+      --untranslated_pending_issue_; // no longer awaiting issue (still awaiting the response)
+    }
     if constexpr (champsim::debug_print) {
       if (q_entry.translate_issued) {
         fmt::print("[TRANSLATE] do_issue_translation instr_id: {} paddr: {} vaddr: {} type: {}\n", q_entry.instr_id, q_entry.address, q_entry.v_address,

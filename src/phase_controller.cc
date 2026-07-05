@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <numeric>
 #include <map>
 #include <set>
 #include <string>
@@ -82,9 +83,20 @@ class default_phase_controller : public champsim::modules::phase_controller {
   // Source ids this controller governs; empty = all.
   std::set<int> governed_;
 
-  // Source tracking: keyed by source_id from source_consumer
-  std::map<int, bool> source_complete_;
-  std::map<int, uint64_t> progress_baseline_;
+  // Source tracking, flattened for the per-cycle advance() path: the map
+  // lookups the old std::map keys cost were a measured per-cycle overhead.
+  // tracked_ preserves consumer discovery order (the completion scan order);
+  // tracked_by_idx_ holds positions sorted by source id, preserving the
+  // id-ordered notification sequence of the complete-all-on-EOF path.
+  struct tracked_source {
+    champsim::modules::source_consumer* consumer;
+    int idx;
+    uint64_t baseline;
+    bool complete;
+  };
+  std::vector<tracked_source> tracked_;
+  std::vector<std::size_t> tracked_by_idx_;
+  std::size_t incomplete_count_ = 0;
   std::vector<unsigned> newly_completed_;
 
   bool governs(int idx) const { return governed_.empty() || governed_.count(idx) > 0; }
@@ -137,7 +149,9 @@ public:
     health_timer_ = 0;
     health_abort_ = false;
     newly_completed_.clear();
-    source_complete_.clear();
+    tracked_.clear();
+    tracked_by_idx_.clear();
+    incomplete_count_ = 0;
 
     // Refresh the per-phase view caches.
     // typed_view is expensive: cache here and reuse across cycles.
@@ -154,11 +168,15 @@ public:
     for (auto& sc : source_consumers_) {
       int idx = sc.get().consumer_id();
       if (idx >= 0) {
-        source_complete_[idx] = false;
-        progress_baseline_[idx] = sc.get().sim_progress();
+        tracked_.push_back({&sc.get(), idx, sc.get().sim_progress(), false});
       }
       sc.get().reset_health();
     }
+    incomplete_count_ = std::size(tracked_);
+    tracked_by_idx_.resize(std::size(tracked_));
+    std::iota(std::begin(tracked_by_idx_), std::end(tracked_by_idx_), std::size_t{0});
+    std::sort(std::begin(tracked_by_idx_), std::end(tracked_by_idx_),
+              [this](std::size_t lhs, std::size_t rhs) { return tracked_[lhs].idx < tracked_[rhs].idx; });
   }
 
   status advance(long progress) override
@@ -199,40 +217,39 @@ public:
     }
 
     // Completion: per-source EOF (policy-dependent) and progress thresholds.
-    for (auto& sc : source_consumers_) {
-      int idx = sc.get().consumer_id();
-      if (idx < 0) {
-        continue;
-      }
-      if (source_complete_[idx]) {
+    for (auto& tracked : tracked_) {
+      if (tracked.complete) {
         continue;
       }
 
-      if (sc.get().source_eof()) {
+      if (tracked.consumer->source_eof()) {
         if (complete_all_on_eof_) {
-          // Classic behavior: the first exhausted source ends the phase for everyone.
-          for (auto& [other_idx, complete] : source_complete_) {
-            if (!complete) {
-              complete = true;
-              newly_completed_.push_back(static_cast<unsigned>(other_idx));
+          // Classic behavior: the first exhausted source ends the phase for
+          // everyone (notified in source-id order).
+          for (auto pos : tracked_by_idx_) {
+            auto& other = tracked_[pos];
+            if (!other.complete) {
+              other.complete = true;
+              --incomplete_count_;
+              newly_completed_.push_back(static_cast<unsigned>(other.idx));
             }
           }
           break;
         }
-        source_complete_[idx] = true;
-        newly_completed_.push_back(static_cast<unsigned>(idx));
+        tracked.complete = true;
+        --incomplete_count_;
+        newly_completed_.push_back(static_cast<unsigned>(tracked.idx));
         continue;
       }
 
-      if ((sc.get().sim_progress() - progress_baseline_[idx]) >= length_) {
-        source_complete_[idx] = true;
-        newly_completed_.push_back(static_cast<unsigned>(idx));
+      if ((tracked.consumer->sim_progress() - tracked.baseline) >= length_) {
+        tracked.complete = true;
+        --incomplete_count_;
+        newly_completed_.push_back(static_cast<unsigned>(tracked.idx));
       }
     }
 
-    bool all_complete = !source_complete_.empty()
-                        && std::all_of(source_complete_.begin(), source_complete_.end(),
-                                       [](const auto& p) { return p.second; });
+    bool all_complete = !tracked_.empty() && incomplete_count_ == 0;
     return all_complete ? status::COMPLETE : status::CONTINUE;
   }
 
