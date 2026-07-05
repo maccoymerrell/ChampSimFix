@@ -75,9 +75,16 @@ struct LSQ_ENTRY : champsim::program_ordered<LSQ_ENTRY> {
   uint64_t producer_id = std::numeric_limits<uint64_t>::max();
   std::vector<std::reference_wrapper<std::optional<LSQ_ENTRY>>> lq_depend_on_me{};
 
+  // Physical ROB slot of the owning instruction, captured at
+  // do_memory_scheduling. The owner is provably still resident at that slot
+  // when finish() runs (it cannot retire until all its mem ops finish, and ROB
+  // slots are reused only after retire), so finish() indexes it in O(1)
+  // instead of an instr_id partition_point. Keyed on the physical slot, not
+  // instr_id, so gapped multi-core ids are irrelevant.
+  std::size_t rob_slot{};
+
   LSQ_ENTRY(champsim::address addr, champsim::program_ordered<LSQ_ENTRY>::id_type id, champsim::address ip, champsim::origin origin);
   void finish(ooo_model_instr& rob_entry) const;
-  void finish(champsim::ring_buffer<ooo_model_instr>::iterator begin, champsim::ring_buffer<ooo_model_instr>::iterator end) const;
 };
 
 // cpu
@@ -401,6 +408,7 @@ private:
       if (LQ[idx].has_value()) {
         auto owner = std::partition_point(std::begin(ROB), std::end(ROB), ooo_model_instr::precedes(LQ[idx]->instr_id));
         if (owner != std::end(ROB) && owner->instr_id == LQ[idx]->instr_id) {
+          LQ[idx]->rob_slot = owner.slot(); // re-derive the finish() slot for injected state
           rob_mem_handles_[owner.slot()].lq_slots.push_back(static_cast<uint16_t>(idx));
         }
       }
@@ -408,6 +416,7 @@ private:
     for (auto& sq_entry : SQ) {
       auto owner = std::partition_point(std::begin(ROB), std::end(ROB), ooo_model_instr::precedes(sq_entry.instr_id));
       if (owner != std::end(ROB) && owner->instr_id == sq_entry.instr_id) {
+        sq_entry.rob_slot = owner.slot(); // re-derive the finish() slot for injected state
         rob_mem_handles_[owner.slot()].sq_entries.push_back(&sq_entry);
       }
     }

@@ -645,6 +645,7 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
     assert(q_entry != std::end(LQ));
     const auto lq_idx = static_cast<std::size_t>(std::distance(std::begin(LQ), q_entry));
     q_entry->emplace(smem, instr.instr_id, instr.ip, instr.origin); // add it to the load queue
+    (*q_entry)->rob_slot = rob_slot;                                // owner is this cycle's ROB.back()
     lq_set_occupied(lq_idx);
     bool live = true; // cleared if this slot is immediately store-forwarded and freed below
 
@@ -683,6 +684,7 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
   // store
   for (auto& dmem : instr.destination_memory) {
     SQ.emplace_back(dmem, instr.instr_id, instr.ip, instr.origin); // add it to the store queue
+    SQ.back().rob_slot = rob_slot;                                 // owner is this cycle's ROB.back()
     sq_store_index_[dmem.to<uint64_t>()].push_back(&SQ.back());
     handles.sq_entries.push_back(&SQ.back());
   }
@@ -777,7 +779,7 @@ void O3_CPU::do_finish_store(const LSQ_ENTRY& sq_entry)
     fmt::print("[SQ] {} instr_id: {} vaddr: {}\n", __func__, sq_entry.instr_id, sq_entry.virtual_address);
   }
 
-  sq_entry.finish(std::begin(ROB), std::end(ROB));
+  sq_entry.finish(ROB.at_slot(sq_entry.rob_slot));
   complete_stage_clean_ = false; // a memory op finished
 
   // Release dependent loads
@@ -785,7 +787,7 @@ void O3_CPU::do_finish_store(const LSQ_ENTRY& sq_entry)
     assert(dependent.has_value()); // LQ entry is still allocated
     assert(dependent->producer_id == sq_entry.instr_id);
 
-    dependent->finish(std::begin(ROB), std::end(ROB));
+    dependent->finish(ROB.at_slot(dependent->rob_slot));
     dependent.reset();
     lq_clear_occupied(static_cast<std::size_t>(&dependent - LQ.data()));
   }
@@ -936,7 +938,7 @@ long O3_CPU::handle_memory_return()
     if (blk_it != std::end(hmr_block_index_)) {
       for (const auto idx : blk_it->second) {
         auto& lq_entry = LQ[idx];
-        lq_entry->finish(std::begin(ROB), std::end(ROB));
+        lq_entry->finish(ROB.at_slot(lq_entry->rob_slot));
         complete_stage_clean_ = false; // a memory op finished
         lq_entry.reset();
         lq_clear_occupied(idx);
@@ -1083,13 +1085,6 @@ void O3_CPU::print_deadlock()
 LSQ_ENTRY::LSQ_ENTRY(champsim::address addr, champsim::program_ordered<LSQ_ENTRY>::id_type id, champsim::address local_ip, champsim::origin local_origin)
     : champsim::program_ordered<LSQ_ENTRY>{id}, virtual_address(addr), ip(local_ip), origin(local_origin)
 {
-}
-
-void LSQ_ENTRY::finish(champsim::ring_buffer<ooo_model_instr>::iterator begin, champsim::ring_buffer<ooo_model_instr>::iterator end) const
-{
-  auto rob_entry = std::partition_point(begin, end, ooo_model_instr::precedes(this->instr_id));
-  assert(rob_entry != end);
-  finish(*rob_entry);
 }
 
 void LSQ_ENTRY::finish(ooo_model_instr& rob_entry) const
