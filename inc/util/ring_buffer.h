@@ -73,12 +73,21 @@ class ring_buffer
   std::vector<std::optional<T>> storage_{};
   std::size_t head_ = 0; // physical index of the logical front
   std::size_t count_ = 0;
+  // Cached storage_.size(). The size accessors (begin/end/physical/full/
+  // capacity, plus the wrap tests) run on the simulator's hottest scans, where
+  // libstdc++'s std::vector::size() — a _M_finish − _M_start pointer
+  // subtraction — profiled as ~3% of run time (begin()/end() re-do it on every
+  // scan). capacity_ is derived state: it is written *only* where storage_ is
+  // (re)sized, and set_capacity() and reserve() are the sole assigners of
+  // storage_, so it cannot desync. Debug builds assert the invariant at those
+  // two sites.
+  std::size_t capacity_ = 0;
 
   std::size_t physical(std::size_t logical) const
   {
     std::size_t idx = head_ + logical;
-    if (idx >= storage_.size()) {
-      idx -= storage_.size();
+    if (idx >= capacity_) {
+      idx -= capacity_;
     }
     return idx;
   }
@@ -204,6 +213,10 @@ public:
     storage_ = std::vector<std::optional<T>>(capacity);
     head_ = 0;
     count_ = 0;
+    capacity_ = capacity;
+#ifndef NDEBUG
+    assert(capacity_ == storage_.size());
+#endif
   }
 
   /**
@@ -215,7 +228,7 @@ public:
    */
   void reserve(size_type new_capacity)
   {
-    if (new_capacity <= storage_.size()) {
+    if (new_capacity <= capacity_) {
       return;
     }
     std::vector<std::optional<T>> new_storage(new_capacity);
@@ -224,12 +237,16 @@ public:
     }
     storage_ = std::move(new_storage);
     head_ = 0;
+    capacity_ = new_capacity;
+#ifndef NDEBUG
+    assert(capacity_ == storage_.size());
+#endif
   }
 
-  size_type capacity() const { return storage_.size(); }
+  size_type capacity() const { return capacity_; }
   size_type size() const { return count_; }
   [[nodiscard]] bool empty() const { return count_ == 0; }
-  [[nodiscard]] bool full() const { return count_ == storage_.size(); }
+  [[nodiscard]] bool full() const { return count_ == capacity_; }
 
   reference operator[](size_type idx) { return *storage_[physical(idx)]; }
   const_reference operator[](size_type idx) const { return *storage_[physical(idx)]; }
@@ -253,10 +270,10 @@ public:
   reference back() { return (*this)[count_ - 1]; }
   const_reference back() const { return (*this)[count_ - 1]; }
 
-  iterator begin() { return {storage_.data(), storage_.size(), head_, 0}; }
-  iterator end() { return {storage_.data(), storage_.size(), head_, count_}; }
-  const_iterator begin() const { return {storage_.data(), storage_.size(), head_, 0}; }
-  const_iterator end() const { return {storage_.data(), storage_.size(), head_, count_}; }
+  iterator begin() { return {storage_.data(), capacity_, head_, 0}; }
+  iterator end() { return {storage_.data(), capacity_, head_, count_}; }
+  const_iterator begin() const { return {storage_.data(), capacity_, head_, 0}; }
+  const_iterator end() const { return {storage_.data(), capacity_, head_, count_}; }
   const_iterator cbegin() const { return begin(); }
   const_iterator cend() const { return end(); }
 
@@ -310,7 +327,7 @@ public:
     assert(count_ > 0);
     storage_[head_].reset(); // release the element's resources promptly
     ++head_;
-    if (head_ >= storage_.size()) {
+    if (head_ >= capacity_) {
       head_ = 0;
     }
     --count_;
@@ -385,7 +402,7 @@ private:
   void grow_if_full()
   {
     if (full()) {
-      reserve(std::max<size_type>(2 * storage_.size(), 8));
+      reserve(std::max<size_type>(2 * capacity_, 8));
     }
   }
 };
