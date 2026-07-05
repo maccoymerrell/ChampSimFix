@@ -500,21 +500,29 @@ long CACHE::operate()
   }
 
   // upper levels get an equal portion of the remaining bandwidth
-  champsim::bandwidth::maximum_type per_upper_bandwidth =
-      std::size(upper_levels) >= 1
-          ? (champsim::bandwidth::maximum_type)std::max((size_t)initiate_tag_bw.amount_remaining() / std::size(upper_levels), size_t{1})
-          : champsim::bandwidth::maximum_type{};
+  // Guard the per-cycle upper intake: only build the per-upper bandwidth and
+  // run the transform_while_n machinery when some upper channel actually has a
+  // pending request. When all uppers are idle this short-circuits to a few
+  // O(1) has_pending() checks instead of constructing a span+bandwidth per
+  // queue and finding it empty. Byte-identical: an empty queue admits nothing
+  // and consumes no bandwidth, so skipping it changes no state.
+  if (std::any_of(std::begin(upper_levels), std::end(upper_levels), [](auto* ul) { return ul->has_pending(); })) {
+    const champsim::bandwidth::maximum_type per_upper_bandwidth =
+        std::size(upper_levels) >= 1
+            ? (champsim::bandwidth::maximum_type)std::max((size_t)initiate_tag_bw.amount_remaining() / std::size(upper_levels), size_t{1})
+            : champsim::bandwidth::maximum_type{};
 
-  for (auto* ul : upper_levels) {
-    for (auto q : {std::ref(ul->get_wq()), std::ref(ul->get_rq()), std::ref(ul->get_pq())}) {
-      // this needs to be in this loop, we need to ensure that for cases where bandwidth doesn't divide nicely across upstreams,
-      // we don't accidentally consume more bandwidth than expected
-      champsim::bandwidth per_upper_tag_bw{std::min(per_upper_bandwidth, champsim::bandwidth::maximum_type{initiate_tag_bw.amount_remaining()})};
-      auto bandwidth_consumed = champsim::transform_while_n(q.get(), router, per_upper_tag_bw, can_admit, initiate_tag_check<true>(ul));
-      if constexpr (champsim::debug_print) {
-        channels_bandwidth_consumed.push_back(bandwidth_consumed);
+    for (auto* ul : upper_levels) {
+      for (auto q : {std::ref(ul->get_wq()), std::ref(ul->get_rq()), std::ref(ul->get_pq())}) {
+        // this needs to be in this loop, we need to ensure that for cases where bandwidth doesn't divide nicely across upstreams,
+        // we don't accidentally consume more bandwidth than expected
+        champsim::bandwidth per_upper_tag_bw{std::min(per_upper_bandwidth, champsim::bandwidth::maximum_type{initiate_tag_bw.amount_remaining()})};
+        auto bandwidth_consumed = champsim::transform_while_n(q.get(), router, per_upper_tag_bw, can_admit, initiate_tag_check<true>(ul));
+        if constexpr (champsim::debug_print) {
+          channels_bandwidth_consumed.push_back(bandwidth_consumed);
+        }
+        initiate_tag_bw.consume(bandwidth_consumed);
       }
-      initiate_tag_bw.consume(bandwidth_consumed);
     }
   }
 

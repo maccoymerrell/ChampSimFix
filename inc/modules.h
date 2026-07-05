@@ -1037,6 +1037,11 @@ struct module_base {
     virtual request_queue_type& get_pq() = 0;
     virtual response_queue_type& get_returned() = 0;
 
+    // O(1) event signal: does any request queue hold work? Lets a consumer
+    // guard its per-cycle intake machinery (bandwidth/span construction) so
+    // an idle channel costs a few empty() checks, not the full scan setup.
+    virtual bool has_pending() { return !std::empty(get_rq()) || !std::empty(get_wq()) || !std::empty(get_pq()); }
+
     // Stats accessors
     virtual stats_type& get_sim_stats() = 0;
     virtual stats_type& get_roi_stats() = 0;
