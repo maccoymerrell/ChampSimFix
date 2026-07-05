@@ -43,6 +43,7 @@
 #include "operable.h"
 #include "modules.h"
 #include "util/to_underlying.h" // for to_underlying
+#include "util/latency_queue.h"
 #include "util/ring_buffer.h"
 #include "waitable.h"
 
@@ -200,7 +201,9 @@ public:
   // land here unconditionally and drain at MAX_FILL, subject to lower-level
   // backpressure), so pushes go through the growing calls.
   champsim::ring_buffer<fill_type> MSHR;
-  champsim::ring_buffer<fill_type> inflight_fills;
+  // A time-ordered ready queue keyed on each fill's data_promise: fills retire
+  // from the front once their promise is ready, up to MAX_FILL per cycle.
+  champsim::latency_queue<fill_type, champsim::waitable_ready_time<&fill_type::data_promise>> inflight_fills;
 
   long operate() final;
   long poll_cycle() final;

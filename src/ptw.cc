@@ -158,9 +158,6 @@ long PageTableWalker::operate()
 {
   long progress{0};
 
-  auto is_ready = [time = current_time](const auto& pkt) {
-    return pkt.data.is_ready_at(time);
-  };
   auto& returned = lower_level->get_returned();
   std::for_each(std::cbegin(returned), std::cend(returned), [this](const auto& pkt) { this->finish_packet(pkt); });
   progress += std::distance(std::cbegin(returned), std::cend(returned));
@@ -171,25 +168,24 @@ long PageTableWalker::operate()
   next_steps.clear();
 
   champsim::bandwidth fill_bw{MAX_FILL};
-  auto [complete_begin, complete_end] = champsim::get_span_p(std::cbegin(completed), std::cend(completed), fill_bw, is_ready);
-  std::for_each(complete_begin, complete_end, [](auto& mshr_entry) {
+  // Retire the ready prefix of completed walks (whose data promise is ready by
+  // current_time), up to MAX_FILL, emitting each to its return channels.
+  completed.drain_ready(current_time, fill_bw, [](const auto& mshr_entry) {
     for (auto ret : mshr_entry.to_return) {
       ret->emplace_back_grow(mshr_entry.v_address, mshr_entry.v_address, *mshr_entry.data, mshr_entry.pf_metadata, mshr_entry.instr_depend_on_me);
     }
+    return true;
   });
-  fill_bw.consume(std::distance(complete_begin, complete_end));
-  completed.erase(complete_begin, complete_end);
 
-  auto [mshr_begin, mshr_end] = champsim::get_span_p(std::cbegin(finished), std::cend(finished), fill_bw, is_ready);
-  std::tie(mshr_begin, mshr_end) = champsim::get_span_p(mshr_begin, mshr_end, [&next_steps, this](const auto& pkt) {
+  // Retire the ready prefix of finished steps, stopping before the first whose
+  // handle_fill declines (the walk cannot advance yet).
+  finished.drain_ready(current_time, fill_bw, [&next_steps, this](const auto& pkt) {
     auto result = this->handle_fill(pkt);
     if (result.has_value()) {
       next_steps.emplace_back(*result);
     }
     return result.has_value();
   });
-  fill_bw.consume(std::distance(mshr_begin, mshr_end));
-  finished.erase(mshr_begin, mshr_end);
 
   champsim::bandwidth tag_bw{MAX_READ};
   for (auto* ul : upper_levels) {
