@@ -745,6 +745,9 @@ long O3_CPU::operate_lsq()
       }
       load_bw.consume();
       lq_entry->fetch_issued = true;
+      // Record the now-in-flight load under its block address; its matching
+      // L1D return will finish it through this index.
+      hmr_block_index_[hmr_block_key(lq_entry->virtual_address)].push_back(static_cast<uint32_t>(idx));
       lq_clear_unissued(idx); // clears the ready bit too
     }
   }
@@ -906,20 +909,24 @@ long O3_CPU::handle_memory_return()
   auto& l1d_returned = L1D_bus.lower_level->get_returned();
   auto l1d_it = std::begin(l1d_returned);
   for (champsim::bandwidth l1d_bw{L1D_BANDWIDTH}; l1d_bw.has_remaining() && l1d_it != std::end(l1d_returned); l1d_bw.consume(), ++l1d_it) {
-    const auto l1d_block = l1d_it->v_address.to<uint64_t>() >> block_shamt; // loop-invariant across the LQ scan
-    // Visit occupied LQ slots in index order (identical order to a full scan)
-    for (std::size_t word = 0; word < std::size(lq_occupied_); ++word) {
-      for (uint64_t bits = lq_occupied_[word]; bits != 0; bits &= bits - 1) {
-        const std::size_t idx = word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits));
+    const auto l1d_block = l1d_it->v_address.to<uint64_t>() >> block_shamt;
+    // Every fetch-issued load to this block is recorded in the return index,
+    // so one lookup replaces the sweep over all occupied LQ slots. finish()
+    // still bumps completed_mem_ops on each owner; the finishes touch
+    // independent slots (and per-owner counters commute), so the recorded
+    // order is result-equivalent to the old ascending-slot scan. The whole
+    // block's loads leave together, so erase the key.
+    auto blk_it = hmr_block_index_.find(l1d_block);
+    if (blk_it != std::end(hmr_block_index_)) {
+      for (const auto idx : blk_it->second) {
         auto& lq_entry = LQ[idx];
-        if (lq_entry->fetch_issued && (lq_entry->virtual_address.to<uint64_t>() >> block_shamt) == l1d_block) {
-          lq_entry->finish(std::begin(ROB), std::end(ROB));
-          complete_stage_clean_ = false; // a memory op finished
-          lq_entry.reset();
-          lq_clear_occupied(idx);
-          ++progress;
-        }
+        lq_entry->finish(std::begin(ROB), std::end(ROB));
+        complete_stage_clean_ = false; // a memory op finished
+        lq_entry.reset();
+        lq_clear_occupied(idx);
+        ++progress;
       }
+      hmr_block_index_.erase(blk_it);
     }
     ++progress;
   }

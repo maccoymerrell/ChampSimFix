@@ -232,6 +232,15 @@ private:
   // re-checking hundreds of waiting candidates every cycle.
   std::vector<uint64_t> lq_ready_;
   std::deque<std::pair<champsim::chrono::clock::time_point, uint32_t>> lq_pending_ready_;
+  // Return-matching index: FETCH-ISSUED loads keyed by their block address —
+  // exactly what an L1D return carries. A demand load leaves the LQ only
+  // through handle_memory_return (producer-waiting loads never issue,
+  // immediate-store-forward loads are freed before issue), so this index is
+  // maintained at exactly two transitions: a load's slot is inserted when
+  // operate_lsq marks it fetch_issued, and erased when a matching return
+  // finishes it. handle_memory_return's per-return lookup replaces the sweep
+  // over every occupied LQ slot. Mirrors the sq_store_index_ idiom.
+  std::unordered_map<uint64_t, std::vector<uint32_t>> hmr_block_index_;
   // Post-EOF drain latch for poll_cycle (see there).
   bool drained_latch_ = false;
 
@@ -265,6 +274,14 @@ private:
 
   static void candidate_set(std::vector<uint64_t>& bits, std::size_t slot) { bits[slot >> 6] |= (uint64_t{1} << (slot & 63)); }
   static void candidate_clear(std::vector<uint64_t>& bits, std::size_t slot) { bits[slot >> 6] &= ~(uint64_t{1} << (slot & 63)); }
+
+  // Block-address key for the return index: the same shift handle_memory_return
+  // applies to a returned packet's address, so an issue-site insert and a
+  // return-site lookup land on the same key.
+  static uint64_t hmr_block_key(champsim::address addr)
+  {
+    return addr.to<uint64_t>() >> champsim::to_underlying(champsim::block_number_extent{}.lower);
+  }
 
   // Visit the set bits of `bits` within physical slots [from, to), ascending.
   // fn(slot) returns false to stop; returns false if stopped early.
@@ -392,10 +409,14 @@ private:
     lq_unissued_.assign((std::size(LQ) + 63) / 64, 0);
     lq_ready_.assign((std::size(LQ) + 63) / 64, 0);
     lq_pending_ready_.clear();
+    hmr_block_index_.clear();
     lq_free_slots_ = static_cast<long>(std::size(LQ));
     for (std::size_t idx = 0; idx < std::size(LQ); ++idx) {
       if (LQ[idx].has_value()) {
         lq_set_occupied(idx);
+        if (LQ[idx]->fetch_issued) {
+          hmr_block_index_[hmr_block_key(LQ[idx]->virtual_address)].push_back(static_cast<uint32_t>(idx));
+        }
         if (!(LQ[idx]->producer_id == std::numeric_limits<uint64_t>::max() && !LQ[idx]->fetch_issued)) {
           lq_clear_unissued(idx);
         } else if (LQ[idx]->ready_time < current_time) {
