@@ -861,10 +861,16 @@ long O3_CPU::handle_memory_return()
 {
   long progress{0};
 
+  // Block-granularity matching compares raw shifted values: constructing a
+  // dynamic-extent block_number per scanned entry was a measured cost, and
+  // equality of the block slices is exactly equality of the shifted values.
+  const auto block_shamt = champsim::to_underlying(champsim::block_number_extent{}.lower);
+
   auto& l1i_returned = L1I_bus.lower_level->get_returned();
   for (champsim::bandwidth fetch_bw{FETCH_WIDTH}, l1i_bw{L1I_BANDWIDTH}; fetch_bw.has_remaining() && l1i_bw.has_remaining() && !l1i_returned.empty();
        l1i_bw.consume()) {
     auto& l1i_entry = l1i_returned.front();
+    const auto l1i_block = l1i_entry.v_address.to<uint64_t>() >> block_shamt;
 
     // Each iteration consumes one dependent id; bandwidth is spent only on
     // matches. The consumed prefix is erased once, after the loop (the old
@@ -876,7 +882,7 @@ long O3_CPU::handle_memory_return()
       const auto depend_id = l1i_entry.instr_depend_on_me[consumed];
       auto fetched = std::partition_point(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), ooo_model_instr::precedes(depend_id));
       if (fetched != std::end(IFETCH_BUFFER) && fetched->instr_id == depend_id
-          && champsim::block_number{fetched->ip} == champsim::block_number{l1i_entry.v_address} && fetched->fetch_issued) {
+          && (fetched->ip.to<uint64_t>() >> block_shamt) == l1i_block && fetched->fetch_issued) {
         fetched->fetch_completed = true;
         fetch_bw.consume();
         ++progress;
@@ -900,12 +906,13 @@ long O3_CPU::handle_memory_return()
   auto& l1d_returned = L1D_bus.lower_level->get_returned();
   auto l1d_it = std::begin(l1d_returned);
   for (champsim::bandwidth l1d_bw{L1D_BANDWIDTH}; l1d_bw.has_remaining() && l1d_it != std::end(l1d_returned); l1d_bw.consume(), ++l1d_it) {
+    const auto l1d_block = l1d_it->v_address.to<uint64_t>() >> block_shamt; // loop-invariant across the LQ scan
     // Visit occupied LQ slots in index order (identical order to a full scan)
     for (std::size_t word = 0; word < std::size(lq_occupied_); ++word) {
       for (uint64_t bits = lq_occupied_[word]; bits != 0; bits &= bits - 1) {
         const std::size_t idx = word * 64 + static_cast<std::size_t>(__builtin_ctzll(bits));
         auto& lq_entry = LQ[idx];
-        if (lq_entry->fetch_issued && champsim::block_number{lq_entry->virtual_address} == champsim::block_number{l1d_it->v_address}) {
+        if (lq_entry->fetch_issued && (lq_entry->virtual_address.to<uint64_t>() >> block_shamt) == l1d_block) {
           lq_entry->finish(std::begin(ROB), std::end(ROB));
           complete_stage_clean_ = false; // a memory op finished
           lq_entry.reset();

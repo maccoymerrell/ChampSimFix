@@ -61,6 +61,22 @@ struct dynamic_extent {
   constexpr dynamic_extent(champsim::data::bits low, std::size_t size) : dynamic_extent(low + champsim::data::bits{size}, low) {}
 };
 
+namespace detail
+{
+// Cached geometry for the wrapper extents below. Constant-initialized to the
+// 12-bit-page / 6-bit-block defaults; ``refresh_address_extents()`` rewrites
+// them once the environment publishes the real geometry (block and page size
+// are runtime configuration). Inline variables keep the wrapper constructors
+// and size() header-inlinable: address slices are constructed on the
+// simulator's hottest paths, and an out-of-line constructor behind a
+// static-local guard was a measured cost. The upper bound is
+// ``champsim::address::bits`` (64); extent.cc statically asserts the match.
+inline dynamic_extent cached_page_number_extent{champsim::data::bits{64}, champsim::data::bits{12}};
+inline dynamic_extent cached_page_offset_extent{champsim::data::bits{12}, champsim::data::bits{}};
+inline dynamic_extent cached_block_number_extent{champsim::data::bits{64}, champsim::data::bits{6}};
+inline dynamic_extent cached_block_offset_extent{champsim::data::bits{6}, champsim::data::bits{}};
+} // namespace detail
+
 /**
  * An extent that is always the size of a page number
  */
@@ -69,7 +85,7 @@ struct page_number_extent : dynamic_extent {
    * This extent can only be default-initialized.
    * It will have ``upper == champsim::address::bits`` and ``lower == LOG2_PAGE_SIZE``.
    */
-  page_number_extent();
+  page_number_extent() : dynamic_extent(detail::cached_page_number_extent) {}
 };
 
 /**
@@ -80,7 +96,7 @@ struct page_offset_extent : dynamic_extent {
    * This extent can only be default-initialized.
    * It will have ``upper == LOG2_PAGE_SIZE`` and ``lower == 0``.
    */
-  page_offset_extent();
+  page_offset_extent() : dynamic_extent(detail::cached_page_offset_extent) {}
 };
 
 /**
@@ -91,7 +107,7 @@ struct block_number_extent : dynamic_extent {
    * This extent can only be default-initialized.
    * It will have ``upper == champsim::address::bits`` and ``lower == LOG2_BLOCK_SIZE``.
    */
-  block_number_extent();
+  block_number_extent() : dynamic_extent(detail::cached_block_number_extent) {}
 };
 
 /**
@@ -102,7 +118,7 @@ struct block_offset_extent : dynamic_extent {
    * This extent can only be default-initialized.
    * It will have ``upper == LOG2_BLOCK_SIZE`` and ``lower == 0``.
    */
-  block_offset_extent();
+  block_offset_extent() : dynamic_extent(detail::cached_block_offset_extent) {}
 };
 
 /**
@@ -123,12 +139,14 @@ struct static_extent {
 
 /**
  * Give the width of the extent. For static_extent, this function can be constexpr.
+ * These are header-inline: every dynamic-extent address_slice construction
+ * masks by this width, and an out-of-line call here was a measured cost.
  */
-std::size_t size(dynamic_extent ext);
-std::size_t size(page_number_extent ext);
-std::size_t size(page_offset_extent ext);
-std::size_t size(block_number_extent ext);
-std::size_t size(block_offset_extent ext);
+constexpr std::size_t size(dynamic_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
+constexpr std::size_t size(page_number_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
+constexpr std::size_t size(page_offset_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
+constexpr std::size_t size(block_number_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
+constexpr std::size_t size(block_offset_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
 
 // Refresh the cached page/block extent values used by the default
 // constructors of ``page_number_extent`` / ``block_offset_extent`` etc.

@@ -123,8 +123,13 @@ auto CACHE::fill_block(fill_type fill, uint32_t metadata) -> BLOCK
 
 auto CACHE::matches_address(champsim::address addr) const
 {
-  return [match = addr.slice_upper(OFFSET_BITS), shamt = OFFSET_BITS](const auto& entry) {
-    return entry.address.slice_upper(shamt) == match;
+  // Compare raw shifted values: equality of the upper slices is exactly
+  // equality of the shifted 64-bit values, without constructing a
+  // dynamic-extent address_slice per scanned entry (this predicate runs
+  // against every MSHR and inflight-fill entry on every miss).
+  const auto shamt = champsim::to_underlying(OFFSET_BITS);
+  return [match = addr.to<uint64_t>() >> shamt, shamt](const auto& entry) {
+    return (entry.address.template to<uint64_t>() >> shamt) == match;
   };
 }
 
