@@ -58,8 +58,12 @@ its lower-level channel via::
 This tells the simulator to look up the module named ``cpu0_L1D_cpu0_L2C_channel`` and
 connect it as the lower-level channel for this cache.
 
-References are resolved after all modules have been constructed, so definition order in
-the ``"children"`` array does not matter.
+References are resolved immediately as each module in the ``"children"`` array is
+constructed, by looking up the referenced name among the modules built so far. Definition
+order therefore matters: a module must be defined **before** any module that references
+it. In particular, channels must be declared before the caches, cores, and memory
+controllers that connect to them (a forward reference to a not-yet-constructed module
+aborts with an ``[ENVIRONMENT] ERROR: @-reference ... not found``).
 
 ----------------------------------
 Typed Parameter Objects
@@ -176,11 +180,16 @@ Channels connect modules together. A channel definition looks like::
 Cores and Workload Sources
 ----------------------------------
 
-A core declares its ``consumer_id`` (its hardware-context identity; ids must be unique
-and dense from 0) and attaches one or more workload sources as children. A source's
-``stream_id`` — the address-space identity stamped on its tokens — defaults to the
-owning consumer's id and only needs to be set when they differ (e.g. two traces feeding
-one core)::
+A core's ``consumer_id`` (its hardware-context identity) is *not* declared in the config:
+it is assigned at startup by enumerating cores in config-declaration order, densely from 0
+(see ``assign_identities`` in ``src/champsim.cc``). The ``consumer_id`` key shown in the
+sample below is therefore inert — it takes effect only when it happens to equal the
+enumerated value, and may be omitted. A core attaches one or more workload sources as
+children. Each source is likewise stamped with a ``stream`` (address-space) identity
+assigned by the framework at startup — there is no numeric stream id to set in the config.
+By default every source gets its own distinct stream, so two traces feeding one core
+occupy different address spaces; give sibling sources the same string ``stream`` label to
+make them share one address space::
 
     {
         "name": "cpu0",
@@ -199,8 +208,10 @@ one core)::
         ]
     }
 
-Page-table walkers take an ``asid`` parameter (the address space whose root they walk
-from); in the classic shape it equals the core's ``consumer_id``. See
+Page-table walkers are shared hardware and do not take an address-space parameter: the
+address space (CR3 root) is resolved per walk from each request's origin/stream at
+runtime, so the same walker serves every consumer that routes through it. (The ``"asid"``
+key sometimes seen in older sample PTW blocks is inert and ignored.) See
 :ref:`Orchestration` for the consumer/stream identity model.
 
 ----------------------------------
@@ -285,7 +296,7 @@ your config. This is useful for verifying that modules are connected correctly::
 
     bin/champsim --config my_config.json --dump
 
-This prints every module, its parameters, and its connections to stderr.
+This prints every module, its parameters, and its connections to stdout.
 
 ----------------------------------
 Globals and Lexical Scoping

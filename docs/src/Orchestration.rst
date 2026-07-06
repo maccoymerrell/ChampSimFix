@@ -121,9 +121,13 @@ configuration. Consumers that mirror another consumer's identity rather than bei
 hardware contexts of their own may ``pin_consumer_id``; pinned consumers are skipped by
 the enumeration. The ``num_consumers`` global (readable by any module through the
 ``ModuleBuilder`` fall-through) sizes per-consumer tables such as ``ship`` and ``drrip``
-replacement state. The explicit environment derives it by counting workload sources in
-the config; override it with a root-level ``"num_consumers"`` key when consumers hold
-multiple sources.
+replacement state. The explicit environment derives it by counting consumer models in the
+config (models carrying the ``source_consumer`` mixin, via
+``interface_registry::model_is_consumer``); each consumer is counted exactly once
+regardless of how many sources it holds, and the source and stream totals are published
+separately as ``num_sources`` and ``num_streams``. Override it with a root-level
+``"num_consumers"`` key (for example when a model mirrors another consumer's identity via
+``pin_consumer_id``).
 
 .. _Orch_Origin:
 
@@ -216,8 +220,9 @@ Parameters::
 
 ``eof_policy`` selects what happens when a consumer's sources are exhausted:
 ``"complete_all"`` (default; the classic trace-driven behavior — the first exhausted
-source ends the phase for everyone) or ``"complete_consumer"``/``"complete_source"``
-(only that consumer completes; for heterogeneous runs).
+source ends the phase for everyone) or ``"complete_source"`` (only the exhausted source
+completes; for heterogeneous runs). Any value other than the exact string
+``"complete_source"`` is treated as ``"complete_all"``.
 
 Instead of ``warmup_length``/``simulation_length``, a controller may declare an
 arbitrary phase list::
