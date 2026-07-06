@@ -201,7 +201,7 @@ The generic shipped model is ``PHASE_CONTROLLER`` (``INSTRUCTION_PHASE_CONTROLLE
 remains as an alias). It is token-agnostic and owns only generic mechanics:
 
 * **Completion** — a consumer completes when its ``sim_progress()`` delta reaches the
-  phase length (in its own token unit), or when its sources hit EOF.
+  phase length (in its own token unit), or when one of its sources signals end-of-stream.
 * **Deadlock** — ``deadlock_cycles`` consecutive zero-progress cycles abort the run,
   unless a consumer or operable reports ``has_pending_work()``.
 * **Health** — every ``health_period`` cycles each governed consumer's ``check_health``
@@ -218,11 +218,14 @@ Parameters::
         "simulation_length": "$simulation_instructions"
     }
 
-``eof_policy`` selects what happens when a consumer's sources are exhausted:
-``"complete_all"`` (default; the classic trace-driven behavior — the first exhausted
-source ends the phase for everyone) or ``"complete_source"`` (only the exhausted source
-completes; for heterogeneous runs). Any value other than the exact string
-``"complete_source"`` is treated as ``"complete_all"``.
+By default a trace source replays (``repeat: true``): it reopens the trace at the end and
+never signals end-of-stream, so it feeds instructions until the consumer reaches the phase
+length. ``eof_policy`` matters only for a *finite* source that does signal end-of-stream (a
+non-repeating trace, or a bounded generator): ``"complete_all"`` (default) ends the phase
+for every consumer at that first signal; ``"complete_source"`` retires only the consumer
+whose source ended and lets the others run on to their own phase lengths (heterogeneous
+mixes). Any value other than the exact string ``"complete_source"`` is treated as
+``"complete_all"``.
 
 Instead of ``warmup_length``/``simulation_length``, a controller may declare an
 arbitrary phase list::

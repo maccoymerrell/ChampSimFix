@@ -250,7 +250,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
   // Store the environment builder itself
   builder_params_[(builder.get_name().empty() ? "LEGACY_ENVIRONMENT" : builder.get_name())] = builder;
 
-  // Local variables (formerly member variables)
+  // Local variables
   std::vector<channel_module*> channels;
   memory_controller_module* DRAM = nullptr;
   vmem_module* vmem = nullptr;
@@ -943,7 +943,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
       }
       src_builder.add_parameter("trace_file", trace_names[static_cast<std::size_t>(cc.index)]);
       src_builder.add_parameter("cloudsuite", builder.get_parameter<bool>("cloudsuite", true, false));
-      src_builder.add_parameter("repeat", builder.get_parameter<bool>("repeat", true, false));
+      src_builder.add_parameter("repeat", builder.get_parameter<bool>("repeat", true, true));
     }
     core_builder.add_submodule("workload_source", std::move(src_builder));
 

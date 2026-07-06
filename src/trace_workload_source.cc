@@ -7,7 +7,8 @@
  *     share one framework-assigned stream (address space); unlabeled sources
  *     each get their own. Numeric ids are never configured (see origin.h).
  *   - cloudsuite (bool, optional): use cloudsuite trace format (default: false)
- *   - repeat (bool, optional): loop the trace on EOF (default: false)
+ *   - repeat (bool, optional): loop the trace on EOF, replaying it so the source
+ *     never signals end-of-stream and the phase runs to its length (default: true)
  */
 
 #include <optional>
@@ -33,7 +34,7 @@ struct trace_workload_source : public champsim::modules::instruction_source {
   explicit trace_workload_source(champsim::modules::ModuleBuilder builder)
     : trace_path_(builder.get_parameter<std::string>("trace_file")),
       cloudsuite_(builder.get_parameter<bool>("cloudsuite", true, false)),
-      repeat_(builder.get_parameter<bool>("repeat", true, false))
+      repeat_(builder.get_parameter<bool>("repeat", true, true))
   {
     stream_label_ = builder.get_parameter<std::string>("stream", true, std::string{});
   }
