@@ -1372,8 +1372,7 @@ struct module_base {
     // where the stream defaults to the consumer's id (see origin.h).
     source_consumer* consumer_ = nullptr;
 
-    // Standalone instances (unit tests) fall back to the owning consumer's
-    // id, the historical default.
+    // Standalone instances (unit tests) fall back to the owning consumer's id.
     uint32_t default_stream() const override { return static_cast<uint32_t>(consumer_ != nullptr ? consumer_->consumer_id() : 0); }
 
   private:

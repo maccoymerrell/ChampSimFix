@@ -125,7 +125,7 @@ private:
   void issue_translation(tag_lookup_type& q_entry);
 
   // Route a tag-lookup entry to the correct pipeline stage. Gating on
-  // (lower_translate != nullptr && !is_translated) confines the PIPT timing fix
+  // (lower_translate != nullptr && !is_translated) confines the additive timing
   // to physically-indexed data caches: such untranslated entries park in
   // untranslated_tag_check with no event_cycle (stamped later by
   // finish_translation); everything else enters inflight_tag_check timed from

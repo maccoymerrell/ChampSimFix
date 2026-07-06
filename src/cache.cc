@@ -554,9 +554,9 @@ uint64_t CACHE::get_set(uint64_t address) const { return static_cast<uint64_t>(g
 
 long CACHE::get_set_index(champsim::address address) const
 {
-  // Same value as slicing lg2(NUM_SET) bits above OFFSET_BITS, but avoids a
-  // dynamic-extent slice per lookup (called on every tag check, fill, and
-  // replacement update).
+  // Physical set index: the lg2(NUM_SET) bits above OFFSET_BITS, via a
+  // precomputed shift+mask since this runs on every tag check, fill, and
+  // replacement update.
   return static_cast<long>((address.to<uint64_t>() >> set_index_shift_) & set_index_mask_);
 }
 
@@ -665,9 +665,9 @@ void CACHE::finish_translation(const response_type& packet)
   auto matches_vpage = [page_num = champsim::page_number{packet.v_address}](const auto& entry) {
     return (champsim::page_number{entry.v_address} == page_num) && !entry.is_translated;
   };
-  // The tag check begins only now that translation produced the physical set
-  // index, so stamp it ADDITIVELY: (translation-complete) + HIT_LATENCY, never
-  // overlapped with translation latency. Crux of the PIPT correctness fix.
+  // The tag check can begin only now that translation produced the physical
+  // set index, so stamp it additively: (translation-complete) + HIT_LATENCY. A
+  // physically-indexed cache cannot overlap the tag check with translation.
   const auto tag_check_ready = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : HIT_LATENCY);
   auto complete_translation = [p_page = champsim::page_number{packet.data}, tag_check_ready, this](auto& entry) {
     [[maybe_unused]] auto old_address = entry.address;

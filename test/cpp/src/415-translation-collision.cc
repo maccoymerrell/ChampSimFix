@@ -61,9 +61,9 @@ SCENARIO("A cache keeps the address for packets that don't need translation")
         // The pre-translated `test` (0xcafebabe) must not be corrupted by the
         // same-virtual-page translation the seed triggers; both reach the lower
         // level, and 0xcafebabe stays distinct from the seed's translated
-        // 0x11111eef. Order (PIPT fix): pre-translated `test` tag-checks at
-        // admission + HIT_LATENCY and is forwarded FIRST; the untranslated `seed`
-        // waits for its (additive) translation and is forwarded SECOND.
+        // 0x11111eef. Order: pre-translated `test` tag-checks at admission +
+        // HIT_LATENCY and is forwarded FIRST; the untranslated `seed` waits for
+        // its (additive) translation and is forwarded SECOND.
         REQUIRE_THAT(mock_ll.addresses, Catch::Matchers::RangeEquals(std::vector{test.address, champsim::address{0x11111eef}}));
       }
     }

@@ -904,9 +904,7 @@ The default bit-slice, made explicit (``indexer/bit_slice/bit_slice.h``):
       // Canonical bit-slice: use champsim::address::slice with a
       // dynamic_extent describing [offset_bits, offset_bits + lg2(num_sets)),
       // then unwrap the strongly-typed slice with .to<long>(). This yields the
-      // same set index as CACHE::get_set_index's built-in default, which
-      // computes that value with a precomputed shift+mask to avoid a
-      // dynamic-extent slice on every lookup.
+      // same set index as CACHE::get_set_index's built-in default.
       return addr
           .slice(champsim::dynamic_extent{offset_bits, champsim::lg2(num_sets)})
           .to<long>();
@@ -1019,7 +1017,7 @@ hooks (e.g. ``void CACHE::prefetcher_initialize()``), here is how to update them
    * Add ``override`` to each method.
 
 3. **Move global state** into member variables.  Each module instance gets its own
-   state — you no longer need to key state by cache/CPU pointer.
+   state, so it need not be keyed by cache/CPU pointer.
 
 4. **Add a constructor** that takes ``champsim::modules::ModuleBuilder``.  If you need
    access to the parent cache or core, call ``builder.get_parent<T>()``.

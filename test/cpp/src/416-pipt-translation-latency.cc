@@ -134,7 +134,7 @@ TEST_CASE("A pre-translated access into a translating cache is not delayed by tr
 // non-translating cache. The fixed path is gated on (lower_translate != nullptr
 // && !is_translated), so it is never entered: every access tag-checks from
 // admission + HIT_LATENCY, byte-identical to pre-fix. 401 corroborates.
-SCENARIO("A non-translating (TLB-like) cache is unaffected by the PIPT fix")
+SCENARIO("A non-translating (TLB-like) cache tag-checks without waiting on translation")
 {
   GIVEN("An empty cache with no translator")
   {
