@@ -75,12 +75,10 @@ struct LSQ_ENTRY : champsim::program_ordered<LSQ_ENTRY> {
   uint64_t producer_id = std::numeric_limits<uint64_t>::max();
   std::vector<std::reference_wrapper<std::optional<LSQ_ENTRY>>> lq_depend_on_me{};
 
-  // Physical ROB slot of the owning instruction, captured at
-  // do_memory_scheduling. The owner is provably still resident at that slot
-  // when finish() runs (it cannot retire until all its mem ops finish, and ROB
-  // slots are reused only after retire), so finish() indexes it in O(1)
-  // instead of an instr_id partition_point. Keyed on the physical slot, not
-  // instr_id, so gapped multi-core ids are irrelevant.
+  // Physical ROB slot of the owning instruction (captured at
+  // do_memory_scheduling): the owner is still resident when finish() runs, so
+  // it indexes in O(1) instead of an instr_id partition_point. Keyed on the
+  // physical slot, so gapped multi-core ids are irrelevant.
   std::size_t rob_slot{};
 
   LSQ_ENTRY(champsim::address addr, champsim::program_ordered<LSQ_ENTRY>::id_type id, champsim::address ip, champsim::origin origin);
@@ -91,8 +89,7 @@ struct LSQ_ENTRY : champsim::program_ordered<LSQ_ENTRY> {
 class O3_CPU : public champsim::modules::core_module, public champsim::module_phase, public champsim::module_stat
 {
 public:
-  // This core's consumer id (its "CPU number"): hardware-context identity
-  // for provenance stamping, tables, stats, and phase tracking.
+  // This core's consumer id (its "CPU number"): hardware-context identity.
 
   // cycle
   champsim::chrono::clock::time_point begin_phase_time{};
@@ -110,40 +107,32 @@ public:
   // instruction buffer
   struct dib_shift {
     champsim::data::bits shamt;
-    // Integer projection: equality of the shifted values matches equality of
-    // the upper-slice objects the DIB previously stored, without building a
-    // dynamic-extent slice per lookup (two lookups per fetched instruction).
+    // Integer projection: shifted-value equality matches the DIB's old
+    // upper-slice equality, without building a slice per lookup.
     auto operator()(champsim::address val) const { return val.to<uint64_t>() >> champsim::to_underlying(shamt); }
   };
   using dib_type = champsim::msl::lru_table<champsim::address, dib_shift, dib_shift>;
   dib_type DIB;
 
   // reorder buffer, load/store queue, register file
-  // Frontend stage buffers: admission is gated at the configured sizes
-  // (promote_to_decode and decode_instruction clamp their bandwidth to the
-  // free space), and erasure is front-anchored, so fixed-capacity rings
-  // replace the deques' chunk churn.
+  // Frontend stage buffers: admission gated at the configured sizes, erasure
+  // front-anchored, so fixed-capacity rings replace the deques' chunk churn.
   champsim::ring_buffer<ooo_model_instr> DISPATCH_BUFFER;
   champsim::ring_buffer<ooo_model_instr> DECODE_BUFFER;
   champsim::ring_buffer<ooo_model_instr> DIB_HIT_BUFFER;
 
 private:
-  // The ROB, LQ, and IFETCH_BUFFER carry incrementally maintained
-  // bookkeeping (scheduled prefix, stage change-detectors, occupancy and
-  // readiness bitmaps, frontend scan positions); they are private so no
-  // outside mutation can desynchronize it. Inspect through
-  // rob()/lq()/ifetch_buffer(); mutate through the modify_* counterparts,
-  // which re-derive the state.
-  // The ROB is a contiguous fixed-capacity FIFO: the backend stages walk it
-  // every operated cycle, and deque chunk-map iteration was a measured cost.
+  // ROB, LQ, and IFETCH_BUFFER carry incrementally maintained bookkeeping;
+  // private so outside mutation can't desync it. Inspect via rob()/lq()/
+  // ifetch_buffer(); mutate via the modify_* counterparts, which re-derive it.
+  // The ROB is a contiguous fixed-capacity FIFO walked every operated cycle.
   champsim::ring_buffer<ooo_model_instr> ROB;
   std::vector<std::optional<LSQ_ENTRY>> LQ;
   champsim::ring_buffer<ooo_model_instr> IFETCH_BUFFER;
 
-  // The SQ is a ring buffer: dispatch admits at the back (gated at SQ_SIZE),
-  // completion erases at the front, and sq_store_index_ holds pointers into
-  // it — ring elements never move for their whole residency (the buffer is
-  // never enlarged), so those pointers are as stable as the deque's were.
+  // SQ ring buffer: dispatch admits at the back, completion erases at the
+  // front. sq_store_index_ holds pointers into it; ring elements never move
+  // for their residency (never enlarged), so those pointers stay stable.
   champsim::ring_buffer<LSQ_ENTRY> SQ;
 
 public:
@@ -154,8 +143,7 @@ public:
   const champsim::ring_buffer<ooo_model_instr>& ifetch_buffer() const { return IFETCH_BUFFER; }
 
   // Apply an arbitrary mutation, then re-derive all dependent bookkeeping.
-  // This is the sanctioned way to reach into these structures from outside
-  // (tests, experiment harnesses); it cannot leave the state inconsistent.
+  // The sanctioned way to mutate these structures from outside (tests).
   template <typename F>
   void modify_rob(F&& fn)
   {
@@ -219,39 +207,28 @@ public:
 private:
   bool warmup_ = true;
   [[maybe_unused]] bool roi_ = false;
-  // Number of free LQ slots, maintained at the four LQ mutation sites so
-  // dispatch does not re-count 128 optionals per loop iteration.
+  // Free LQ slot count, maintained at the four LQ mutation sites so dispatch
+  // need not re-count the optionals per iteration.
   long lq_free_slots_ = 0;
-  // Occupied-slot bitmap for the LQ, maintained at the same four sites.
-  // Iterating set bits ascending visits exactly the occupied slots in index
-  // order — the same order as a full scan of the vector.
+  // Occupied-slot bitmap for the LQ, maintained at the same four sites;
+  // set bits ascending visit the occupied slots in index order.
   std::vector<uint64_t> lq_occupied_;
-  // Issue candidates: occupied slots with no producer and fetch not yet
-  // issued. When the LQ is full of in-flight loads the occupancy bitmap
-  // degenerates to a full scan; this one stays proportional to actionable
-  // entries.
+  // Issue candidates: occupied slots with no producer, fetch not yet issued.
+  // Stays proportional to actionable entries, unlike the occupancy bitmap.
   std::vector<uint64_t> lq_unissued_;
-  // The subset of unissued candidates whose ready_time has passed — the
-  // exact set operate_lsq's walk would act on. Entries are promoted here
-  // from lq_pending_ready_ (enrolled at do_execution, ready_times monotone,
-  // so promotion is a FIFO pop) as the clock passes their ready_time. Under
-  // read-queue backpressure the walk becomes a popcount instead of
-  // re-checking hundreds of waiting candidates every cycle.
+  // Unissued candidates whose ready_time has passed — the exact set
+  // operate_lsq acts on. Promoted from lq_pending_ready_ as the clock passes
+  // their ready_time (ready_times monotone, so promotion is a FIFO pop).
   std::vector<uint64_t> lq_ready_;
   std::deque<std::pair<champsim::chrono::clock::time_point, uint32_t>> lq_pending_ready_;
-  // Return-matching index: FETCH-ISSUED loads keyed by their block address —
-  // exactly what an L1D return carries. A demand load leaves the LQ only
-  // through handle_memory_return (producer-waiting loads never issue,
-  // immediate-store-forward loads are freed before issue), so this index is
-  // maintained at exactly two transitions: a load's slot is inserted when
-  // operate_lsq marks it fetch_issued, and erased when a matching return
-  // finishes it. handle_memory_return's per-return lookup replaces the sweep
-  // over every occupied LQ slot. Mirrors the sq_store_index_ idiom.
+  // Return-matching index: fetch-issued loads keyed by block address (what an
+  // L1D return carries). Maintained at two transitions — inserted when
+  // operate_lsq marks a load fetch_issued, erased when a matching return
+  // finishes it — so handle_memory_return does a lookup, not an LQ sweep.
   std::unordered_map<uint64_t, std::vector<uint32_t>> hmr_block_index_;
 
   // Allocation-free fixed-capacity vector for the per-instruction memory
-  // handles below: an instruction carries at most NUM_INSTR_SOURCES (4) memory
-  // loads and NUM_INSTR_DESTINATIONS_SPARC (4) memory stores.
+  // handles below (<=4 loads, <=4 stores per instruction).
   template <typename T, std::size_t N>
   struct bounded_array {
     std::array<T, N> data_{};
@@ -272,45 +249,35 @@ private:
     bounded_array<uint16_t, 4> lq_slots{};
     bounded_array<LSQ_ENTRY*, 4> sq_entries{};
   };
-  // Per-ROB-slot memory handles, keyed by the instruction's stable physical ROB
-  // slot. Recorded at do_memory_scheduling (the LQ/SQ entries it just created)
-  // and read at do_execution, so ready-time stamping visits <=4 recorded
-  // handles instead of scanning the whole LQ and SQ for a matching instr_id.
-  // Overwritten on every dispatch into a slot, so the resident instruction's
-  // handle is always current; rebuilt from LQ/SQ/ROB in the resync_* paths.
+  // Per-ROB-slot memory handles, keyed by stable physical slot. Recorded at
+  // do_memory_scheduling, read at do_execution, so ready-time stamping visits
+  // <=4 handles instead of scanning LQ and SQ. Overwritten on each dispatch
+  // into a slot; rebuilt from LQ/SQ/ROB in the resync_* paths.
   std::vector<rob_mem_handle> rob_mem_handles_;
 
   // Post-EOF drain latch for poll_cycle (see there).
   bool drained_latch_ = false;
 
   // Frontend scan positions over IFETCH_BUFFER. dib_checked entries form a
-  // strict prefix (checked in window order, erased only at the front), so
-  // ifetch_dib_checked_ is its exact length. ifetch_fetch_scan_ is a
-  // monotone lower bound on the first fetch-ready entry (flags are
-  // monotone and unchecked entries form a suffix); the scan advances it
-  // lazily, so each buffer position is walked O(1) times amortized.
+  // strict prefix, so ifetch_dib_checked_ is its exact length.
+  // ifetch_fetch_scan_ is a monotone lower bound on the first fetch-ready
+  // entry, advanced lazily so each position is walked O(1) times amortized.
   long ifetch_dib_checked_ = 0;
   long ifetch_fetch_scan_ = 0;
 
   // Length of the scheduled prefix of the ROB. Scheduled entries always form
-  // a strict prefix: dispatch appends unscheduled entries with monotone
-  // ready_times, schedule_instruction schedules in order from the prefix
-  // boundary, and retire pops completed (hence scheduled) entries.
+  // a strict prefix (dispatch appends unscheduled, schedule fills in order,
+  // retire pops completed).
   long num_scheduled_ = 0;
   // Scheduler-window occupancy: scheduled-but-unexecuted instructions hold
-  // scheduler slots. Maintained by do_scheduling/do_execution; pre-charges
-  // the SCHEDULER_SIZE budget so the rename walk need not revisit them.
+  // slots. Pre-charges the SCHEDULER_SIZE budget so rename skips them.
   long scheduler_occupancy_ = 0;
 
   // Stage candidate sets, as bitmaps over the ROB's stable physical slots:
   // exec candidates are scheduled-and-unexecuted; mem-complete candidates are
-  // executed-and-uncompleted instructions whose memory ops have ALL finished
-  // (completed_mem_ops == num_mem_ops) — the exact subset complete_inflight can
-  // actually complete. Bits are set/cleared at the state transitions
-  // (do_scheduling; do_execution and the memory-op finish that crosses
-  // completed_mem_ops == num_mem_ops for an executed instruction;
-  // do_complete_execution), so the walks visit only actionable instructions
-  // instead of the whole ROB. Iterated in age order (from the head slot,
+  // executed-and-uncompleted with all memory ops finished (completed_mem_ops
+  // == num_mem_ops). Bits set/cleared at the state transitions, so the walks
+  // visit only actionable instructions. Iterated in age order (from head,
   // wrapping).
   std::vector<uint64_t> exec_candidates_;
   std::vector<uint64_t> mem_complete_candidates_;
@@ -318,9 +285,8 @@ private:
   static void candidate_set(std::vector<uint64_t>& bits, std::size_t slot) { bits[slot >> 6] |= (uint64_t{1} << (slot & 63)); }
   static void candidate_clear(std::vector<uint64_t>& bits, std::size_t slot) { bits[slot >> 6] &= ~(uint64_t{1} << (slot & 63)); }
 
-  // Block-address key for the return index: the same shift handle_memory_return
-  // applies to a returned packet's address, so an issue-site insert and a
-  // return-site lookup land on the same key.
+  // Block-address key for the return index: same shift handle_memory_return
+  // applies, so issue-site insert and return-site lookup land on one key.
   static uint64_t hmr_block_key(champsim::address addr)
   {
     return addr.to<uint64_t>() >> champsim::to_underlying(champsim::block_number_extent{}.lower);
@@ -362,10 +328,9 @@ private:
     return visit_candidate_range(bits, head, ROB.capacity(), fn) && visit_candidate_range(bits, 0, head, fn);
   }
 
-  // Stage change-detectors: a walk of execute/complete that issues nothing
-  // is side-effect-free, and its outcome can only change through the events
-  // that dirty these flags (a new scheduling, a register completion, a
-  // memory-op finish) or through time reaching the recorded wake point.
+  // Stage change-detectors: an execute/complete walk that issues nothing is
+  // side-effect-free; its outcome changes only via the events that dirty
+  // these flags or time reaching the recorded wake point.
   bool exec_stage_clean_ = false;
   champsim::chrono::clock::time_point exec_stage_wake_{};
   bool complete_stage_clean_ = false;
@@ -391,20 +356,16 @@ private:
   }
 
   // Store-forwarding index: per (exact virtual address) stack of SQ entries,
-  // oldest first, youngest at the back. std::deque guarantees references to
-  // unerased elements survive push_back and front-erasure, and the SQ only
-  // grows at the back (dispatch, in program order) and shrinks at the front
-  // (completion, oldest first), so each stack stays age-ordered and the back
-  // is exactly the youngest store to that address — what the forwarding
-  // max_element scan previously searched for.
+  // oldest first, youngest at the back. The SQ grows at the back (dispatch,
+  // program order) and shrinks at the front (completion, oldest first), so
+  // each stack stays age-ordered and the back is the youngest store to that
+  // address — what the forwarding scan previously searched for.
   std::unordered_map<uint64_t, std::vector<LSQ_ENTRY*>> sq_store_index_;
 
   // Rebuild the ROB-slot-keyed memory handles from the live LQ, SQ, and ROB.
-  // The owner of each memory entry is found by instr_id (ROB is instr_id
-  // sorted). Only currently-occupied LQ slots are recorded, which is exactly
-  // the set do_execution's revalidation would act on, and slots are visited
-  // ascending / stores front-to-back to match the recording order of normal
-  // operation. Called from every resync_* path that can move these entries.
+  // Owners found by instr_id (ROB is instr_id sorted); slots visited ascending
+  // / stores front-to-back to match normal recording order. Called from every
+  // resync_* path that can move these entries.
   void rebuild_rob_mem_handles()
   {
     rob_mem_handles_.assign(ROB.capacity(), rob_mem_handle{});

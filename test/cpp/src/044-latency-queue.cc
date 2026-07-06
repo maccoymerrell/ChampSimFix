@@ -100,9 +100,9 @@ TEST_CASE("drain_ready with ample bandwidth retires the whole ready prefix")
 TEST_CASE("drain_ready never retires past the ready boundary even with later-ready-looking entries")
 {
   // The readiness boundary is the FIRST non-ready entry (a front prefix), not a
-  // filter: an entry after a non-ready one is never reached this cycle, matching
-  // the get_span_p the sites open-coded. (Callers keep ready-times nondecreasing;
-  // here we deliberately violate that to pin the boundary semantics.)
+  // filter: an entry after a non-ready one is never reached this cycle (matches
+  // the open-coded get_span_p at the call sites). Callers keep ready-times
+  // nondecreasing; here we violate that to pin the boundary.
   auto q = make_queue({{at(10), 0}, {at(50), 1}, {at(10), 2}});
   champsim::bandwidth bw{champsim::bandwidth::maximum_type{16}};
 

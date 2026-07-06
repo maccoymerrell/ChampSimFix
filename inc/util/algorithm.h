@@ -49,16 +49,11 @@ long int transform_while_n(R& queue, Output out, bandwidth sz, F&& test_func, G&
 }
 
 /**
- * An in-place stable partition for small ranges.
- *
- * Behaves exactly like std::stable_partition — the predicate is applied
- * exactly once per element, in first-to-last order (this matters: some
- * callers use side-effectful predicates), and the relative order within both
- * groups is preserved — but never acquires the temporary buffer that library
- * implementations allocate per call. Cost is O(d*n) element moves, where d
- * is the number of out-of-place elements; intended for the simulator's
- * bandwidth-bounded windows (a handful of elements), where the hidden
- * malloc/free pair costs more than the moves.
+ * In-place stable partition for small ranges. Like std::stable_partition
+ * (predicate applied exactly once per element, first-to-last — some callers'
+ * predicates are side-effectful — with relative order preserved in both groups)
+ * but allocates no temporary buffer. O(d*n) moves for d out-of-place elements;
+ * for bandwidth-bounded windows where a malloc/free pair outweighs the moves.
  */
 template <typename It, typename Pred>
 It stable_partition_small(It first, It last, Pred pred)

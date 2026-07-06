@@ -29,9 +29,8 @@ champsim::channel::channel() : channel(champsim::modules::ModuleBuilder{"default
 
 namespace
 {
-// Queue sizes may be configured as "effectively unbounded" (the legacy DRAM
-// channel uses SIZE_MAX): such queues start with a modest allocation and
-// enlarge on demand, while bounded queues are allocated at their exact
+// "Effectively unbounded" queues (e.g. the legacy DRAM channel's SIZE_MAX)
+// start small and grow on demand; bounded queues are allocated at their exact
 // admission limit.
 std::size_t initial_queue_capacity(std::size_t configured_size)
 {
@@ -44,11 +43,9 @@ std::size_t initial_queue_capacity(std::size_t configured_size)
 champsim::channel::channel(champsim::modules::ModuleBuilder builder)
     : RQ_SIZE(builder.get_parameter<std::size_t>("rq_size", false, 0)), PQ_SIZE(builder.get_parameter<std::size_t>("pq_size", false, 0)), WQ_SIZE(builder.get_parameter<std::size_t>("wq_size", false, 0)), OFFSET_BITS(builder.get_parameter<champsim::data::bits>("offset_bits", false, champsim::data::bits{0})), match_offset_bits(builder.get_parameter<bool>("match_offset_bits", false, false))
 {
-  // The request queues are admission-gated at their configured sizes.
-  // Responses have no modeled bound (one arrives per accepted request still
-  // in flight below); the returned queue starts with a heuristic capacity
-  // and enlarges on demand — producers push through
-  // push_back_grow()/emplace_back_grow().
+  // Request queues are admission-gated at their configured sizes. Responses
+  // have no modeled bound, so the returned queue starts at a heuristic capacity
+  // and grows on demand (producers use push_back_grow()/emplace_back_grow()).
   RQ.set_capacity(::initial_queue_capacity(RQ_SIZE));
   PQ.set_capacity(::initial_queue_capacity(PQ_SIZE));
   WQ.set_capacity(::initial_queue_capacity(WQ_SIZE));
@@ -63,9 +60,8 @@ bool champsim::channel::do_add_queue(R& queue, std::size_t queue_size, const typ
     return false; // cannot handle this request
   }
 
-  // One copy into the queue (the local staging copy was a second, dead one).
-  // Growth only ever triggers on effectively-unbounded queues: a bounded
-  // queue is rejected above before it reaches its allocation.
+  // Growth only ever triggers on effectively-unbounded queues: a bounded queue
+  // is rejected above before it reaches its allocation.
   queue.push_back_grow(packet);
 
   return true;

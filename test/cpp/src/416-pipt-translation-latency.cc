@@ -4,20 +4,13 @@
 #include "defaults.hpp"
 #include "mocks.hpp"
 
-// Pins the physically-indexed (PIPT) translation-timing fix: for a cache that
-// translates (lower_translate != nullptr), an access that arrives UNTRANSLATED
-// cannot begin its tag check until translation has produced the physical set
-// index, so the translation latency is ADDITIVE (serialized before the tag
-// check), never hidden under HIT_LATENCY.
-//
-// The bug this guards against only manifested for FAST (TLB-hit) translations,
-// where the translation completed inside the HIT_LATENCY window and was
-// therefore fully overlapped — making a physically-indexed cache behave as if
-// it were virtually indexed. This test deliberately uses a translator whose
-// latency is SMALLER than HIT_LATENCY (the overlapped case) and asserts the
-// additive total. Sibling test 412-queue-translation-miss already pins the
-// slow-translation case (translator latency > HIT_LATENCY), which was additive
-// even before the fix.
+// PIPT translation-timing fix: for a translating cache (lower_translate !=
+// nullptr), an UNTRANSLATED access cannot tag-check until translation yields the
+// physical set index, so translation latency is ADDITIVE, never hidden under
+// HIT_LATENCY. The bug only surfaced for FAST (TLB-hit) translations that fit
+// inside the HIT_LATENCY window (fully overlapped); this test uses
+// translate_latency < hit_latency to pin that case. 412 pins the slow case
+// (translator latency > HIT_LATENCY), which was additive even pre-fix.
 TEMPLATE_TEST_CASE("An untranslated access serializes translation before its tag check (PIPT)", "", to_wq_MRP, to_rq_MRP, to_pq_MRP)
 {
   GIVEN("An empty cache with a translator faster than its hit latency")
@@ -69,12 +62,10 @@ TEMPLATE_TEST_CASE("An untranslated access serializes translation before its tag
 
       THEN("Translation latency is additive, not hidden under the hit latency")
       {
-        // Additive total: translate_latency + hit_latency + fill_latency + 2
-        // (the trailing +2 is the fixed inter-element clocking delay, identical
-        // to the slow-translation formula validated in 412). Because
-        // translate_latency (4) < hit_latency (10), the buggy overlapped model
-        // would have hidden the translation entirely and returned in
-        // hit_latency + fill_latency + 2 == 15; the additive value is 19.
+        // Additive total: translate + hit + fill + 2 (the +2 is fixed
+        // inter-element clocking, as in 412). Since translate(4) < hit(10), the
+        // buggy overlapped model would hide translation and return
+        // hit+fill+2==15; the additive value is 19.
         constexpr uint64_t additive = translate_latency + hit_latency + fill_latency + 2;
         constexpr uint64_t overlapped_buggy = hit_latency + fill_latency + 2;
         static_assert(additive > overlapped_buggy, "the fix must make the fast-translation path strictly slower than the overlapped bug");
@@ -84,11 +75,9 @@ TEMPLATE_TEST_CASE("An untranslated access serializes translation before its tag
   }
 }
 
-// A pre-translated access into the SAME translating cache must be unaffected by
-// the fix: it never needs translation, so its tag check is timed from admission
-// (event_cycle = admission + HIT_LATENCY) exactly as before. Contrasting it with
-// the untranslated case above shows the delta is precisely the translation
-// round trip — i.e. the translation is serialized, not overlapped.
+// A pre-translated access into the same translating cache never translates, so
+// its tag check is timed from admission + HIT_LATENCY as before. The delta from
+// the untranslated case above is precisely the translation round trip.
 TEST_CASE("A pre-translated access into a translating cache is not delayed by translation")
 {
   constexpr uint64_t hit_latency = 10;
@@ -141,13 +130,10 @@ TEST_CASE("A pre-translated access into a translating cache is not delayed by tr
   }
 }
 
-// TLB scoping: a cache with NO translator (lower_translate == nullptr) is a TLB
-// (or any non-translating cache). The fix's changed path is gated on
-// (lower_translate != nullptr && !is_translated), so such a cache NEVER enters
-// it — every access is tag-checked immediately on admission, timed from
-// admission + HIT_LATENCY, byte-identical to before the fix. This pins that
-// invariant directly; 401-hit-latency corroborates it with the same exact-hit
-// timing on a non-translating cache.
+// A cache with no translator (lower_translate == nullptr) is a TLB / any
+// non-translating cache. The fixed path is gated on (lower_translate != nullptr
+// && !is_translated), so it is never entered: every access tag-checks from
+// admission + HIT_LATENCY, byte-identical to pre-fix. 401 corroborates.
 SCENARIO("A non-translating (TLB-like) cache is unaffected by the PIPT fix")
 {
   GIVEN("An empty cache with no translator")

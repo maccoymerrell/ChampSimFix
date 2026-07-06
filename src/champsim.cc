@@ -77,24 +77,14 @@ static std::vector<module_stat_entry> collect_module_stat(modules::environment_m
   return out;
 }
 
-// Pure cycle operation: order operables by simulation time, then operate all.
-// Operables vector is passed in to avoid re-querying the environment each cycle.
+// Order operables by current_time (furthest-behind first — functional, not
+// incidental), then operate all. Vector passed in to avoid per-cycle re-query.
 //
-// The sort orders by current_time so the operables furthest behind (each runs
-// at its own clock period, so they drift apart) are operated first — a
-// functional ordering, not incidental. Cheap in practice: the vector is small
-// and near-sorted every cycle.
-//
-// CAVEAT (behavioral, load-bearing): std::sort is not stable, so operables at
-// the SAME current_time are permuted in an implementation-defined order once
-// the range exceeds libstdc++'s 16-element insertion-sort threshold. Their
-// operate order within a cycle is observable (a same-time producer/consumer
-// pair), so simulation results depend on that tie ordering. This is baked into
-// the reference outputs: making the sort stable, skipping it when "already
-// sorted", or building against a different standard library can all shift
-// results for configs with >16 operables (e.g. multi-core). Do not "fix" it
-// without deliberately re-baselining — the dependency is a known portability
-// fragility, not a correctness contract.
+// LOAD-BEARING: std::sort is unstable, so same-current_time operables (>16, past
+// libstdc++'s insertion-sort threshold) tie-break in an implementation-defined
+// order that IS observable and baked into the reference outputs. Making the sort
+// stable/skippable or changing stdlib shifts results for >16-operable configs
+// (multi-core). Do not "fix" without re-baselining.
 long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables, champsim::chrono::clock& global_clock)
 {
   std::sort(std::begin(operables), std::end(operables),
@@ -108,13 +98,10 @@ long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables
   return progress;
 }
 
-// Generic phase loop, driving any number of phase controllers.
-// Combination rules: the phase ABORTs if any controller aborts, and COMPLETEs
-// when every controller reports complete. on_source_complete fires once per
-// source id, the first time any controller reports it complete.
-// Source EOF is observed by the controllers themselves, via each consumer's
-// source_eof() — the orchestrator carries no workload knowledge.
-// Caches typed_view and module_phase results once per phase for performance.
+// Generic phase loop over any number of phase controllers: ABORT if any aborts,
+// COMPLETE when all complete. on_source_complete fires once per source id. EOF
+// is observed by the controllers via source_eof() (the orchestrator carries no
+// workload knowledge). Caches views once per phase.
 void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t length,
                modules::environment_module& env,
                std::vector<std::reference_wrapper<modules::phase_controller>>& controllers,
@@ -219,11 +206,9 @@ static phase_stats collect_phase_stats(const phase_info& phase, modules::environ
   return stats;
 }
 
-// Assign identities. Consumer ids and stream ids are framework-internal:
-// consumers enumerate densely in configuration order, and every workload
-// source gets its own stream (its own address space) unless sources share
-// a "stream" label in the configuration, in which case they share one id.
-// Configurations never contain the numbers; only origins carry them.
+// Assign framework-internal identities: consumers enumerate densely in config
+// order; each workload source gets its own stream (address space) unless sources
+// share a "stream" label. Configs never contain the numbers; only origins do.
 void assign_identities(modules::environment_module& env)
 {
   identities().clear();
@@ -275,11 +260,9 @@ void assign_identities(modules::environment_module& env)
     std::exit(-1);
   }
 
-  // Warm each stream's page-table root in stream order. Roots would
-  // otherwise be allocated at each stream's first walk, making physical
-  // page assignment depend on runtime timing; allocating here keeps it a
-  // pure function of the configuration (and matches the historical
-  // construction-time allocation order).
+  // Warm each stream's page-table root in stream order: otherwise roots are
+  // allocated at first walk, making physical page assignment timing-dependent.
+  // Doing it here keeps assignment a pure function of the configuration.
   for (auto& vm : env.typed_view<modules::vmem_module>("vmem")) {
     for (uint32_t stream = 0; stream < next_stream; ++stream) {
       (void)vm.get().get_pte_pa(champsim::origin{champsim::origin::invalid_id, stream}, champsim::page_number{}, vm.get().get_pt_levels());
@@ -302,9 +285,8 @@ std::vector<phase_stats> main(modules::environment_module& env, std::vector<phas
     op.initialize();
   }
 
-  // Gather the phase controllers.
-  // If the environment provides any (explicit config), use all of them.
-  // Otherwise, create one default controller.
+  // Gather phase controllers: use all the environment provides, else create
+  // one default controller.
   auto controllers = env.typed_view<modules::phase_controller>("phase_controller");
   if (controllers.empty()) {
     auto pc_builder = modules::ModuleBuilder("phase_controller", "PHASE_CONTROLLER")

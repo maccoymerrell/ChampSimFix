@@ -37,9 +37,9 @@ class PageTableWalker : public champsim::modules::page_table_walker_module, publ
     champsim::address vaddr;
     champsim::address ptw_addr;
     std::size_t level;
-    // The address space this cached walk step belongs to. A walker is
-    // hardware owned by a consumer, not by an address space: entries are
-    // stream-tagged so concurrent streams never hit each other's steps.
+    // Address space of this cached walk step. The walker is shared hardware,
+    // so entries are stream-tagged to keep concurrent streams from hitting
+    // each other's steps.
     champsim::origin::id_type stream = 0;
   };
 
@@ -74,10 +74,8 @@ class PageTableWalker : public champsim::modules::page_table_walker_module, publ
     mshr_type(const request_type& req, std::size_t level);
   };
 
-  // Walk-state queues. None of them is admission-gated in this model (walk
-  // steps are accepted whenever the lower level accepts the read), so they
-  // start at MSHR_SIZE and enlarge on demand: MSHR through its growing
-  // range-insert, finished/completed through push_back_grow.
+  // Walk-state queues. Not admission-gated (a step is accepted whenever the
+  // lower level accepts the read), so they start at MSHR_SIZE and grow on demand.
   champsim::ring_buffer<mshr_type> MSHR;
   // Time-ordered ready queues keyed on each walk step's data promise: finished
   // steps and completed walks retire from the front once ready, up to MAX_FILL.

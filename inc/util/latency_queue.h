@@ -29,20 +29,14 @@
 namespace champsim
 {
 /**
- * A ready-time projection for entries whose readiness is governed by a
- * champsim::waitable member (the common case in the simulator's latency
- * queues). Point it at the member with a pointer-to-member constant:
+ * Ready-time projection for entries whose readiness is a champsim::waitable
+ * member (the common case). Bind it with a pointer-to-member constant:
  *
  *   champsim::latency_queue<fill_type, champsim::waitable_ready_time<&fill_type::data_promise>>
  *
- * The entry's ready-time is the waitable's event time, or time_point::max()
- * while the waitable has no time set. This is defined so that
- *   waitable_ready_time{}(entry) <= now
- * is bit-for-bit the same predicate as
- *   (entry.*WaitableMember).is_ready_at(now)
- * (both reduce to event_cycle.value_or(time_sentinel) <= now); the drain sites
- * that used is_ready_at therefore keep byte-identical readiness after moving
- * onto this projection.
+ * Ready-time is the waitable's event time (time_point::max() when unset), so
+ * `waitable_ready_time{}(entry) <= now` is byte-identical to
+ * `(entry.*WaitableMember).is_ready_at(now)`.
  */
 template <auto WaitableMember>
 struct waitable_ready_time {
@@ -54,19 +48,13 @@ struct waitable_ready_time {
 };
 
 /**
- * A ready-time projection for entries whose readiness is a plain time_point
- * member (as opposed to a champsim::waitable). Point it at the member with a
- * pointer-to-member constant:
+ * Ready-time projection for entries whose readiness is a plain time_point
+ * member (not a champsim::waitable). Bind it with a pointer-to-member constant:
  *
  *   champsim::latency_queue<tag_lookup_type, champsim::member_ready_time<&tag_lookup_type::event_cycle>>
  *
- * The entry's ready-time is that member's value directly. Entries typically
- * default the member to time_point::max() ("not yet scheduled"), so an
- * unstamped entry is never ready; the stamping site sets it to the cycle the
- * entry becomes eligible. This makes
- *   member_ready_time{}(entry) <= now
- * exactly the plain event_cycle <= now check the drain sites used before
- * migrating onto this projection.
+ * Ready-time is that member's value directly; entries default it to
+ * time_point::max() ("not yet scheduled") so an unstamped entry is never ready.
  */
 template <auto TimeMember>
 struct member_ready_time {
@@ -80,35 +68,20 @@ struct member_ready_time {
 /**
  * A time-ordered ready queue: a bounded FIFO of entries that each carry a
  * ready-time, kept in nondecreasing ready-time order, drained from the front
- * under a bandwidth cap.
+ * under a bandwidth cap. Names once (in drain_ready) the get_span_p +
+ * find_if_not + bandwidth::consume + erase sequence that recurred across cache
+ * fills, page-walk completions, etc.
  *
- * This consolidates the "time-ordered entries + ready-check + bandwidth-limited
- * drain" pattern that recurs across the simulator (cache fills, page-walk
- * completions, ...), where each cycle a structure retires the prefix of
- * front-most entries whose event time has arrived, up to a per-cycle bandwidth,
- * stopping early when a handler declines an entry. Before this primitive every
- * such site open-coded the same get_span_p + find_if_not + bandwidth::consume +
- * erase sequence; latency_queue names that sequence once, in drain_ready().
+ * Backed by a champsim::ring_buffer, whose iterator/reference invalidation
+ * contract it inherits (tail insertion invalidates nothing; front retirement
+ * invalidates all iterators but keeps references to survivors valid). The
+ * ring-buffer surface is re-exported so a member can migrate from ring_buffer
+ * to latency_queue with no other call-site changes.
  *
- * The container is a champsim::ring_buffer, so it inherits that type's storage
- * and iterator/reference-invalidation contract (see ring_buffer.h): tail
- * insertion never invalidates references, and front retirement invalidates all
- * iterators but keeps references to surviving elements valid. The ring-buffer
- * surface (size/empty/front/push_back/.../begin/end) is re-exported so a member
- * migrated from ring_buffer to latency_queue needs no other call-site changes.
- *
- * Ready-time contract. The ready-time of an entry is ReadyTime{}(entry), a
- * stateless projection to champsim::chrono::clock::time_point (default-
- * constructed on demand; see waitable_ready_time for the waitable case). An
- * entry is "ready at now" exactly when
- *   ReadyTime{}(entry) <= now
- * — the boundary is inclusive (<=), matching waitable::is_ready_at and the
- * event_cycle <= now checks the drain sites used. Entries are expected to be
- * enqueued with nondecreasing ready-times (append at the tail as events are
- * scheduled), so the ready entries always form a front prefix; next_ready_time()
- * and has_ready() read only the front and are O(1). The queue does not enforce
- * the ordering — it is a modeling invariant of the callers, exactly as it was
- * when these queues were plain ring buffers.
+ * Ready-time contract: an entry is ready at now iff ReadyTime{}(entry) <= now
+ * (inclusive, matching waitable::is_ready_at). Callers must enqueue with
+ * nondecreasing ready-times so the ready entries form a front prefix; the queue
+ * does not enforce this. next_ready_time()/has_ready() read only the front, O(1).
  */
 template <typename T, typename ReadyTime>
 class latency_queue
@@ -127,13 +100,8 @@ public:
   latency_queue() = default;
   explicit latency_queue(size_type capacity) : buf_(capacity) {}
 
-  /**
-   * The ready-time of the front entry, or time_point::max() when empty. O(1).
-   *
-   * Exposes the next event time so a caller can decide when the queue will next
-   * have work — the hook a future event-driven idle-skip would read. It has no
-   * effect on draining and is not consulted by drain_ready().
-   */
+  /** Ready-time of the front entry, or time_point::max() when empty. O(1). The
+   *  next-event hook for idle-skip; not consulted by drain_ready(). */
   champsim::chrono::clock::time_point next_ready_time() const
   {
     return empty() ? champsim::chrono::clock::time_point::max() : ReadyTime{}(buf_.front());
@@ -145,26 +113,14 @@ public:
 
   /**
    * Retire the ready front prefix, up to the bandwidth, handing each entry to
-   * process. This is the primitive's reason to exist: it reproduces exactly the
-   * sequence the drain sites open-coded.
+   * process (a bool-returning handler): take the prefix within bw and ready at
+   * now, walk it with find_if_not stopping before the first entry process
+   * declines, then consume that many bw units and erase them from the front.
    *
-   *  1. Take the front prefix that is both within bw and ready at now
-   *     (ReadyTime{}(entry) <= now) — champsim::get_span_p with the readiness
-   *     predicate. bw is read, not yet consumed.
-   *  2. Walk that prefix with process, an entry handler returning bool, stopping
-   *     before the first entry it declines — std::find_if_not. A handler with
-   *     side effects that always returns true drains the whole ready prefix
-   *     (the for_each-style sites); one that can return false stops early (the
-   *     find_if_not-style sites).
-   *  3. Consume that many units of bw and erase exactly those entries from the
-   *     front.
-   *
-   * process is invoked on const entries in front-to-back order; it is called on
-   * the declining entry too (find_if_not evaluates it to detect the stop), so a
-   * handler that mutates must tolerate being run on the entry that stops the
-   * drain — the same contract get_span_p imposed. Returns the number of entries
-   * retired (== units of bw consumed). Erasure invalidates all iterators; see
-   * ring_buffer's invalidation contract.
+   * process runs on const entries front-to-back, INCLUDING the declining entry
+   * (find_if_not evaluates it to detect the stop), so a mutating handler must
+   * tolerate running on the entry that stops the drain. Returns the number
+   * retired (== bw consumed). Erasure invalidates all iterators.
    */
   template <typename Fn>
   long drain_ready(champsim::chrono::clock::time_point now, champsim::bandwidth& bw, Fn&& process)
@@ -179,9 +135,7 @@ public:
   }
 
   // --- champsim::ring_buffer surface pass-throughs ---------------------------
-  // These forward verbatim to the backing ring_buffer so a member can migrate
-  // from ring_buffer<T> to latency_queue<T, ...> without touching its other
-  // call sites. See ring_buffer.h for each operation's contract.
+  // Forward verbatim to the backing ring_buffer; see ring_buffer.h for contracts.
 
   void set_capacity(size_type capacity) { buf_.set_capacity(capacity); }
   void reserve(size_type new_capacity) { buf_.reserve(new_capacity); }

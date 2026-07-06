@@ -33,16 +33,11 @@
 
 long O3_CPU::poll_cycle()
 {
-  // A live core is never idle: fill_from_sources() refills the input queue
-  // every cycle until every workload source is exhausted. Skipping is
-  // therefore only possible in the post-EOF drain state — every pipeline
-  // structure empty and nothing left to fetch. This matters for multi-core
-  // runs where an early-finishing core would otherwise burn a full pipeline
-  // walk every cycle until the last core completes its phase.
-  //
-  // Drained is a latch: once the sources are exhausted and the pipeline is
-  // empty, operate() never runs again this phase, so nothing can
-  // re-populate it — skip the re-check on every subsequent cycle.
+  // Skipping is only possible in the post-EOF drain state — every pipeline
+  // structure empty and nothing left to fetch. Matters for multi-core runs so
+  // an early-finishing core doesn't burn a full pipeline walk every cycle.
+  // Drained is a latch: once drained, operate() never runs again this phase,
+  // so nothing re-populates it — skip the re-check on every later cycle.
   if (drained_latch_) {
     return 1;
   }
@@ -137,13 +132,13 @@ namespace
 {
 void do_stack_pointer_folding(ooo_model_instr& arch_instr)
 {
-  // The exact, true value of the stack pointer for any given instruction can usually be determined immediately after the instruction is decoded without
-  // waiting for the stack pointer's dependency chain to be resolved.
+  // The stack pointer's true value can usually be determined right after decode,
+  // without waiting for its dependency chain to resolve.
   bool writes_sp = (std::count(std::begin(arch_instr.destination_registers), std::end(arch_instr.destination_registers), champsim::REG_STACK_POINTER) > 0);
   if (writes_sp) {
-    // Avoid creating register dependencies on the stack pointer for calls, returns, pushes, and pops, but not for variable-sized changes in the
-    // stack pointer position. reads_other indicates that the stack pointer is being changed by a variable amount, which can't be determined before
-    // execution.
+    // Avoid stack-pointer register deps for calls/returns/pushes/pops, but not
+    // for variable-sized changes. reads_other means the SP changes by a
+    // variable amount, unknowable before execution.
     bool reads_other =
         (std::count_if(std::begin(arch_instr.source_registers), std::end(arch_instr.source_registers),
                        [](auto r) { return r != champsim::REG_STACK_POINTER && r != champsim::REG_FLAGS && r != champsim::REG_INSTRUCTION_POINTER; })
@@ -160,7 +155,7 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
 {
   bool stop_fetch = false;
 
-  // handle branch prediction for all instructions as at this point we do not know if the instruction is a branch
+  // Predict for all instructions; we don't yet know if this is a branch.
   sim_stats.total_branch_types.increment(arch_instr.branch);
   auto [predicted_branch_target, always_taken] = impl_btb_prediction(arch_instr.ip, arch_instr.branch);
   arch_instr.branch_prediction = impl_predict_branch(arch_instr.ip, predicted_branch_target, always_taken, arch_instr.branch) || always_taken;
@@ -210,7 +205,8 @@ std::size_t O3_CPU::instructions_requested()
 
 bool O3_CPU::do_init_instruction(ooo_model_instr& arch_instr)
 {
-  // fast warmup eliminates register dependencies between instructions branch predictor, cache contents, and prefetchers are still warmed up
+  // Fast warmup drops inter-instruction register deps; predictor, caches, and
+  // prefetchers still warm up.
   if (is_warmup()) {
     arch_instr.source_registers.clear();
     arch_instr.destination_registers.clear();
@@ -269,16 +265,14 @@ long O3_CPU::fetch_instruction()
     return champsim::block_number{lhs.ip} != champsim::block_number{rhs.ip};
   };
 
-  // The first fetch-ready entry can only move forward (flags are monotone,
-  // unchecked entries form a suffix, erases are front-anchored), so resume
-  // the scan from the maintained position instead of the buffer front, and
-  // advance the position to the first match: each buffer slot is walked
-  // O(1) times amortized instead of once per cycle.
+  // The first fetch-ready entry only moves forward, so resume the scan from
+  // the maintained position, not the buffer front — each slot is walked O(1)
+  // times amortized instead of once per cycle.
   auto scan_begin = std::next(std::begin(IFETCH_BUFFER), std::min(ifetch_fetch_scan_, static_cast<long>(std::size(IFETCH_BUFFER))));
   auto l1i_req_begin = std::find_if(scan_begin, std::end(IFETCH_BUFFER), fetch_ready);
-  // Advance only over permanently non-matching entries: checked-and-issued
-  // ones. Unchecked entries (at and beyond the dib prefix) can become
-  // fetch-ready later, so the position must never pass the prefix boundary.
+  // Advance only over permanently non-matching (checked-and-issued) entries;
+  // never pass the dib prefix boundary, since unchecked entries can still
+  // become fetch-ready.
   ifetch_fetch_scan_ = std::min(std::distance(std::begin(IFETCH_BUFFER), l1i_req_begin), ifetch_dib_checked_);
   for (champsim::bandwidth l1i_bw{L1I_BANDWIDTH}; l1i_bw.has_remaining() && l1i_req_begin != std::end(IFETCH_BUFFER); l1i_bw.consume()) {
     auto l1i_req_end = std::adjacent_find(l1i_req_begin, std::end(IFETCH_BUFFER), no_match_ip);
@@ -466,28 +460,22 @@ long O3_CPU::dispatch_instruction()
 
 long O3_CPU::schedule_instruction()
 {
-  // Scheduled entries form a strict ROB prefix, and unscheduled entries keep
-  // their dispatch-assigned (monotone) ready_times. If there is no
-  // unscheduled entry, or the first one is not yet ready, the walk below
-  // cannot call do_scheduling — and it has no other side effects — so skip it.
+  // Scheduled entries form a strict ROB prefix; unscheduled entries keep
+  // monotone ready_times. If the first unscheduled entry is absent or not yet
+  // ready, the walk below has no side effects — skip it.
   if (num_scheduled_ >= static_cast<long>(std::size(ROB))) {
     return 0;
   }
-  // The guard on .scheduled is defensive: in normal operation the entry at
-  // the prefix boundary is never scheduled; externally injected ROB state
-  // (unit tests) falls through to the always-correct full walk.
+  // The .scheduled guard is defensive: normally the prefix-boundary entry is
+  // never scheduled; injected ROB state (tests) falls through to the full walk.
   if (const auto& first = ROB[static_cast<std::size_t>(num_scheduled_)]; !first.scheduled && first.ready_time > current_time) {
     return 0;
   }
 
-  // The scheduler window: in-flight (scheduled, unexecuted) instructions
-  // occupy slots, so pre-charge the budget with their count rather than
-  // re-walking them. The free-register rename gate is evaluated only for
-  // instructions actually being renamed this cycle — their source_registers
-  // still hold architectural ids, so the check is meaningful. (Historical
-  // note: the gate used to sit in a walk from the ROB front and re-evaluated
-  // already-renamed instructions, whose operands are physical ids; that
-  // stalled rename on a semantically arbitrary condition.)
+  // Pre-charge the budget with the in-flight (scheduled, unexecuted) count
+  // rather than re-walking them. The free-register rename gate applies only to
+  // instructions renamed this cycle, whose source_registers still hold
+  // architectural ids, so the check is meaningful.
   champsim::bandwidth search_bw{SCHEDULER_SIZE};
   search_bw.consume(std::min(scheduler_occupancy_, champsim::to_underlying(SCHEDULER_SIZE)));
 
@@ -537,11 +525,9 @@ void O3_CPU::do_scheduling(ooo_model_instr& instr)
 
 long O3_CPU::execute_instruction()
 {
-  // The walk is side-effect-free unless it issues. Its outcome changes only
-  // when an instruction becomes scheduled (do_scheduling), a register becomes
-  // valid (do_complete_execution), or time reaches a pending ready_time —
-  // exec_stage_clean_/exec_stage_wake_ track exactly those events, so a
-  // clean stage before its wake point provably issues nothing.
+  // The walk is side-effect-free unless it issues, and its outcome changes
+  // only via the events exec_stage_clean_/exec_stage_wake_ track, so a clean
+  // stage before its wake point provably issues nothing.
   if (exec_stage_clean_ && current_time < exec_stage_wake_) {
     return 0;
   }
@@ -597,18 +583,16 @@ void O3_CPU::do_execution(ooo_model_instr& instr, std::size_t rob_slot)
   const auto& handles = rob_mem_handles_[rob_slot];
 
   // Mark this instruction's LQ entries as ready to translate. Each recorded
-  // slot is revalidated: a producer-waiting load may have been finished (and
-  // its slot reused by another instruction) via store forwarding since
-  // scheduling, so only slots still holding this instruction's load are
-  // stamped — exactly the instr_id test the old occupied-slot scan applied.
+  // slot is revalidated (a producer-waiting load may have been finished and
+  // its slot reused via forwarding), so only slots still holding this
+  // instruction's load are stamped.
   for (const auto idx : handles.lq_slots) {
     auto& lq_entry = LQ[idx];
     if (lq_entry.has_value() && lq_entry->instr_id == instr.instr_id) {
       lq_entry->ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
-      // Enroll issue candidates for readiness promotion. Producer-waiting
-      // entries never issue through operate_lsq's walk, so only unissued
-      // candidates enroll; enrollment times are monotone (current_time plus a
-      // constant), keeping the pending queue promotion a FIFO pop.
+      // Enroll issue candidates for readiness promotion; only unissued ones
+      // enroll. Enrollment times are monotone (current_time plus a constant),
+      // keeping the pending-queue promotion a FIFO pop.
       if ((lq_unissued_[idx >> 6] >> (idx & 63)) & 1U) {
         lq_pending_ready_.emplace_back(lq_entry->ready_time, static_cast<uint32_t>(idx));
       }
@@ -616,8 +600,8 @@ void O3_CPU::do_execution(ooo_model_instr& instr, std::size_t rob_slot)
   }
 
   // Mark this instruction's SQ entries as ready to translate. The recorded
-  // pointers are valid: do_execution sets the store's ready_time, so before it
-  // runs the store cannot have been fetched, completed, or front-erased.
+  // pointers are valid: before do_execution runs, the store cannot have been
+  // fetched, completed, or front-erased.
   for (auto* sq_entry : handles.sq_entries) {
     sq_entry->ready_time = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : EXEC_LATENCY);
   }
@@ -656,8 +640,7 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
     bool live = true; // cleared if this slot is immediately store-forwarded and freed below
 
     // Check for forwarding: the youngest prior store to this exact address
-    // (the back of the per-address stack — identical to what the old
-    // max_element scan over the whole SQ selected)
+    // (the back of the per-address stack).
     auto fwd_it = sq_store_index_.find(smem.to<uint64_t>());
     if (fwd_it != std::end(sq_store_index_)) {
       auto* sq_it = fwd_it->second.back();
@@ -680,8 +663,7 @@ void O3_CPU::do_memory_scheduling(ooo_model_instr& instr)
     }
 
     // Record only the live slot; a slot freed by immediate forwarding above
-    // (and possibly reused by a later source_memory op of this instruction)
-    // must not appear in the handle list.
+    // (possibly reused by a later op) must not appear in the handle list.
     if (live) {
       handles.lq_slots.push_back(static_cast<uint16_t>(lq_idx));
     }
@@ -748,15 +730,12 @@ long O3_CPU::operate_lsq()
     }
   }
 
-  // The ready set is exactly the candidates the historical full scan would
-  // act on (occupied, no producer, unissued, ready), in the same slot
-  // order. Every load targets the same L1D read queue and nothing drains it
-  // inside this loop, so once one admission is rejected every further
-  // attempt this cycle would fail identically: stop at the first rejection,
-  // as hardware would — a full signal gates issue; the queue is not
-  // re-presented with every waiting load each cycle. All queue accounting
-  // stays inside the channel's own add_rq path, where its full-queue
-  // counters read as cycles-blocked.
+  // The ready set is exactly the candidates a full scan would act on, in slot
+  // order. All loads target the same L1D read queue, undrained in this loop,
+  // so once one admission is rejected every later attempt this cycle fails
+  // identically — stop at the first rejection, as hardware would. Queue
+  // accounting stays in the channel's add_rq path (full-queue counters read
+  // as cycles-blocked).
   bool rq_rejected = false;
   for (std::size_t word = 0; word < std::size(lq_ready_) && load_bw.has_remaining() && !rq_rejected; ++word) {
     for (uint64_t bits = lq_ready_[word]; bits != 0 && load_bw.has_remaining(); bits &= bits - 1) {
@@ -857,12 +836,9 @@ void O3_CPU::do_complete_execution(ooo_model_instr& instr)
 
 long O3_CPU::complete_inflight_instruction()
 {
-  // Same detector pattern as execute_instruction: candidates are created by
-  // do_execution, by the memory-op finish that crosses completed_mem_ops ==
-  // num_mem_ops (LSQ_ENTRY::finish call sites), or by time reaching a pending
-  // ready_time. mem_complete_candidates_ already excludes executed instructions
-  // still waiting on memory, so the walk visits only slots that can complete
-  // once their ready_time passes.
+  // Same detector pattern as execute_instruction. mem_complete_candidates_
+  // excludes executed instructions still waiting on memory, so the walk visits
+  // only slots that can complete once their ready_time passes.
   if (complete_stage_clean_ && current_time < complete_stage_wake_) {
     return 0;
   }
@@ -904,9 +880,9 @@ long O3_CPU::handle_memory_return()
 {
   long progress{0};
 
-  // Block-granularity matching compares raw shifted values: constructing a
-  // dynamic-extent block_number per scanned entry was a measured cost, and
-  // equality of the block slices is exactly equality of the shifted values.
+  // Block-granularity matching compares raw shifted values (building a
+  // block_number per entry was a measured cost; shifted-value equality equals
+  // block-slice equality).
   const auto block_shamt = champsim::to_underlying(champsim::block_number_extent{}.lower);
 
   auto& l1i_returned = L1I_bus.lower_level->get_returned();
@@ -916,10 +892,8 @@ long O3_CPU::handle_memory_return()
     const auto l1i_block = l1i_entry.v_address.to<uint64_t>() >> block_shamt;
 
     // Each iteration consumes one dependent id; bandwidth is spent only on
-    // matches. The consumed prefix is erased once, after the loop (the old
-    // per-element front-erase made this quadratic in the dependent count),
-    // and the buffer search is a partition_point: IFETCH_BUFFER is sorted by
-    // instr_id (appended in program order, erased only at the front).
+    // matches. The consumed prefix is erased once after the loop, and the
+    // buffer search is a partition_point (IFETCH_BUFFER is instr_id-sorted).
     std::size_t consumed = 0;
     while (fetch_bw.has_remaining() && consumed < std::size(l1i_entry.instr_depend_on_me)) {
       const auto depend_id = l1i_entry.instr_depend_on_me[consumed];
@@ -950,12 +924,11 @@ long O3_CPU::handle_memory_return()
   auto l1d_it = std::begin(l1d_returned);
   for (champsim::bandwidth l1d_bw{L1D_BANDWIDTH}; l1d_bw.has_remaining() && l1d_it != std::end(l1d_returned); l1d_bw.consume(), ++l1d_it) {
     const auto l1d_block = l1d_it->v_address.to<uint64_t>() >> block_shamt;
-    // Every fetch-issued load to this block is recorded in the return index,
-    // so one lookup replaces the sweep over all occupied LQ slots. finish()
-    // still bumps completed_mem_ops on each owner; the finishes touch
-    // independent slots (and per-owner counters commute), so the recorded
-    // order is result-equivalent to the old ascending-slot scan. The whole
-    // block's loads leave together, so erase the key.
+    // Every fetch-issued load to this block is in the return index, so one
+    // lookup replaces the sweep over occupied LQ slots. finish() bumps each
+    // owner's completed_mem_ops; finishes touch independent slots and commute,
+    // so order is result-equivalent to the old scan. The block's loads leave
+    // together, so erase the key.
     auto blk_it = hmr_block_index_.find(l1d_block);
     if (blk_it != std::end(hmr_block_index_)) {
       for (const auto idx : blk_it->second) {

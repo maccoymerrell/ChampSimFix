@@ -123,10 +123,9 @@ auto CACHE::fill_block(fill_type fill, uint32_t metadata) -> BLOCK
 
 auto CACHE::matches_address(champsim::address addr) const
 {
-  // Compare raw shifted values: equality of the upper slices is exactly
-  // equality of the shifted 64-bit values, without constructing a
-  // dynamic-extent address_slice per scanned entry (this predicate runs
-  // against every MSHR and inflight-fill entry on every miss).
+  // Compare raw shifted 64-bit values (== equality of the upper slices) to avoid
+  // constructing a dynamic-extent address_slice per scanned entry — this runs
+  // against every MSHR and inflight-fill entry on every miss.
   const auto shamt = champsim::to_underlying(OFFSET_BITS);
   return [match = addr.to<uint64_t>() >> shamt, shamt](const auto& entry) {
     return (entry.address.template to<uint64_t>() >> shamt) == match;
@@ -294,10 +293,9 @@ bool CACHE::handle_miss(tag_lookup_type& handle_pkt)
 
   last_served_origin = handle_pkt.origin;
 
-  // check mshr, then inflight fills. Ring iterators compare by logical
-  // position and must not be compared across containers, so the found entry
-  // is carried as a pointer (stable: neither container mutates before the
-  // merge below).
+  // Check MSHR, then inflight fills. Ring iterators compare by logical position
+  // and must not be compared across containers, so carry the found entry as a
+  // pointer (stable: neither container mutates before the merge below).
   fill_type* fill_entry = nullptr;
   if (auto mshr_it = std::find_if(std::begin(MSHR), std::end(MSHR), matches_address(handle_pkt.address)); mshr_it != std::end(MSHR)) {
     fill_entry = &*mshr_it;
@@ -307,9 +305,8 @@ bool CACHE::handle_miss(tag_lookup_type& handle_pkt)
   }
   bool mshr_full = (MSHR.size() == MSHR_SIZE);
 
-  // On the success paths below the tag entry is consumed (its caller erases
-  // it), so its vectors are moved into the allocated fill. Only scalar
-  // fields of handle_pkt are read after those moves. The failure paths
+  // On success the tag entry is consumed (caller erases it), so its vectors are
+  // moved into the fill and only scalar fields are read afterward; failure paths
   // return before any move, leaving the entry intact for retry.
   if (fill_entry != nullptr) // miss or fill already inflight
   {
@@ -391,10 +388,8 @@ auto CACHE::initiate_tag_check(champsim::modules::channel_module* ul)
                  retval.v_address, access_type_names.at(champsim::to_underlying(retval.type)), !std::empty(retval.to_return));
     }
 
-    // event_cycle is provisionally stamped for the translated fast path
-    // (tag check timed from admission). admit_tag_check overrides it for the
-    // untranslated case, where the tag check must wait for the physical
-    // address, and owns the translation-pressure bookkeeping.
+    // event_cycle is provisionally stamped for the translated fast path (timed
+    // from admission); admit_tag_check overrides it for untranslated entries.
     return retval;
   };
 }
@@ -402,11 +397,10 @@ auto CACHE::initiate_tag_check(champsim::modules::channel_module* ul)
 void CACHE::admit_tag_check(tag_lookup_type&& entry)
 {
   if (lower_translate != nullptr && !entry.is_translated) {
-    // Physically-indexed cache, untranslated arrival: the tag check cannot
-    // begin until translation yields the physical set index. Park the entry
-    // with no ready-time; finish_translation will stamp event_cycle =
-    // (translation-complete) + HIT_LATENCY and move it into the timed
-    // pipeline. translate_issued is always false at construction, so it always
+    // Untranslated arrival at a physically-indexed cache: the tag check can't
+    // begin until translation yields the physical set index. Park with no
+    // ready-time; finish_translation stamps event_cycle and moves it into the
+    // timed pipeline. translate_issued is false at construction, so it always
     // owes a translation request.
     entry.event_cycle = champsim::chrono::clock::time_point::max();
     ++untranslated_pending_issue_;
@@ -420,10 +414,9 @@ void CACHE::admit_tag_check(tag_lookup_type&& entry)
 
 long CACHE::poll_cycle()
 {
-  // Skip a cycle only when nothing is pending anywhere: no responses to
-  // finish, no inflight work, and no requests waiting on any upper channel.
-  // MSHR-only-pending state is skippable — the wake event is an arrival on
-  // lower_level->get_returned(), which is re-checked here every cycle.
+  // Skip a cycle only when nothing is pending anywhere. MSHR-only-pending state
+  // is skippable — its wake event is an arrival on lower_level->get_returned(),
+  // re-checked here every cycle.
   const bool idle = std::empty(lower_level->get_returned())
                     && (lower_translate == nullptr || std::empty(lower_translate->get_returned()))
                     && std::empty(inflight_fills) && std::empty(inflight_tag_check)
@@ -435,13 +428,10 @@ long CACHE::poll_cycle()
     return 0;
   }
 
-  // Per-cycle bookkeeping that operate() would have done must still happen on
-  // skipped cycles so the observable cycle stream is unchanged:
-  //  - the upper-level round-robin keeps its arbitration alignment, and
-  //  - prefetchers keep their contractual once-per-cycle hook (internal
-  //    clocks, lookahead machines). A prefetch issued here lands in
-  //    internal_PQ, so the next poll returns 0 — the same first
-  //    tag-check cycle it would get without skipping.
+  // Bookkeeping operate() would do must still happen on skipped cycles to keep
+  // the observable cycle stream unchanged: the upper-level round-robin keeps its
+  // arbitration alignment, and prefetchers keep their once-per-cycle hook (a
+  // prefetch issued here lands in internal_PQ, so the next poll returns 0).
   if (std::size(upper_levels) > 1) {
     std::rotate(upper_levels.begin(), upper_levels.begin() + 1, upper_levels.end());
   }
@@ -474,21 +464,17 @@ long CACHE::operate()
   champsim::bandwidth fill_bw{MAX_FILL};
   inflight_fills.drain_ready(current_time, fill_bw, [this](const auto& x) { return this->handle_fill(x); });
 
-  // Initiate tag checks: pull ready entries from the upper-level queues and the
-  // internal prefetch queue and route each into the tag-check pipeline via
-  // admit_tag_check (translated -> inflight_tag_check timed from now;
-  // untranslated -> untranslated_tag_check to await translation). The window
-  // limit bounds only the timed pipeline (inflight_tag_check); untranslated
-  // entries stage separately, throttled by their own occupancy below. (window
-  // limit hoisted: MAX_TAG * hit-latency cycles is invariant after construction)
+  // Initiate tag checks: pull ready entries from the upper-level queues and
+  // internal_PQ and route each via admit_tag_check. The window limit bounds only
+  // the timed pipeline (inflight_tag_check); untranslated entries stage
+  // separately, throttled by their own occupancy below.
   const champsim::bandwidth::maximum_type bandwidth_from_tag_checks{tag_check_window_limit_ - (long)std::size(inflight_tag_check)};
   champsim::bandwidth initiate_tag_bw{std::clamp(bandwidth_from_tag_checks, champsim::bandwidth::maximum_type{0}, MAX_TAG)};
   tag_check_router router{this};
-  // Throttle NEW untranslated admissions once the staging buffer is full
-  // (backpressure on slow translation), exactly as the old stash throttle;
-  // already-translated entries (and every entry of a non-translating cache)
-  // are always admissible. Reading the live occupancy keeps the buffer bounded
-  // across the several source queues drained in this one cycle.
+  // Throttle NEW untranslated admissions once the staging buffer hits MSHR_SIZE
+  // (backpressure on slow translation); already-translated entries (and every
+  // entry of a non-translating cache) are always admissible. Reading live
+  // occupancy keeps the buffer bounded across the source queues drained here.
   auto can_admit = [this](const auto& entry) {
     return entry.is_translated || lower_translate == nullptr
            || std::size(untranslated_tag_check) < static_cast<std::size_t>(MSHR_SIZE);
@@ -499,13 +485,10 @@ long CACHE::operate()
     std::rotate(upper_levels.begin(), upper_levels.begin() + 1, upper_levels.end());
   }
 
-  // upper levels get an equal portion of the remaining bandwidth
-  // Guard the per-cycle upper intake: only build the per-upper bandwidth and
-  // run the transform_while_n machinery when some upper channel actually has a
-  // pending request. When all uppers are idle this short-circuits to a few
-  // O(1) has_pending() checks instead of constructing a span+bandwidth per
-  // queue and finding it empty. Byte-identical: an empty queue admits nothing
-  // and consumes no bandwidth, so skipping it changes no state.
+  // Upper levels split the remaining bandwidth equally. Guard the intake so the
+  // transform machinery only runs when some upper has a pending request; when
+  // all are idle this is a few O(1) has_pending() checks. Byte-identical: an
+  // empty queue admits nothing and consumes no bandwidth.
   if (std::any_of(std::begin(upper_levels), std::end(upper_levels), [](auto* ul) { return ul->has_pending(); })) {
     const champsim::bandwidth::maximum_type per_upper_bandwidth =
         std::size(upper_levels) >= 1
@@ -514,8 +497,8 @@ long CACHE::operate()
 
     for (auto* ul : upper_levels) {
       for (auto q : {std::ref(ul->get_wq()), std::ref(ul->get_rq()), std::ref(ul->get_pq())}) {
-        // this needs to be in this loop, we need to ensure that for cases where bandwidth doesn't divide nicely across upstreams,
-        // we don't accidentally consume more bandwidth than expected
+        // Recompute inside the loop: when bandwidth doesn't divide evenly across
+        // upstreams, this prevents consuming more than expected.
         champsim::bandwidth per_upper_tag_bw{std::min(per_upper_bandwidth, champsim::bandwidth::maximum_type{initiate_tag_bw.amount_remaining()})};
         auto bandwidth_consumed = champsim::transform_while_n(q.get(), router, per_upper_tag_bw, can_admit, initiate_tag_check<true>(ul));
         if constexpr (champsim::debug_print) {
@@ -529,19 +512,16 @@ long CACHE::operate()
   auto pq_bandwidth_consumed = champsim::transform_while_n(internal_PQ, router, initiate_tag_bw, can_admit, initiate_tag_check<false>());
   initiate_tag_bw.consume(pq_bandwidth_consumed);
 
-  // Issue translations for the parked entries. The pending-issue index counts
-  // exactly the entries this walk would act on; when it is zero the walk is a
-  // no-op. finish_translation moves resolved entries into inflight_tag_check,
-  // which is translated-only and is never scanned for translation here.
+  // Issue translations for parked entries. untranslated_pending_issue_ counts
+  // exactly the entries this walk acts on, so when it is zero the walk is a
+  // no-op.
   if (lower_translate != nullptr && untranslated_pending_issue_ > 0) {
     std::for_each(std::begin(untranslated_tag_check), std::end(untranslated_tag_check), [this](auto& x) { this->issue_translation(x); });
   }
 
   // Perform tag checks. inflight_tag_check is translated-only and time-ordered,
-  // so readiness collapses to event_cycle <= now and the ready entries are a
-  // front prefix. (No untranslated entry is ever admitted here — see
-  // admit_tag_check — so the is_translated guard the drain used to carry is
-  // structurally redundant; the O(1) front check smoke-tests that invariant.)
+  // so readiness is event_cycle <= now and ready entries are a front prefix.
+  // The assert smoke-tests the translated-only invariant.
   assert(std::empty(inflight_tag_check) || inflight_tag_check.front().is_translated);
   auto do_handle_miss = [this](auto& pkt) {
     if (pkt.type == access_type::WRITE && !this->match_offset_bits) {
@@ -574,9 +554,9 @@ uint64_t CACHE::get_set(uint64_t address) const { return static_cast<uint64_t>(g
 
 long CACHE::get_set_index(champsim::address address) const
 {
-  // Same value as slicing lg2(NUM_SET) bits above OFFSET_BITS, without
-  // constructing a dynamic-extent slice per lookup (this is called for every
-  // tag check, fill, and replacement update).
+  // Same value as slicing lg2(NUM_SET) bits above OFFSET_BITS, but avoids a
+  // dynamic-extent slice per lookup (called on every tag check, fill, and
+  // replacement update).
   return static_cast<long>((address.to<uint64_t>() >> set_index_shift_) & set_index_mask_);
 }
 
@@ -685,10 +665,9 @@ void CACHE::finish_translation(const response_type& packet)
   auto matches_vpage = [page_num = champsim::page_number{packet.v_address}](const auto& entry) {
     return (champsim::page_number{entry.v_address} == page_num) && !entry.is_translated;
   };
-  // The tag check of a physically-indexed cache begins only now that translation
-  // has produced the physical set index, so stamp its completion time
-  // ADDITIVELY: (translation-complete) + HIT_LATENCY, never overlapped with the
-  // translation latency. This is the crux of the PIPT correctness fix.
+  // The tag check begins only now that translation produced the physical set
+  // index, so stamp it ADDITIVELY: (translation-complete) + HIT_LATENCY, never
+  // overlapped with translation latency. Crux of the PIPT correctness fix.
   const auto tag_check_ready = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : HIT_LATENCY);
   auto complete_translation = [p_page = champsim::page_number{packet.data}, tag_check_ready, this](auto& entry) {
     [[maybe_unused]] auto old_address = entry.address;
@@ -706,13 +685,10 @@ void CACHE::finish_translation(const response_type& packet)
     }
   };
 
-  // Group every parked entry whose page just resolved to the front, complete
-  // it, and move it into the timed tag-check pipeline. The remaining entries
-  // stay parked (awaiting their own translation). Both the erase from the
-  // staging buffer and the append to inflight_tag_check are order-preserving,
-  // and every append is stamped tag_check_ready == current_time + HIT_LATENCY,
-  // which is nondecreasing across cycles, so inflight_tag_check stays in
-  // event_cycle order (the latency_queue readiness-prefix contract).
+  // Group every parked entry whose page just resolved to the front, complete it,
+  // and move it into inflight_tag_check. Both operations are order-preserving and
+  // every append is stamped current_time + HIT_LATENCY (nondecreasing across
+  // cycles), so inflight_tag_check stays in event_cycle order.
   auto matched_end = champsim::stable_partition_small(std::begin(untranslated_tag_check), std::end(untranslated_tag_check), matches_vpage);
   std::for_each(std::begin(untranslated_tag_check), matched_end, [&](auto& entry) {
     complete_translation(entry);

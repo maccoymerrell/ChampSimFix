@@ -44,9 +44,8 @@ struct dynamic_extent {
   champsim::data::bits lower;
 
   /**
-   * Default-construct a zero-width extent (upper == lower == 0). Allows
-   * ``address_slice<dynamic_extent>`` to be default-constructed for array
-   * placeholders that get a real extent assigned to them on first use.
+   * Default-construct a zero-width extent (upper == lower == 0), letting
+   * ``address_slice<dynamic_extent>`` array placeholders get a real extent later.
    */
   constexpr dynamic_extent() : upper{}, lower{} {}
 
@@ -63,14 +62,13 @@ struct dynamic_extent {
 
 namespace detail
 {
-// Cached geometry for the wrapper extents below. Constant-initialized to the
-// 12-bit-page / 6-bit-block defaults; ``refresh_address_extents()`` rewrites
-// them once the environment publishes the real geometry (block and page size
-// are runtime configuration). Inline variables keep the wrapper constructors
-// and size() header-inlinable: address slices are constructed on the
-// simulator's hottest paths, and an out-of-line constructor behind a
-// static-local guard was a measured cost. The upper bound is
-// ``champsim::address::bits`` (64); extent.cc statically asserts the match.
+// Cached geometry for the wrapper extents below, kept as inline variables so
+// their constructors and size() stay header-inlinable on the hot path (an
+// out-of-line ctor behind a static-local guard was a measured cost).
+// Constant-initialized to 12-bit-page / 6-bit-block defaults;
+// refresh_address_extents() rewrites them once the real runtime geometry is
+// published. Upper bound is champsim::address::bits (64); extent.cc statically
+// asserts the match.
 inline dynamic_extent cached_page_number_extent{champsim::data::bits{64}, champsim::data::bits{12}};
 inline dynamic_extent cached_page_offset_extent{champsim::data::bits{12}, champsim::data::bits{}};
 inline dynamic_extent cached_block_number_extent{champsim::data::bits{64}, champsim::data::bits{6}};
@@ -139,8 +137,8 @@ struct static_extent {
 
 /**
  * Give the width of the extent. For static_extent, this function can be constexpr.
- * These are header-inline: every dynamic-extent address_slice construction
- * masks by this width, and an out-of-line call here was a measured cost.
+ * Header-inline: every dynamic-extent address_slice construction masks by this
+ * width, and an out-of-line call was a measured cost.
  */
 constexpr std::size_t size(dynamic_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
 constexpr std::size_t size(page_number_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
@@ -148,12 +146,11 @@ constexpr std::size_t size(page_offset_extent ext) { return to_underlying(ext.up
 constexpr std::size_t size(block_number_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
 constexpr std::size_t size(block_offset_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
 
-// Refresh the cached page/block extent values used by the default
-// constructors of ``page_number_extent`` / ``block_offset_extent`` etc.
-// Call once after publishing ``log2_page_size`` / ``log2_block_size`` to
-// ``ModuleBuilder::globals()`` so any subsequently-constructed address
-// slice picks up the new geometry. Avoids per-construction globals
-// lookups on the hot path.
+// Rewrite the cached page/block extents used by the default constructors of
+// page_number_extent / block_offset_extent etc. Call once after publishing
+// log2_page_size / log2_block_size to ModuleBuilder::globals(); later-built
+// address slices then pick up the new geometry without a per-construction
+// globals lookup.
 void refresh_address_extents();
 
 template <champsim::data::bits UP, champsim::data::bits LOW>

@@ -64,20 +64,15 @@ struct DRAM_ADDRESS_MAPPING {
   unsigned long get_column(champsim::address address) const;
 
   /**
-   * Perform the hashing operations for indexing our channels, banks, and bankgroups.
-   * This is done to increase parallelism when serving requests at the DRAM level.
+   * Hash row bits into the channel/bank/bankgroup index to spread DRAM parallelism.
+   * Each iteration XORs the selected segment bits into `field`, until no un-XOR'd
+   * row bits remain.
    *
-   * :param address: The physical address at which the hashing operation is occurring.
-   * :param segment_size: The number of row bits extracted during each iteration. (# of row bits / segment_size) == # of XOR operations
-   * :param segment_offset: The bit offset within the segment that the XOR operation will occur at. The bits taken from the segment will be [segment_offset +
-   * field_bits : segment_offset]
-   *
-   * :param field: The input index that is being permuted by the operation.
+   * :param address: The physical address being hashed.
+   * :param segment_size: Row bits consumed per iteration; (row bits / segment_size) == # of XORs.
+   * :param segment_offset: Bit offset within each segment; extracted bits are [segment_offset + field_bits : segment_offset].
+   * :param field: The index being permuted.
    * :param field_bits: The length of the index in bits.
-   *
-   * Each iteration of the operation takes the selected bits of the segment and XORs them with the entirety of the field
-   * which should be equal or greater than length (in the case of the last iteration). This continues until no bits remain
-   * within the row that have not been XOR'd with the field.
    */
   unsigned long swizzle_bits(champsim::address address, unsigned long segment_size, champsim::data::bits segment_offset, unsigned long field,
                              unsigned long field_bits) const;
@@ -115,8 +110,8 @@ struct DRAM_CHANNEL final : public champsim::operable {
     champsim::chrono::clock::time_point ready_time = champsim::chrono::clock::time_point::max();
 
     // Memoized address decompositions (pure functions of `address`, computed
-    // once at insertion). The scheduler comparator previously recomputed the
-    // full rank/bankgroup/bank swizzle for every waiting request, every cycle.
+    // once at insertion) so the scheduler comparator need not re-swizzle every
+    // waiting request each cycle.
     std::size_t bank_req_idx = 0;
     std::size_t bankgroup_req_idx = 0;
     std::size_t row_idx = 0;
@@ -130,11 +125,9 @@ struct DRAM_CHANNEL final : public champsim::operable {
   using queue_type = std::vector<std::optional<value_type>>;
 
 private:
-  // The queues and bank state carry incrementally maintained counters (see
-  // below); they are private so that no outside mutation can desynchronize
-  // the bookkeeping. Inspect through rq()/wq()/bank_requests(); mutate
-  // through insert_rq()/insert_wq() or modify_rq()/modify_wq(), which
-  // re-derive the counters after arbitrary changes.
+  // Private so no outside mutation can desync the incrementally maintained
+  // counters (below). Inspect via rq()/wq()/bank_requests(); mutate via
+  // insert_rq()/insert_wq() or modify_rq()/modify_wq().
   queue_type WQ;
   queue_type RQ;
 
@@ -186,10 +179,9 @@ private:
   std::size_t write_high_wm_ = 0;
   std::size_t write_low_wm_ = 0;
 
-  // Incrementally maintained state counters. Each replaces a full-capacity
-  // scan per cycle with O(1) reads. Every mutation of RQ/WQ/bank_request
-  // flows through member functions (or modify_*/resync_counters), so the
-  // counters cannot be desynchronized from outside.
+  // Incrementally maintained counters: O(1) reads replacing a full-capacity
+  // scan per cycle. All mutation flows through member functions (or
+  // modify_*/resync_counters), so they cannot desync.
   long rq_occupancy_ct = 0;      // RQ slots with has_value
   long wq_occupancy_ct = 0;      // WQ slots with has_value
   long rq_unchecked_ct = 0;      // occupied RQ slots with !forward_checked
@@ -206,17 +198,14 @@ public:
   const queue_type& wq() const { return WQ; }
   const request_array_type& bank_requests() const { return bank_request; }
 
-  // Place a fully formed request into the first free slot (the caller
-  // controls all fields, including ready_time and the checked/scheduled
-  // flags). Returns false if the queue is full. Counters are maintained.
+  // Place a fully formed request (caller sets all fields) into the first free
+  // slot; false if the queue is full. Counters are maintained.
   bool insert_rq(request_type entry);
   bool insert_wq(request_type entry);
 
-  // Apply an arbitrary mutation to a queue, then re-derive the counters.
-  // This is the sanctioned way for tests (or future code) to reach into the
-  // queues; it cannot leave the bookkeeping inconsistent. Note: bank_request
-  // holds iterators into the queues, so entries referenced by in-flight bank
-  // requests must not be relocated.
+  // Apply an arbitrary mutation, then re-derive the counters. Note:
+  // bank_request holds iterators into the queues, so entries referenced by
+  // in-flight bank requests must not be relocated.
   template <typename F>
   void modify_rq(F&& fn)
   {
@@ -256,10 +245,9 @@ public:
   long operate() final;
   void print_deadlock() final;
 
-  // True if operate() would perform (or settle) any work at time t: pending
-  // queue entries, bank/bus activity, a due refresh, or a write->read mode
-  // switch. Used by the owning MEMORY_CONTROLLER's poll_cycle(); this channel
-  // is parent-ticked, so its own poll_cycle() is never consulted.
+  // True if operate() would do or settle any work at time t (queued entries,
+  // bank/bus activity, due refresh, or a write->read switch). Used by the
+  // owning MEMORY_CONTROLLER's poll_cycle(); this channel is parent-ticked.
   bool would_do_work_at(champsim::chrono::clock::time_point t) const;
 
   // Timer-scheduled work in flight (refresh, busy banks, an occupied data

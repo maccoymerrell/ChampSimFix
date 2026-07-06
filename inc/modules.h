@@ -53,13 +53,10 @@
 //class CACHE;
 //class O3_CPU;
 /**
- * The ChampSim runtime module system.
- *
- * This namespace contains all module interfaces and the infrastructure for
- * constructing, registering, and instantiating modules at runtime. Module
- * authors interact primarily with the four user-facing interfaces
- * (prefetcher, replacement, branch_predictor, btb), the ModuleBuilder for
- * construction, and the register_module template for registration.
+ * The ChampSim runtime module system: module interfaces plus the infrastructure
+ * to construct, register, and instantiate them at runtime. Authors use the
+ * user-facing interfaces (prefetcher, replacement, branch_predictor, btb),
+ * ModuleBuilder, and register_module.
  */
 namespace champsim::modules {
 
@@ -79,9 +76,8 @@ struct workload_source;
 struct ModuleBuilder {
   public:
   /**
-   * One level of lexical scope: a frozen map of named values visible to a
-   * module and everything constructed beneath it in the config tree.
-   * Shared, immutable frames make builder copies cheap and lifetime-safe.
+   * One lexical scope frame: an immutable map of named values visible to a
+   * module and everything beneath it. Shared+immutable keeps copies cheap.
    */
   using scope_frame_type = std::shared_ptr<const std::map<std::string, std::any>>;
 
@@ -95,9 +91,8 @@ struct ModuleBuilder {
   std::string module_name = "";
   std::string model = "";
   std::any parent = nullptr;
-  // The environment that should be told about this instance when it is
-  // created (nested-instance enrollment). Set only on submodule builders —
-  // top-level children are registered by the environment itself.
+  // Environment to notify on instance creation (nested-instance enrollment).
+  // Set only on submodule builders; top-level children the environment registers.
   environment_module* owner_ = nullptr;
 
   template<typename T>
@@ -176,11 +171,9 @@ struct ModuleBuilder {
    * \return The parameter value, or default_value if absent and optional.
    */
   /**
-   * Process-wide fall-through builder. Any ``get_parameter`` call that
-   * misses the local builder consults this one before failing/returning
-   * the default. Use it for system-wide settings (block_size, page_size,
-   * num_consumers, etc.) that every module should be able to read without
-   * requiring the environment to inject them everywhere.
+   * Process-wide fall-through builder: a get_parameter miss on the local
+   * builder consults this before failing. Holds system-wide settings
+   * (block_size, page_size, num_consumers, ...) every module can read.
    */
   static ModuleBuilder& globals() {
     static ModuleBuilder g{"<globals>", "<globals>"};
@@ -189,8 +182,8 @@ struct ModuleBuilder {
 
   template<typename T>
   T get_parameter(std::string name, bool optional = false, T default_value = T{}) const {
-    // Globals lookups (either direct or via fall-through) are completely
-    // suppressed in dump output to avoid per-module spam of system params.
+    // Globals lookups (direct or fall-through) are suppressed in dump output
+    // to avoid per-module spam of system params.
     const bool suppress_dump = (this == &globals());
     auto found = lookup_parameter<T>(name);
     if (found.value.has_value()) {
@@ -338,12 +331,9 @@ public:
 
   // ---- Nested-instance enrollment ----
 
-  // Recursively mark every submodule builder (but not this builder) as owned
-  // by the given environment. Instances created from owned builders announce
-  // themselves via environment_module::enroll_nested_instance, which is how
-  // submodule-created modules (workload sources, prefetchers, ...) become
-  // visible to the environment's views — and, when operable, get ticked
-  // automatically by the orchestrator.
+  // Recursively mark every submodule builder (not this one) as owned by env.
+  // Instances from owned builders self-announce via enroll_nested_instance,
+  // joining the environment's views (and operable ticking).
   ModuleBuilder& set_owner_of_submodules(environment_module* env) {
     for (auto& [iface, subs] : submodules_) {
       for (auto& sub : subs) {
@@ -401,10 +391,9 @@ public:
     std::function<champsim::module_stat*(const std::any&)> to_module_stat;
     // Returns the registered model name and the instance NAME for an instance any.
     std::function<instance_id(const std::any&)> identify;
-    // True when the named model's implementation class is a source_consumer
-    // / stream_source. Recorded at register_module time (statically, via
-    // is_base_of), so environments can count consumers and sources from a
-    // config before constructing any module.
+    // Whether the named model's impl is a source_consumer / stream_source.
+    // Recorded at register_module time (is_base_of) so environments can count
+    // consumers/sources from a config before constructing any module.
     std::function<bool(const std::string&)> model_is_consumer;
     std::function<bool(const std::string&)> model_is_source;
     // Per-instance dynamic_cast to the stream_source mixin (matching
@@ -560,11 +549,9 @@ struct module_base {
         return name;
     }
 
-    // Everything known about a registered model: its factory, plus the
-    // traits that must be queryable before any instance exists (a
-    // pre-construction consumer count cannot dynamic_cast what has not been
-    // constructed, so inheritance is recorded here, where the concrete type
-    // is known statically).
+    // A registered model's factory plus traits that must be queryable before
+    // any instance exists (pre-construction counts can't dynamic_cast, so
+    // inheritance is recorded here where the concrete type is known statically).
     struct model_record {
       std::function<std::unique_ptr<B>(ModuleBuilder builder)> create;
       bool is_consumer = false;
@@ -706,10 +693,9 @@ struct module_base {
           }
           return vec;
         };
-        // Per-instance dynamic_cast: works even when only the implementation
-        // (not the interface) inherits operable. This lets a specific model
-        // be operable while other models of the same interface (e.g. the
-        // default channel) are not.
+        // Per-instance dynamic_cast: works even when only the impl (not the
+        // interface) inherits operable, so one model can be operable while
+        // others of the same interface (e.g. the default channel) are not.
         info.to_operable = [](const std::any& a) -> champsim::operable* {
           return dynamic_cast<champsim::operable*>(std::any_cast<B*>(a));
         };
@@ -757,22 +743,17 @@ struct module_base {
   struct source_consumer {
     virtual ~source_consumer() = default;
 
-    // Health as judged by the consumer itself. The consumer knows its own
-    // expected progress rate (instructions retired for a core, packets
-    // delivered for a network consumer, ...), so livelock policy lives here —
-    // not in the phase controller, which only aggregates.
+    // Health judged by the consumer itself: it knows its own expected progress
+    // rate, so livelock policy lives here, not in the aggregating phase controller.
     enum class source_health { healthy, warning, critical, stalled };
 
     // True when all attached workload sources are exhausted.
     virtual bool source_eof() const { return true; }
 
-    // Consumer id: this consumer's hardware-context identity. Assigned by
-    // the framework at startup, by enumeration in configuration order —
-    // never written in a configuration. Ids are unique and dense in
-    // [0, num_consumers); they key per-consumer resources (replacement
-    // tables, stats, phase tracking) and default the stream of attached
-    // sources. See origin.h. Standalone instances (unit tests) keep the
-    // default of 0, matching the historical single-core default.
+    // Consumer id: hardware-context identity, assigned at startup by enumeration
+    // in config order, never written in a config. Unique and dense in
+    // [0, num_consumers); keys per-consumer resources and defaults attached
+    // sources' streams (see origin.h). Standalone instances default to 0.
     int consumer_id() const { return consumer_id_; }
     // The instance name this consumer was configured under (set by the
     // module factory). Use champsim::identities() for id <-> name lookups.
@@ -784,10 +765,8 @@ struct module_base {
         consumer_id_ = id;
       }
     }
-    // Consumers that mirror another consumer's identity (rather than being
-    // hardware contexts of their own — e.g. a shadow/replay channel) may pin
-    // their id; pinned consumers are skipped by the startup enumeration and
-    // do not occupy an id slot.
+    // Consumers mirroring another's identity (e.g. a shadow/replay channel) may
+    // pin their id; pinned consumers are skipped by enumeration and own no slot.
     void pin_consumer_id(int id)
     {
       consumer_id_ = id;
@@ -825,10 +804,9 @@ struct module_base {
     // Called at the end of a phase for summary output. Return empty to suppress.
     virtual std::string phase_complete_message(const std::string& /*phase_name*/) const { return {}; }
 
-    // Format a periodic progress report (driven by a heartbeat-style
-    // listener, which owns the interval bookkeeping and supplies the
-    // numbers). The consumer owns the wording because it knows its own
-    // token unit. Return empty to suppress.
+    // Format a periodic progress report (driven by a heartbeat listener that
+    // supplies the numbers); the consumer owns the wording (its token unit).
+    // Return empty to suppress.
     virtual std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const
     {
       return fmt::format("Heartbeat source {} tokens: {} cycles: {} rate: {:.4} cumulative rate: {:.4}", consumer_id(), total_progress, total_cycles,
@@ -871,10 +849,8 @@ struct module_base {
     std::string phase_complete_message(const std::string& phase_name) const override;
     std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const override;
 
-    // Health policy for instruction consumers: progress rate (instructions
-    // per cycle) over the check window against retirement-rate floors.
-    // These are the former phase-controller livelock thresholds, now owned
-    // by the consumer that knows its own progress unit.
+    // Health policy for instruction consumers: IPC over the check window vs
+    // retirement-rate floors (the former phase-controller livelock thresholds).
     source_health check_health(uint64_t elapsed) override;
     void reset_health() override;
 
@@ -1324,32 +1300,22 @@ struct module_base {
   };
 
   /**
-   * Workload source interface — provides discrete units of work ("tokens")
-   * to a source_consumer.
-   *
-   * Attach as a submodule of any module that inherits source_consumer.
-   * This base carries only the token-agnostic lifecycle that the
-   * orchestration layer needs; the typed pull protocol lives on
-   * typed_workload_source<Token>. A consumer and its sources agree on the
-   * token type by construction: a core consumes instruction_source
-   * (Token = ooo_model_instr), a memory-stream source feeds a cache-side
-   * consumer records, a network consumer would take packets — all meshing
-   * in one run because the orchestrator never sees the token type.
+   * Workload source interface — provides discrete units of work ("tokens") to a
+   * source_consumer. Attach as a submodule of a source_consumer. This base holds
+   * only the token-agnostic lifecycle; the typed pull protocol lives on
+   * typed_workload_source<Token>. Consumer and sources agree on the token type by
+   * construction, so mixed token types coexist (the orchestrator never sees it).
    */
-  // Mixin for any module that holds a stream identity — the address-space
-  // tag stamped on the tokens it produces. The exact counterpart of
-  // source_consumer: any model of any interface may inherit it (the
-  // workload_source interface does, but so may e.g. a channel model that
-  // synthesizes requests), it is enumerated by the same startup pass, and
-  // it supports the same pinning affordance for models that mirror another
-  // holder's identity rather than owning a slot.
+  // Mixin for any module holding a stream identity — the address-space tag
+  // stamped on the tokens it produces. Counterpart of source_consumer: any
+  // model may inherit it, enumerated by the same startup pass, with the same
+  // pinning affordance for holders that mirror another's identity.
   struct stream_source {
     virtual ~stream_source() = default;
 
-    // Stream id: the address-space identity stamped on this source's tokens.
-    // Assigned by the framework at startup: every source gets its own stream
-    // unless sources share a "stream" label in the configuration, in which
-    // case they share one id. Never written as a number in a configuration.
+    // Stream id: address-space identity stamped on this source's tokens.
+    // Assigned at startup; each source gets its own unless sources share a
+    // "stream" label. Never written as a number in a config.
     uint32_t stream_id() const
     {
       if (stream_id_.has_value()) {
@@ -1363,9 +1329,8 @@ struct module_base {
         stream_id_ = id;
       }
     }
-    // Sources that mirror another holder's stream (rather than owning an
-    // address space of their own) may pin; pinned sources are skipped by the
-    // startup enumeration and do not occupy a stream slot.
+    // Sources mirroring another holder's stream may pin; pinned sources are
+    // skipped by enumeration and own no stream slot.
     void pin_stream_id(uint32_t id)
     {
       stream_id_ = id;
@@ -1462,16 +1427,11 @@ struct module_base {
   };
 
   /**
-   * Phase controller interface — manages phase completion and health monitoring.
-   *
-   * The phase controller owns the per-phase loop conditions: it observes
-   * cycle progress, drives deadlock detection, aggregates the health that
-   * each source consumer reports about itself, and signals when each source
-   * has completed its share of the phase. Source EOF is observed by polling
-   * source_consumer::source_eof() directly — there is no external EOF
-   * notification. If the controller exposes a non-empty phase list via
-   * get_phases(), the simulator runs that list instead of the default
-   * warmup+sim pair.
+   * Phase controller interface — owns the per-phase loop conditions: observes
+   * cycle progress, drives deadlock detection, aggregates consumer-reported
+   * health, and signals per-source completion. EOF is polled directly via
+   * source_consumer::source_eof(). A non-empty get_phases() list overrides the
+   * default warmup+sim pair.
    */
   struct phase_controller : public module_base<phase_controller, environment_module> {
     virtual ~phase_controller() = default;
@@ -1499,13 +1459,10 @@ struct module_base {
   };
 
   /**
-   * Listener interface — observes run-wide events for reporting.
-   *
-   * Listeners are ordinary modules: declare them as top-level children in an
-   * explicit config (interface "listener"), request extra models via the
-   * --listeners CLI option, or rely on the default HEARTBEAT listener that
-   * main creates when a config declares none. Producers reach the active
-   * listeners through the emit_* free functions below.
+   * Listener interface — observes run-wide events for reporting. Ordinary
+   * modules: declare as top-level "listener" children, add via --listeners, or
+   * rely on the default HEARTBEAT listener. Producers reach active listeners
+   * through the emit_* free functions below.
    */
   struct listener : public module_base<listener, environment_module> {
     virtual ~listener() = default;
@@ -1536,11 +1493,10 @@ struct module_base {
     // Special interface_type "operable" returns all operable modules across all interfaces.
     virtual std::vector<std::any> view(const std::string& interface_type) const = 0;
 
-    // Called by module_base::create_instance for instances whose builder was
-    // marked via ModuleBuilder::set_owner_of_submodules — i.e. modules
-    // constructed inside a parent module rather than by the environment.
-    // Implementations should append these to their views (after top-level
-    // modules, preserving top-level ordering). Default: ignore.
+    // Called by create_instance for instances whose builder was marked via
+    // set_owner_of_submodules (modules built inside a parent, not by the env).
+    // Implementations append these to their views after top-level modules
+    // (preserving top-level order). Default: ignore.
     virtual void enroll_nested_instance(const std::string& /*interface_name*/, const std::string& /*name*/, std::any /*instance*/) {}
 
     // Typed convenience wrapper: casts the any values to T* and returns reference_wrappers.

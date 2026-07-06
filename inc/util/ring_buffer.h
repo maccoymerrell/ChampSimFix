@@ -29,41 +29,31 @@
 namespace champsim
 {
 /**
- * A bounded FIFO with contiguous storage and random-access iterators.
+ * A bounded FIFO with contiguous storage and random-access iterators: a
+ * std::deque replacement for structures with a known (or amortizable)
+ * capacity, trading the deque's chunk-map indirection for a single contiguous
+ * allocation (iteration is one add + wrap test per step).
  *
- * This is a general-purpose queue container, replacing std::deque wherever a
- * structure has a known (or amortizable) capacity: push_back/emplace_back at
- * the tail, pop_front at the head, and index/iterate in insertion order —
- * but over a single contiguous allocation, so iteration costs one add and a
- * wrap test per step instead of the deque's chunk-map indirection.
+ * Supports the standard container surface (begin/end/cbegin/cend, size/empty,
+ * front/back, operator[]/at, push_back/emplace_back, pop_front/pop_back, clear,
+ * reserve) plus the end-anchored subset of insert/erase. Elements leave in FIFO
+ * order (or LIFO via pop_back); no middle mutation.
  *
- * It supports the standard container calls its backing store allows:
- * begin/end/cbegin/cend, size/empty, front/back, operator[]/at,
- * push_back/emplace_back, pop_front/pop_back, clear, reserve, and the
- * end-anchored subset of insert/erase (see those members). Mutation in the
- * middle of the sequence is not part of the container's contract — elements
- * leave in FIFO (or LIFO, via pop_back) order only.
- *
- * Capacity semantics: set_capacity() fixes the capacity while empty;
- * push_back on a full buffer is a precondition violation (assert), so
- * admission must be gated by full()/size() — the simulator's structure sizes
- * are model parameters and overflow is a modeling bug. For queues with no
- * modeled bound, the _grow insertion calls enlarge the backing store
- * (amortized doubling) instead of failing.
+ * Capacity: set_capacity() fixes the capacity while empty; push_back on a full
+ * buffer is a precondition violation (assert), so admission must be gated by
+ * full()/size(). The _grow calls instead enlarge the store (amortized doubling)
+ * for queues with no modeled bound.
  *
  * Iterator and reference invalidation:
- *  - push_back/emplace_back: no iterator or reference is invalidated (the
- *    backing store never reallocates); past-the-end iterators become
- *    dereferenceable as usual.
- *  - pop_front/pop_back/erase/clear: references to surviving elements remain
- *    valid, but ALL iterators are invalidated — an iterator carries its
- *    logical index from the front, which shifts when the head moves.
- *  - reserve, insert, and the _grow calls, when they enlarge the store: all
- *    iterators, references, and physical slot indices are invalidated.
- *    While within capacity, insert and the _grow calls behave as push_back.
- * In short: a reference or pointer to an element is stable for the element's
- * entire residency provided the backing store is never enlarged; iterators
- * are stable only across tail insertion.
+ *  - push_back/emplace_back: invalidate nothing (the store never reallocates).
+ *  - pop_front/pop_back/erase/clear: references to surviving elements stay
+ *    valid, but ALL iterators are invalidated — an iterator carries its logical
+ *    index from the front, which shifts when the head moves.
+ *  - reserve/insert/_grow that enlarge the store: all iterators, references, and
+ *    physical slot indices are invalidated; within capacity they act as push_back.
+ * In short: a reference or pointer is stable for the element's whole residency
+ * provided the store is never enlarged; iterators are stable only across tail
+ * insertion.
  */
 template <typename T>
 class ring_buffer
@@ -73,14 +63,11 @@ class ring_buffer
   std::vector<std::optional<T>> storage_{};
   std::size_t head_ = 0; // physical index of the logical front
   std::size_t count_ = 0;
-  // Cached storage_.size(). The size accessors (begin/end/physical/full/
-  // capacity, plus the wrap tests) run on the simulator's hottest scans, where
-  // libstdc++'s std::vector::size() — a _M_finish − _M_start pointer
-  // subtraction — profiled as ~3% of run time (begin()/end() re-do it on every
-  // scan). capacity_ is derived state: it is written *only* where storage_ is
-  // (re)sized, and set_capacity() and reserve() are the sole assigners of
-  // storage_, so it cannot desync. Debug builds assert the invariant at those
-  // two sites.
+  // Cached storage_.size(): libstdc++'s std::vector::size() (a _M_finish −
+  // _M_start pointer subtraction) profiled as ~3% of run time on the hottest
+  // scans, which begin()/end() redo every step. Derived state, written only
+  // where storage_ is (re)sized — set_capacity() and reserve() are its sole
+  // assigners, so it cannot desync; debug builds assert the invariant there.
   std::size_t capacity_ = 0;
 
   std::size_t physical(std::size_t logical) const
@@ -96,10 +83,9 @@ class ring_buffer
   class iterator_impl
   {
     using slot_type = std::conditional_t<Const, const std::optional<T>, std::optional<T>>;
-    // The data pointer, capacity, and physical index are cached in the
-    // iterator so dereferencing is a single indexed load with no indirection
-    // through the owning container (these walks are the hottest loops in the
-    // simulator). The logical index orders iterators and measures distance.
+    // Data pointer, capacity, and physical index are cached in the iterator so
+    // dereference is a single indexed load with no indirection through the owning
+    // container (the hottest loops). The logical index orders and measures distance.
     slot_type* data_ = nullptr;
     std::size_t cap_ = 0;
     std::size_t phys_ = 0; // physical slot of the current element
@@ -203,10 +189,7 @@ public:
   ring_buffer() = default;
   explicit ring_buffer(size_type capacity) { set_capacity(capacity); }
 
-  /**
-   * Fix the capacity. May only be called while the buffer is empty; existing
-   * contents (there are none) are discarded.
-   */
+  /** Fix the capacity. May only be called while the buffer is empty. */
   void set_capacity(size_type capacity)
   {
     assert(count_ == 0);
@@ -220,11 +203,9 @@ public:
   }
 
   /**
-   * Enlarge the backing store to hold at least new_capacity elements,
-   * preserving the contents in order. No-op if the buffer is already at
-   * least that large. Unlike set_capacity(), this may be called while
-   * elements are present; when it enlarges the store it invalidates all
-   * iterators, references, and physical slot indices.
+   * Enlarge the backing store to hold >= new_capacity elements, preserving
+   * contents in order; no-op if already that large. May be called with elements
+   * present; enlarging invalidates all iterators, references, and slot indices.
    */
   void reserve(size_type new_capacity)
   {
@@ -300,10 +281,9 @@ public:
   }
 
   /**
-   * Tail insertion for queues without a modeled capacity bound: as
-   * push_back/emplace_back, but a full buffer enlarges the backing store
-   * (amortized doubling) instead of asserting. When growth occurs, all
-   * iterators, references, and physical slot indices are invalidated.
+   * Tail insertion for queues with no modeled bound: as push_back, but a full
+   * buffer enlarges the store (amortized doubling) instead of asserting; growth
+   * invalidates all iterators, references, and physical slot indices.
    */
   void push_back_grow(const T& value)
   {
@@ -349,12 +329,9 @@ public:
   const_reference at_slot(size_type slot) const { return *storage_[slot]; }
 
   /**
-   * Insert a range at the tail. Only end-anchored insertion is supported,
-   * mirroring push_back (the position argument exists for interface
-   * familiarity and must equal end()). Unlike push_back, insertion beyond
-   * the capacity enlarges the backing store (with reserve()'s invalidation
-   * consequences): range insertion serves batch staging and external state
-   * injection, not admission-gated modeling.
+   * Insert a range at the tail. Only end-anchored insertion is supported: pos
+   * must equal end(). Beyond capacity it enlarges the store (with reserve()'s
+   * invalidation consequences).
    */
   template <typename InputIt>
   iterator insert(const_iterator pos, InputIt first, InputIt last)

@@ -112,10 +112,9 @@ long MEMORY_CONTROLLER::operate()
 
 long MEMORY_CONTROLLER::poll_cycle()
 {
-  // Skippable only when no request is waiting on any upper channel and no
-  // DRAM channel has pending or timer-due work this cycle (bank activity,
-  // dbus activity, a due refresh, or an unsettled write mode). Skip at most
-  // 1 cycle: new work can arrive on the upper channels at any cycle.
+  // Skippable only when no upper channel has a waiting request and no DRAM
+  // channel has pending or timer-due work this cycle. Skip at most 1 cycle:
+  // new work can arrive on an upper channel at any time.
   const bool uppers_idle = std::all_of(std::cbegin(queues), std::cend(queues), [](auto* ul) {
     return std::empty(ul->get_rq()) && std::empty(ul->get_wq()) && std::empty(ul->get_pq());
   });
@@ -141,10 +140,9 @@ long MEMORY_CONTROLLER::poll_cycle()
 
 bool DRAM_CHANNEL::has_pending_work() const
 {
-  // Timer-scheduled work only: refreshes in flight (or queued behind a busy
-  // bank), banks occupied until a known ready_time, or an active data-bus
-  // transfer. Queued-but-unscheduled packets are excluded — with free banks
-  // they schedule (and count progress) on the very next operated cycle.
+  // Timer-scheduled work only: in-flight refreshes, banks busy until a known
+  // ready_time, or an active data-bus transfer. Queued-but-unscheduled packets
+  // are excluded — they schedule (and count progress) on the next operated cycle.
   return active_request != std::cend(bank_request) || valid_bank_count > 0 || refresh_pending_banks > 0;
 }
 
@@ -160,9 +158,8 @@ bool DRAM_CHANNEL::would_do_work_at(champsim::chrono::clock::time_point t) const
     return true;
   }
   // An unsettled write burst: swap_write_mode() switches to read mode on the
-  // next operated cycle even with empty queues, stamping dbus_cycle_available.
-  // Run that cycle for real so the turn-around penalty lands at the same time
-  // it would without skipping.
+  // next operated cycle even with empty queues. Run it for real so the
+  // turn-around penalty lands when it would without skipping.
   if (write_mode) {
     return true;
   }
@@ -272,11 +269,9 @@ void DRAM_CHANNEL::schedule_refresh()
       refresh_row -= address_mapping.rows();
   }
 
-  // Go through each bank, and handle refreshes. Refresh is housekeeping, not
-  // workload progress: it contributes nothing to the liveness signal the
-  // deadlock detector consumes. Requests stalled behind an in-flight refresh
-  // are protected instead by has_pending_work() — the refresh completes at a
-  // known future time without external input.
+  // Handle refreshes per bank. Refresh is housekeeping, not workload progress,
+  // so it feeds no liveness signal; requests stalled behind an in-flight
+  // refresh are protected by has_pending_work() instead.
   for (auto& b_req : bank_request) {
     // refresh is now needed for this bank
     if (schedule_refresh) {
@@ -309,7 +304,7 @@ void DRAM_CHANNEL::swap_write_mode()
   const std::size_t DRAM_WRITE_HIGH_WM = write_high_wm_;
   const std::size_t DRAM_WRITE_LOW_WM = write_low_wm_;
 
-  // Check queue occupancy (maintained counters; was a 128-slot scan per cycle)
+  // Check queue occupancy (maintained counters, not a per-cycle scan)
   auto wq_occu = static_cast<std::size_t>(wq_occupancy_ct);
   auto rq_occu = static_cast<std::size_t>(rq_occupancy_ct);
 
