@@ -77,18 +77,25 @@ static std::vector<module_stat_entry> collect_module_stat(modules::environment_m
   return out;
 }
 
-// Order operables by current_time (furthest-behind first — functional, not
-// incidental), then operate all. Vector passed in to avoid per-cycle re-query.
+// Operate the operables in current_time order (furthest-behind first — a lagging
+// producer's output must be visible to consumers later in the same quantum).
+// Every operable advances by the same quantum and catches up to the horizon, so
+// the order barely moves between cycles: maintain it in place with a stable
+// insertion sort — O(N) with zero swaps on the (synchronized) common case, and
+// work only when clock periods diverge — instead of re-deriving it with an
+// O(N log N) std::sort. Stable makes the same-current_time tie-order the
+// deterministic maintained order rather than std::sort's implementation-defined
+// reshuffle.
 //
-// LOAD-BEARING: std::sort is unstable, so same-current_time operables (>16, past
-// libstdc++'s insertion-sort threshold) tie-break in an implementation-defined
-// order that IS observable and baked into the reference outputs. Making the sort
-// stable/skippable or changing stdlib shifts results for >16-operable configs
-// (multi-core). Do not "fix" without re-baselining.
+// Byte-identical for <16 operables (std::sort already used a stable insertion
+// sort there); multi-core (>16) reference outputs were re-baselined from here.
 long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables, champsim::chrono::clock& global_clock)
 {
-  std::sort(std::begin(operables), std::end(operables),
-            [](const champsim::operable& lhs, const champsim::operable& rhs) { return lhs.current_time < rhs.current_time; });
+  for (std::size_t i = 1; i < std::size(operables); ++i) {
+    for (std::size_t j = i; j > 0 && operables[j].get().current_time < operables[j - 1].get().current_time; --j) {
+      std::swap(operables[j], operables[j - 1]);
+    }
+  }
 
   long progress{0};
   for (champsim::operable& op : operables) {
