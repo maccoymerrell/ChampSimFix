@@ -17,7 +17,7 @@ SCENARIO("Blocks that hit the DIB are removed from fetch candidacy")
 
     auto seed_instr = champsim::test::instruction_with_ip(champsim::address{0xfeed0040});
 
-    uut.IFETCH_BUFFER.push_back(seed_instr);
+    uut.modify_ifetch_buffer([&](auto& buf) { buf.push_back(seed_instr); });
 
     for (auto i = 0; i < 100; i++) {
       for (auto op : std::array<champsim::operable*, 3>{{&uut, &mock_L1I, &mock_L1D}})
@@ -30,9 +30,11 @@ SCENARIO("Blocks that hit the DIB are removed from fetch candidacy")
       auto test_instr_first = champsim::test::instruction_with_ip(champsim::address{0xbeefbeef});
       auto test_instr_second = champsim::test::instruction_with_ip(champsim::address{0xbeefbee0});
 
-      uut.IFETCH_BUFFER.push_back(test_instr_first);
-      uut.IFETCH_BUFFER.push_back(seed_instr);
-      uut.IFETCH_BUFFER.push_back(test_instr_second);
+      uut.modify_ifetch_buffer([&](auto& buf) {
+        buf.push_back(test_instr_first);
+        buf.push_back(seed_instr);
+        buf.push_back(test_instr_second);
+      });
 
       for (auto i = 0; i < 100; i++) {
         for (auto op : std::array<champsim::operable*, 3>{{&uut, &mock_L1I, &mock_L1D}})

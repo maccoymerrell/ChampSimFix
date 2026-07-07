@@ -34,7 +34,8 @@ bool champsim::operable::skip_enabled() { return skip_enabled_; }
 long champsim::operable::operate_on(const champsim::chrono::clock& clock)
 {
   long progress{0};
-  while (current_time < clock.now()) {
+  const auto horizon = clock.now(); // invariant during this call
+  while (current_time < horizon) {
     // Enter the next local cycle before polling so poll_cycle() observes the
     // same end-of-cycle timestamp that operate() does (matching _operate()).
     current_time += clock_period;

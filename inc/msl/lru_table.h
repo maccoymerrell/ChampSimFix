@@ -113,7 +113,7 @@ private:
     }
     if (set_idx < 0)
       throw std::range_error{"Set projection produced negative set index: " + std::to_string(set_idx)};
-    diff_type raw_idx{(set_idx % NUM_SET) * NUM_WAY};
+    diff_type raw_idx{(set_idx & (NUM_SET - 1)) * NUM_WAY}; // NUM_SET is a power of 2 (enforced at construction)
     auto begin = std::next(std::begin(block), raw_idx);
     auto end = std::next(begin, NUM_WAY);
     return std::pair{begin, end};

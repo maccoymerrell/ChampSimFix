@@ -38,35 +38,39 @@ SCENARIO("An exhausted register file does not block scheduling behind an already
     // rename path -- no poking the allocator directly.
     const auto writer_count = uut.reg_allocator.count_free_registers();
     REQUIRE(writer_count > 0);
-    for (uint64_t i = 0; i < writer_count; ++i) {
-      auto writer = champsim::test::instruction_with_ip(1 + i);
-      writer.instr_id = 1 + i;
-      writer.destination_registers.push_back(10);
-      writer.ready_time = champsim::chrono::clock::time_point{};
-      uut.ROB.push_back(writer);
-    }
+    uut.modify_rob([&](auto& rob) {
+      for (uint64_t i = 0; i < writer_count; ++i) {
+        auto writer = champsim::test::instruction_with_ip(1 + i);
+        writer.instr_id = 1 + i;
+        writer.destination_registers.push_back(10);
+        writer.ready_time = champsim::chrono::clock::time_point{};
+        rob.push_back(writer);
+      }
+    });
 
     WHEN("The core cycles so every writer is scheduled and the register file is exhausted")
     {
       for (auto op : elements)
         op->_operate();
 
-      REQUIRE(std::all_of(std::begin(uut.ROB), std::end(uut.ROB), [](const auto& instr) { return instr.scheduled; }));
+      REQUIRE(std::all_of(std::begin(uut.rob()), std::end(uut.rob()), [](const auto& instr) { return instr.scheduled; }));
       REQUIRE(uut.reg_allocator.count_free_registers() == 0);
 
       AND_WHEN("A ready instruction needing no new registers arrives behind the in-flight writers and the core cycles again")
       {
-        auto probe = champsim::test::instruction_with_ip(1000);
-        probe.instr_id = 1000;
-        probe.ready_time = champsim::chrono::clock::time_point{};
-        uut.ROB.push_back(probe);
+        uut.modify_rob([&](auto& rob) {
+          auto probe = champsim::test::instruction_with_ip(1000);
+          probe.instr_id = 1000;
+          probe.ready_time = champsim::chrono::clock::time_point{};
+          rob.push_back(probe);
+        });
 
         for (auto op : elements)
           op->_operate();
 
         THEN("It still schedules -- the exhausted file must not gate an already-scheduled instruction ahead of it")
         {
-          REQUIRE(uut.ROB.back().scheduled);
+          REQUIRE(uut.rob().back().scheduled);
         }
       }
     }

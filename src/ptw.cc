@@ -36,19 +36,20 @@ PageTableWalker::PageTableWalker(champsim::modules::ModuleBuilder builder)
       HIT_LATENCY(builder.get_parameter<unsigned>("latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), vmem(builder.get_parameter<champsim::modules::vmem_module*>("vmem")), pt_levels_(vmem->get_pt_levels())
 {
   log2_page_size_ = builder.get_parameter<unsigned>("log2_page_size");
+  MSHR.set_capacity(MSHR_SIZE);
+  finished.set_capacity(MSHR_SIZE);
+  completed.set_capacity(MSHR_SIZE);
   auto local_pscl_dims = builder.get_parameter<std::vector<std::array<uint32_t, 3>>>("pscl_dims");
   auto pt_levels = vmem->get_pt_levels();
-  // Valid PSCL levels are [2, pt_levels]. Level 1 is never cached (handle_fill
-  // at level 1 produces the final va_to_pa lookup, not another intermediate
-  // step). Levels > pt_levels don't exist in this table.
+  // Valid PSCL levels are [2, pt_levels]: level 1 is never cached (its fill is
+  // the final va_to_pa, not an intermediate step) and levels > pt_levels don't exist.
   local_pscl_dims.erase(std::remove_if(std::begin(local_pscl_dims), std::end(local_pscl_dims),
                                         [pt_levels](auto x) { return std::get<0>(x) > pt_levels || std::get<0>(x) < 2; }),
                          std::end(local_pscl_dims));
 
-  // Ensure every level in [2, pt_levels] has a PSCL entry. Missing levels get
-  // a 0-way stub that always misses and silently ignores fills, preserving the
-  // invariant std::size(pscl) == pt_levels - 1 so the walk always starts at
-  // the correct level and no walk steps are silently skipped.
+  // Every level in [2, pt_levels] gets a PSCL entry (missing ones a 0-way stub
+  // that always misses), preserving the invariant std::size(pscl) == pt_levels - 1
+  // so the walk starts at the right level and skips no steps.
   for (std::size_t level = 2; level <= pt_levels; ++level) {
     bool configured = std::any_of(std::begin(local_pscl_dims), std::end(local_pscl_dims),
                                   [level](const auto& x) { return std::get<0>(x) == level; });
@@ -72,9 +73,8 @@ PageTableWalker::mshr_type::mshr_type(const request_type& req, std::size_t level
 
 auto PageTableWalker::handle_read(const request_type& handle_pkt, channel_type* ul) -> std::optional<mshr_type>
 {
-  // The walk's address space comes from the request, not from the walker:
-  // this is hardware owned by a consumer, serving whatever streams reach it.
-  // The root (CR3) is the requesting stream's, resolved per walk.
+  // The address space comes from the request, not the walker (shared hardware):
+  // the root (CR3) is the requesting stream's, resolved per walk.
   const auto walk_root = vmem->get_pte_pa(handle_pkt.origin, champsim::page_number{}, pt_levels_).first;
   pscl_entry walk_init = {handle_pkt.v_address, walk_root, std::size(pscl), handle_pkt.origin.stream()};
   std::vector<std::optional<pscl_entry>> pscl_hits;
@@ -140,11 +140,10 @@ auto PageTableWalker::step_translation(const mshr_type& source) -> std::optional
 
 long PageTableWalker::poll_cycle()
 {
-  // Skip only when no walk state exists anywhere: nothing returned from
-  // below, no in-flight walk steps, and no requests on any upper channel.
-  // MSHR entries awaiting a lower-level response are skippable — the wake
-  // event is an arrival on lower_level->get_returned(), re-checked here
-  // every cycle.
+  // Skip only when no walk state exists anywhere: nothing returned from below,
+  // no in-flight steps, no upper-channel requests. MSHR entries awaiting a
+  // lower-level response are skippable — the wake is an arrival on
+  // lower_level->get_returned(), re-checked every cycle.
   const bool idle = std::empty(lower_level->get_returned()) && std::empty(finished) && std::empty(completed)
                     && std::all_of(std::cbegin(upper_levels), std::cend(upper_levels),
                                    [](auto* ul) { return std::empty(ul->get_rq()); });
@@ -155,35 +154,34 @@ long PageTableWalker::operate()
 {
   long progress{0};
 
-  auto is_ready = [time = current_time](const auto& pkt) {
-    return pkt.data.is_ready_at(time);
-  };
-  std::for_each(std::cbegin(lower_level->get_returned()), std::cend(lower_level->get_returned()), [this](const auto& pkt) { this->finish_packet(pkt); });
-  progress += std::distance(std::cbegin(lower_level->get_returned()), std::cend(lower_level->get_returned()));
-  lower_level->get_returned().clear();
+  auto& returned = lower_level->get_returned();
+  std::for_each(std::cbegin(returned), std::cend(returned), [this](const auto& pkt) { this->finish_packet(pkt); });
+  progress += std::distance(std::cbegin(returned), std::cend(returned));
+  returned.clear();
 
-  std::vector<mshr_type> next_steps{};
+  // Scratch vector reused across cycles to avoid a per-cycle allocation
+  auto& next_steps = next_steps_scratch_;
+  next_steps.clear();
 
   champsim::bandwidth fill_bw{MAX_FILL};
-  auto [complete_begin, complete_end] = champsim::get_span_p(std::cbegin(completed), std::cend(completed), fill_bw, is_ready);
-  std::for_each(complete_begin, complete_end, [](auto& mshr_entry) {
+  // Retire the ready prefix of completed walks (whose data promise is ready by
+  // current_time), up to MAX_FILL, emitting each to its return channels.
+  completed.drain_ready(current_time, fill_bw, [](const auto& mshr_entry) {
     for (auto ret : mshr_entry.to_return) {
-      ret->emplace_back(mshr_entry.v_address, mshr_entry.v_address, *mshr_entry.data, mshr_entry.pf_metadata, mshr_entry.instr_depend_on_me);
+      ret->emplace_back_grow(mshr_entry.v_address, mshr_entry.v_address, *mshr_entry.data, mshr_entry.pf_metadata, mshr_entry.instr_depend_on_me);
     }
+    return true;
   });
-  fill_bw.consume(std::distance(complete_begin, complete_end));
-  completed.erase(complete_begin, complete_end);
 
-  auto [mshr_begin, mshr_end] = champsim::get_span_p(std::cbegin(finished), std::cend(finished), fill_bw, is_ready);
-  std::tie(mshr_begin, mshr_end) = champsim::get_span_p(mshr_begin, mshr_end, [&next_steps, this](const auto& pkt) {
+  // Retire the ready prefix of finished steps, stopping before the first whose
+  // handle_fill declines (the walk cannot advance yet).
+  finished.drain_ready(current_time, fill_bw, [&next_steps, this](const auto& pkt) {
     auto result = this->handle_fill(pkt);
     if (result.has_value()) {
       next_steps.emplace_back(*result);
     }
     return result.has_value();
   });
-  fill_bw.consume(std::distance(mshr_begin, mshr_end));
-  finished.erase(mshr_begin, mshr_end);
 
   champsim::bandwidth tag_bw{MAX_READ};
   for (auto* ul : upper_levels) {
@@ -250,7 +248,9 @@ void PageTableWalker::finish_packet(const response_type& packet)
     mshr_entry.data = is_last_step(mshr_entry) ? finish_last_step(mshr_entry) : finish_step(mshr_entry);
   });
 
-  std::partition_copy(std::begin(MSHR), last_finished, std::back_inserter(completed), std::back_inserter(finished), is_last_step);
+  std::for_each(std::begin(MSHR), last_finished, [&, is_last_step](auto& mshr_entry) {
+    (is_last_step(mshr_entry) ? completed : finished).push_back_grow(std::move(mshr_entry));
+  });
   MSHR.erase(std::begin(MSHR), last_finished);
 }
 

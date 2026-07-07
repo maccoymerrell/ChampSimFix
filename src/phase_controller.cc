@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <numeric>
 #include <map>
 #include <set>
 #include <string>
@@ -29,27 +30,18 @@
 namespace {
 
 /*
- * The generic phase controller. Token-agnostic: it never assumes what a
- * source consumer's progress unit is. It owns only the generic mechanics:
- *
- *  - completion: a source completes when its sim_progress() delta reaches
- *    the phase length (denominated in that consumer's own tokens), or when
- *    its sources hit EOF (policy-selectable, see eof_policy).
+ * Generic, token-agnostic phase controller. Owns only generic mechanics:
+ *  - completion: a source completes when its sim_progress() delta reaches the
+ *    phase length (in that consumer's own tokens), or at source EOF (see eof_policy).
  *  - deadlock: consecutive zero-progress cycles, vetoed while any consumer
  *    reports scheduled future work (has_pending_work).
- *  - health: every health_period cycles each consumer judges itself via
- *    check_health(); a stalled verdict aborts. The old instruction-rate
- *    "livelock" policy now lives in core_module::check_health.
+ *  - health: every health_period cycles each consumer self-judges via
+ *    check_health(); a stalled verdict aborts.
  *
- * Parameters:
- *  - deadlock_cycles (int, default 500)
- *  - health_period (uint64, default 10000000; legacy alias livelock_period)
- *  - eof_policy (string, default "complete_all"): when a consumer's sources
- *    are exhausted, either every source completes ("complete_all", the
- *    classic trace-driven behavior) or only that source ("complete_source",
- *    for heterogeneous runs).
- *  - phases (json array of {name, is_warmup, length}) or
- *    warmup_length/simulation_length scalars: optional run structure.
+ * Params: deadlock_cycles (int, 500); health_period (uint64, 1e7; alias
+ * livelock_period); eof_policy ("complete_all" ends the phase for all sources
+ * at the first EOF, "complete_source" only that source); phases (json array of
+ * {name, is_warmup, length}) or warmup_length/simulation_length scalars.
  */
 class default_phase_controller : public champsim::modules::phase_controller {
   using source_health = champsim::modules::source_consumer::source_health;
@@ -82,9 +74,19 @@ class default_phase_controller : public champsim::modules::phase_controller {
   // Source ids this controller governs; empty = all.
   std::set<int> governed_;
 
-  // Source tracking: keyed by source_id from source_consumer
-  std::map<int, bool> source_complete_;
-  std::map<int, uint64_t> progress_baseline_;
+  // Source tracking, flattened for the per-cycle advance() path (map lookups
+  // were a measured per-cycle overhead). Ordering is load-bearing: tracked_
+  // keeps consumer discovery order (the completion scan order); tracked_by_idx_
+  // is sorted by source id for the id-ordered complete-all-on-EOF notification.
+  struct tracked_source {
+    champsim::modules::source_consumer* consumer;
+    int idx;
+    uint64_t baseline;
+    bool complete;
+  };
+  std::vector<tracked_source> tracked_;
+  std::vector<std::size_t> tracked_by_idx_;
+  std::size_t incomplete_count_ = 0;
   std::vector<unsigned> newly_completed_;
 
   bool governs(int idx) const { return governed_.empty() || governed_.count(idx) > 0; }
@@ -119,9 +121,8 @@ public:
     }
     // If neither is set, phases_ stays empty — caller owns the phase list.
 
-    // Optional: the source ids this controller governs. Multiple controllers
-    // can partition the sources of a run; each controller then applies its
-    // own completion/health policy to its subset. Default: govern all.
+    // Optional source ids this controller governs, letting multiple controllers
+    // partition a run's sources (each applies its own policy). Default: all.
     if (builder.has_parameter("sources")) {
       for (auto& s : builder.get_parameter<nlohmann::json>("sources")) {
         governed_.insert(s.get<int>());
@@ -137,7 +138,9 @@ public:
     health_timer_ = 0;
     health_abort_ = false;
     newly_completed_.clear();
-    source_complete_.clear();
+    tracked_.clear();
+    tracked_by_idx_.clear();
+    incomplete_count_ = 0;
 
     // Refresh the per-phase view caches.
     // typed_view is expensive: cache here and reuse across cycles.
@@ -154,11 +157,15 @@ public:
     for (auto& sc : source_consumers_) {
       int idx = sc.get().consumer_id();
       if (idx >= 0) {
-        source_complete_[idx] = false;
-        progress_baseline_[idx] = sc.get().sim_progress();
+        tracked_.push_back({&sc.get(), idx, sc.get().sim_progress(), false});
       }
       sc.get().reset_health();
     }
+    incomplete_count_ = std::size(tracked_);
+    tracked_by_idx_.resize(std::size(tracked_));
+    std::iota(std::begin(tracked_by_idx_), std::end(tracked_by_idx_), std::size_t{0});
+    std::sort(std::begin(tracked_by_idx_), std::end(tracked_by_idx_),
+              [this](std::size_t lhs, std::size_t rhs) { return tracked_[lhs].idx < tracked_[rhs].idx; });
   }
 
   status advance(long progress) override
@@ -166,9 +173,8 @@ public:
     newly_completed_.clear();
 
     // Deadlock detection: consecutive zero-progress cycles are a hang unless
-    // someone knows more work is scheduled — a consumer awaiting a paced
-    // arrival, or an operable with timer-scheduled work in flight (e.g. a
-    // DRAM refresh stalling requests for a known, bounded time).
+    // more work is scheduled — a consumer awaiting a paced arrival, or an
+    // operable with timer-scheduled work in flight (e.g. a DRAM refresh).
     if (progress == 0) {
       const bool pending = std::any_of(std::begin(source_consumers_), std::end(source_consumers_),
                                        [](const auto& sc) { return sc.get().has_pending_work(); })
@@ -199,40 +205,39 @@ public:
     }
 
     // Completion: per-source EOF (policy-dependent) and progress thresholds.
-    for (auto& sc : source_consumers_) {
-      int idx = sc.get().consumer_id();
-      if (idx < 0) {
-        continue;
-      }
-      if (source_complete_[idx]) {
+    for (auto& tracked : tracked_) {
+      if (tracked.complete) {
         continue;
       }
 
-      if (sc.get().source_eof()) {
+      if (tracked.consumer->source_eof()) {
         if (complete_all_on_eof_) {
-          // Classic behavior: the first exhausted source ends the phase for everyone.
-          for (auto& [other_idx, complete] : source_complete_) {
-            if (!complete) {
-              complete = true;
-              newly_completed_.push_back(static_cast<unsigned>(other_idx));
+          // Classic behavior: the first exhausted source ends the phase for
+          // everyone (notified in source-id order).
+          for (auto pos : tracked_by_idx_) {
+            auto& other = tracked_[pos];
+            if (!other.complete) {
+              other.complete = true;
+              --incomplete_count_;
+              newly_completed_.push_back(static_cast<unsigned>(other.idx));
             }
           }
           break;
         }
-        source_complete_[idx] = true;
-        newly_completed_.push_back(static_cast<unsigned>(idx));
+        tracked.complete = true;
+        --incomplete_count_;
+        newly_completed_.push_back(static_cast<unsigned>(tracked.idx));
         continue;
       }
 
-      if ((sc.get().sim_progress() - progress_baseline_[idx]) >= length_) {
-        source_complete_[idx] = true;
-        newly_completed_.push_back(static_cast<unsigned>(idx));
+      if ((tracked.consumer->sim_progress() - tracked.baseline) >= length_) {
+        tracked.complete = true;
+        --incomplete_count_;
+        newly_completed_.push_back(static_cast<unsigned>(tracked.idx));
       }
     }
 
-    bool all_complete = !source_complete_.empty()
-                        && std::all_of(source_complete_.begin(), source_complete_.end(),
-                                       [](const auto& p) { return p.second; });
+    bool all_complete = !tracked_.empty() && incomplete_count_ == 0;
     return all_complete ? status::COMPLETE : status::CONTINUE;
   }
 
@@ -250,10 +255,8 @@ public:
   std::vector<champsim::phase_info> get_phases() const override { return phases_; }
 };
 
-// Register interface and model. The historic INSTRUCTION_PHASE_CONTROLLER
-// name remains registered as an alias so existing configs keep working; the
-// controller itself is token-agnostic (livelock policy lives in the
-// consumers' check_health).
+// Register interface and model. INSTRUCTION_PHASE_CONTROLLER stays registered
+// as an alias so existing configs keep working.
 static champsim::modules::phase_controller::register_interface phase_controller_iface_reg("phase_controller");
 static champsim::modules::phase_controller::register_module<default_phase_controller> default_pc_reg("PHASE_CONTROLLER");
 static champsim::modules::phase_controller::register_module<default_phase_controller> instruction_pc_reg("INSTRUCTION_PHASE_CONTROLLER");

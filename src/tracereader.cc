@@ -26,12 +26,6 @@ namespace champsim
 {
 uint64_t tracereader::instr_unique_id = 0; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-ooo_model_instr apply_branch_target(ooo_model_instr branch, const ooo_model_instr& target)
-{
-  branch.branch_target = (branch.is_branch && branch.branch_taken) ? target.ip : champsim::address{};
-  return branch;
-}
-
 template <template <class, class> typename R, typename T>
 champsim::tracereader get_tracereader_for_type(std::string fname, champsim::origin origin)
 {

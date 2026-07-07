@@ -53,15 +53,22 @@ public:
 
   void increment(key_type key)
   {
-    allocate(key);
+    // Single search: allocate-if-missing and bump through one lookup
     auto [key_iter, value_iter] = get_iter(key);
+    if (key_iter == std::end(keys) || *key_iter != key) {
+      keys.insert(key_iter, key);
+      value_iter = values.insert(value_iter, value_type{});
+    }
     (*value_iter)++;
   }
 
   void set(key_type key, value_type val)
   {
-    allocate(key);
     auto [key_iter, value_iter] = get_iter(key);
+    if (key_iter == std::end(keys) || *key_iter != key) {
+      keys.insert(key_iter, key);
+      value_iter = values.insert(value_iter, value_type{});
+    }
     *value_iter = val;
   }
 

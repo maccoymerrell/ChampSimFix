@@ -86,7 +86,7 @@ std::vector<bool> refresh_test(MEMORY_CONTROLLER* uut, champsim::channel* channe
 
     // make sure that for every refresh cycle, each bank undergoes refresh at least once
     std::vector<bool> bank_under_refresh;
-    std::transform(std::begin(uut->channels[0].bank_request), std::end(uut->channels[0].bank_request), std::back_inserter(bank_under_refresh),
+    std::transform(std::begin(uut->channels[0].bank_requests()), std::end(uut->channels[0].bank_requests()), std::back_inserter(bank_under_refresh),
                    [](const auto& entry) { return (entry.under_refresh); });
     std::transform(std::begin(bank_refreshed), std::end(bank_refreshed), std::begin(bank_under_refresh), std::begin(bank_refreshed), std::logical_or<>{});
     if (uut->current_time >= champsim::chrono::clock::time_point{} + refresh_cycle * tREF) {

@@ -25,7 +25,6 @@
 #include <array>
 #include <cstddef> // for size_t
 #include <cstdint> // for uint64_t, uint32_t, uint8_t
-#include <deque>
 #include <iterator> // for size
 #include <limits>   // for numeric_limits
 #include <memory>
@@ -44,6 +43,8 @@
 #include "operable.h"
 #include "modules.h"
 #include "util/to_underlying.h" // for to_underlying
+#include "util/latency_queue.h"
+#include "util/ring_buffer.h"
 #include "waitable.h"
 
 class CACHE : public champsim::modules::cache_module, public champsim::module_phase, public champsim::module_stat
@@ -76,10 +77,11 @@ class CACHE : public champsim::modules::cache_module, public champsim::module_ph
     champsim::chrono::clock::time_point event_cycle = champsim::chrono::clock::time_point::max();
 
     std::vector<uint64_t> instr_depend_on_me{};
-    std::vector<std::deque<response_type>*> to_return{};
+    std::vector<champsim::ring_buffer<response_type>*> to_return{};
 
-    explicit tag_lookup_type(request_type req) : tag_lookup_type(req, false, false) {}
+    explicit tag_lookup_type(request_type req) : tag_lookup_type(std::move(req), false, false) {}
     tag_lookup_type(const request_type& req, bool local_pref, bool skip);
+    tag_lookup_type(request_type&& req, bool local_pref, bool skip);
   };
 
 public:
@@ -103,21 +105,51 @@ public:
     champsim::chrono::clock::time_point time_enqueued;
 
     std::vector<uint64_t> instr_depend_on_me{};
-    std::vector<std::deque<response_type>*> to_return{};
+    std::vector<champsim::ring_buffer<response_type>*> to_return{};
 
     fill_type(const tag_lookup_type& req, champsim::chrono::clock::time_point _time_enqueued);
+    // Move form: steals the dependency and return vectors from a tag entry
+    // that is about to be erased from its queue.
+    fill_type(tag_lookup_type&& req, champsim::chrono::clock::time_point _time_enqueued);
     static fill_type merge(fill_type predecessor, fill_type successor);
   };
 
 private:
   bool try_hit(const tag_lookup_type& handle_pkt);
   bool handle_fill(const fill_type& fill);
-  bool handle_miss(const tag_lookup_type& handle_pkt);
-  bool handle_write(const tag_lookup_type& handle_pkt);
+  bool handle_miss(tag_lookup_type& handle_pkt);
+  bool handle_write(tag_lookup_type& handle_pkt);
   void finish_packet(const response_type& packet);
   void finish_translation(const response_type& packet);
 
-  void issue_translation(tag_lookup_type& q_entry) const;
+  void issue_translation(tag_lookup_type& q_entry);
+
+  // Route a tag-lookup entry to the correct pipeline stage. Gating on
+  // (lower_translate != nullptr && !is_translated) confines the additive timing
+  // to physically-indexed data caches: such untranslated entries park in
+  // untranslated_tag_check with no event_cycle (stamped later by
+  // finish_translation); everything else enters inflight_tag_check timed from
+  // admission (event_cycle = admission + HIT_LATENCY).
+  void admit_tag_check(tag_lookup_type&& entry);
+
+  // Output iterator for operate()'s admission transform: forwards each entry to
+  // admit_tag_check so one transform pass can split across both pipeline stages.
+  struct tag_check_router {
+    CACHE* self;
+    using iterator_category = std::output_iterator_tag;
+    using value_type = void;
+    using difference_type = std::ptrdiff_t;
+    using pointer = void;
+    using reference = void;
+    tag_check_router& operator*() { return *this; }
+    tag_check_router& operator++() { return *this; }
+    tag_check_router& operator++(int) { return *this; }
+    tag_check_router& operator=(tag_lookup_type&& entry)
+    {
+      self->admit_tag_check(std::move(entry));
+      return *this;
+    }
+  };
 
 public:
   using BLOCK = champsim::cache_block;
@@ -140,11 +172,31 @@ private:
   champsim::address module_address(const T& element) const;
 
   auto matches_address(champsim::address address) const;
-  std::pair<fill_type, request_type> mshr_and_forward_packet(const tag_lookup_type& handle_pkt);
+  request_type forward_packet(const tag_lookup_type& handle_pkt);
 
-  std::deque<tag_lookup_type> internal_PQ{};
-  std::deque<tag_lookup_type> inflight_tag_check{};
-  std::deque<tag_lookup_type> translation_stash{};
+  // Capacity is exactly PQ_SIZE (prefetch_line gates admission there); appended
+  // at the tail, retired from the front (erasures are front-anchored).
+  champsim::ring_buffer<tag_lookup_type> internal_PQ{};
+  // TRANSLATED tag-check pipeline: a time-ordered latency_queue keyed on
+  // event_cycle. Every entry holds a physical set index and is stamped
+  // current_time + HIT_LATENCY (at admission if already translated, else by
+  // finish_translation). current_time is nondecreasing, so ready entries
+  // (event_cycle <= now) are always a front prefix; erasures are front-anchored.
+  // Admission is bounded by tag_check_window_limit_, but translation-completion
+  // moves are unbounded per cycle (growing push), so capacity carries headroom.
+  //
+  // PIPT TIMING INVARIANT: an untranslated entry in a translating cache is never
+  // placed here until translation completes (the physical set index doesn't
+  // exist before then), so translation latency is additive, never hidden under
+  // HIT_LATENCY; until then it waits in untranslated_tag_check.
+  champsim::latency_queue<tag_lookup_type, champsim::member_ready_time<&tag_lookup_type::event_cycle>> inflight_tag_check{};
+  // UNTRANSLATED tag-check staging buffer: entries awaiting their physical
+  // address. They carry NO event_cycle (max() sentinel) and are never
+  // tag-checked from here; issue_translation walks this buffer and
+  // finish_translation stamps event_cycle and moves matched entries into
+  // inflight_tag_check. New admissions are throttled at MSHR_SIZE occupancy
+  // (backpressure on slow translation); entries compact front-anchored.
+  champsim::ring_buffer<tag_lookup_type> untranslated_tag_check{};
 
   std::vector<champsim::modules::prefetcher*> pref_module_pimpl;
   std::vector<champsim::modules::replacement*> repl_module_pimpl;
@@ -154,9 +206,8 @@ public:
   channel_type* lower_level;
   channel_type* lower_translate;
 
-  // Provenance of the most recently served packet; stamped onto prefetches
-  // issued by this cache (attribution: prefetches belong to whoever touched
-  // the cache last).
+  // Provenance of the most recently served packet; stamped onto prefetches this
+  // cache issues (they attribute to whoever touched the cache last).
   champsim::origin last_served_origin{};
   std::string NAME;
   uint32_t NUM_SET, NUM_WAY, MSHR_SIZE;
@@ -175,8 +226,13 @@ public:
 
   stats_type sim_stats, roi_stats;
 
-  std::deque<fill_type> MSHR;
-  std::deque<fill_type> inflight_fills;
+  // MSHR capacity is exactly MSHR_SIZE (admission-gated). inflight_fills has no
+  // admission gate (writebacks and closed MSHR entries land unconditionally,
+  // drain at MAX_FILL), so its pushes use the growing calls.
+  champsim::ring_buffer<fill_type> MSHR;
+  // A time-ordered ready queue keyed on each fill's data_promise: fills retire
+  // from the front once their promise is ready, up to MAX_FILL per cycle.
+  champsim::latency_queue<fill_type, champsim::waitable_ready_time<&fill_type::data_promise>> inflight_fills;
 
   long operate() final;
   long poll_cycle() final;
@@ -193,6 +249,20 @@ private:
   // Snapshot of the warmup/ROI flags for the current phase.
   bool warmup_ = true;
   [[maybe_unused]] bool roi_ = false;
+  // Hoisted invariants (set once at construction):
+  // MAX_TAG * (HIT_LATENCY / clock_period) — the tag-check window limit
+  long tag_check_window_limit_ = 0;
+  // set index = (address >> shift) & mask (NUM_SET is a power of two)
+  unsigned set_index_shift_ = 0;
+  uint64_t set_index_mask_ = 0;
+  // per-access-type prefetcher activation lookup (replaces a std::count
+  // over pref_activate_mask on every tag check)
+  std::array<bool, static_cast<std::size_t>(access_type::NUM_TYPES)> pref_activate_lut_{};
+  // Count of parked entries still needing a translation request issued
+  // (!translate_issued); gates the per-cycle issue walk so a fully-issued
+  // backlog is not re-scanned. Grows in admit_tag_check, shrinks on issue
+  // success (issue_translation) or a piggybacked translation (finish_translation).
+  long untranslated_pending_issue_ = 0;
 public:
   bool is_warmup() const { return warmup_; }
   bool is_roi() const    { return roi_; }
@@ -274,6 +344,23 @@ public:
         FILL_LATENCY(builder.get_parameter<uint64_t>("fill_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), OFFSET_BITS(builder.get_parameter<champsim::data::bits>("offset_bits")), MAX_TAG(builder.get_parameter<champsim::bandwidth::maximum_type>("max_tag_bandwidth")), MAX_FILL(builder.get_parameter<champsim::bandwidth::maximum_type>("max_fill_bandwidth")),
         prefetch_as_load(builder.get_parameter<bool>("prefetch_as_load")), match_offset_bits(builder.get_parameter<bool>("match_offset_bits")), virtual_prefetch(builder.get_parameter<bool>("virtual_prefetch")), pref_activate_mask(builder.get_parameter<std::vector<access_type>>("pref_activate_mask"))
   {
+    // Hoisted invariants for the per-cycle path
+    tag_check_window_limit_ = champsim::to_underlying(MAX_TAG) * static_cast<long>(HIT_LATENCY / clock_period);
+    set_index_shift_ = static_cast<unsigned>(champsim::to_underlying(OFFSET_BITS));
+    set_index_mask_ = NUM_SET - 1;
+    // Admission is clamped to the window limit; translation-completion moves can
+    // add up to the MSHR_SIZE-throttled backlog on top, so seed with that
+    // headroom (the moves use the growing push and never assert regardless).
+    inflight_tag_check.set_capacity(static_cast<std::size_t>(tag_check_window_limit_ + champsim::to_underlying(MAX_TAG)) + static_cast<std::size_t>(MSHR_SIZE));
+    MSHR.set_capacity(MSHR_SIZE);
+    inflight_fills.set_capacity(2 * static_cast<std::size_t>(MSHR_SIZE) + 8);
+    internal_PQ.set_capacity(PQ_SIZE);
+    // Throttled at MSHR_SIZE occupancy, plus at most one cycle's MAX_TAG
+    // admissions before the throttle is re-read; growing push covers bursts.
+    untranslated_tag_check.set_capacity(static_cast<std::size_t>(MSHR_SIZE) + static_cast<std::size_t>(champsim::to_underlying(MAX_TAG)));
+    for (auto type : pref_activate_mask)
+      pref_activate_lut_[static_cast<std::size_t>(champsim::to_underlying(type))] = true;
+
     // Construct prefetcher submodules
     for (const auto& sub : builder.get_submodules("prefetcher", true))
       pref_module_pimpl.push_back(champsim::modules::prefetcher::create_instance(sub, static_cast<champsim::modules::cache_module*>(this)));

@@ -1,11 +1,8 @@
 /*
- * Explicit environment implementation for ChampSim.
- * Reads a hierarchical JSON configuration where each module explicitly specifies
- * its name, interface type ("module"), and model ("model"). References to other
- * modules use "@name" syntax and are resolved in declaration order.
- *
- * This implementation is fully generic: no interface types or module names are
- * hardcoded. Any registered interface and model will work without alteration.
+ * Explicit environment for ChampSim. Reads a hierarchical JSON config where each
+ * module specifies name, interface ("module"), and "model"; "@name" references
+ * resolve in declaration order. Fully generic: no interface or module names are
+ * hardcoded — any registered interface/model works.
  */
 
 #include "environment.h"
@@ -78,13 +75,10 @@ void resolve_var(const std::string& val_str, const std::string& key,
   add_param(builder, key, cli_args[vn], mod_name, modules_by_name, module_interfaces, cli_args);
 }
 
-// Add a single (key, val) JSON parameter to the builder.
-//
-// The environment owns only the structural concerns (null skipping,
-// $-variable resolution, @-reference lookup). Everything else — scalars,
-// arrays, typed objects — flows through ``type_registry::try_convert``,
-// so adding a new type is a registry registration rather than a change
-// here.
+// Add a single (key, val) JSON parameter to the builder. The environment owns
+// only structural concerns (null skipping, $-variable and @-reference
+// resolution); everything else flows through type_registry::try_convert, so a
+// new type is a registry registration, not a change here.
 void add_param(ModuleBuilder& builder, const std::string& key, const json& val,
                const std::string& mod_name,
                const std::map<std::string, std::any>& modules_by_name,
@@ -141,10 +135,9 @@ void add_param(ModuleBuilder& builder, const std::string& key, const json& val,
   }
 }
 
-// Populate a ModuleBuilder with parameters from a JSON node, with full type
-// support (typed objects, @-references, $-variables, arrays, scalars) and
-// recursive children.
-// cli_args: flat JSON object of CLI arguments available for $-variable substitution.
+// Populate a ModuleBuilder from a JSON node with full type support (typed
+// objects, @-references, $-variables, arrays, scalars) and recursive children.
+// cli_args: flat JSON object for $-variable substitution.
 void populate_builder(const json& node, ModuleBuilder& builder,
                       const std::map<std::string, std::any>& modules_by_name,
                       const std::map<std::string, std::string>& module_interfaces,
@@ -152,10 +145,9 @@ void populate_builder(const json& node, ModuleBuilder& builder,
 {
   const std::string& name = builder.get_name();
 
-  // A "globals" object on a module opens a lexical scope: its keys are
-  // visible to this module and everything constructed beneath it, unless
-  // shadowed by a more local definition. Ordinary module parameters stay
-  // module-local; only this block is inherited.
+  // A "globals" object opens a lexical scope: its keys are visible to this
+  // module and everything beneath it, unless locally shadowed. Only this block
+  // is inherited; ordinary parameters stay module-local.
   if (auto it = node.find("globals"); it != node.end() && it->is_object()) {
     ModuleBuilder frame_builder{name + ".globals", "<scope>"};
     for (auto& [key, val] : it->items()) {
@@ -210,15 +202,12 @@ champsim::environment::environment(ModuleBuilder builder)
 
   auto& children = config["children"];
 
-  // Pre-construction: count consumers and sources so both can be published
-  // to the globals before any module is constructed. Modules that size
-  // per-consumer tables (e.g. ship/drrip, indexed by origin's consumer id)
-  // read num_consumers via builder.get_parameter fall-through, so it must
-  // be the exact consumer count — the same space assign_identities later
-  // enumerates. Consumer-ness is a per-model trait recorded at
-  // register_module time (a model can be a source_consumer even when its
-  // interface is not), queried here by (module, model) name. Configs may
-  // override with a root-level "num_consumers" key.
+  // Pre-construction: count consumers and sources to publish to the globals
+  // before any module is built. Modules sizing per-consumer tables read
+  // num_consumers via get_parameter fall-through, so it must exactly match the
+  // space assign_identities later enumerates. Consumer-/source-ness is a
+  // per-model trait recorded at register_module time. Configs may override via
+  // a root-level "num_consumers" key.
   std::size_t num_consumers = 0;
   std::size_t num_sources = 0;
   std::size_t num_streams = 0;
@@ -250,12 +239,10 @@ champsim::environment::environment(ModuleBuilder builder)
   num_consumers = config.value("num_consumers", num_consumers);
   num_streams = config.value("num_streams", num_streams);
 
-  // Publish system-wide params to the globals before module construction.
-  //
-  // Every non-reserved top-level scalar in the config becomes a global,
-  // visible to any module through get_parameter fall-through (a root
-  // "globals" object works too, for those who prefer it spelled out).
-  // Reserved names are the config's structural and orchestration keys.
+  // Publish system-wide params to the globals before construction. Every
+  // non-reserved top-level scalar becomes a global, visible via get_parameter
+  // fall-through (a root "globals" object works too). Reserved names are the
+  // config's structural and orchestration keys.
   {
     auto& g = ModuleBuilder::globals();
 
@@ -286,9 +273,8 @@ champsim::environment::environment(ModuleBuilder builder)
     g.add_parameter("num_sources",     num_sources);
     g.add_parameter("num_streams",     num_streams);
   }
-  // Sync the cached address extents (page_number, block_offset, etc.) with
-  // the freshly-published globals so the hot path doesn't pay a lookup per
-  // address-slice construction.
+  // Sync cached address extents with the freshly-published globals so the hot
+  // path doesn't pay a lookup per address-slice construction.
   champsim::refresh_address_extents();
 
   for (auto& child : children) {
@@ -321,10 +307,9 @@ champsim::environment::environment(ModuleBuilder builder)
     module_order_.emplace_back(name, iface);
   }
 
-  // Compute deadlock threshold purely from parameter types.
-  // Every champsim::chrono::picoseconds parameter is a time value; the minimum
-  // is the time quantum and the sum of all latencies is the worst-case total.
-  // sum/min gives worst-case cycles, floored at 500.
+  // Deadlock threshold from parameter types alone: every picoseconds param is a
+  // time value; min is the time quantum, sum the worst-case total, so sum/min
+  // is worst-case cycles (floored at 500).
   {
     using ps_rep = champsim::chrono::picoseconds::rep;
     ps_rep min_ps = std::numeric_limits<ps_rep>::max();

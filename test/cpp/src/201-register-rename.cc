@@ -176,9 +176,14 @@ SCENARIO("The register allocator correctly recycles physical registers when no l
                    .add_parameter("fetch_queues", static_cast<champsim::modules::channel_module*>(&mock_L1I.queues))
                    .add_parameter("data_queues", static_cast<champsim::modules::channel_module*>(&mock_L1D.queues))};
 
-    uut.ROB.push_back(champsim::test::instruction_with_ip(1));
-    for (auto& instr : uut.ROB)
-      instr.ready_time = champsim::chrono::clock::time_point{};
+    uut.modify_rob([&](auto& rob) {
+      rob.push_back(champsim::test::instruction_with_ip(1));
+    });
+    uut.modify_rob([&](auto& rob) {
+      for (auto& instr : rob) {
+        instr.ready_time = champsim::chrono::clock::time_point{};
+      }
+    });
 
     constexpr int PHYSICALREGS = 128;
     RegisterAllocator ra{PHYSICALREGS};

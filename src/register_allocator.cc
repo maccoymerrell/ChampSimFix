@@ -42,12 +42,6 @@ PHYSICAL_REGISTER_ID RegisterAllocator::rename_src_register(int16_t reg)
   return phys;
 }
 
-void RegisterAllocator::complete_dest_register(PHYSICAL_REGISTER_ID physreg)
-{
-  // mark the physical register as valid
-  physical_register_file.at(physreg).valid = true;
-}
-
 void RegisterAllocator::retire_dest_register(PHYSICAL_REGISTER_ID physreg)
 {
   // grab the arch reg index, find old phys reg in backend RAT
@@ -67,22 +61,6 @@ void RegisterAllocator::free_register(PHYSICAL_REGISTER_ID physreg)
 {
   physical_register_file.at(physreg) = {255, 0, false, false}; // arch_reg_index, producing_inst_id, valid, busy
   free_registers.push(physreg);
-}
-
-bool RegisterAllocator::isValid(PHYSICAL_REGISTER_ID physreg) const
-{
-  if (physreg < 0 || static_cast<size_t>(physreg) >= physical_register_file.size())
-    return false;
-  return physical_register_file[physreg].valid;
-}
-
-bool RegisterAllocator::isAllocated(PHYSICAL_REGISTER_ID archreg) const { return frontend_RAT[archreg] != -1; }
-
-unsigned long RegisterAllocator::count_free_registers() const { return std::size(free_registers); }
-
-int RegisterAllocator::count_reg_dependencies(const ooo_model_instr& instr) const
-{
-  return static_cast<int>(std::count_if(std::begin(instr.source_registers), std::end(instr.source_registers), [this](auto reg) { return !isValid(reg); }));
 }
 
 void RegisterAllocator::reset_frontend_RAT()

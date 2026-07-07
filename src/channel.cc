@@ -27,12 +27,32 @@
 
 champsim::channel::channel() : channel(champsim::modules::ModuleBuilder{"default_channel", "DEFAULT_CHANNEL", champsim::defaults::default_channel()}) {}
 
+namespace
+{
+// "Effectively unbounded" queues (e.g. the legacy DRAM channel's SIZE_MAX)
+// start small and grow on demand; bounded queues are allocated at their exact
+// admission limit.
+std::size_t initial_queue_capacity(std::size_t configured_size)
+{
+  constexpr std::size_t bounded_limit = std::size_t{1} << 16;
+  constexpr std::size_t unbounded_initial = 64;
+  return configured_size <= bounded_limit ? configured_size : unbounded_initial;
+}
+} // namespace
+
 champsim::channel::channel(champsim::modules::ModuleBuilder builder)
     : RQ_SIZE(builder.get_parameter<std::size_t>("rq_size", false, 0)), PQ_SIZE(builder.get_parameter<std::size_t>("pq_size", false, 0)),
       WQ_SIZE(builder.get_parameter<std::size_t>("wq_size", false, 0)),
       OFFSET_BITS(builder.get_parameter<champsim::data::bits>("offset_bits", false, champsim::data::bits{0})),
       match_offset_bits(builder.get_parameter<bool>("match_offset_bits", false, false))
 {
+  // Request queues are admission-gated at their configured sizes. Responses
+  // have no modeled bound, so the returned queue starts at a heuristic capacity
+  // and grows on demand (producers use push_back_grow()/emplace_back_grow()).
+  RQ.set_capacity(::initial_queue_capacity(RQ_SIZE));
+  PQ.set_capacity(::initial_queue_capacity(PQ_SIZE));
+  WQ.set_capacity(::initial_queue_capacity(WQ_SIZE));
+  returned.set_capacity(2 * (RQ.capacity() + PQ.capacity() + WQ.capacity()) + 8);
 }
 
 template <typename R>
@@ -43,9 +63,9 @@ bool champsim::channel::do_add_queue(R& queue, std::size_t queue_size, const typ
     return false; // cannot handle this request
   }
 
-  // Insert the packet ahead of the translation misses
-  auto fwd_pkt = packet;
-  queue.push_back(fwd_pkt);
+  // Growth only ever triggers on effectively-unbounded queues: a bounded queue
+  // is rejected above before it reaches its allocation.
+  queue.push_back_grow(packet);
 
   return true;
 }
@@ -69,6 +89,7 @@ bool champsim::channel::add_rq(const request_type& packet)
 
   return result;
 }
+
 
 bool champsim::channel::add_wq(const request_type& packet)
 {
@@ -99,8 +120,7 @@ bool champsim::channel::add_pq(const request_type& packet)
 
   sim_stats.PQ_ACCESS++;
 
-  auto fwd_pkt = packet;
-  auto result = do_add_queue(PQ, PQ_SIZE, fwd_pkt);
+  auto result = do_add_queue(PQ, PQ_SIZE, packet);
   if (result) {
     sim_stats.PQ_TO_CACHE++;
   } else {

@@ -15,10 +15,9 @@ void assign_identities(modules::environment_module& env);
 namespace
 {
 
-// A model of a NON-source interface that holds a stream identity via the
-// mixin — the source-side twin of replay_channel being a source_consumer.
-// It must be counted by num_sources/num_streams and enumerated by
-// assign_identities exactly like a workload_source.
+// A stream identity held via the mixin rather than a workload_source interface;
+// must be counted by num_sources/num_streams and enumerated by assign_identities
+// exactly like a workload_source.
 struct probe_streaming_core_505 : public champsim::modules::core_module, public champsim::modules::stream_source {
   explicit probe_streaming_core_505(champsim::modules::ModuleBuilder) : core_module(champsim::chrono::picoseconds{250}) {}
 
@@ -67,11 +66,10 @@ static champsim::modules::core_module::register_module<probe_core_505> probe_cor
 
 TEST_CASE("num_consumers, num_sources, and num_streams are each counted in their own space")
 {
-  // Three consumers: two ordinary cores plus one stream_source-mixin core.
-  // Four sources: c0 holds two (sharing a stream label), c1 holds one, and
-  // the mixin core is its own source. Three streams: the shared label
-  // collapses c0's pair onto one id. Every count differs, so any conflation
-  // fails loudly.
+  // Three consumers (two cores + one stream_source-mixin core), four sources
+  // (c0's two share a label, c1's one, the mixin core its own), three streams
+  // (the shared label collapses c0's pair). Every count differs, so any
+  // conflation fails loudly.
   nlohmann::json config = {
       {"children",
        nlohmann::json::array({
@@ -108,10 +106,9 @@ TEST_CASE("num_consumers, num_sources, and num_streams are each counted in their
   CHECK(globals.get_parameter<std::size_t>("num_sources") == 4);
   CHECK(globals.get_parameter<std::size_t>("num_streams") == 3);
 
-  // The mixin source is enumerated symmetrically with interface sources:
-  // c0's labeled pair share one stream; c1's source and the mixin core each
-  // get their own. (View order is top-level modules before nested ones, so
-  // assertions key on names, not positions.)
+  // The mixin source is enumerated symmetrically with interface sources. View
+  // order is top-level modules before nested ones, so assertions key on names,
+  // not positions.
   champsim::assign_identities(*env);
   auto sources = env->typed_view<champsim::modules::stream_source>("stream_source");
   REQUIRE(std::size(sources) == 4);

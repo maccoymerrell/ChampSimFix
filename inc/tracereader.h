@@ -103,14 +103,20 @@ public:
   [[nodiscard]] bool eof() const { return trace_file.eof() && std::empty(instr_buffer); }
 };
 
-ooo_model_instr apply_branch_target(ooo_model_instr branch, const ooo_model_instr& target);
-
 template <typename It>
 void set_branch_targets(It begin, It end)
 {
-  std::reverse_iterator rbegin{end};
-  std::reverse_iterator rend{begin};
-  std::adjacent_difference(rbegin, rend, rbegin, apply_branch_target);
+  // Each taken branch's target is the next instruction's ip. The last
+  // element is left untouched: it has no successor yet, and the buffer
+  // leftovers are re-processed after the next refill, which supplies one.
+  // (In-place: the old adjacent_difference formulation copied every
+  // instruction, with its four vectors, two to three times per refill.)
+  if (begin == end) {
+    return;
+  }
+  for (auto it = begin; std::next(it) != end; ++it) {
+    it->branch_target = (it->is_branch && it->branch_taken) ? std::next(it)->ip : champsim::address{};
+  }
 }
 
 template <typename T, typename F>

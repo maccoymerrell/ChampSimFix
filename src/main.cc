@@ -127,18 +127,14 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   // Parse config for system parameters
   std::string env_model = config_json.value("environment", std::string("LEGACY_ENVIRONMENT"));
   bool is_legacy_env = (env_model == "LEGACY_ENVIRONMENT");
-  // The CLI expects one trace per workload SOURCE, not per core. The legacy
-  // environment spawns exactly one workload source per core, so its source
-  // count is num_cores by construction — that identity lives here, not in
-  // the trace check itself. Explicit environments declare sources in the
-  // config and accept any trace count. The environment owns publishing all
-  // system-wide globals (block_size, page_size, log2_*, num_consumers,
-  // num_sources) into ModuleBuilder::globals() during its construction.
+  // The CLI expects one trace per workload SOURCE. The legacy environment
+  // spawns one source per core, so its source count is num_cores by
+  // construction; explicit environments declare sources and accept any count.
+  // The environment publishes all system-wide globals during construction.
   std::size_t legacy_num_sources = config_json.value("num_cores", 1u);
 
-  // Root-level "cycle_skip" (default true) lets idle operables skip cycles
-  // via operable::poll_cycle(). Set false to force every operable to run
-  // operate() each cycle — the A/B switch for behavior verification.
+  // Root-level "cycle_skip" (default true) lets idle operables skip cycles via
+  // poll_cycle(); false forces operate() every cycle (A/B verification switch).
   champsim::operable::set_skip_enabled(config_json.value("cycle_skip", true));
 
   // Scan config for $varname references not covered by explicit CLI options.
@@ -233,10 +229,10 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 
   if (knob_dump) fmt::print("=== End Module Builder Dump ===\n");
 
-  // Assemble the active listener set: listener modules declared in the
-  // config, plus any models requested via --listeners. When the config
-  // declares none, a default HEARTBEAT listener is created (interval from
-  // the root "heartbeat_frequency" key) unless --hide-heartbeat suppresses it.
+  // Assemble the active listener set: config-declared listeners plus models
+  // requested via --listeners. If the config declares none, create a default
+  // HEARTBEAT listener (interval from "heartbeat_frequency") unless
+  // --hide-heartbeat suppresses it.
   std::vector<champsim::modules::listener*> active_listeners;
   for (champsim::modules::listener& l : gen_environment->typed_view<champsim::modules::listener>("listener")) {
     active_listeners.push_back(&l);
@@ -257,10 +253,9 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   }
   champsim::modules::set_active_listeners(std::move(active_listeners));
 
-  // Try to get the phase list from the phase controllers in the environment.
-  // The first controller that defines a non-empty phase list owns the run
-  // structure; a second non-empty list that disagrees is a config error.
-  // Otherwise fall back to the classic two-phase structure driven by -w/-i.
+  // Phase list from the environment's phase controllers: the first non-empty
+  // list owns the run structure; a second that disagrees is a config error.
+  // Otherwise fall back to the classic warmup+sim pair driven by -w/-i.
   std::vector<champsim::phase_info> phases;
   for (champsim::modules::phase_controller& pc : gen_environment->typed_view<champsim::modules::phase_controller>("phase_controller")) {
     auto controller_phases = pc.get_phases();

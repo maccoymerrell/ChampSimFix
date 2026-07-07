@@ -47,6 +47,29 @@ long int transform_while_n(R& queue, Output out, bandwidth sz, F&& test_func, G&
   queue.erase(begin, end);
   return retval;
 }
+
+/**
+ * In-place stable partition for small ranges. Like std::stable_partition
+ * (predicate applied exactly once per element, first-to-last — some callers'
+ * predicates are side-effectful — with relative order preserved in both groups)
+ * but allocates no temporary buffer. O(d*n) moves for d out-of-place elements;
+ * for bandwidth-bounded windows where a malloc/free pair outweighs the moves.
+ */
+template <typename It, typename Pred>
+It stable_partition_small(It first, It last, Pred pred)
+{
+  auto false_begin = std::find_if_not(first, last, pred);
+  if (false_begin == last) {
+    return false_begin;
+  }
+  for (auto it = std::next(false_begin); it != last; ++it) {
+    if (pred(*it)) {
+      std::rotate(false_begin, it, std::next(it));
+      ++false_begin;
+    }
+  }
+  return false_begin;
+}
 } // namespace champsim
 
 #endif

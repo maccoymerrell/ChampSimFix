@@ -18,7 +18,6 @@
 #define PTW_H
 
 #include <array>
-#include <deque>
 #include <limits>   // for numeric_limits
 #include <optional> // for optional
 #include <string>
@@ -28,6 +27,8 @@
 #include "channel.h"
 #include "operable.h"
 #include "msl/lru_table.h"
+#include "util/latency_queue.h"
+#include "util/ring_buffer.h"
 #include "waitable.h"
 
 class PageTableWalker : public champsim::modules::page_table_walker_module, public champsim::module_phase
@@ -36,9 +37,9 @@ class PageTableWalker : public champsim::modules::page_table_walker_module, publ
     champsim::address vaddr;
     champsim::address ptw_addr;
     std::size_t level;
-    // The address space this cached walk step belongs to. A walker is
-    // hardware owned by a consumer, not by an address space: entries are
-    // stream-tagged so concurrent streams never hit each other's steps.
+    // Address space of this cached walk step. The walker is shared hardware,
+    // so entries are stream-tagged to keep concurrent streams from hitting
+    // each other's steps.
     champsim::origin::id_type stream = 0;
   };
 
@@ -63,7 +64,7 @@ class PageTableWalker : public champsim::modules::page_table_walker_module, publ
     champsim::waitable<champsim::address> data{};
 
     std::vector<uint64_t> instr_depend_on_me{};
-    std::vector<std::deque<response_type>*> to_return{};
+    std::vector<champsim::ring_buffer<response_type>*> to_return{};
 
     uint32_t pf_metadata = 0;
     champsim::origin origin{};
@@ -73,9 +74,16 @@ class PageTableWalker : public champsim::modules::page_table_walker_module, publ
     mshr_type(const request_type& req, std::size_t level);
   };
 
-  std::deque<mshr_type> MSHR;
-  std::deque<mshr_type> finished;
-  std::deque<mshr_type> completed;
+  // Walk-state queues. Not admission-gated (a step is accepted whenever the
+  // lower level accepts the read), so they start at MSHR_SIZE and grow on demand.
+  champsim::ring_buffer<mshr_type> MSHR;
+  // Time-ordered ready queues keyed on each walk step's data promise: finished
+  // steps and completed walks retire from the front once ready, up to MAX_FILL.
+  champsim::latency_queue<mshr_type, champsim::waitable_ready_time<&mshr_type::data>> finished;
+  champsim::latency_queue<mshr_type, champsim::waitable_ready_time<&mshr_type::data>> completed;
+
+  // Per-cycle scratch (reused to avoid an allocation per operated cycle)
+  std::vector<mshr_type> next_steps_scratch_;
 
   std::vector<channel_type*> upper_levels;
   channel_type* lower_level;
