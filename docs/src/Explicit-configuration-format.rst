@@ -58,8 +58,12 @@ its lower-level channel via::
 This tells the simulator to look up the module named ``cpu0_L1D_cpu0_L2C_channel`` and
 connect it as the lower-level channel for this cache.
 
-References are resolved after all modules have been constructed, so definition order in
-the ``"children"`` array does not matter.
+References are resolved immediately as each module in the ``"children"`` array is
+constructed, by looking up the referenced name among the modules built so far. Definition
+order therefore matters: a module must be defined **before** any module that references
+it. In particular, channels must be declared before the caches, cores, and memory
+controllers that connect to them (a forward reference to a not-yet-constructed module
+aborts with an ``[ENVIRONMENT] ERROR: @-reference ... not found``).
 
 ----------------------------------
 Typed Parameter Objects
@@ -173,6 +177,69 @@ Channels connect modules together. A channel definition looks like::
     }
 
 ----------------------------------
+Cores and Workload Sources
+----------------------------------
+
+A core's ``consumer_id`` (its hardware-context identity) is *not* declared in the config:
+it is assigned at startup by enumerating consumers in config-declaration order, densely
+from 0 (see ``assign_identities`` in ``src/champsim.cc``), so it never appears in a
+configuration. A core attaches one or more workload sources as children. Each source is
+likewise stamped with a ``stream`` (address-space) identity assigned by the framework at
+startup — there is no numeric stream id to set in the config either. By default every
+source gets its own distinct stream, so two traces feeding one core occupy different
+address spaces; give sibling sources the same string ``stream`` label to make them share
+one address space::
+
+    {
+        "name": "cpu0",
+        "module": "core",
+        "model": "DEFAULT_CORE",
+        "fetch_queues": "@cpu0_cpu0_L1I_channel",
+        "data_queues": "@cpu0_cpu0_L1D_channel",
+        "l1i": "@cpu0_L1I",
+        ...
+        "children": [
+            {"name": "cpu0_bp",  "module": "branch_predictor", "model": "hashed_perceptron"},
+            {"name": "cpu0_btb", "module": "btb", "model": "basic_btb"},
+            {"name": "cpu0_trace", "module": "workload_source", "model": "TRACE_WORKLOAD_SOURCE",
+             "trace_file": "$trace0"}
+        ]
+    }
+
+Page-table walkers are shared hardware and do not take an address-space parameter: the
+address space (CR3 root) is resolved per walk from each request's origin/stream at
+runtime, so the same walker serves every consumer that routes through it. (The ``"asid"``
+key sometimes seen in older sample PTW blocks is inert and ignored.) See
+:ref:`Orchestration` for the consumer/stream identity model.
+
+----------------------------------
+Orchestration Modules
+----------------------------------
+
+Phase controllers and listeners are ordinary top-level children::
+
+    {
+        "name": "pc",
+        "module": "phase_controller",
+        "model": "PHASE_CONTROLLER",
+        "deadlock_cycles": 500,
+        "warmup_length": "$warmup_instructions",
+        "simulation_length": "$simulation_instructions"
+    },
+    {
+        "name": "hb",
+        "module": "listener",
+        "model": "HEARTBEAT",
+        "interval": 10000000
+    }
+
+Any number of phase controllers may be declared (each optionally governing a subset of
+consumers), a controller may define an arbitrary phase list including unmeasured
+fast-forward phases, and root-level keys ``"cycle_skip"``, ``"heartbeat_frequency"``, and
+``"num_consumers"`` tune the orchestration defaults. The full contracts, parameters, and
+composition rules are documented in :ref:`Orchestration`.
+
+----------------------------------
 A Minimal Example
 ----------------------------------
 
@@ -227,4 +294,37 @@ your config. This is useful for verifying that modules are connected correctly::
 
     bin/champsim --config my_config.json --dump
 
-This prints every module, its parameters, and its connections to stderr.
+This prints every module, its parameters, and its connections to stdout.
+
+----------------------------------
+Globals and Lexical Scoping
+----------------------------------
+
+Every non-reserved top-level scalar in the config is a *global*: any module can read it
+through ``get_parameter`` fall-through, exactly like a locally-declared parameter. A
+top-level ``"globals"`` object is equivalent for those who prefer it spelled out::
+
+    {
+        "l2_prefetch_degree": 4,
+        "globals": {"trace_warmup_fraction": 0.2},
+        "children": [ ... ]
+    }
+
+A ``"globals"`` object on any module opens a *lexical scope*: its keys are visible to
+that module and everything beneath it in the tree, shadowing outer scopes, and shadowed
+by local parameters. Ordinary module parameters remain module-local by design — a
+submodule can never accidentally capture its parent's ``sets`` or ``latency``::
+
+    {
+        "name": "cpu0_L2C", "module": "cache", "model": "DEFAULT_CACHE",
+        "globals": {"prefetch_degree": 8},
+        "children": [
+            {"name": "pf_a", "module": "prefetcher", "model": "my_pref"},
+            {"name": "pf_b", "module": "prefetcher", "model": "my_pref",
+             "prefetch_degree": 2}
+        ]
+    }
+
+Here ``pf_a`` resolves ``prefetch_degree`` to 8 from the cache's scope; ``pf_b``'s local
+value of 2 shadows it. Resolution order is always: local parameter, then enclosing
+scopes innermost-first, then the root globals.

@@ -92,6 +92,10 @@ struct DRAM_ADDRESS_MAPPING {
 };
 
 struct DRAM_CHANNEL final : public champsim::operable {
+  // Warmup/ROI flags are propagated from the owning MEMORY_CONTROLLER each phase.
+  bool warmup = true;
+  bool roi    = false;
+
   using response_type = champsim::response;
 
   const DRAM_ADDRESS_MAPPING address_mapping;
@@ -100,7 +104,7 @@ struct DRAM_CHANNEL final : public champsim::operable {
     bool scheduled = false;
     bool forward_checked = false;
 
-    uint8_t asid[2] = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
+    champsim::origin origin{};
 
     uint32_t pf_metadata = 0;
 
@@ -170,7 +174,7 @@ struct DRAM_CHANNEL final : public champsim::operable {
   void check_write_collision();
   void check_read_collision();
   long finish_dbus_request();
-  long schedule_refresh();
+  void schedule_refresh();
   void swap_write_mode();
   long populate_dbus();
   DRAM_CHANNEL::queue_type::iterator schedule_packet();
@@ -178,22 +182,32 @@ struct DRAM_CHANNEL final : public champsim::operable {
 
   void initialize() final;
   long operate() final;
-  void begin_phase() final;
-  void end_phase(unsigned cpu) final;
   void print_deadlock() final;
+
+  // True if operate() would perform (or settle) any work at time t: pending
+  // queue entries, bank/bus activity, a due refresh, or a write->read mode
+  // switch. Used by the owning MEMORY_CONTROLLER's poll_cycle(); this channel
+  // is parent-ticked, so its own poll_cycle() is never consulted.
+  bool would_do_work_at(champsim::chrono::clock::time_point t) const;
+
+  // Timer-scheduled work in flight (refresh, busy banks, an occupied data
+  // bus): completes at a known future time without external input. Vetoes
+  // the zero-progress deadlock abort while requests stall behind a refresh.
+  bool has_pending_work() const final;
 
   std::size_t bank_request_capacity() const;
   std::size_t bankgroup_request_capacity() const;
   [[nodiscard]] champsim::data::bytes density() const;
 };
 
-class MEMORY_CONTROLLER : public champsim::modules::memory_controller_module
+class MEMORY_CONTROLLER : public champsim::modules::memory_controller_module, public champsim::module_phase, public champsim::module_stat
 {
   using channel_type = champsim::modules::channel_module;
   using request_type = typename channel_type::request_type;
   using response_type = typename channel_type::response_type;
   std::vector<channel_type*> queues;
   const champsim::data::bytes channel_width;
+  const unsigned block_size_;
 
   void initiate_requests();
   bool add_rq(const request_type& packet, champsim::modules::channel_module* ul);
@@ -211,9 +225,15 @@ public:
 
   void initialize() final;
   long operate() final;
-  void begin_phase() final;
-  void end_phase(unsigned cpu) final;
+  long poll_cycle() final;
+  bool has_pending_work() const final;
+  void begin_phase(bool warmup, bool roi) override;
+  void end_phase() override;
   void print_deadlock() final;
+
+  // module_stat
+  std::vector<std::string> print_stats(bool roi) const override;
+  void json_stats(champsim::json_stat_builder& b, bool roi) const override;
 
   stats_type get_sim_stats(std::size_t channel_no) const final;
   stats_type get_roi_stats(std::size_t channel_no) const final;

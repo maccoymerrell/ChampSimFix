@@ -48,6 +48,12 @@ etc.) define the contracts that caches, cores, and DRAM controllers fulfill. The
 implementations ``DEFAULT_CACHE`` (``CACHE`` class) and ``DEFAULT_CORE`` (``O3_CPU`` class)
 implement these interfaces. See :ref:`Cache_model` and :ref:`Core_model` for details.
 
+The simulation loop itself is driven by orchestration interfaces —
+``workload_source`` (token providers), ``phase_controller`` (run structure, completion,
+and health), and ``listener`` (run-wide reporting) — plus the ``source_consumer``
+mixin for anything that executes tokens. See :ref:`Orchestration` for the full
+contracts.
+
 ------------------------------------------
 Module Construction and ModuleBuilder
 ------------------------------------------

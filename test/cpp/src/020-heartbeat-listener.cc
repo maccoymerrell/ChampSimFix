@@ -1,228 +1,180 @@
 #include <catch.hpp>
-#include <typeinfo>
-#include <iostream>
-#include <nlohmann/json.hpp>
+#include <sstream>
+#include <string>
+#include <vector>
 
-#include "listeners/heartbeat.h"
-#include "instruction.h"
-#include "trace_instruction.h"
+#include "modules.h"
 
 namespace
 {
 
+// A minimal consumer that reports core-style heartbeat lines.
+struct hb_consumer : champsim::modules::source_consumer {
+  explicit hb_consumer(int id) { set_consumer_id(id); }
+  std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const override
+  {
+    return fmt::format("Heartbeat CPU {} instructions: {} cycles: {} heartbeat IPC: {:.4} cumulative IPC: {:.4}", consumer_id(), total_progress, total_cycles,
+                       interval_rate, cumulative_rate);
+  }
+};
+
+// A registered do-nothing environment to parent the listener module.
+struct hb_env : champsim::modules::environment_module {
+  explicit hb_env(champsim::modules::ModuleBuilder) {}
+  std::vector<std::any> view(const std::string&) const override { return {}; }
+  const champsim::modules::ModuleBuilder get_builder_params(const std::string&) const override { return champsim::modules::ModuleBuilder(); }
+};
+static champsim::modules::environment_module::register_module<hb_env> hb_env_reg("HB_ENV_020");
+
+// Create a HEARTBEAT listener writing into the given stream.
+champsim::modules::listener* make_heartbeat(const std::string& name, std::ostream* out, uint64_t interval)
+{
+  auto env_builder = champsim::modules::ModuleBuilder(name + "_env", "HB_ENV_020");
+  auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
+
+  auto builder = champsim::modules::ModuleBuilder(name, "HEARTBEAT")
+    .add_parameter("interval", interval)
+    .add_parameter("output_stream", out);
+  return champsim::modules::listener::create_instance(builder, env);
+}
+
+} // namespace
+
 TEST_CASE("The heartbeat listener prints one line after 10M instructions retired") {
-    std::ostringstream stdout{};
-    Heartbeat uut{&stdout};
-    
-    // begin phase event
-    bool in_warmup = false;
-    uut.handle_event<Event::BEGIN_PHASE>(in_warmup);
-    
+    std::ostringstream capture{};
+    auto* uut = make_heartbeat("hb020_one", &capture, 10000000ULL);
+    hb_consumer cpu0{0};
+
+    uut->begin_phase(false);
+
+    uint64_t total = 0;
     for (int i = 0; i < 5000000; ++i) {
-        std::deque<ooo_model_instr> fake_instructions{{ooo_model_instr(0, input_instr()), ooo_model_instr(0, input_instr())}};
-        uint32_t cpu = 0;
-        uint64_t curr_cycles = i;
-        auto cb = std::cbegin(fake_instructions);
-        auto ce = std::cend(fake_instructions);
-        uut.handle_event<Event::RETIRE>(cpu, cb, ce, curr_cycles);
+        total += 2;
+        uut->progress(cpu0, total, static_cast<uint64_t>(i));
     }
-    
-    std::string res = stdout.str();
-    
+
+    std::string res = capture.str();
     std::string rest = res.substr(res.find('\n')+1);
-    
+
     REQUIRE_THAT(res, Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 10000000 cycles: 4999999 heartbeat IPC: 2 cumulative IPC: 2 "));
     REQUIRE(rest.length() < 2);
 }
 
 TEST_CASE("The heartbeat listener prints cumulative and heartbeat IPC correctly after a phase change") {
-    std::ostringstream stdout{};
-    Heartbeat uut{&stdout};
-    
-    // begin phase event
-    bool in_warmup = true;
-    uut.handle_event<Event::BEGIN_PHASE>(in_warmup);
-    
-    for (int i = 0; i <11000000; ++i) {
-        
+    std::ostringstream capture{};
+    auto* uut = make_heartbeat("hb020_phase", &capture, 10000000ULL);
+    hb_consumer cpu0{0};
+
+    uut->begin_phase(true);
+
+    uint64_t total = 0;
+    for (int i = 0; i < 11000000; ++i) {
         // phase change to simulation
         if (i == 5000000) {
-          in_warmup = false;
-          uut.handle_event<Event::BEGIN_PHASE>(in_warmup);
+          uut->begin_phase(false);
         }
-      
-        // warmup behavior (4 IPC)
+
+        // warmup behavior (4 IPC), then simulation behavior (2 IPC)
         if (i < 4000000) {
-          std::deque<ooo_model_instr> fake_instructions{{ooo_model_instr(0, input_instr()), ooo_model_instr(0, input_instr()), ooo_model_instr(0, input_instr()), ooo_model_instr(0, input_instr())}};
-          uint32_t cpu = 0;
-          uint64_t curr_cycles = i;
-          auto cb = std::cbegin(fake_instructions);
-          auto ce = std::cend(fake_instructions);
-          uut.handle_event<Event::RETIRE>(cpu, cb, ce, curr_cycles);
+          total += 4;
         } else {
-          // simulation behavior (2 IPC)
-          std::deque<ooo_model_instr> fake_instructions{{ooo_model_instr(0, input_instr()), ooo_model_instr(0, input_instr())}};
-          uint32_t cpu = 0;
-          uint64_t curr_cycles = i;
-          auto cb = std::cbegin(fake_instructions);
-          auto ce = std::cend(fake_instructions);
-          uut.handle_event<Event::RETIRE>(cpu, cb, ce, curr_cycles);
+          total += 2;
+        }
+        uut->progress(cpu0, total, static_cast<uint64_t>(i));
+    }
+
+    std::string res = capture.str();
+    std::vector<std::string> lines;
+    std::istringstream stream{res};
+    for (std::string line; std::getline(stream, line);) lines.push_back(line);
+
+    REQUIRE(lines.size() == 3);
+    // 10M instructions reached at i = 2499999 (4/cycle)
+    REQUIRE_THAT(lines[0], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 10000000 cycles: 2499999 heartbeat IPC: 4 cumulative IPC: 4 "));
+    // 20M at i = 5999999: interval mixes 4 IPC and 2 IPC regions
+    REQUIRE_THAT(lines[1], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 20000000 cycles: 5999999 heartbeat IPC: 2.857 cumulative IPC: 2 "));
+    // 30M at i = 10999999: fully in the 2 IPC region, phase-cumulative also 2
+    REQUIRE_THAT(lines[2], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 30000000 cycles: 10999999 heartbeat IPC: 2 cumulative IPC: 2 "));
+}
+
+TEST_CASE("The heartbeat listener tracks each source independently") {
+    std::ostringstream capture{};
+    auto* uut = make_heartbeat("hb020_multi", &capture, 10000000ULL);
+    std::vector<hb_consumer> cpus{hb_consumer{0}, hb_consumer{1}, hb_consumer{2}, hb_consumer{3}};
+
+    uut->begin_phase(false);
+
+    std::vector<uint64_t> totals(4, 0);
+    for (int i = 0; i < 5000000; ++i) {
+        for (int c = 0; c < 4; ++c) {
+            totals[static_cast<std::size_t>(c)] += 2;
+            uut->progress(cpus[static_cast<std::size_t>(c)], totals[static_cast<std::size_t>(c)], static_cast<uint64_t>(i));
         }
     }
-    
-    std::string res = stdout.str();
-    
-    std::string l1 = res.substr(0, res.find('\n')+1);
-    std::string rest = res.substr(res.find('\n')+1);
-    std::string l2 = rest.substr(0, rest.find('\n')+1);
-    rest = rest.substr(rest.find('\n')+1);
-    std::string l3 = rest.substr(0, rest.find('\n')+1);
-    rest = rest.substr(rest.find('\n')+1);
-    
-    REQUIRE_THAT(l1, Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 10000000 cycles: 2499999 heartbeat IPC: 4 cumulative IPC: 4 "));
-    REQUIRE_THAT(l2, Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 20000000 cycles: 5999999 heartbeat IPC: 2.857 cumulative IPC: 2 "));
-    REQUIRE_THAT(l3, Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 30000000 cycles: 10999999 heartbeat IPC: 2 cumulative IPC: 2 "));
-    REQUIRE(rest.length() < 2);
-}
 
-TEST_CASE("The heartbeat listener prints correctly with multiple CPUs") {
-    std::ostringstream stdout{};
-    Heartbeat uut{&stdout};
-    
-    // begin phase event
-    bool in_warmup = true;
-    uut.handle_event<Event::BEGIN_PHASE>(in_warmup);
-    
-    for (int i = 0; i < 5000000; ++i) {
-        
-        // simulation behavior (2 IPC)
-        std::deque<ooo_model_instr> fake_instructions{{ooo_model_instr(0, input_instr()), ooo_model_instr(0, input_instr())}};
-        uint32_t cpu = 0;
-        uint64_t curr_cycles = i;
-        auto cb = std::cbegin(fake_instructions);
-        auto ce = std::cend(fake_instructions);
-        uut.handle_event<Event::RETIRE>(cpu, cb, ce, curr_cycles);
-        cpu++;
-        uut.handle_event<Event::RETIRE>(cpu, cb, ce, curr_cycles);
-        cpu++;
-        uut.handle_event<Event::RETIRE>(cpu, cb, ce, curr_cycles);
-        cpu++;
-        uut.handle_event<Event::RETIRE>(cpu, cb, ce, curr_cycles);
-        
-    }
-    
-    std::string res = stdout.str();
-    
-    std::string l1 = res.substr(0, res.find('\n')+1);
-    std::string rest = res.substr(res.find('\n')+1);
-    std::string l2 = rest.substr(0, rest.find('\n')+1);
-    rest = rest.substr(rest.find('\n')+1);
-    std::string l3 = rest.substr(0, rest.find('\n')+1);
-    rest = rest.substr(rest.find('\n')+1);
-    std::string l4 = rest.substr(0, rest.find('\n')+1);
-    rest = rest.substr(rest.find('\n')+1);
-    
-    REQUIRE_THAT(l1, Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 10000000 cycles: 4999999 heartbeat IPC: 2 cumulative IPC: 2 "));
-    REQUIRE_THAT(l2, Catch::Matchers::StartsWith("Heartbeat CPU 1 instructions: 10000000 cycles: 4999999 heartbeat IPC: 2 cumulative IPC: 2 "));
-    REQUIRE_THAT(l3, Catch::Matchers::StartsWith("Heartbeat CPU 2 instructions: 10000000 cycles: 4999999 heartbeat IPC: 2 cumulative IPC: 2 "));
-    REQUIRE_THAT(l4, Catch::Matchers::StartsWith("Heartbeat CPU 3 instructions: 10000000 cycles: 4999999 heartbeat IPC: 2 cumulative IPC: 2 "));
-    REQUIRE(rest.length() < 2);
-}
-
-TEST_CASE("The heartbeat listener honors a custom cycles_between_printouts") {
-    std::ostringstream stdout{};
-    Heartbeat uut{&stdout};
-    uut.cycles_between_printouts = 1000000; // 10x more frequent than the default
-
-    bool in_warmup = false;
-    uut.handle_event<Event::BEGIN_PHASE>(in_warmup);
-
-    for (int i = 0; i < 500000; ++i) {
-        std::deque<ooo_model_instr> fake_instructions{{ooo_model_instr(0, input_instr()), ooo_model_instr(0, input_instr())}};
-        uint32_t cpu = 0;
-        uint64_t curr_cycles = i;
-        auto cb = std::cbegin(fake_instructions);
-        auto ce = std::cend(fake_instructions);
-        uut.handle_event<Event::RETIRE>(cpu, cb, ce, curr_cycles);
-    }
-
-    std::string res = stdout.str();
-    std::string rest = res.substr(res.find('\n') + 1);
-
-    REQUIRE_THAT(res, Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 1000000 cycles: 499999 heartbeat IPC: 2 cumulative IPC: 2 "));
-    REQUIRE(rest.length() < 2);
-}
-
-TEST_CASE("The heartbeat listener does not drift when retire batches overshoot the threshold") {
-    // Three instructions retire per cycle into a threshold of 10 instructions.
-    // Each batch carries the running count past a non-multiple boundary
-    // (12, 24, 36, ...).  If the listener snapped its baseline to the
-    // current retired count after each printout, the overshoots would
-    // compound and the second heartbeat would land at instruction 24
-    // instead of 20, etc.  The fix advances the baseline by exact
-    // multiples of cycles_between_printouts so heartbeats stay aligned to
-    // the configured cadence.
-    std::ostringstream stdout{};
-    Heartbeat uut{&stdout};
-    uut.cycles_between_printouts = 10;
-
-    bool in_warmup = false;
-    uut.handle_event<Event::BEGIN_PHASE>(in_warmup);
-
-    constexpr int batches = 20; // 60 instructions total -> 6 heartbeats expected
-    for (int i = 0; i < batches; ++i) {
-        std::deque<ooo_model_instr> fake_instructions{
-            {ooo_model_instr(0, input_instr()), ooo_model_instr(0, input_instr()), ooo_model_instr(0, input_instr())}};
-        uint32_t cpu = 0;
-        uint64_t curr_cycles = static_cast<uint64_t>(i);
-        auto cb = std::cbegin(fake_instructions);
-        auto ce = std::cend(fake_instructions);
-        uut.handle_event<Event::RETIRE>(cpu, cb, ce, curr_cycles);
-    }
-
-    std::string res = stdout.str();
+    std::string res = capture.str();
     std::vector<std::string> lines;
-    for (size_t pos = 0; pos < res.size(); ) {
-        auto next = res.find('\n', pos);
-        if (next == std::string::npos) break;
-        lines.push_back(res.substr(pos, next - pos));
-        pos = next + 1;
+    std::istringstream stream{res};
+    for (std::string line; std::getline(stream, line);) lines.push_back(line);
+
+    REQUIRE(lines.size() == 4);
+    REQUIRE_THAT(lines[0], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 10000000 cycles: 4999999 heartbeat IPC: 2 cumulative IPC: 2 "));
+    REQUIRE_THAT(lines[1], Catch::Matchers::StartsWith("Heartbeat CPU 1 instructions: 10000000 cycles: 4999999 heartbeat IPC: 2 cumulative IPC: 2 "));
+    REQUIRE_THAT(lines[2], Catch::Matchers::StartsWith("Heartbeat CPU 2 instructions: 10000000 cycles: 4999999 heartbeat IPC: 2 cumulative IPC: 2 "));
+    REQUIRE_THAT(lines[3], Catch::Matchers::StartsWith("Heartbeat CPU 3 instructions: 10000000 cycles: 4999999 heartbeat IPC: 2 cumulative IPC: 2 "));
+}
+
+TEST_CASE("The heartbeat listener honors a configured interval") {
+    std::ostringstream capture{};
+    auto* uut = make_heartbeat("hb020_interval", &capture, 1000000ULL);
+    hb_consumer cpu0{0};
+
+    uut->begin_phase(false);
+
+    uint64_t total = 0;
+    for (int i = 0; i < 500000; ++i) {
+        total += 2;
+        uut->progress(cpu0, total, static_cast<uint64_t>(i));
     }
+
+    std::string res = capture.str();
+    REQUIRE_THAT(res, Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 1000000 cycles: 499999 heartbeat IPC: 2 cumulative IPC: 2 "));
+}
+
+TEST_CASE("The heartbeat baseline advances by whole intervals when retires overshoot") {
+    std::ostringstream capture{};
+    auto* uut = make_heartbeat("hb020_overshoot", &capture, 9ULL);
+    hb_consumer cpu0{0};
+
+    uut->begin_phase(false);
+
+    // Batches of 4 against a 9-token interval: the baseline advances by
+    // whole intervals (9, 18, 27, 36, 45, 54, ...) rather than snapping to
+    // the printed total, so prints land at the first batch crossing each
+    // grid line: totals 12, 20, 28, 36, 48, 56.
+    uint64_t total = 0;
+    for (int i = 0; i < 14; ++i) {
+        total += 4;
+        uut->progress(cpu0, total, static_cast<uint64_t>(i));
+    }
+
+    std::string res = capture.str();
+    std::vector<std::string> lines;
+    std::istringstream stream{res};
+    for (std::string line; std::getline(stream, line);) lines.push_back(line);
 
     REQUIRE(lines.size() == 6);
     REQUIRE_THAT(lines[0], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 12 "));
-    REQUIRE_THAT(lines[1], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 21 "));
-    REQUIRE_THAT(lines[2], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 30 "));
-    REQUIRE_THAT(lines[3], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 42 "));
-    REQUIRE_THAT(lines[4], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 51 "));
-    REQUIRE_THAT(lines[5], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 60 "));
+    REQUIRE_THAT(lines[1], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 20 "));
+    REQUIRE_THAT(lines[2], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 28 "));
+    REQUIRE_THAT(lines[3], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 36 "));
+    REQUIRE_THAT(lines[4], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 48 "));
+    REQUIRE_THAT(lines[5], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 56 "));
 }
 
-TEST_CASE("Reading heartbeat_frequency from a JSON config sets cycles_between_printouts") {
-    // Mirrors the wiring in src/main.cc that reads the root-level
-    // heartbeat_frequency field and applies it to the Heartbeat listener,
-    // independent of which environment model the config selects.
-    nlohmann::json config_json = {{"heartbeat_frequency", 1234567U}};
-    std::ostringstream stdout{};
-    Heartbeat uut{&stdout};
-
-    if (config_json.contains("heartbeat_frequency")) {
-        uut.cycles_between_printouts = config_json.value("heartbeat_frequency", uint64_t{10000000});
-    }
-
-    REQUIRE(uut.cycles_between_printouts == 1234567U);
-}
-
-TEST_CASE("Heartbeat listener falls back to its default cadence when heartbeat_frequency is absent") {
-    nlohmann::json config_json = {{"block_size", 64U}};
-    std::ostringstream stdout{};
-    Heartbeat uut{&stdout};
-
-    if (config_json.contains("heartbeat_frequency")) {
-        uut.cycles_between_printouts = config_json.value("heartbeat_frequency", uint64_t{10000000});
-    }
-
-    REQUIRE(uut.cycles_between_printouts == 10000000U);
-}
-
+TEST_CASE("The default progress message is token-generic") {
+    champsim::modules::source_consumer generic{};
+    // Standalone consumers default to id 0 until the startup pass assigns one
+    auto msg = generic.progress_message(100, 50, 2.0, 2.0);
+    REQUIRE_THAT(msg, Catch::Matchers::StartsWith("Heartbeat source 0 tokens: 100 cycles: 50 "));
 }

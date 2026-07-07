@@ -41,12 +41,12 @@
 #include "champsim.h"
 #include "channel.h"
 #include "chrono.h"
-#include "modules.h"
 #include "operable.h"
+#include "modules.h"
 #include "util/to_underlying.h" // for to_underlying
 #include "waitable.h"
 
-class CACHE : public champsim::modules::cache_module
+class CACHE : public champsim::modules::cache_module, public champsim::module_phase, public champsim::module_stat
 {
   enum [[deprecated(
       "Prefetchers may not specify arbitrary fill levels. Use CACHE::prefetch_line(pf_addr, fill_this_level, prefetch_metadata) instead.")]] FILL_LEVEL{
@@ -64,7 +64,7 @@ class CACHE : public champsim::modules::cache_module
     uint64_t instr_id;
 
     uint32_t pf_metadata;
-    uint32_t cpu;
+    champsim::origin origin;
 
     access_type type;
     bool prefetch_from_this;
@@ -72,7 +72,6 @@ class CACHE : public champsim::modules::cache_module
     bool is_translated;
     bool translate_issued = false;
 
-    uint8_t asid[2] = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
 
     champsim::chrono::clock::time_point event_cycle = champsim::chrono::clock::time_point::max();
 
@@ -95,12 +94,11 @@ public:
       uint32_t pf_metadata;
     };
     champsim::waitable<returned_value> data_promise{};
-    uint32_t cpu;
+    champsim::origin origin;
 
     access_type type;
     bool prefetch_from_this;
 
-    uint8_t asid[2] = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
 
     champsim::chrono::clock::time_point time_enqueued;
 
@@ -156,7 +154,10 @@ public:
   channel_type* lower_level;
   channel_type* lower_translate;
 
-  uint32_t cpu = 0;
+  // Provenance of the most recently served packet; stamped onto prefetches
+  // issued by this cache (attribution: prefetches belong to whoever touched
+  // the cache last).
+  champsim::origin last_served_origin{};
   std::string NAME;
   uint32_t NUM_SET, NUM_WAY, MSHR_SIZE;
   std::size_t PQ_SIZE;
@@ -178,10 +179,23 @@ public:
   std::deque<fill_type> inflight_fills;
 
   long operate() final;
+  long poll_cycle() final;
   void initialize() final;
-  void begin_phase() final;
-  void end_phase(unsigned cpu) final;
+  void begin_phase(bool warmup, bool roi) override;
+  void end_phase() override;
   void end_simulation() final;
+
+  // module_stat
+  std::vector<std::string> print_stats(bool roi) const override;
+  void json_stats(champsim::json_stat_builder& b, bool roi) const override;
+
+private:
+  // Snapshot of the warmup/ROI flags for the current phase.
+  bool warmup_ = true;
+  [[maybe_unused]] bool roi_ = false;
+public:
+  bool is_warmup() const { return warmup_; }
+  bool is_roi() const    { return roi_; }
 
   [[deprecated]] std::size_t get_occupancy(uint8_t queue_type, champsim::address address) const;
   [[deprecated]] std::size_t get_size(uint8_t queue_type, champsim::address address) const;
@@ -232,39 +246,33 @@ public:
 
   void print_deadlock() final;
 
-  void impl_prefetcher_initialize() const;
-  [[nodiscard]] uint32_t impl_prefetcher_cache_operate(champsim::address addr, champsim::address ip, bool cache_hit, bool useful_prefetch, access_type type,
-                                                       uint32_t metadata_in) const;
-  [[nodiscard]] uint32_t impl_prefetcher_cache_fill(champsim::address addr, long set, long way, bool prefetch, champsim::address evicted_addr,
-                                                    uint32_t metadata_in) const;
-  void impl_prefetcher_cycle_operate() const;
-  void impl_prefetcher_final_stats() const;
-  void impl_prefetcher_branch_operate(champsim::address ip, uint8_t branch_type, champsim::address branch_target) const;
-  void impl_initialize_replacement() const;
-  [[nodiscard]] long impl_find_victim(uint32_t triggering_cpu, uint64_t instr_id, long set, const BLOCK* current_set, champsim::address ip,
-                                      champsim::address full_addr, access_type type) const;
-  void impl_update_replacement_state(uint32_t triggering_cpu, long set, long way, champsim::address full_addr, champsim::address ip,
-                                     champsim::address victim_addr, access_type type, bool hit) const;
-  void impl_replacement_cache_fill(uint32_t triggering_cpu, long set, long way, champsim::address full_addr, champsim::address ip,
-                                   champsim::address victim_addr, access_type type) const;
-  void impl_replacement_final_stats() const;
+
+    void impl_prefetcher_initialize() const;
+    [[nodiscard]] uint32_t impl_prefetcher_cache_operate(champsim::address addr, champsim::address ip, bool cache_hit, bool useful_prefetch, access_type type,
+                                                         uint32_t metadata_in) const;
+    [[nodiscard]] uint32_t impl_prefetcher_cache_fill(champsim::address addr, long set, long way, bool prefetch, champsim::address evicted_addr,
+                                                      uint32_t metadata_in) const;
+    void impl_prefetcher_cycle_operate() const;
+    void impl_prefetcher_final_stats() const;
+    void impl_prefetcher_branch_operate(champsim::address ip, uint8_t branch_type, champsim::address branch_target) const;
+      void impl_initialize_replacement() const;
+    [[nodiscard]] long impl_find_victim(champsim::origin origin, uint64_t instr_id, long set, const BLOCK* current_set, champsim::address ip,
+                                        champsim::address full_addr, access_type type) const;
+    void impl_update_replacement_state(champsim::origin origin, long set, long way, champsim::address full_addr, champsim::address ip,
+                                       champsim::address victim_addr, access_type type, bool hit) const;
+    void impl_replacement_cache_fill(champsim::origin origin, long set, long way, champsim::address full_addr, champsim::address ip,
+                                     champsim::address victim_addr, access_type type) const;
+    void impl_replacement_final_stats() const;
   // NOLINTEND(readability-make-member-function-const)
 
   explicit CACHE(champsim::modules::ModuleBuilder builder)
       : champsim::modules::cache_module(builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
         upper_levels(builder.get_parameter<std::vector<champsim::modules::channel_module*>>("upper_levels")),
         lower_level(builder.get_parameter<champsim::modules::channel_module*>("lower_level")),
-        lower_translate(builder.get_parameter<champsim::modules::channel_module*>("lower_translate")), NAME(builder.get_name()),
-        NUM_SET(builder.get_parameter<uint32_t>("num_sets")), NUM_WAY(builder.get_parameter<uint32_t>("num_ways")),
-        MSHR_SIZE(builder.get_parameter<uint32_t>("mshr_size")), PQ_SIZE(builder.get_parameter<std::size_t>("pq_size")),
-        HIT_LATENCY(builder.get_parameter<uint64_t>("hit_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
-        FILL_LATENCY(builder.get_parameter<uint64_t>("fill_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
-        OFFSET_BITS(builder.get_parameter<champsim::data::bits>("offset_bits")),
-        MAX_TAG(builder.get_parameter<champsim::bandwidth::maximum_type>("max_tag_bandwidth")),
-        MAX_FILL(builder.get_parameter<champsim::bandwidth::maximum_type>("max_fill_bandwidth")),
-        prefetch_as_load(builder.get_parameter<bool>("prefetch_as_load")), match_offset_bits(builder.get_parameter<bool>("match_offset_bits")),
-        virtual_prefetch(builder.get_parameter<bool>("virtual_prefetch")),
-        pref_activate_mask(builder.get_parameter<std::vector<access_type>>("pref_activate_mask"))
+        lower_translate(builder.get_parameter<champsim::modules::channel_module*>("lower_translate")),
+        NAME(builder.get_name()), NUM_SET(builder.get_parameter<uint32_t>("num_sets")), NUM_WAY(builder.get_parameter<uint32_t>("num_ways")), MSHR_SIZE(builder.get_parameter<uint32_t>("mshr_size")), PQ_SIZE(builder.get_parameter<std::size_t>("pq_size")), HIT_LATENCY(builder.get_parameter<uint64_t>("hit_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+        FILL_LATENCY(builder.get_parameter<uint64_t>("fill_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), OFFSET_BITS(builder.get_parameter<champsim::data::bits>("offset_bits")), MAX_TAG(builder.get_parameter<champsim::bandwidth::maximum_type>("max_tag_bandwidth")), MAX_FILL(builder.get_parameter<champsim::bandwidth::maximum_type>("max_fill_bandwidth")),
+        prefetch_as_load(builder.get_parameter<bool>("prefetch_as_load")), match_offset_bits(builder.get_parameter<bool>("match_offset_bits")), virtual_prefetch(builder.get_parameter<bool>("virtual_prefetch")), pref_activate_mask(builder.get_parameter<std::vector<access_type>>("pref_activate_mask"))
   {
     // Construct prefetcher submodules
     for (const auto& sub : builder.get_submodules("prefetcher", true))
@@ -280,6 +288,7 @@ public:
   CACHE& operator=(const CACHE&) = delete;
   CACHE& operator=(CACHE&&);
 };
+
 
 #ifdef SET_ASIDE_CHAMPSIM_MODULE
 #undef SET_ASIDE_CHAMPSIM_MODULE

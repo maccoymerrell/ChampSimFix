@@ -17,31 +17,41 @@
 #ifndef PHASE_INFO_H
 #define PHASE_INFO_H
 
+#include <any>
 #include <cstdint>
-#include <memory>
+#include <map>
 #include <string>
-#include <string_view>
+#include <utility>
 #include <vector>
 
-#include "modules.h"
 
 namespace champsim
 {
 
+// A phase of the run: a name, a warmup flag, an ROI flag, and a length
+// denominated in each source consumer's own progress unit (instructions for
+// cores, packets for a network consumer, ...). roi selects whether the phase
+// contributes to region-of-interest statistics — typically !is_warmup, but
+// independent so a run can contain unmeasured non-warmup phases (e.g. a
+// fast-forward between warmup and the measured region). Workload identity
+// (e.g. trace paths) is not part of the phase — sources describe themselves
+// via workload_source::describe().
 struct phase_info {
   std::string name;
   bool is_warmup;
+  bool roi;
   uint64_t length;
-  std::vector<std::size_t> trace_index;
-  std::vector<std::string> trace_names;
 };
 
 struct phase_stats {
   std::string name;
   std::vector<std::string> trace_names;
-  std::vector<champsim::modules::core_module::stats_type> roi_cpu_stats, sim_cpu_stats;
-  std::vector<champsim::modules::cache_module::stats_type> roi_cache_stats, sim_cache_stats;
-  std::vector<champsim::modules::memory_controller_module::stats_type> roi_dram_stats, sim_dram_stats;
+  // Pre-collected by collect_phase_stats
+  std::vector<std::string> sim_lines;   // all sim plaintext lines
+  std::vector<std::string> roi_lines;   // all roi plaintext lines
+  // interface -> [(module_name, json_any)] for JSON compilation
+  std::map<std::string, std::vector<std::pair<std::string, std::any>>> sim_json;
+  std::map<std::string, std::vector<std::pair<std::string, std::any>>> roi_json;
 };
 
 } // namespace champsim

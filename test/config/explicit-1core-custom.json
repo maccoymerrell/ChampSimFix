@@ -1,4 +1,5 @@
 {
+  "environment": "ENVIRONMENT",
   "_comment": "1-core explicit config with custom block/page size for test 502",
   "block_size": 128,
   "page_size": 8192,
@@ -215,7 +216,6 @@
       "clock_period": {
         "time": "250p"
       },
-      "cpu": 0,
       "mshr_size": 5,
       "latency": 0,
       "max_tag_check": {
@@ -250,7 +250,8 @@
           4,
           8
         ]
-      ]
+      ],
+      "asid": 0
     },
     {
       "name": "LLC",
@@ -614,7 +615,6 @@
       "clock_period": {
         "time": "250p"
       },
-      "cpu": 0,
       "dib_set": 32,
       "dib_way": 8,
       "dib_window": 16,
@@ -678,8 +678,16 @@
           "name": "cpu0_btb",
           "module": "btb",
           "model": "basic_btb"
+        },
+        {
+          "name": "cpu0_trace_source",
+          "module": "workload_source",
+          "model": "TRACE_WORKLOAD_SOURCE",
+          "trace_file": "$trace0",
+          "stream_id": 0
         }
-      ]
+      ],
+      "consumer_id": 0
     }
   ]
 }

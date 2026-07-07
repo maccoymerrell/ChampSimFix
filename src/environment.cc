@@ -10,273 +10,165 @@
 
 #include "environment.h"
 
+#include <set>
+
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
+
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
 
-#include "access_type.h"
-#include "bandwidth.h"
 #include "champsim.h"
 #include "chrono.h"
+#include "type_registry.h"
 #include "util/bits.h"
-#include "util/units.h"
 
 using json = nlohmann::json;
 using namespace champsim::modules;
 
-namespace
-{
-
-// Split a string like "4G" into {4.0, "G"} or "32000" into {32000.0, ""}.
-std::pair<double, std::string> parse_number_and_suffix(const std::string& s)
-{
-  std::size_t pos = 0;
-  double value = std::stod(s, &pos);
-  return {value, s.substr(pos)};
-}
-
-// Parse a frequency string with SI suffix → picoseconds period.
-// Formula: ps = round(1e12 / (value * multiplier))
-champsim::chrono::picoseconds parse_frequency_string(const std::string& s)
-{
-  auto [value, suffix] = parse_number_and_suffix(s);
-  double multiplier = 1.0;
-  if (suffix.empty())
-    multiplier = 1.0;
-  else if (suffix == "K")
-    multiplier = 1e3;
-  else if (suffix == "M")
-    multiplier = 1e6;
-  else if (suffix == "G")
-    multiplier = 1e9;
-  else if (suffix == "T")
-    multiplier = 1e12;
-  else {
-    fmt::print("[ENVIRONMENT] ERROR: unknown frequency suffix '{}' in '{}'\n", suffix, s);
-    std::exit(-1);
-  }
-  auto ps = static_cast<int64_t>(std::round(1e12 / (value * multiplier)));
-  return champsim::chrono::picoseconds{ps};
-}
-
-// Parse a time string with suffix → std::any of the appropriate chrono type.
-// The suffix determines the exact stored type (must match consumer expectations).
-std::any parse_time_string(const std::string& s)
-{
-  auto [value, suffix] = parse_number_and_suffix(s);
-  auto int_val = static_cast<int64_t>(std::round(value));
-  if (suffix.empty() || suffix == "p")
-    return champsim::chrono::picoseconds{int_val};
-  else if (suffix == "n")
-    return champsim::chrono::nanoseconds{int_val};
-  else if (suffix == "u")
-    return champsim::chrono::microseconds{int_val};
-  else if (suffix == "m")
-    return champsim::chrono::milliseconds{int_val};
-  else if (suffix == "s")
-    return champsim::chrono::seconds{int_val};
-  fmt::print("[ENVIRONMENT] ERROR: unknown time suffix '{}' in '{}'\n", suffix, s);
-  std::exit(-1);
-}
-
-// Parse a bytes string with SI or IEC binary suffix → champsim::data::bytes.
-champsim::data::bytes parse_bytes_string(const std::string& s)
-{
-  auto [value, suffix] = parse_number_and_suffix(s);
-  auto int_val = static_cast<long long>(std::round(value));
-  if (suffix.empty())
-    return champsim::data::bytes{int_val};
-  // IEC binary prefixes
-  if (suffix == "Ki")
-    return champsim::data::kibibytes{int_val};
-  if (suffix == "Mi")
-    return champsim::data::mebibytes{int_val};
-  if (suffix == "Gi")
-    return champsim::data::gibibytes{int_val};
-  if (suffix == "Ti")
-    return champsim::data::tebibytes{int_val};
-  // SI decimal prefixes
-  if (suffix == "K")
-    return champsim::data::bytes{int_val * 1000LL};
-  if (suffix == "M")
-    return champsim::data::bytes{int_val * 1000000LL};
-  if (suffix == "G")
-    return champsim::data::bytes{int_val * 1000000000LL};
-  if (suffix == "T")
-    return champsim::data::bytes{int_val * 1000000000000LL};
-  fmt::print("[ENVIRONMENT] ERROR: unknown bytes suffix '{}' in '{}'\n", suffix, s);
-  std::exit(-1);
-}
-
-// Parse a bits string with SI suffix → champsim::data::bits.
-champsim::data::bits parse_bits_string(const std::string& s)
-{
-  auto [value, suffix] = parse_number_and_suffix(s);
-  auto int_val = static_cast<unsigned long long>(std::round(value));
-  if (suffix.empty())
-    return champsim::data::bits{int_val};
-  if (suffix == "K")
-    return champsim::data::bits{int_val * 1000ULL};
-  if (suffix == "M")
-    return champsim::data::bits{int_val * 1000000ULL};
-  if (suffix == "G")
-    return champsim::data::bits{int_val * 1000000000ULL};
-  fmt::print("[ENVIRONMENT] ERROR: unknown bits suffix '{}' in '{}'\n", suffix, s);
-  std::exit(-1);
-}
-
-// Try to parse a JSON object as a type-wrapped value, e.g. {"frequency": "4G"}
-// Returns true and sets the std::any result if recognized.
-bool try_parse_typed_value(const json& obj, std::any& out)
-{
-  if (!obj.is_object() || obj.size() != 1)
-    return false;
-  auto it = obj.begin();
-  const std::string& type_key = it.key();
-  const json& val = it.value();
-
-  if (type_key == "frequency" && val.is_string()) {
-    out = parse_frequency_string(val.get<std::string>());
-    return true;
-  } else if (type_key == "time" && val.is_string()) {
-    out = parse_time_string(val.get<std::string>());
-    return true;
-  } else if (type_key == "bytes" && val.is_string()) {
-    out = parse_bytes_string(val.get<std::string>());
-    return true;
-  } else if (type_key == "bits" && val.is_string()) {
-    out = parse_bits_string(val.get<std::string>());
-    return true;
-  } else if (type_key == "bandwidth") {
-    out = champsim::bandwidth::maximum_type{val.get<long long>()};
-    return true;
-  } else if (type_key == "optional_uint64") {
-    if (val.is_null())
-      out = std::optional<uint64_t>{};
-    else
-      out = std::optional<uint64_t>{val.get<uint64_t>()};
-    return true;
-  } else if (type_key == "null") {
-    std::string iface_name = val.get<std::string>();
-    out = interface_registry::make_null_pointer(iface_name);
-    return true;
-  } else if (type_key == "access_types" && val.is_array()) {
-    std::vector<access_type> result;
-    for (auto& elem : val) {
-      auto at = access_type_from_string(elem.get<std::string>());
-      if (at != access_type::NUM_TYPES)
-        result.push_back(at);
-    }
-    out = result;
-    return true;
-  }
-  return false;
-}
+namespace {
 
 // Try to parse an @-reference string, returning the referenced name if valid.
-std::optional<std::string> try_parse_ref(const std::string& s)
-{
-  if (!s.empty() && s[0] == '@')
-    return s.substr(1);
+std::optional<std::string> try_parse_ref(const std::string& s) {
+  if (!s.empty() && s[0] == '@') return s.substr(1);
   return std::nullopt;
 }
 
+// Check if a string is a $-variable (CLI arg reference)
+bool is_var(const std::string& s) { return !s.empty() && s[0] == '$'; }
+std::string var_name(const std::string& s) { return s.substr(1); }
+
 // Check if a JSON array is entirely @-references
-bool is_ref_array(const json& arr)
-{
-  if (!arr.is_array() || arr.empty())
-    return false;
+bool is_ref_array(const json& arr) {
+  if (!arr.is_array() || arr.empty()) return false;
   for (auto& elem : arr) {
-    if (!elem.is_string() || !try_parse_ref(elem.get<std::string>()))
-      return false;
+    if (!elem.is_string() || !try_parse_ref(elem.get<std::string>())) return false;
   }
   return true;
 }
 
+// Forward-declare so add_param can recurse via $-variable resolution.
+void add_param(ModuleBuilder& builder, const std::string& key, const json& val,
+               const std::string& mod_name,
+               const std::map<std::string, std::any>& modules_by_name,
+               const std::map<std::string, std::string>& module_interfaces,
+               const json& cli_args);
+
+// Resolve a $-variable from the CLI args map by re-entering add_param with the
+// resolved JSON value, so any type the dispatch handles (scalar, typed object,
+// reference, array) works for variables too.
+void resolve_var(const std::string& val_str, const std::string& key,
+                 const std::string& mod_name,
+                 const std::map<std::string, std::any>& modules_by_name,
+                 const std::map<std::string, std::string>& module_interfaces,
+                 const json& cli_args, ModuleBuilder& builder)
+{
+  std::string vn = var_name(val_str);
+  if (!cli_args.contains(vn)) {
+    fmt::print("[ENVIRONMENT] ERROR: $-variable '{}' not found in CLI args (used in '{}' param '{}')\n",
+               vn, mod_name, key);
+    std::exit(-1);
+  }
+  add_param(builder, key, cli_args[vn], mod_name, modules_by_name, module_interfaces, cli_args);
+}
+
+// Add a single (key, val) JSON parameter to the builder.
+//
+// The environment owns only the structural concerns (null skipping,
+// $-variable resolution, @-reference lookup). Everything else — scalars,
+// arrays, typed objects — flows through ``type_registry::try_convert``,
+// so adding a new type is a registry registration rather than a change
+// here.
+void add_param(ModuleBuilder& builder, const std::string& key, const json& val,
+               const std::string& mod_name,
+               const std::map<std::string, std::any>& modules_by_name,
+               const std::map<std::string, std::string>& module_interfaces,
+               const json& cli_args)
+{
+  if (val.is_null()) {
+    return;
+  }
+  if (val.is_string() && is_var(val.get<std::string>())) {
+    resolve_var(val.get<std::string>(), key, mod_name, modules_by_name, module_interfaces, cli_args, builder);
+    return;
+  }
+  if (auto ref = val.is_string() ? try_parse_ref(val.get<std::string>()) : std::nullopt) {
+    const auto& rn = *ref;
+    auto mit = modules_by_name.find(rn);
+    if (mit == modules_by_name.end()) {
+      fmt::print("[ENVIRONMENT] ERROR: @-reference '{}' not found (used in '{}' param '{}')\n", rn, mod_name, key);
+      std::exit(-1);
+    }
+    builder.add_raw_parameter(key, mit->second);
+    return;
+  }
+  if (val.is_array() && is_ref_array(val)) {
+    std::vector<std::any> refs;
+    std::string ref_iface;
+    for (auto& elem : val) {
+      auto rn = *try_parse_ref(elem.get<std::string>());
+      auto mit = modules_by_name.find(rn);
+      if (mit == modules_by_name.end()) {
+        fmt::print("[ENVIRONMENT] ERROR: @-reference '{}' not found (in array param '{}' of '{}')\n", rn, key, mod_name);
+        std::exit(-1);
+      }
+      std::string curr_iface = module_interfaces.at(rn);
+      if (ref_iface.empty()) {
+        ref_iface = curr_iface;
+      } else if (curr_iface != ref_iface) {
+        fmt::print("[ENVIRONMENT] ERROR: mixed interface types in array '{}' of '{}': expected '{}', got '{}' for '{}'\n",
+                   key, mod_name, ref_iface, curr_iface, rn);
+        std::exit(-1);
+      }
+      refs.push_back(mit->second);
+    }
+    builder.add_raw_parameter(key, interface_registry::make_vector(ref_iface, refs));
+    return;
+  }
+
+  // Everything else flows through the type_registry: typed objects
+  // (e.g. {"frequency": "4G"}) are converted via the named-type
+  // registrations; bare scalars and arrays use the kind defaults.
+  std::any converted;
+  if (champsim::type_registry::try_convert(val, converted)) {
+    builder.add_raw_parameter(key, std::move(converted));
+  }
+}
+
 // Populate a ModuleBuilder with parameters from a JSON node, with full type
-// support (typed objects, @-references, arrays, scalars) and recursive children.
-// This handles arbitrary nesting depth for submodules.
-void populate_builder(const json& node, ModuleBuilder& builder, const std::map<std::string, std::any>& modules_by_name,
-                      const std::map<std::string, std::string>& module_interfaces)
+// support (typed objects, @-references, $-variables, arrays, scalars) and
+// recursive children.
+// cli_args: flat JSON object of CLI arguments available for $-variable substitution.
+void populate_builder(const json& node, ModuleBuilder& builder,
+                      const std::map<std::string, std::any>& modules_by_name,
+                      const std::map<std::string, std::string>& module_interfaces,
+                      const json& cli_args, std::vector<ModuleBuilder::scope_frame_type> frames)
 {
   const std::string& name = builder.get_name();
 
+  // A "globals" object on a module opens a lexical scope: its keys are
+  // visible to this module and everything constructed beneath it, unless
+  // shadowed by a more local definition. Ordinary module parameters stay
+  // module-local; only this block is inherited.
+  if (auto it = node.find("globals"); it != node.end() && it->is_object()) {
+    ModuleBuilder frame_builder{name + ".globals", "<scope>"};
+    for (auto& [key, val] : it->items()) {
+      add_param(frame_builder, key, val, name, modules_by_name, module_interfaces, cli_args);
+    }
+    frames.insert(std::begin(frames), std::make_shared<const std::map<std::string, std::any>>(frame_builder.get_parameters()));
+  }
+  builder.inherit_scope(frames);
+
   // Process all JSON parameters (skip reserved keys)
   for (auto& [key, val] : node.items()) {
-    if (key == "name" || key == "module" || key == "model" || key == "children" || key == "_comment")
-      continue;
-
-    if (val.is_null()) {
-      continue;
-    } else if (auto ref = val.is_string() ? try_parse_ref(val.get<std::string>()) : std::nullopt) {
-      const auto& rn = *ref;
-      auto mit = modules_by_name.find(rn);
-      if (mit == modules_by_name.end()) {
-        fmt::print("[ENVIRONMENT] ERROR: @-reference '{}' not found (used in '{}' param '{}')\n", rn, name, key);
-        std::exit(-1);
-      }
-      builder.add_raw_parameter(key, mit->second);
-    } else if (val.is_array() && is_ref_array(val)) {
-      std::vector<std::any> refs;
-      std::string ref_iface;
-      for (auto& elem : val) {
-        auto rn = *try_parse_ref(elem.get<std::string>());
-        auto mit = modules_by_name.find(rn);
-        if (mit == modules_by_name.end()) {
-          fmt::print("[ENVIRONMENT] ERROR: @-reference '{}' not found (in array param '{}' of '{}')\n", rn, key, name);
-          std::exit(-1);
-        }
-        std::string curr_iface = module_interfaces.at(rn);
-        if (ref_iface.empty()) {
-          ref_iface = curr_iface;
-        } else if (curr_iface != ref_iface) {
-          fmt::print("[ENVIRONMENT] ERROR: mixed interface types in array '{}' of '{}': expected '{}', got '{}' for '{}'\n", key, name, ref_iface, curr_iface,
-                     rn);
-          std::exit(-1);
-        }
-        refs.push_back(mit->second);
-      }
-      builder.add_raw_parameter(key, interface_registry::make_vector(ref_iface, refs));
-    } else if (val.is_object()) {
-      std::any typed_val;
-      if (try_parse_typed_value(val, typed_val)) {
-        builder.add_raw_parameter(key, std::move(typed_val));
-      } else {
-        builder.add_parameter(key, val);
-      }
-    } else if (val.is_boolean()) {
-      builder.add_parameter(key, val.get<bool>());
-    } else if (val.is_number_integer()) {
-      builder.add_parameter(key, val.get<int64_t>());
-    } else if (val.is_number_float()) {
-      builder.add_parameter(key, val.get<double>());
-    } else if (val.is_string()) {
-      builder.add_parameter(key, val.get<std::string>());
-    } else if (val.is_array()) {
-      if (!val.empty() && val[0].is_string()) {
-        std::vector<std::string> sv;
-        for (auto& e : val)
-          sv.push_back(e.get<std::string>());
-        builder.add_parameter(key, sv);
-      } else if (!val.empty() && val[0].is_array()) {
-        std::vector<std::array<uint32_t, 3>> dims;
-        for (std::size_t i = 0; i < val.size(); i++) {
-          std::array<uint32_t, 3> entry{};
-          for (std::size_t j = 0; j < val[i].size() && j < 3; j++) {
-            entry[j] = static_cast<uint32_t>(val[i][j].get<int64_t>());
-          }
-          dims.push_back(entry);
-        }
-        builder.add_parameter(key, dims);
-      } else {
-        builder.add_parameter(key, val);
-      }
-    }
+    if (key == "name" || key == "module" || key == "model" || key == "children" || key == "_comment" || key == "globals") continue;
+    add_param(builder, key, val, name, modules_by_name, module_interfaces, cli_args);
   }
 
   // Recursively handle nested children as submodules
@@ -291,7 +183,7 @@ void populate_builder(const json& node, ModuleBuilder& builder, const std::map<s
       std::string sub_model = sub["model"].get<std::string>();
 
       ModuleBuilder child_builder{sub_name, sub_model};
-      populate_builder(sub, child_builder, modules_by_name, module_interfaces);
+      populate_builder(sub, child_builder, modules_by_name, module_interfaces, cli_args, frames);
       builder.add_submodule(sub_iface, std::move(child_builder));
     }
   }
@@ -306,6 +198,7 @@ champsim::environment::environment(ModuleBuilder builder)
 {
   builder_params_[(builder.get_name().empty() ? "ENVIRONMENT" : builder.get_name())] = builder;
   json config = builder.get_parameter<json>("config_json");
+  auto cli_args = builder.get_parameter<json>("cli_args", true, json::object());
 
   block_size_ = config.value("block_size", 64u);
   page_size_ = config.value("page_size", 4096u);
@@ -316,6 +209,87 @@ champsim::environment::environment(ModuleBuilder builder)
   }
 
   auto& children = config["children"];
+
+  // Pre-construction: count consumers and sources so both can be published
+  // to the globals before any module is constructed. Modules that size
+  // per-consumer tables (e.g. ship/drrip, indexed by origin's consumer id)
+  // read num_consumers via builder.get_parameter fall-through, so it must
+  // be the exact consumer count — the same space assign_identities later
+  // enumerates. Consumer-ness is a per-model trait recorded at
+  // register_module time (a model can be a source_consumer even when its
+  // interface is not), queried here by (module, model) name. Configs may
+  // override with a root-level "num_consumers" key.
+  std::size_t num_consumers = 0;
+  std::size_t num_sources = 0;
+  std::size_t num_streams = 0;
+  std::set<std::string> stream_labels_seen;
+  std::function<void(const json&)> count_identities = [&](const json& node) {
+    const auto module_key = node.value("module", "");
+    const auto model_key = node.value("model", "");
+    if (modules::interface_registry::model_is_source(module_key, model_key)) {
+      ++num_sources;
+      // Streams follow the assignment rule: labeled sources share one id per
+      // distinct "stream" label, unlabeled sources get their own.
+      const auto label = node.value("stream", "");
+      if (label.empty() || stream_labels_seen.insert(label).second) {
+        ++num_streams;
+      }
+    }
+    if (modules::interface_registry::model_is_consumer(module_key, model_key)) {
+      ++num_consumers;
+    }
+    if (node.contains("children")) {
+      for (const auto& sub : node["children"]) {
+        count_identities(sub);
+      }
+    }
+  };
+  for (const auto& child : children) {
+    count_identities(child);
+  }
+  num_consumers = config.value("num_consumers", num_consumers);
+  num_streams = config.value("num_streams", num_streams);
+
+  // Publish system-wide params to the globals before module construction.
+  //
+  // Every non-reserved top-level scalar in the config becomes a global,
+  // visible to any module through get_parameter fall-through (a root
+  // "globals" object works too, for those who prefer it spelled out).
+  // Reserved names are the config's structural and orchestration keys.
+  {
+    auto& g = ModuleBuilder::globals();
+
+    static const std::set<std::string> reserved{"children", "name",       "module",    "model",     "_comment",           "_description", "environment",
+                                                "num_cores", "cycle_skip", "phases",    "listeners", "heartbeat_frequency", "globals"};
+    ModuleBuilder root_scope{"<root>", "<scope>"};
+    for (auto& [key, val] : config.items()) {
+      if (reserved.count(key) != 0 || val.is_structured() || val.is_null()) {
+        continue;
+      }
+      add_param(root_scope, key, val, "<root>", modules_by_name_, module_interfaces_, cli_args);
+    }
+    if (auto it = config.find("globals"); it != config.end() && it->is_object()) {
+      for (auto& [key, val] : it->items()) {
+        add_param(root_scope, key, val, "<root>", modules_by_name_, module_interfaces_, cli_args);
+      }
+    }
+    for (const auto& [key, val] : root_scope.get_parameters()) {
+      g.add_raw_parameter(key, val);
+    }
+
+    // Canonical system-wide values (derived where not configured)
+    g.add_parameter("block_size",      block_size_);
+    g.add_parameter("page_size",       page_size_);
+    g.add_parameter("log2_block_size", static_cast<unsigned>(champsim::lg2(block_size_)));
+    g.add_parameter("log2_page_size",  static_cast<unsigned>(champsim::lg2(page_size_)));
+    g.add_parameter("num_consumers",   num_consumers);
+    g.add_parameter("num_sources",     num_sources);
+    g.add_parameter("num_streams",     num_streams);
+  }
+  // Sync the cached address extents (page_number, block_offset, etc.) with
+  // the freshly-published globals so the hot path doesn't pay a lookup per
+  // address-slice construction.
+  champsim::refresh_address_extents();
 
   for (auto& child : children) {
     if (!child.contains("name") || !child.contains("module") || !child.contains("model")) {
@@ -329,8 +303,12 @@ champsim::environment::environment(ModuleBuilder builder)
 
     auto mod_builder = ModuleBuilder{name, model};
 
-    // Populate parameters (with full type support) and submodules (recursive)
-    populate_builder(child, mod_builder, modules_by_name_, module_interfaces_);
+    populate_builder(child, mod_builder, modules_by_name_, module_interfaces_, cli_args, {});
+
+    // Submodule builders self-enroll their instances (enroll_nested_instance)
+    // so nested modules join the views; the top-level module itself is
+    // registered below, preserving declaration order.
+    mod_builder.set_owner_of_submodules(this);
 
     // Create the module via the interface registry
     std::any typed_ptr = interface_registry::create(iface, mod_builder, static_cast<environment_module*>(this));
@@ -341,12 +319,6 @@ champsim::environment::environment(ModuleBuilder builder)
     // Store in the type-indexed collection
     modules_by_type_[iface].push_back(typed_ptr);
     module_order_.emplace_back(name, iface);
-  }
-
-  // Count cores for num_cpus
-  auto it = modules_by_type_.find("core");
-  if (it != modules_by_type_.end()) {
-    num_cpus_ = it->second.size();
   }
 
   // Compute deadlock threshold purely from parameter types.
@@ -368,29 +340,72 @@ champsim::environment::environment(ModuleBuilder builder)
       }
     }
     if (min_ps < std::numeric_limits<ps_rep>::max() && min_ps > 0)
-      deadlock_cycles_ = static_cast<int>(std::max((sum_ps / min_ps) * 3, ps_rep{500}));
+      deadlock_cycles_ = static_cast<int>(std::max((sum_ps / min_ps)*3, ps_rep{500}));
   }
+
+}
+
+// ====== Nested-instance enrollment ======
+
+void champsim::environment::enroll_nested_instance(const std::string& interface_name, const std::string& name, std::any instance)
+{
+  if (interface_name.empty()) {
+    return; // interface was never registered by name; nothing to file it under
+  }
+  if (modules_by_name_.count(name) != 0U) {
+    fmt::print("[ENVIRONMENT] ERROR: duplicate module name '{}' (nested instance collides with an existing module)\n", name);
+    std::exit(-1);
+  }
+  modules_by_name_[name] = instance;
+  module_interfaces_[name] = interface_name;
+  nested_by_type_[interface_name].push_back(instance);
+  nested_order_.emplace_back(name, interface_name);
 }
 
 // ====== Generic view function ======
 
 auto champsim::environment::view(const std::string& interface_type) const -> std::vector<std::any>
 {
-  if (interface_type == "operable") {
-    // Aggregate all operable modules in declaration order
+  // Collect matches for an aggregate view: converter-filtered walk of the
+  // top-level modules (declaration order) followed by nested instances
+  // (creation order), so pre-existing top-level ordering is preserved.
+  auto collect_aggregate = [this](auto&& get_converter) {
     std::vector<std::any> result;
-    for (auto& [name, iface] : module_order_) {
-      auto to_op = interface_registry::get_to_operable(iface);
-      if (to_op) {
-        auto& typed_ptr = modules_by_name_.at(name);
-        result.push_back(static_cast<champsim::operable*>(to_op(typed_ptr)));
+    for (const auto* order : {&module_order_, &nested_order_}) {
+      for (auto& [name, iface] : *order) {
+        auto converter = get_converter(iface);
+        if (converter) {
+          auto& typed_ptr = modules_by_name_.at(name);
+          // Converters are per-instance dynamic_casts: they return nullptr
+          // for models that do not actually inherit the aggregate mixin
+          // (e.g. the default channel), so only genuine matches enroll.
+          if (auto* match = converter(typed_ptr)) {
+            result.push_back(match);
+          }
+        }
       }
     }
     return result;
+  };
+
+  if (interface_type == "operable") {
+    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_operable(iface); });
   }
 
-  auto it = modules_by_type_.find(interface_type);
-  if (it == modules_by_type_.end())
-    return {};
-  return it->second;
+  if (interface_type == "source_consumer") {
+    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_source_consumer(iface); });
+  }
+
+  if (interface_type == "stream_source") {
+    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_stream_source(iface); });
+  }
+
+  std::vector<std::any> result;
+  if (auto it = modules_by_type_.find(interface_type); it != modules_by_type_.end()) {
+    result = it->second;
+  }
+  if (auto it = nested_by_type_.find(interface_type); it != nested_by_type_.end()) {
+    result.insert(result.end(), it->second.begin(), it->second.end());
+  }
+  return result;
 }

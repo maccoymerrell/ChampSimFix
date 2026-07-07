@@ -18,17 +18,20 @@
 
 #include <algorithm>
 #include <chrono>
+#include <functional>
 #include <numeric>
+#include <set>
 #include <vector>
 #include <fmt/chrono.h>
 #include <fmt/core.h>
 
-#include "event_listeners.h"
 #include "modules.h"
-#include "ooo_cpu.h"
+#include "module_phase.h"
+#include "module_stat.h"
+#include "json_stat_builder.h"
 #include "operable.h"
 #include "phase_info.h"
-#include "tracereader.h"
+#include "identity_registry.h"
 
 const auto start_time = std::chrono::steady_clock::now();
 
@@ -36,175 +39,295 @@ std::chrono::seconds elapsed_time() { return std::chrono::duration_cast<std::chr
 
 namespace champsim
 {
-long do_cycle(std::vector<std::reference_wrapper<champsim::operable>> operables, std::vector<std::reference_wrapper<champsim::modules::core_module>>& cores,
-              std::vector<tracereader>& traces, std::vector<std::size_t> trace_index, champsim::chrono::clock& global_clock)
+
+// Discovery helpers: return the [(interface, name, instance_any)] across the
+// environment so the orchestrator can drive module_phase / module_stat hooks
+// without re-querying typed_view per cycle.
+struct module_phase_entry  { champsim::module_phase* ptr;  std::string interface_name; std::string model; std::string name; };
+struct module_stat_entry   { champsim::module_stat*  ptr;  std::string interface_name; std::string model; std::string name; };
+
+static std::vector<module_phase_entry> collect_module_phase(modules::environment_module& env)
+{
+  std::vector<module_phase_entry> out;
+  // Walk every operable and dynamic_cast to module_phase. This naturally
+  // covers all operables — including ones the environment exposes only via
+  // view("operable") (e.g. test mocks that aren't registered interfaces).
+  for (auto& op_ref : env.typed_view<champsim::operable>("operable")) {
+    if (auto* mp = dynamic_cast<champsim::module_phase*>(&op_ref.get())) {
+      out.push_back({mp, "operable", "", ""});
+    }
+  }
+  return out;
+}
+
+static std::vector<module_stat_entry> collect_module_stat(modules::environment_module& env)
+{
+  std::vector<module_stat_entry> out;
+  for (const auto& iface : modules::interface_registry::get_interface_names()) {
+    auto to_ms = modules::interface_registry::get_to_module_stat(iface);
+    if (!to_ms) continue;
+    for (const auto& inst : env.view(iface)) {
+      auto* ms = to_ms(inst);
+      if (ms) {
+        auto id = modules::interface_registry::identify(iface, inst);
+        out.push_back({ms, iface, id.model, id.name});
+      }
+    }
+  }
+  return out;
+}
+
+// Pure cycle operation: sort and operate all operables.
+// Operables vector is passed in to avoid re-querying the environment each cycle.
+long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables, champsim::chrono::clock& global_clock)
 {
   std::sort(std::begin(operables), std::end(operables),
             [](const champsim::operable& lhs, const champsim::operable& rhs) { return lhs.current_time < rhs.current_time; });
 
-  // Operate
   long progress{0};
   for (champsim::operable& op : operables) {
     progress += op.operate_on(global_clock);
   }
 
-  // Read from trace
-  for (champsim::modules::core_module& cpu : cores) {
-    auto& trace = traces.at(trace_index.at(cpu.get_cpu_num()));
-    for (auto pkt_count = cpu.instructions_requested(); !trace.eof() && pkt_count > 0; --pkt_count) {
-      cpu.push_instruction(trace());
-    }
-  }
-
   return progress;
 }
 
-phase_stats do_phase(const phase_info& phase, modules::environment_module& env, std::vector<tracereader>& traces, champsim::chrono::clock& global_clock)
+// Generic phase loop, driving any number of phase controllers.
+// Combination rules: the phase ABORTs if any controller aborts, and COMPLETEs
+// when every controller reports complete. on_source_complete fires once per
+// source id, the first time any controller reports it complete.
+// Source EOF is observed by the controllers themselves, via each consumer's
+// source_eof() — the orchestrator carries no workload knowledge.
+// Caches typed_view and module_phase results once per phase for performance.
+void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t length,
+               modules::environment_module& env,
+               std::vector<std::reference_wrapper<modules::phase_controller>>& controllers,
+               champsim::chrono::clock& global_clock,
+               std::function<void(unsigned)> on_source_complete)
 {
-  // Cache typed views once — these never change during simulation
+  // typed_view is expensive; cache once per phase and reuse across all cycles.
   auto operables = env.typed_view<champsim::operable>("operable");
-  auto cores = env.typed_view<champsim::modules::core_module>("core");
+  auto phase_modules = collect_module_phase(env);
 
-  auto [phase_name, is_warmup, length, trace_index, trace_names] = phase;
-
-  // Initialize phase
-  for (champsim::operable& op : operables) {
-    op.warmup = is_warmup;
-    op.begin_phase();
+  // Drive phase hooks on opted-in modules.
+  for (auto& e : phase_modules) {
+    e.ptr->begin_phase(is_warmup, roi);
   }
 
   const auto time_quantum = std::accumulate(std::cbegin(operables), std::cend(operables), champsim::chrono::clock::duration::max(),
                                             [](const auto acc, const operable& y) { return std::min(acc, y.clock_period); });
 
-  const int DEADLOCK_CYCLE = env.get_deadlock_cycles();
+  for (modules::phase_controller& controller : controllers) {
+    controller.begin_phase(phase_name, is_warmup, length);
+  }
 
-  bool livelock_trigger{false};
-  uint64_t livelock_period{10000000};
-  uint64_t livelock_timer{0};
-  //                                   die | critical | warning
-  std::vector<double> livelock_threshold{0.01, 0.02, 0.05};
-  std::vector<uint64_t> livelock_instr(std::size(cores), 0);
-
-  // Perform phase
-  int stalled_cycle{0};
-  std::vector<bool> phase_complete(std::size(cores), false);
-  while (!std::accumulate(std::begin(phase_complete), std::end(phase_complete), true, std::logical_and{})) {
-    auto next_phase_complete = phase_complete;
+  std::set<unsigned> completed_sources;
+  modules::phase_controller::status phase_status{modules::phase_controller::status::CONTINUE};
+  while (phase_status == modules::phase_controller::status::CONTINUE) {
     global_clock.tick(time_quantum);
 
-    auto progress = do_cycle(operables, cores, traces, trace_index, global_clock);
+    auto progress = do_cycle(operables, global_clock);
 
-    if (progress == 0) {
-      ++stalled_cycle;
-    } else {
-      stalled_cycle = 0;
-    }
+    bool any_abort = false;
+    bool all_complete = true;
+    for (modules::phase_controller& controller : controllers) {
+      auto controller_status = controller.advance(progress);
+      any_abort |= (controller_status == modules::phase_controller::status::ABORT);
+      all_complete &= (controller_status == modules::phase_controller::status::COMPLETE);
 
-    // Livelock detect, every livelock_period cycles, check progress and alert the user
-    livelock_timer++;
-    if (livelock_timer >= livelock_period) {
-      // for each cpu
-      for (champsim::modules::core_module& cpu : cores) {
-        // for each threshold
-        for (auto thres = std::begin(livelock_threshold); thres != std::end(livelock_threshold); thres++) {
-          double livelock_ipc = std::ceil(cpu.sim_instr() - livelock_instr[cpu.get_cpu_num()]) / std::ceil(livelock_period);
-          if (livelock_ipc <= *thres) {
-            if (std::distance(std::begin(livelock_threshold), thres) == 0) {
-              livelock_trigger = true;
-              fmt::print("{} CPU {} panic: IPC {:.5g} < {:.5g}\n", phase_name, cpu.get_cpu_num(), livelock_ipc, *thres);
-            } else if (std::distance(std::begin(livelock_threshold), thres) == 1)
-              fmt::print("{} CPU {} critical: IPC {:.5g} < {:.5g}\n", phase_name, cpu.get_cpu_num(), livelock_ipc, *thres);
-            else
-              fmt::print("{} CPU {} warning: IPC {:.5g} < {:.5g}\n", phase_name, cpu.get_cpu_num(), livelock_ipc, *thres);
-
-            break;
-          }
+      // Source completion: surface notifications so source_consumers can print
+      // their per-source messages. End-of-phase work is done once at the end.
+      for (unsigned source_idx : controller.newly_completed_sources()) {
+        if (completed_sources.insert(source_idx).second && on_source_complete) {
+          on_source_complete(source_idx);
         }
-        livelock_instr[cpu.get_cpu_num()] = cpu.sim_instr();
       }
-      livelock_timer = 0;
     }
 
-    if (stalled_cycle >= DEADLOCK_CYCLE || livelock_trigger) {
+    if (any_abort) {
       std::for_each(std::begin(operables), std::end(operables), [](champsim::operable& c) { c.print_deadlock(); });
-      exit(-1); // abort fails to flush which can truncate deadlock printouts, so use exit with -1 to indicate failure
+      abort();
     }
-
-    // If any trace reaches EOF, terminate all phases
-    if (std::any_of(std::begin(traces), std::end(traces), [](const auto& tr) { return tr.eof(); })) {
-      std::fill(std::begin(next_phase_complete), std::end(next_phase_complete), true);
-    }
-
-    // Check for phase finish
-    for (champsim::modules::core_module& cpu : cores) {
-      // Phase complete
-      next_phase_complete[cpu.get_cpu_num()] = next_phase_complete[cpu.get_cpu_num()] || (cpu.sim_instr() >= length);
-    }
-
-    for (champsim::modules::core_module& cpu : cores) {
-      if (next_phase_complete[cpu.get_cpu_num()] != phase_complete[cpu.get_cpu_num()]) {
-        for (champsim::operable& op : operables) {
-          op.end_phase(cpu.get_cpu_num());
-        }
-
-        fmt::print("{} finished CPU {} instructions: {} cycles: {} cumulative IPC: {:.4g} (Simulation time: {:%H hr %M min %S sec})\n", phase_name,
-                   cpu.get_cpu_num(), cpu.sim_instr(), cpu.sim_cycle(), std::ceil(cpu.sim_instr()) / std::ceil(cpu.sim_cycle()), elapsed_time());
-      }
-    }
-
-    phase_complete = next_phase_complete;
+    phase_status = all_complete ? modules::phase_controller::status::COMPLETE : modules::phase_controller::status::CONTINUE;
   }
 
-  for (champsim::modules::core_module& cpu : cores) {
-    fmt::print("{} complete CPU {} instructions: {} cycles: {} cumulative IPC: {:.4g} (Simulation time: {:%H hr %M min %S sec})\n", phase_name,
-               cpu.get_cpu_num(), cpu.sim_instr(), cpu.sim_cycle(), std::ceil(cpu.sim_instr()) / std::ceil(cpu.sim_cycle()), elapsed_time());
+  // End-of-phase hooks for module_phase participants.
+  for (auto& e : phase_modules) {
+    e.ptr->end_phase();
   }
 
+  for (modules::phase_controller& controller : controllers) {
+    controller.end_phase();
+  }
+}
+
+// Collect phase statistics generically: walk all module_stat instances and
+// publish their lines / JSON under [interface][model][name].
+static phase_stats collect_phase_stats(const phase_info& phase, modules::environment_module& env)
+{
   phase_stats stats;
   stats.name = phase.name;
 
-  for (std::size_t i = 0; i < std::size(trace_index); ++i) {
-    stats.trace_names.push_back(trace_names.at(trace_index.at(i)));
+  // Workload identity comes from the sources themselves, in creation order
+  // (for the legacy environment: one trace per core, in core order).
+  for (modules::workload_source& src : env.typed_view<modules::workload_source>("workload_source")) {
+    auto desc = src.describe();
+    if (!desc.empty()) {
+      stats.trace_names.push_back(desc);
+    }
   }
 
-  std::transform(std::begin(cores), std::end(cores), std::back_inserter(stats.sim_cpu_stats),
-                 [](const champsim::modules::core_module& cpu) { return cpu.get_sim_stats(); });
-  std::transform(std::begin(cores), std::end(cores), std::back_inserter(stats.roi_cpu_stats),
-                 [](const champsim::modules::core_module& cpu) { return cpu.get_roi_stats(); });
+  // SIM and ROI passes share discovery; the bool selects which stat set to emit.
+  auto stat_modules = collect_module_stat(env);
+  for (auto& e : stat_modules) {
+    auto sim_lines = e.ptr->print_stats(false);
+    auto roi_lines = e.ptr->print_stats(true);
+    stats.sim_lines.insert(stats.sim_lines.end(), sim_lines.begin(), sim_lines.end());
+    stats.roi_lines.insert(stats.roi_lines.end(), roi_lines.begin(), roi_lines.end());
 
-  auto caches = env.typed_view<champsim::modules::cache_module>("cache");
-  std::transform(std::begin(caches), std::end(caches), std::back_inserter(stats.sim_cache_stats),
-                 [](const champsim::modules::cache_module& cache) { return cache.get_sim_stats(); });
-  std::transform(std::begin(caches), std::end(caches), std::back_inserter(stats.roi_cache_stats),
-                 [](const champsim::modules::cache_module& cache) { return cache.get_roi_stats(); });
+    // For [interface][model][name] keying we wrap the per-instance JSON in
+    // a {model: {name: {...}}} object and let the printer merge by interface.
+    champsim::json_stat_builder sim_builder, roi_builder;
+    e.ptr->json_stats(sim_builder, false);
+    e.ptr->json_stats(roi_builder, true);
 
-  for (champsim::modules::memory_controller_module& dram : env.typed_view<champsim::modules::memory_controller_module>("memory_controller")) {
-    for (std::size_t chan_no = 0; chan_no < dram.get_num_channels(); ++chan_no) {
-      stats.sim_dram_stats.push_back(dram.get_sim_stats(chan_no));
-      stats.roi_dram_stats.push_back(dram.get_roi_stats(chan_no));
-    }
+    nlohmann::json sim_wrapped = nlohmann::json::object();
+    sim_wrapped[e.model][e.name] = sim_builder.json();
+    nlohmann::json roi_wrapped = nlohmann::json::object();
+    roi_wrapped[e.model][e.name] = roi_builder.json();
+
+    stats.sim_json[e.interface_name].emplace_back(e.name, std::any{sim_wrapped});
+    stats.roi_json[e.interface_name].emplace_back(e.name, std::any{roi_wrapped});
   }
 
   return stats;
 }
 
-// simulation entry point
-std::vector<phase_stats> main(modules::environment_module& env, std::vector<phase_info>& phases, std::vector<tracereader>& traces)
+// Assign identities. Consumer ids and stream ids are framework-internal:
+// consumers enumerate densely in configuration order, and every workload
+// source gets its own stream (its own address space) unless sources share
+// a "stream" label in the configuration, in which case they share one id.
+// Configurations never contain the numbers; only origins carry them.
+void assign_identities(modules::environment_module& env)
 {
+  identities().clear();
+
+  int next_consumer = 0;
+  for (auto& sc : env.typed_view<modules::source_consumer>("source_consumer")) {
+    if (sc.get().consumer_id_pinned()) {
+      continue; // mirrors another consumer's identity; owns no slot
+    }
+    sc.get().set_consumer_id(next_consumer);
+    identities().register_consumer(next_consumer, sc.get().consumer_name());
+    ++next_consumer;
+  }
+
+  auto num_consumers = modules::ModuleBuilder::globals().get_parameter<std::size_t>("num_consumers", true, std::size_t{0});
+  if (num_consumers > 0 && static_cast<std::size_t>(next_consumer) > num_consumers) {
+    fmt::print("ERROR: {} consumers found but num_consumers is {} — per-consumer tables would index out of bounds. "
+               "Remove or raise the root config key \"num_consumers\".\n",
+               next_consumer, num_consumers);
+    std::exit(-1);
+  }
+
+  uint32_t next_stream = 0;
+  std::map<std::string, uint32_t> stream_labels;
+  for (auto& src : env.typed_view<modules::stream_source>("stream_source")) {
+    if (src.get().stream_id_pinned()) {
+      continue; // mirrors another source's stream; owns no slot
+    }
+    const auto& label = src.get().stream_label();
+    if (label.empty()) {
+      src.get().set_stream_id(next_stream);
+      identities().register_source(next_stream, src.get().source_name());
+      ++next_stream;
+    } else {
+      auto [it, fresh] = stream_labels.try_emplace(label, next_stream);
+      if (fresh) {
+        ++next_stream;
+      }
+      src.get().set_stream_id(it->second);
+      identities().register_source(it->second, src.get().source_name());
+    }
+  }
+
+  auto num_streams = modules::ModuleBuilder::globals().get_parameter<std::size_t>("num_streams", true, std::size_t{0});
+  if (num_streams > 0 && static_cast<std::size_t>(next_stream) > num_streams) {
+    fmt::print("ERROR: {} streams found but num_streams is {} — per-stream tables would index out of bounds. "
+               "Remove or raise the root config key \"num_streams\".\n",
+               next_stream, num_streams);
+    std::exit(-1);
+  }
+
+  // Warm each stream's page-table root in stream order. Roots would
+  // otherwise be allocated at each stream's first walk, making physical
+  // page assignment depend on runtime timing; allocating here keeps it a
+  // pure function of the configuration (and matches the historical
+  // construction-time allocation order).
+  for (auto& vm : env.typed_view<modules::vmem_module>("vmem")) {
+    for (uint32_t stream = 0; stream < next_stream; ++stream) {
+      (void)vm.get().get_pte_pa(champsim::origin{champsim::origin::invalid_id, stream}, champsim::page_number{}, vm.get().get_pt_levels());
+    }
+  }
+}
+
+identity_registry& identities()
+{
+  static identity_registry registry;
+  return registry;
+}
+
+// simulation entry point
+std::vector<phase_stats> main(modules::environment_module& env, std::vector<phase_info>& phases)
+{
+  assign_identities(env);
+
   for (champsim::operable& op : env.typed_view<champsim::operable>("operable")) {
     op.initialize();
   }
 
+  // Gather the phase controllers.
+  // If the environment provides any (explicit config), use all of them.
+  // Otherwise, create one default controller.
+  auto controllers = env.typed_view<modules::phase_controller>("phase_controller");
+  if (controllers.empty()) {
+    auto pc_builder = modules::ModuleBuilder("phase_controller", "PHASE_CONTROLLER")
+      .add_parameter("deadlock_cycles", env.get_deadlock_cycles());
+    controllers.push_back(*modules::phase_controller::create_instance(pc_builder, &env));
+  }
+
   champsim::chrono::clock global_clock;
   std::vector<phase_stats> results;
-  for (auto phase : phases) {
-    // call event listeners
-    handle_event<Event::BEGIN_PHASE>(phase.is_warmup);
-    // handle_begin_phase(0, phase.is_warmup);
+  for (const auto& phase : phases) {
+    const auto& [phase_name, is_warmup, roi, length] = phase;
 
-    auto stats = do_phase(phase, env, traces, global_clock);
-    if (!phase.is_warmup) {
-      results.push_back(stats);
+    modules::emit_begin_phase(is_warmup);
+
+    // Cache the source_consumer view once per phase; the source-completion
+    // hook would otherwise call typed_view every cycle.
+    auto consumers = env.typed_view<champsim::modules::source_consumer>("source_consumer");
+
+    auto on_complete = [&](unsigned source_idx) {
+      for (auto& sc : consumers) {
+        if (sc.get().consumer_id() == static_cast<int>(source_idx)) {
+          auto msg = sc.get().source_finish_message(phase_name);
+          if (!msg.empty())
+            fmt::print("{} (Simulation time: {:%H hr %M min %S sec})\n", msg, elapsed_time());
+        }
+      }
+    };
+
+    run_phase(phase_name, is_warmup, roi, length, env, controllers, global_clock, on_complete);
+
+    // Print phase completion summary via source_consumer hooks
+    for (auto& sc : consumers) {
+      auto msg = sc.get().phase_complete_message(phase_name);
+      if (!msg.empty())
+        fmt::print("{} (Simulation time: {:%H hr %M min %S sec})\n", msg, elapsed_time());
+    }
+
+    if (roi) {
+      results.push_back(collect_phase_stats(phase, env));
     }
   }
 

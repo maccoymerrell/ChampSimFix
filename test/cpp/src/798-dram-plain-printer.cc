@@ -1,7 +1,7 @@
 #include <catch.hpp>
 
 #include "dram_stats.h"
-#include "stats_printer.h"
+#include "modules.h"
 
 TEST_CASE("An empty DRAM stats prints zero")
 {
@@ -16,7 +16,7 @@ TEST_CASE("An empty DRAM stats prints zero")
                                     "  FULL:          0",
                                     "test_channel REFRESHES ISSUED: -"};
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::memory_controller_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("The DRAM RQ row buffer hit counter increments the printed stats")
@@ -33,7 +33,7 @@ TEST_CASE("The DRAM RQ row buffer hit counter increments the printed stats")
                                     "  FULL:          0",
                                     "test_channel REFRESHES ISSUED: -"};
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::memory_controller_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("The DRAM RQ row buffer miss counter increments the printed stats")
@@ -50,7 +50,7 @@ TEST_CASE("The DRAM RQ row buffer miss counter increments the printed stats")
                                     "  FULL:          0",
                                     "test_channel REFRESHES ISSUED: -"};
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::memory_controller_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("The DRAM WQ row buffer hit counter increments the printed stats")
@@ -67,7 +67,7 @@ TEST_CASE("The DRAM WQ row buffer hit counter increments the printed stats")
                                     "  FULL:          0",
                                     "test_channel REFRESHES ISSUED: -"};
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::memory_controller_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("The DRAM WQ row buffer miss counter increments the printed stats")
@@ -84,7 +84,7 @@ TEST_CASE("The DRAM WQ row buffer miss counter increments the printed stats")
                                     "  FULL:          0",
                                     "test_channel REFRESHES ISSUED: -"};
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::memory_controller_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("The DRAM WQ full counter increments the printed stats")
@@ -101,7 +101,7 @@ TEST_CASE("The DRAM WQ full counter increments the printed stats")
                                     "  FULL:        255",
                                     "test_channel REFRESHES ISSUED: -"};
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::memory_controller_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("The DRAM dbus congestion counters increment the printed stats")
@@ -119,7 +119,7 @@ TEST_CASE("The DRAM dbus congestion counters increment the printed stats")
                                     "  FULL:          0",
                                     "test_channel REFRESHES ISSUED: -"};
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::memory_controller_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("The DRAM refresh counters increment the printed stats")
@@ -132,5 +132,5 @@ TEST_CASE("The DRAM refresh counters increment the printed stats")
                                     "test_channel WQ ROW_BUFFER_HIT:          0", "  ROW_BUFFER_MISS:          0", "  FULL:          0",
                                     "test_channel REFRESHES ISSUED:        100"};
 
-  REQUIRE_THAT(champsim::plain_printer::format(given), Catch::Matchers::RangeEquals(expected));
+  REQUIRE_THAT(champsim::modules::memory_controller_module::format_plaintext(given), Catch::Matchers::RangeEquals(expected));
 }

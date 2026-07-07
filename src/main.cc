@@ -17,7 +17,9 @@
 #include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <numeric>
+#include <set>
 #include <string>
 #include <vector>
 #include <CLI/CLI.hpp>
@@ -28,25 +30,31 @@
 #include "champsim.h"
 #include "defaults.hpp"
 #include "environment.h"
-#include "event_listeners.h"
 #include "legacy_environment.h"
 #include "modules.h"
 #include "ooo_cpu.h" // for O3_CPU
 #include "phase_info.h"
 #include "stats_printer.h"
-#include "tracereader.h"
 #include "vmem.h"
 
 namespace champsim
 {
-std::vector<phase_stats> main(modules::environment_module& env, std::vector<phase_info>& phases, std::vector<tracereader>& traces);
+std::vector<phase_stats> main(modules::environment_module& env, std::vector<phase_info>& phases);
+void assign_identities(modules::environment_module& env);
 }
 
-std::size_t NUM_CPUS = 1;
-unsigned BLOCK_SIZE = 64;
-unsigned PAGE_SIZE = 4096;
-unsigned LOG2_BLOCK_SIZE = 6;
-unsigned LOG2_PAGE_SIZE = 12;
+// Collect all $varname references from a JSON document (recursive).
+static void collect_config_vars(const nlohmann::json& node, std::set<std::string>& out_vars)
+{
+  if (node.is_string()) {
+    const auto& s = node.get<std::string>();
+    if (!s.empty() && s.front() == '$') out_vars.insert(s.substr(1));
+  } else if (node.is_object()) {
+    for (auto& [k, v] : node.items()) collect_config_vars(v, out_vars);
+  } else if (node.is_array()) {
+    for (auto& elem : node) collect_config_vars(elem, out_vars);
+  }
+}
 
 int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 {
@@ -71,13 +79,13 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
                                           "The number of instructions in the detailed phase. If not specified, run to the end of the trace.");
   auto* deprec_sim_instr_option =
       app.add_option("--simulation_instructions", simulation_instructions, "[deprecated] use --simulation-instructions instead")->excludes(sim_instr_option);
-
   auto* json_option =
       app.add_option("--json", json_file_name, "The name of the file to receive JSON output. If no name is specified, stdout will be used")->expected(0, 1);
 
   app.add_option("--listeners", requested_listeners, "A list of the listeners to be attached to the run");
 
-  // Parse CLI first pass to get config file, then we'll know NUM_CPUS for trace validation
+  // Parse CLI first pass to read the config file path; the second pass uses
+  // the resolved core count for trace validation.
   app.allow_extras(true);
   try {
     app.parse(argc, argv);
@@ -86,8 +94,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   }
 
   // Enable dump mode if requested
-  if (knob_dump)
-    fmt::print("=== Module Builder Dump ===\n");
+  if (knob_dump) fmt::print("=== Module Builder Dump ===\n");
 
   // Read JSON config from file or stdin
   nlohmann::json config_json;
@@ -100,8 +107,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
       return 1;
     }
   } else {
-    if (config_file_path.empty())
-      config_file_path = "champsim_config.json";
+    if (config_file_path.empty()) config_file_path = "champsim_config.json";
     std::ifstream config_stream(config_file_path);
     if (config_stream.is_open()) {
       try {
@@ -118,58 +124,70 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     fmt::print(stderr, "\nConfig: {}\n\n", config_json["_description"].get<std::string>());
   }
 
-  // Construct the environment via the module system
+  // Parse config for system parameters
   std::string env_model = config_json.value("environment", std::string("LEGACY_ENVIRONMENT"));
-  // Set globals from the environment
-  NUM_CPUS = config_json.value("num_cores", 1u); // default to 1 CPU if not specified, needed for trace validation
-  BLOCK_SIZE = config_json.value("block_size", 64u);
-  PAGE_SIZE = config_json.value("page_size", 4096u);
-  LOG2_BLOCK_SIZE = champsim::lg2(BLOCK_SIZE);
-  LOG2_PAGE_SIZE = champsim::lg2(PAGE_SIZE);
+  bool is_legacy_env = (env_model == "LEGACY_ENVIRONMENT");
+  // The CLI expects one trace per workload SOURCE, not per core. The legacy
+  // environment spawns exactly one workload source per core, so its source
+  // count is num_cores by construction — that identity lives here, not in
+  // the trace check itself. Explicit environments declare sources in the
+  // config and accept any trace count. The environment owns publishing all
+  // system-wide globals (block_size, page_size, log2_*, num_consumers,
+  // num_sources) into ModuleBuilder::globals() during its construction.
+  std::size_t legacy_num_sources = config_json.value("num_cores", 1u);
 
-  // Apply the heartbeat printout frequency from the config (root-level
-  // ``heartbeat_frequency``).  This is environment-agnostic: both the
-  // ENVIRONMENT and LEGACY_ENVIRONMENT paths share the same global Heartbeat
-  // listener defined in inc/event_listeners.h, so the field is honored
-  // regardless of which environment model the config selects.
-  if (config_json.contains("heartbeat_frequency")) {
-    std::get<Heartbeat>(listeners).cycles_between_printouts = config_json.value("heartbeat_frequency", uint64_t{10000000});
+  // Root-level "cycle_skip" (default true) lets idle operables skip cycles
+  // via operable::poll_cycle(). Set false to force every operable to run
+  // operate() each cycle — the A/B switch for behavior verification.
+  champsim::operable::set_skip_enabled(config_json.value("cycle_skip", true));
+
+  // Scan config for $varname references not covered by explicit CLI options.
+  // Each unique varname becomes a --varname option in the second pass and is
+  // substituted into module parameters via cli_args.
+  static const std::set<std::string> builtin_cli_vars = {
+    "warmup_instructions", "simulation_instructions", "cloudsuite"
+  };
+  std::set<std::string> raw_config_vars;
+  collect_config_vars(config_json, raw_config_vars);
+  std::map<std::string, std::string> dynamic_cli_vars;
+  for (const auto& vn : raw_config_vars) {
+    if (builtin_cli_vars.count(vn)) continue;
+    // $traceN vars are handled via the positional traces argument
+    if (vn.size() > 5 && vn.substr(0, 5) == "trace"
+        && std::all_of(vn.begin() + 5, vn.end(), ::isdigit)) continue;
+    dynamic_cli_vars[vn] = "";
   }
 
-  auto env_builder = champsim::modules::ModuleBuilder("environment", env_model).add_parameter("config_json", config_json);
-  champsim::modules::ModuleBuilder::set_dump_enabled(knob_dump);
-  auto* gen_environment = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
-
-  if (knob_dump)
-    fmt::print("=== End Module Builder Dump ===\n");
-
-  auto set_heartbeat_callback = [&](auto) {
-    for (champsim::modules::core_module& cpu : gen_environment->typed_view<champsim::modules::core_module>("core")) {
-      cpu.quiet(true);
-    }
-  };
-
-  // Re-parse with full validation now that NUM_CPUS is known
+  // Second CLI parse with full validation
+  bool hide_heartbeat = false;
   CLI::App app2{"A microarchitecture simulator for research and education"};
   app2.add_option("--config", config_file_path, "Path to the JSON configuration file");
   app2.add_flag("-c,--cloudsuite", knob_cloudsuite, "Read all traces using the cloudsuite format");
   app2.add_flag("--dump", knob_dump, "Print each module builder's parameters as modules are constructed");
-  app2.add_flag("--hide-heartbeat", set_heartbeat_callback, "Hide the heartbeat output");
+  app2.add_flag("--hide-heartbeat", hide_heartbeat, "Hide the heartbeat output");
   warmup_instr_option = app2.add_option("-w,--warmup-instructions", warmup_instructions, "The number of instructions in the warmup phase");
   deprec_warmup_instr_option =
       app2.add_option("--warmup_instructions", warmup_instructions, "[deprecated] use --warmup-instructions instead")->excludes(warmup_instr_option);
   sim_instr_option = app2.add_option("-i,--simulation-instructions", simulation_instructions,
-                                     "The number of instructions in the detailed phase. If not specified, run to the end of the trace.");
+                                          "The number of instructions in the detailed phase. If not specified, run to the end of the trace.");
   deprec_sim_instr_option =
       app2.add_option("--simulation_instructions", simulation_instructions, "[deprecated] use --simulation-instructions instead")->excludes(sim_instr_option);
+  for (auto& [vn, val] : dynamic_cli_vars)
+    app2.add_option("--" + vn, val, "Config variable: $" + vn);
   json_option =
       app2.add_option("--json", json_file_name, "The name of the file to receive JSON output. If no name is specified, stdout will be used")->expected(0, 1);
   app2.add_option("--listeners", requested_listeners, "A list of the listeners to be attached to the run");
-  app2.add_option("traces", trace_names, "The paths to the traces")->required()->expected((int)NUM_CPUS)->check(CLI::ExistingFile);
+
+  // Legacy env requires exactly legacy_num_sources traces; explicit envs allow any number
+  // (traces resolve via $traceN variables in the config).
+  auto* trace_option = app2.add_option("traces", trace_names, "The paths to the traces");
+  if (is_legacy_env) {
+    trace_option->required()->expected(static_cast<int>(legacy_num_sources))->check(CLI::ExistingFile);
+  } else {
+    trace_option->check(CLI::ExistingFile);
+  }
 
   CLI11_PARSE(app2, argc, argv);
-
-  init_event_listeners(requested_listeners);
 
   const bool warmup_given = (warmup_instr_option->count() > 0) || (deprec_warmup_instr_option->count() > 0);
   const bool simulation_given = (sim_instr_option->count() > 0) || (deprec_sim_instr_option->count() > 0);
@@ -188,26 +206,97 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     warmup_instructions = simulation_instructions / 5;
   }
 
-  std::vector<champsim::tracereader> traces;
-  std::transform(
-      std::begin(trace_names), std::end(trace_names), std::back_inserter(traces),
-      [knob_cloudsuite, repeat = simulation_given, i = uint8_t(0)](auto name) mutable { return get_tracereader(name, i++, knob_cloudsuite, repeat); });
-
-  std::vector<champsim::phase_info> phases{
-      {champsim::phase_info{"Warmup", true, static_cast<uint64_t>(warmup_instructions), std::vector<std::size_t>(std::size(trace_names), 0), trace_names},
-       champsim::phase_info{"Simulation", false, static_cast<uint64_t>(simulation_instructions), std::vector<std::size_t>(std::size(trace_names), 0),
-                            trace_names}}};
-
-  for (auto& p : phases) {
-    std::iota(std::begin(p.trace_index), std::end(p.trace_index), 0);
+  // Construct the environment via the module system (after all CLI args are known)
+  // Build a CLI args map for $-variable substitution in explicit configs
+  nlohmann::json cli_args = nlohmann::json::object();
+  cli_args["warmup_instructions"] = warmup_instructions;
+  cli_args["simulation_instructions"] = simulation_instructions;
+  cli_args["cloudsuite"] = knob_cloudsuite;
+  // Populate dynamic $-variables collected from the config; coerce to numeric where possible
+  for (auto& [vn, val] : dynamic_cli_vars) {
+    try { cli_args[vn] = std::stoll(val); continue; } catch (...) {}
+    try { cli_args[vn] = std::stod(val); continue; } catch (...) {}
+    cli_args[vn] = val;
+  }
+  for (std::size_t i = 0; i < trace_names.size(); ++i) {
+    cli_args[fmt::format("trace{}", i)] = trace_names[i];
   }
 
-  fmt::print("\n*** ChampSim Multicore Out-of-Order Simulator ***\nWarmup Instructions: {}\nSimulation Instructions: {}\nNumber of CPUs: {}\nPage size: {}\n\n",
-             phases.at(0).length, phases.at(1).length, std::size(gen_environment->typed_view<champsim::modules::core_module>("core")), PAGE_SIZE);
+  auto env_builder = champsim::modules::ModuleBuilder("environment", env_model)
+    .add_parameter("config_json", config_json)
+    .add_parameter("traces", trace_names)
+    .add_parameter("cloudsuite", knob_cloudsuite)
+    .add_parameter("repeat", simulation_given)
+    .add_parameter("cli_args", cli_args);
+  champsim::modules::ModuleBuilder::set_dump_enabled(knob_dump);
+  auto* gen_environment = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
 
-  auto phase_stats = champsim::main(*gen_environment, phases, traces);
+  if (knob_dump) fmt::print("=== End Module Builder Dump ===\n");
 
-  fmt::print("\nChampSim completed all CPUs\n\n");
+  // Assemble the active listener set: listener modules declared in the
+  // config, plus any models requested via --listeners. When the config
+  // declares none, a default HEARTBEAT listener is created (interval from
+  // the root "heartbeat_frequency" key) unless --hide-heartbeat suppresses it.
+  std::vector<champsim::modules::listener*> active_listeners;
+  for (champsim::modules::listener& l : gen_environment->typed_view<champsim::modules::listener>("listener")) {
+    active_listeners.push_back(&l);
+  }
+  const bool config_declared_listeners = !active_listeners.empty();
+  for (const auto& model_name : requested_listeners) {
+    if (!champsim::modules::listener::has_model(model_name)) {
+      fmt::print("WARNING: Listener \"{}\" not found\n", model_name);
+      continue;
+    }
+    auto listener_builder = champsim::modules::ModuleBuilder(model_name, model_name);
+    active_listeners.push_back(champsim::modules::listener::create_instance(listener_builder, gen_environment));
+  }
+  if (!config_declared_listeners && !hide_heartbeat) {
+    auto heartbeat_builder = champsim::modules::ModuleBuilder("heartbeat", "HEARTBEAT")
+      .add_parameter("interval", config_json.value("heartbeat_frequency", uint64_t{10000000}));
+    active_listeners.push_back(champsim::modules::listener::create_instance(heartbeat_builder, gen_environment));
+  }
+  champsim::modules::set_active_listeners(std::move(active_listeners));
+
+  // Try to get the phase list from the phase controllers in the environment.
+  // The first controller that defines a non-empty phase list owns the run
+  // structure; a second non-empty list that disagrees is a config error.
+  // Otherwise fall back to the classic two-phase structure driven by -w/-i.
+  std::vector<champsim::phase_info> phases;
+  for (champsim::modules::phase_controller& pc : gen_environment->typed_view<champsim::modules::phase_controller>("phase_controller")) {
+    auto controller_phases = pc.get_phases();
+    if (controller_phases.empty()) continue;
+    if (phases.empty()) {
+      phases = std::move(controller_phases);
+    } else if (controller_phases.size() != phases.size()
+               || !std::equal(phases.begin(), phases.end(), controller_phases.begin(), [](const auto& a, const auto& b) {
+                    return a.name == b.name && a.is_warmup == b.is_warmup && a.length == b.length;
+                  })) {
+      fmt::print("ERROR: multiple phase controllers declare conflicting phase lists\n");
+      return 1;
+    }
+  }
+
+  if (phases.empty()) {
+    // Classic fallback: Warmup + Simulation driven by CLI -w/-i
+    phases = {
+      champsim::phase_info{"Warmup",     true,  false, static_cast<uint64_t>(warmup_instructions)},
+      champsim::phase_info{"Simulation", false, true,  static_cast<uint64_t>(simulation_instructions)},
+    };
+  }
+
+  // Print header: find warmup/sim lengths by is_warmup flag
+  uint64_t printed_warmup = 0, printed_sim = 0;
+  for (auto& p : phases) {
+    if (p.is_warmup) printed_warmup = p.length;
+    else             printed_sim    = p.length;
+  }
+  fmt::print("\n*** ChampSim Multicore Out-of-Order Simulator ***\nWarmup Instructions: {}\nSimulation Instructions: {}\nNumber of CPUs: {}\nTrace sources: {}\nPage size: {}\n\n",
+             printed_warmup, printed_sim, gen_environment->get_num("core"),
+             gen_environment->get_num("workload_source"), gen_environment->get_page_size());
+
+  auto phase_stats = champsim::main(*gen_environment, phases);
+
+  fmt::print("\nChampSim completed all phases\n\n");
 
   champsim::plain_printer{std::cout}.print(phase_stats);
 
