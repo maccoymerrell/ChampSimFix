@@ -20,6 +20,13 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   P.min_pattern_size = 6;
   P.enable_spp = true;
   P.enable_fallthrough = true;
+  // Per-pattern VERIFICATION FEEDBACK (DSE faithful stack): the IP sampling table (pf_sample_) records the
+  // trigger PATTERN alongside the IP; on resolve it validates that exact pattern and feeds the outcome back
+  // into its per-position prediction_counter -- a proven-useless e2e prediction is penalized toward silence
+  // (natural SPP fall-through), a proven-useful one reinforced. Part of the baseline (B and C).
+  P.pattern_validate = true;
+  P.pv_feed_confidence = true;
+  P.pv_conf_penalty = 16;
   P.enable_ip_filter = true; // FINAL (full-knob sweep 2026-07-04): agg1 -- AMAT +1.1%% for useless -43%%,
                              // DRAM-bandwidth -24%% on full-132 (replay). Per-IP accuracy filter, usefulness metric.
   // DEPTH throttle is now the DEFAULT (full-132 +0.35%%, zero regressions>1%%, mcf +40%%/triangle +16%%):
@@ -90,6 +97,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(enable_instr_prefetch); CFG(instr_la_depth); CFG(instr_conf); CFG(instr_table_entries); CFG(instr_delta_bits); CFG(instr_xlate_entries); CFG(instr_filter_entries);
   CFG(instr_feed_data); CFG(unblock_instructions);
   CFG(instr_nextn); CFG(instr_packed_residency);
+  CFG(pattern_validate); CFG(pv_feed_confidence); CFG(pv_conf_penalty); CFG(pv_sample_div); CFG(pv_min_samples); CFG(pv_bad_pct);
 #undef CFG
 
   pfht_.assign(P.pfht_entries ? P.pfht_entries : 1, pf_track{});

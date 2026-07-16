@@ -258,7 +258,7 @@ struct params {
   int online_theta_train = 0;
 
   // --- Table sizes ---
-  std::size_t pattern_table_sets = 1024; // PROMOTED: sized to hold the PC-widened key space (pattern_pc_bits=4)
+  std::size_t pattern_table_sets = 512; // PROMOTED: sized to hold the PC-widened key space (pattern_pc_bits=4)
   std::size_t pattern_table_ways = 2;
   std::size_t pattern_conf_sets = 1;
   std::size_t pattern_conf_ways = 16;
@@ -717,19 +717,23 @@ struct params {
     region += lg2(region_ways);
     region *= region_sets * region_ways;
 
-    // Pattern table(s): per-entry usefulness + prediction conf table; one tier
-    // per pattern size (pattern_size down to min_pattern_size, halving), each
-    // with 2^size sets; doubled if separate negative tables.
-    uint64_t per_pat = (adaptive_usefulness || global_or_pattern_usefulness) ? (lg2(pattern_usefulness_sample) * 2 + 4) : 0;
-    if (table_or_counter)
-      per_pat += pattern_size * 7;
-    else
-      per_pat += (pattern_conf_ways * pattern_conf_sets) * (pattern_size + 7 + lg2(pattern_conf_ways)) + lg2(pattern_table_ways);
-    uint64_t tier_sets = 0;
-    for (uint32_t s = pattern_size; s >= min_pattern_size && s > 0; s /= 2)
-      tier_sets += (uint64_t{1} << s);
-    tier_sets <<= pattern_context_bits; // context grows the pattern keyspace
-    uint64_t pattern = per_pat * tier_sets * pattern_table_ways * ((do_negative && separate_negative_tables) ? 2 : 1);
+    // Pattern table(s): a TAGGED set-associative table of pattern_table_sets x pattern_table_ways, ONE per
+    // prediction order. PC/context WIDEN the key (pattern_size + pattern_pc_bits + pattern_context_bits) but
+    // the table is sized to the hot working set -- FAR below the 2^key space, most of which is cold -- so it
+    // stores a tag (the key bits above the set index) and tolerates conflict evictions. Per entry: tag +
+    // prediction (per-bit counters, or the conf table) + occurrence count (confidence denominator) + optional
+    // per-pattern usefulness + lru. Doubled for a separate negative (backward) table.
+    uint64_t n_orders = 1;
+    for (uint32_t s = pattern_size; s > min_pattern_size && s > 0; s /= 2) ++n_orders;
+    const uint64_t key_bits = pattern_size + pattern_context_bits + pattern_pc_bits;
+    const uint64_t set_idx_bits = lg2(pattern_table_sets);
+    const uint64_t tag_bits = key_bits > set_idx_bits ? key_bits - set_idx_bits : 1; // ~0 only when sets==keyspace (direct-mapped)
+    const uint64_t pred_bits = table_or_counter ? (pattern_size * 7)
+                             : (pattern_conf_ways * pattern_conf_sets) * (pattern_size + 7 + lg2(pattern_conf_ways));
+    const uint64_t use_bits = (adaptive_usefulness || global_or_pattern_usefulness) ? (lg2(pattern_usefulness_sample) * 2 + 4) : 0;
+    const uint64_t occ_bits = 12; // occurrence count (confidence = counter/occ)
+    const uint64_t per_entry = tag_bits + pred_bits + occ_bits + use_bits + lg2(pattern_table_ways);
+    uint64_t pattern = per_entry * pattern_table_sets * pattern_table_ways * n_orders * ((do_negative && separate_negative_tables) ? 2 : 1);
 
     // Cross-page tracker (hashed short tag).
     uint64_t cpt = (8 + 1 + region_tag_bits) * cpt_sets * cpt_ways;
