@@ -1,0 +1,136 @@
+[
+  {
+    "name": "baseline"
+  },
+  {
+    "scrape_access_count": 6,
+    "name": "scrape|count6"
+  },
+  {
+    "scrape_access_count": 28,
+    "name": "scrape|count28"
+  },
+  {
+    "scrape_idle_time": 250,
+    "name": "scrape|idle250"
+  },
+  {
+    "scrape_idle_time": 4000,
+    "name": "scrape|idle4000"
+  },
+  {
+    "scrape_on_evict": true,
+    "name": "scrape|onEvict"
+  },
+  {
+    "scrape_on_idle": false,
+    "name": "scrape|noIdle"
+  },
+  {
+    "pattern_size": 4,
+    "min_pattern_size": 4,
+    "name": "pattern|size4"
+  },
+  {
+    "pattern_size": 8,
+    "min_pattern_size": 8,
+    "name": "pattern|size8"
+  },
+  {
+    "min_confidence_to_prefetch": 30,
+    "name": "pattern|conf30"
+  },
+  {
+    "min_confidence_to_prefetch": 70,
+    "name": "pattern|conf70"
+  },
+  {
+    "table_or_counter": true,
+    "name": "pattern|counterMode"
+  },
+  {
+    "pattern_table_sets": 32,
+    "name": "tables|pt32"
+  },
+  {
+    "pattern_table_sets": 128,
+    "name": "tables|pt128"
+  },
+  {
+    "pattern_conf_ways": 32,
+    "name": "tables|patConf32"
+  },
+  {
+    "region_ways": 4,
+    "name": "regioncap|regWays4"
+  },
+  {
+    "region_ways": 6,
+    "name": "regioncap|regWays6"
+  },
+  {
+    "region_ways": 8,
+    "name": "regioncap|regWays8"
+  },
+  {
+    "region_ways": 16,
+    "name": "regioncap|regWays16"
+  },
+  {
+    "region_ways": 24,
+    "name": "regioncap|regWays24"
+  },
+  {
+    "region_sets": 32,
+    "name": "regioncap|regSets32"
+  },
+  {
+    "region_sets": 128,
+    "name": "regioncap|regSets128"
+  },
+  {
+    "region_sets": 256,
+    "name": "regioncap|regSets256"
+  },
+  {
+    "page_bits": 13,
+    "name": "region|page8K"
+  },
+  {
+    "page_bits": 14,
+    "name": "region|page16K"
+  },
+  {
+    "do_negative": true,
+    "scan_backward": true,
+    "name": "direction|bidir"
+  },
+  {
+    "scan_distance_forward": 8,
+    "name": "aggression|scan8"
+  },
+  {
+    "scan_distance_forward": 32,
+    "name": "aggression|scan32"
+  },
+  {
+    "do_lookahead": false,
+    "name": "aggression|noLookahead"
+  },
+  {
+    "lookahead_depth": 8,
+    "name": "aggression|lookahead8"
+  },
+  {
+    "prefetch_to_l2_degree": 1,
+    "name": "aggression|l2deg1"
+  },
+  {
+    "prob_drop_prefetches": false,
+    "name": "aggression|noDrop"
+  },
+  {
+    "scrape_full_window": true,
+    "name": "windowfix|fixed"
+  }
+]

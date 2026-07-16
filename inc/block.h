@@ -18,6 +18,7 @@
 #define BLOCK_H
 
 #include "champsim.h"
+#include "chrono.h"
 
 namespace champsim
 {
@@ -31,6 +32,11 @@ struct cache_block {
   champsim::address data{};
 
   uint32_t pf_metadata = 0;
+
+  // Simulator-side bookkeeping (not modeled hardware): the fetch latency this line
+  // incurred to fill (enqueue -> fill). Read only for prefetched lines, to report the
+  // miss latency a demand avoids when it hits the prefetch -- see prefetch_accel_sink.
+  champsim::chrono::clock::duration fill_latency{};
 };
 } // namespace champsim
 

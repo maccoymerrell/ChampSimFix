@@ -27,6 +27,7 @@ absolute.options
 
 .cache/
 compile_commands.json
-
+tools/
+scripts/
 .vscode/
 **/.DS_Store

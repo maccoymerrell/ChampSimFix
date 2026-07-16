@@ -887,6 +887,21 @@ struct module_base {
 
     /** Return true if this cache uses virtual addresses for prefetching. */
     virtual bool is_virtual_prefetch() const = 0;
+
+    /**
+     * Opt this cache's prefetcher into seeing instruction-fetch accesses (L1I
+     * misses). Off by default: instruction fetches are normally blocked from
+     * activating the prefetcher (DPC4 parity). A prefetcher that wants to model
+     * the instruction stream (e.g. an L2 instruction prefetcher) enables this
+     * from its constructor. Default no-op so other caches are unaffected.
+     */
+    virtual void set_prefetch_instructions(bool /*enable*/) {}
+    /**
+     * True iff the access currently being handed to prefetcher_cache_operate is
+     * an instruction fetch (ip and v_address share a block). Only meaningful when
+     * set_prefetch_instructions(true) was requested. Default false.
+     */
+    virtual bool current_access_is_instruction() const { return false; }
     /**
      * Issue a prefetch into this cache.
      *

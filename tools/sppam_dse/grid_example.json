@@ -1,0 +1,39 @@
+{
+  "_comment": "Example SPPAM design-space grid. Cartesian product of the axes below; edit freely. Each axis maps to params in params.h.",
+  "base": {
+    "scan_forward": true,
+    "scan_backward": false
+  },
+  "axes": {
+    "scrape_trigger": [
+      {"scrape_on_count": true, "scrape_access_count": 8, "_label": "scrapeN8"},
+      {"scrape_on_count": true, "scrape_access_count": 14, "_label": "scrapeN14"},
+      {"scrape_on_evict": true, "scrape_on_count": false, "_label": "scrapeEvict"}
+    ],
+    "pattern_res": [
+      {"pattern_size": 4, "min_pattern_size": 4, "_label": "p4"},
+      {"pattern_size": 6, "min_pattern_size": 6, "_label": "p6"}
+    ],
+    "table_size": [
+      {"pattern_table_sets": 128, "_label": "pt128"},
+      {"pattern_table_sets": 256, "_label": "pt256"}
+    ],
+    "region_size": [
+      {"page_bits": 12, "_label": "rgn4K"},
+      {"page_bits": 13, "_label": "rgn8K"}
+    ],
+    "directionality": [
+      {"do_negative": false, "scan_backward": false, "_label": "fwd"},
+      {"do_negative": true, "scan_backward": true, "_label": "bidir"}
+    ],
+    "aggression": [
+      {"scan_distance_forward": 8, "_label": "scan8"},
+      {"scan_distance_forward": 16, "_label": "scan16"},
+      {"scan_distance_forward": 32, "_label": "scan32"}
+    ],
+    "window_fix": [
+      {"scrape_full_window": false, "_label": "orig"},
+      {"scrape_full_window": true, "_label": "fixed"}
+    ]
+  }
+}

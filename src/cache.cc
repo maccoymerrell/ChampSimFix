@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <cstdlib>
 #include "cache.h"
 
 #include <algorithm>
@@ -188,6 +189,22 @@ bool CACHE::handle_fill(const fill_type& fill)
     evicting_address = module_address(*way);
   }
 
+  // Event trace: a valid victim is being replaced. way's flags are still intact
+  // (overwritten below at *way = fill_block). victim_dead_pf => prefetched line
+  // that was never demand-used (a wasted prefetch that also cost a fill slot).
+  if (evtrace_.active() && way != set_end && way->valid) {
+    champsim::ev_evict_record r{};
+    r.cycle = static_cast<uint64_t>(current_time.time_since_epoch() / clock_period);
+    r.victim_paddr = way->address.to<uint64_t>();
+    r.fill_paddr = fill.address.to<uint64_t>();
+    r.fill_ip = fill.ip.to<uint64_t>();
+    r.fill_is_prefetch = (fill.type == access_type::PREFETCH) ? uint8_t{1} : uint8_t{0};
+    r.victim_dead_pf = way->prefetch ? uint8_t{1} : uint8_t{0};
+    r.victim_dirty = way->dirty ? uint8_t{1} : uint8_t{0};
+    r.victim_valid = uint8_t{1};
+    evtrace_.evict(r);
+  }
+
   auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill), get_set_index(fill.address), way_idx, (fill.type == access_type::PREFETCH),
                                                   evicting_address, fill.data_promise->pf_metadata);
   impl_replacement_cache_fill(fill.origin, get_set_index(fill.address), way_idx, module_address(fill), fill.ip, evicting_address, fill.type);
@@ -202,11 +219,23 @@ bool CACHE::handle_fill(const fill_type& fill)
     }
 
     *way = fill_block(fill, metadata_thru);
+    // sim-side: record how long this fill took to arrive (enqueue -> now). For a prefetched
+    // line this is the miss latency a later demand hit will avoid (see useful_prefetch).
+    way->fill_latency = current_time - fill.time_enqueued;
   }
 
   // COLLECT STATS
-  if (fill.type != access_type::PREFETCH)
+  if (fill.type != access_type::PREFETCH) {
     sim_stats.total_miss_latency_cycles += (current_time - (fill.time_enqueued + clock_period)) / clock_period;
+    // Report the demand miss latency (actual == counterfactual: no prefetch involved) to any
+    // replay source. A miss that is the window's critical path caps the prefetch benefit.
+    if (!accel_sinks_.empty()) {
+      const auto miss_latency = current_time - fill.time_enqueued;
+      for (auto* sink : accel_sinks_) {
+        sink->note_demand_latency(fill.instr_id, miss_latency, miss_latency);
+      }
+    }
+  }
   sim_stats.fill.increment(std::pair{fill.type, fill.origin.cpu()});
 
   response_type response{fill.address, fill.v_address, fill.data_promise->data, metadata_thru, fill.instr_depend_on_me};
@@ -227,6 +256,24 @@ bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
   const auto hit = (way != set_end);
   const auto useful_prefetch = (hit && way->prefetch && !handle_pkt.prefetch_from_this);
 
+  // Event trace: record this access (with hit + useful flags) and stash the
+  // trigger PC so any prefetch_line issued during prefetcher_cache_operate links back.
+  evtrace_trigger_ip_ = handle_pkt.ip.to<uint64_t>();
+  if (evtrace_.active()) {
+    champsim::ev_access_record r{};
+    r.cycle = static_cast<uint64_t>(current_time.time_since_epoch() / clock_period);
+    r.ip = evtrace_trigger_ip_;
+    r.vaddr = handle_pkt.v_address.to<uint64_t>();
+    r.paddr = handle_pkt.address.to<uint64_t>();
+    r.instr_id = handle_pkt.instr_id;
+    r.type = static_cast<uint8_t>(champsim::to_underlying(handle_pkt.type));
+    r.is_prefetch = handle_pkt.prefetch_from_this ? uint8_t{1} : uint8_t{0};
+    r.hit = hit ? uint8_t{1} : uint8_t{0};
+    r.useful = useful_prefetch ? uint8_t{1} : uint8_t{0};
+    r.is_translated = handle_pkt.is_translated ? uint8_t{1} : uint8_t{0};
+    evtrace_.access(r);
+  }
+
   if constexpr (champsim::debug_print) {
     fmt::print("[{}] {} instr_id: {} address: {} v_address: {} data: {} set: {} way: {} ({}) type: {} cycle: {}\n", NAME, __func__, handle_pkt.instr_id,
                handle_pkt.address, handle_pkt.v_address, handle_pkt.data, get_set_index(handle_pkt.address), std::distance(set_begin, way),
@@ -235,6 +282,11 @@ bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
 
   auto metadata_thru = handle_pkt.pf_metadata;
   if (should_activate_prefetcher(handle_pkt)) {
+    // Expose "is this an instruction fetch?" to the prefetcher (only computed when a
+    // prefetcher opted in; ip == v_address block-wise == instruction). Reset to false
+    // otherwise so a data access never reads a stale instruction flag.
+    current_access_is_instr_ =
+        prefetch_instructions_ && (champsim::block_number{handle_pkt.ip} == champsim::block_number{handle_pkt.v_address});
     metadata_thru = impl_prefetcher_cache_operate(module_address(handle_pkt), handle_pkt.ip, hit, useful_prefetch, handle_pkt.type, metadata_thru);
   }
 
@@ -257,6 +309,12 @@ bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
     if (useful_prefetch) {
       ++sim_stats.pf_useful;
       way->prefetch = false;
+      // Report this demand's actual (a hit -> HIT_LATENCY) vs counterfactual (the fetch
+      // latency the prefetch absorbed) to any replay source, for its ROB-windowed
+      // critical-path acceleration. Inert for ordinary caches (no sinks).
+      for (auto* sink : accel_sinks_) {
+        sink->note_demand_latency(handle_pkt.instr_id, HIT_LATENCY, way->fill_latency);
+      }
     }
   }
 
@@ -606,22 +664,33 @@ bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint3
 {
   ++sim_stats.pf_requested;
 
-  if (std::size(internal_PQ) >= PQ_SIZE) {
-    return false;
+  bool accepted = false;
+  if (std::size(internal_PQ) < PQ_SIZE) {
+    request_type pf_packet;
+    pf_packet.type = access_type::PREFETCH;
+    pf_packet.pf_metadata = prefetch_metadata;
+    pf_packet.origin = last_served_origin;
+    pf_packet.address = pf_addr;
+    pf_packet.v_address = virtual_prefetch ? pf_addr : champsim::address{};
+    pf_packet.is_translated = !virtual_prefetch;
+
+    internal_PQ.emplace_back(pf_packet, true, !fill_this_level);
+    ++sim_stats.pf_issued;
+    accepted = true;
   }
 
-  request_type pf_packet;
-  pf_packet.type = access_type::PREFETCH;
-  pf_packet.pf_metadata = prefetch_metadata;
-  pf_packet.origin = last_served_origin;
-  pf_packet.address = pf_addr;
-  pf_packet.v_address = virtual_prefetch ? pf_addr : champsim::address{};
-  pf_packet.is_translated = !virtual_prefetch;
+  if (evtrace_.active()) {
+    champsim::ev_pf_record r{};
+    r.cycle = static_cast<uint64_t>(current_time.time_since_epoch() / clock_period);
+    r.pf_addr = pf_addr.to<uint64_t>();
+    r.trigger_ip = evtrace_trigger_ip_;
+    r.metadata = prefetch_metadata;
+    r.fill_this_level = fill_this_level ? uint8_t{1} : uint8_t{0};
+    r.accepted = accepted ? uint8_t{1} : uint8_t{0};
+    evtrace_.pf(r);
+  }
 
-  internal_PQ.emplace_back(pf_packet, true, !fill_this_level);
-  ++sim_stats.pf_issued;
-
-  return true;
+  return accepted;
 }
 
 // LCOV_EXCL_START exclude deprecated function
@@ -895,6 +964,16 @@ void CACHE::begin_phase(bool warmup, bool roi)
 {
   warmup_ = warmup;
   roi_ = roi;
+
+  // Opt-in event tracing (CHAMPSIM_EVTRACE=<prefix>). Only during the simulation
+  // phase; defaults to the L2C unless CHAMPSIM_EVTRACE_CACHE names an exact NAME.
+  if (!warmup) {
+    const char* pfx = std::getenv("CHAMPSIM_EVTRACE");
+    const char* only = std::getenv("CHAMPSIM_EVTRACE_CACHE");
+    const bool match = (only != nullptr) ? (NAME == only) : (NAME.find("L2C") != std::string::npos);
+    if (pfx != nullptr && match)
+      evtrace_.open(pfx, NAME);
+  }
   stats_type new_roi_stats;
   stats_type new_sim_stats;
 
@@ -914,6 +993,8 @@ void CACHE::begin_phase(bool warmup, bool roi)
 
 void CACHE::end_phase()
 {
+  evtrace_.close();
+
   roi_stats.total_miss_latency_cycles = sim_stats.total_miss_latency_cycles;
 
   roi_stats.hits = sim_stats.hits;
@@ -947,7 +1028,15 @@ void CACHE::end_simulation() { impl_prefetcher_final_stats(); impl_replacement_f
 template <typename T>
 bool CACHE::should_activate_prefetcher(const T& pkt) const
 {
-  return !pkt.prefetch_from_this && pref_activate_lut_[champsim::to_underlying(pkt.type)];
+  // DPC4 parity: an instruction fetch has ip == the fetched virtual address (the PC IS the address being
+  // fetched); block those from triggering/training the prefetcher so only data accesses drive prefetching.
+  // Toggle for the block-vs-noblock ablation: env NO_INSTR_BLOCK=1 disables it.
+  // A prefetcher that models the instruction stream opts in via
+  // set_prefetch_instructions(true) -> prefetch_instructions_, which lets
+  // instruction fetches through here too (it routes them internally).
+  static const bool no_instr_block = (std::getenv("NO_INSTR_BLOCK") != nullptr);
+  return !pkt.prefetch_from_this && pref_activate_lut_[champsim::to_underlying(pkt.type)]
+         && (no_instr_block || prefetch_instructions_ || champsim::block_number{pkt.ip} != champsim::block_number{pkt.v_address});
 }
 
 // LCOV_EXCL_START Exclude the following function from LCOV
