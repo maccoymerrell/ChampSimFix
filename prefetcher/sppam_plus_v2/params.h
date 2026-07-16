@@ -482,6 +482,7 @@ struct params {
   int perc_pe_margin = 0;                // with perc_label_pe: only train when |PE| exceeds this (skip the noisy middle)
   double perc_pe_scale = 30.0;           // PE magnitude -> training-step size (~L_LLC): high-PE (DRAM-covering) hits train harder
   int perc_pe_step_max = 4;              // cap the per-example weight step so no single high-PE outcome dominates
+  uint32_t perc_feat_mask = 0x3F;        // enabled feature tables (bit0 PC, 1 offset, 2 engine, 3 depth, 4 use-bucket, 5 tim-bucket)
   std::size_t perc_track_cap = 16384;    // outstanding-prefetch feature snapshots (block->features), trained on EVERY
                                          // hit/eviction outcome -- the dense training trigger (the sampled per-IP
                                          // usefulness/timeliness are FEATURES, not the training signal)
@@ -986,7 +987,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(pv_sample_directmap); SET(pv_sample_ttl); SET(pv_sample_evict_div);
   SET(pv_adaptive_rate); SET(pv_rate_window); SET(pv_churn_hi); SET(pv_churn_lo); SET(pv_div_min); SET(pv_div_max);
   SET(enable_perceptron_filter); SET(perc_pc_entries); SET(perc_weight_max); SET(perc_tau_keep);
-  SET(perc_theta_train); SET(perc_explore_div); SET(perc_label_pe); SET(perc_pe_margin); SET(perc_track_cap); SET(perc_pe_scale); SET(perc_pe_step_max);
+  SET(perc_theta_train); SET(perc_explore_div); SET(perc_label_pe); SET(perc_pe_margin); SET(perc_track_cap); SET(perc_pe_scale); SET(perc_pe_step_max); SET(perc_feat_mask);
   SET(pv_feed_confidence); SET(pv_conf_penalty);
   SET(prob_drop_prefetches); SET(global_or_pattern_usefulness); SET(adaptive_usefulness);
   SET(pattern_usefulness_cutoff); SET(use_default_prediction); SET(default_pattern); SET(default_prediction);
