@@ -89,6 +89,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(bwd_useful_gate); CFG(bwd_useful_thresh); CFG(bwd_useful_min_samples);
   CFG(enable_instr_prefetch); CFG(instr_la_depth); CFG(instr_conf); CFG(instr_table_entries); CFG(instr_delta_bits); CFG(instr_xlate_entries); CFG(instr_filter_entries);
   CFG(instr_feed_data); CFG(unblock_instructions);
+  CFG(instr_nextn); CFG(instr_packed_residency);
 #undef CFG
 
   pfht_.assign(P.pfht_entries ? P.pfht_entries : 1, pf_track{});
@@ -101,6 +102,12 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
     spp_ = std::make_unique<sppam_dse::spp_predictor>(P, this);
   if (P.enable_instr_prefetch)
     ipred_ = std::make_unique<sppam_dse::iprefetch_predictor>(P);
+  // v2: route the branch graph's residency through SPPAM's PACKED code map (4KiB-page/both-maps) instead of
+  // its own private filter -> one shared filter, lower redundancy, zero extra state. filter_evict_code (below)
+  // keeps it coherent with L2 eviction.
+  if (ipred_ && P.instr_packed_residency)
+    ipred_->set_shared_residency([this](uint64_t b) { return pred_->filter_probe_code(b); },
+                                 [this](uint64_t b) { pred_->filter_mark_code(b); });
   // Opt the L2 into delivering instruction fetches when the branch graph is on OR when we
   // explicitly want the data path to see instructions (the branch-graph-off marginal-value arm).
   if (P.enable_instr_prefetch || P.unblock_instructions)
@@ -339,6 +346,8 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
       }
     }
     pred_->on_l2_evict(evb, cycle_, evict_was_unused);
+    if (P.instr_packed_residency)
+      pred_->filter_evict_code(evb); // clear the packed code-residency bit on L2 eviction (no-op for non-code blocks)
   }
 
   if (pe_terms || (P.enable_ip_filter && P.ip_filter_depth_throttle)) { // lightweight inflight counters (MLP gate)

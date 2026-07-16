@@ -554,6 +554,9 @@ struct params {
   // delivering instruction fetches even with the branch graph OFF (the data-path-only arm).
   bool instr_feed_data = false;
   bool unblock_instructions = false;
+  // v2 instruction refinements (DSE holistic-id/bg_residency findings; default OFF = B, C enables):
+  int instr_nextn = 0;                 // sequential fallback: prefetch this many phys blocks ahead within the code page (next-2 ~= full SPPAM on the sequential residual)
+  bool instr_packed_residency = false; // branch graph shares SPPAM's PACKED code residency (4KiB-page/both-maps) instead of its own filter -> lower redundancy, zero extra state
   int instr_la_depth = 8;            // lookahead ceiling (max blocks walked ahead per access)
   int instr_conf = 60;              // confidence gate (percent): walk deeper only while dominant-edge share >= this
   // Realistic IP-space encoding (validated in the DSE): cov/acc are flat down to 256 edges, so the
@@ -867,6 +870,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(gate_adaptive); SET(gate_thrash_min);
   SET(enable_instr_prefetch); SET(instr_la_depth); SET(instr_conf); SET(instr_table_entries); SET(instr_delta_bits); SET(instr_xlate_entries); SET(instr_filter_entries);
   SET(instr_feed_data); SET(unblock_instructions);
+  SET(instr_nextn); SET(instr_packed_residency);
   SET(enable_region_thrash_throttle); SET(region_thrash_min_blocks); SET(region_thrash_table); SET(region_thrash_lo); SET(region_thrash_hi); SET(region_thrash_max_drop);
   SET(enable_pe_management); SET(pe_phase); SET(pe_throttle_div); SET(pfht_entries); SET(pfht_tag_bits); SET(pe_sample_div); SET(pe_pf_demand_weight);
   SET(pe_serv_dram); SET(pe_serv_llc); SET(pe_dram_lat_threshold);
