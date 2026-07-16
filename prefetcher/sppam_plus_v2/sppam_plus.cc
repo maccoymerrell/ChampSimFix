@@ -52,6 +52,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   // or the params.h default). decltype picks each field's exact type.
 #define CFG(field) P.field = builder.get_parameter<decltype(P.field)>(#field, true, P.field)
   CFG(region_bits); CFG(region_sets); CFG(region_ways); CFG(region_tag_bits);
+  CFG(pattern_table_sets); CFG(pattern_table_ways); CFG(negative_table_sets); CFG(negative_table_ways); // PHT geometry (fwd + decoupled backward)
   CFG(region_page_aligned_sets); CFG(within_page_shadow);
   CFG(pattern_size); CFG(min_pattern_size); CFG(pattern_context_bits); CFG(pattern_pc_bits); CFG(pattern_context_src);
   CFG(min_confidence_to_prefetch); CFG(counter_up); CFG(counter_down); CFG(table_or_counter);

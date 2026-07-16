@@ -267,6 +267,11 @@ struct params {
   // --- Table sizes ---
   std::size_t pattern_table_sets = 512; // PROMOTED: sized to hold the PC-widened key space (pattern_pc_bits=4)
   std::size_t pattern_table_ways = 2;
+  // Separate NEGATIVE (backward) table geometry, decoupled from the forward table. Backward patterns are far
+  // fewer than forward, so this can be sized down independently (tolerating conflicts) to reclaim state while
+  // preserving mcf's backward coverage. 0 = inherit the forward pattern_table_sets/ways.
+  std::size_t negative_table_sets = 0;
+  std::size_t negative_table_ways = 0;
   std::size_t pattern_conf_sets = 1;
   std::size_t pattern_conf_ways = 16;
   std::size_t cpt_sets = 128;
@@ -788,7 +793,13 @@ struct params {
     const uint64_t pw_bits = pattern_perceptron ? (static_cast<uint64_t>(pattern_size) * static_cast<uint64_t>(pp_hist_bits < 0 ? 0 : pp_hist_bits) * 8) : 0;
     const uint64_t occ_bits = 12;
     const uint64_t per_entry = tag_bits + pred_bits + occ_bits + use_bits + pw_bits + lg2(pattern_table_ways);
-    t.pattern = per_entry * pattern_table_sets * pattern_table_ways * n_orders * ((do_negative && separate_negative_tables) ? 2 : 1);
+    t.pattern = per_entry * pattern_table_sets * pattern_table_ways * n_orders;
+    if (do_negative && separate_negative_tables) {          // separate backward table at its own (sizable-down) geometry
+      const uint64_t nsets = negative_table_sets ? negative_table_sets : pattern_table_sets;
+      const uint64_t nways = negative_table_ways ? negative_table_ways : pattern_table_ways;
+      const uint64_t ntag = key_bits > lg2(nsets) ? key_bits - lg2(nsets) : 1;
+      t.pattern += (ntag + pred_bits + occ_bits + use_bits + pw_bits + lg2(nways)) * nsets * nways * n_orders;
+    }
 
     // ---- Cross-page tracker + shadow LLC-residency map (both hashed short tags).
     t.cpt = (8 + 1 + region_tag_bits) * cpt_sets * cpt_ways;
@@ -928,7 +939,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(min_confidence_to_prefetch); SET(counter_up); SET(counter_down);
   SET(online_learning); SET(online_neg_samples); SET(online_theta_train);
   SET(pattern_perceptron); SET(pp_hist_bits); SET(pp_pc_bits); SET(pp_weight_cap);
-  SET(pattern_table_sets); SET(pattern_table_ways);
+  SET(pattern_table_sets); SET(pattern_table_ways); SET(negative_table_sets); SET(negative_table_ways);
   SET(pattern_conf_sets); SET(pattern_conf_ways); SET(cpt_sets); SET(cpt_ways);
   SET(scrape_on_idle); SET(scrape_idle_time); SET(scrape_on_count);
   SET(scrape_min_count); SET(scrape_access_count); SET(scrape_on_evict);

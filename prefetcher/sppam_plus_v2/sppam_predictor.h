@@ -40,9 +40,11 @@ public:
     std::size_t orders = 1;
     for (uint32_t s = P.pattern_size; s > P.min_pattern_size; s /= 2)
       ++orders;
+    const std::size_t neg_sets = P.negative_table_sets ? P.negative_table_sets : P.pattern_table_sets; // 0 = inherit
+    const std::size_t neg_ways = P.negative_table_ways ? P.negative_table_ways : P.pattern_table_ways;
     for (std::size_t o = 0; o < orders; ++o) {
       pattern_tables_.emplace_back(P.pattern_table_sets, P.pattern_table_ways);
-      negative_pattern_tables_.emplace_back(P.pattern_table_sets, P.pattern_table_ways);
+      negative_pattern_tables_.emplace_back(neg_sets, neg_ways); // decoupled, sizable-down backward table
     }
     if (P.dedup_analysis)
       dedup_ = std::make_unique<dedup_analyzer>();
