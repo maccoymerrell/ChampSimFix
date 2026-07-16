@@ -764,11 +764,11 @@ struct params {
   // shadow mirror) are deliberately excluded: they are measurement instruments, not proposed hardware.
   struct state_terms {
     uint64_t region = 0, staging = 0, pattern = 0, cpt = 0, llc = 0, misc = 0, spp = 0, mgmt = 0,
-             instr = 0, am = 0, ipf = 0, ip_dir = 0, cold = 0, dpht = 0, xpage = 0, rbloom = 0, rstage = 0;
+             instr = 0, am = 0, ipf = 0, ip_dir = 0, cold = 0, dpht = 0, xpage = 0, rbloom = 0, rstage = 0, perc = 0;
     uint64_t total() const
     {
       return region + staging + pattern + cpt + llc + misc + spp + mgmt + instr + am + ipf + ip_dir
-           + cold + dpht + xpage + rbloom + rstage;
+           + cold + dpht + xpage + rbloom + rstage + perc;
     }
   };
 
@@ -916,6 +916,16 @@ struct params {
     if (enable_resid_bloom) t.rbloom = resid_bloom_bits;
     if (enable_region_staging) t.rstage = staging_entries * (16 /*tag*/ + 8 /*count*/);
 
+    // ---- Perceptron prefetch filter (optional): per-feature weight tables + per-outstanding-prefetch training buffers.
+    if (enable_perceptron_filter) {
+      auto po2 = [](uint64_t n) { uint64_t r = 1; while (r < n) r <<= 1; return r; };
+      const uint64_t wbits = lg2(2 * (perc_weight_max > 0 ? static_cast<uint64_t>(perc_weight_max) : 1) + 1) + 1; // signed weight
+      const uint64_t entries = po2(perc_pc_entries) + bpr + 4 + 16 + 8 + 8 + 16 + po2(perc_sig_entries); // PC,off,eng,dep,use,tim,conf,sig
+      t.perc = entries * wbits;
+      t.perc += perc_track_cap * (8 * 10 + 1); // predictor perc_track_: 8 feature indices (~10b) + explored bit
+      t.perc += perc_track_cap * (16 + 16);    // glue perc_issue_/perc_lat_: block tag + real fill latency
+    }
+
     return t;
   }
 
@@ -932,7 +942,7 @@ struct params {
     add("region", t.region); add("staging", t.staging); add("pattern", t.pattern); add("cpt", t.cpt);
     add("llc", t.llc); add("misc", t.misc); add("spp", t.spp); add("mgmt", t.mgmt); add("instr", t.instr);
     add("am", t.am); add("ipf", t.ipf); add("ip_dir", t.ip_dir); add("cold", t.cold); add("dpht", t.dpht);
-    add("xpage", t.xpage); add("rbloom", t.rbloom); add("rstage", t.rstage);
+    add("xpage", t.xpage); add("rbloom", t.rbloom); add("rstage", t.rstage); add("perc", t.perc);
     return s;
   }
 };

@@ -102,6 +102,10 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(pattern_validate); CFG(pv_feed_confidence); CFG(pv_conf_penalty); CFG(pv_sample_div); CFG(pv_min_samples); CFG(pv_bad_pct); CFG(pv_sample_cap);
   CFG(pv_sample_directmap); CFG(pv_sample_ttl); CFG(pv_sample_evict_div); // direct-mapped probabilistic sample table
   CFG(pv_adaptive_rate); CFG(pv_rate_window); CFG(pv_churn_hi); CFG(pv_churn_lo); CFG(pv_div_min); CFG(pv_div_max); // adaptive sample rate
+  // Perceptron prefetch filter (optional sub-in; OFF by default). Trained on the glue's REAL per-prefetch fill latency.
+  CFG(enable_perceptron_filter); CFG(perc_pc_entries); CFG(perc_weight_max); CFG(perc_tau_keep); CFG(perc_theta_train);
+  CFG(perc_explore_div); CFG(perc_label_pe); CFG(perc_pe_margin); CFG(perc_track_cap); CFG(perc_pe_scale); CFG(perc_pe_step_max);
+  CFG(perc_feat_mask); CFG(perc_pe_signonly); CFG(perc_sig_entries); CFG(perc_pe_norm);
 #undef CFG
 
   pfht_.assign(P.pfht_entries ? P.pfht_entries : 1, pf_track{});
@@ -225,7 +229,15 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
     pred_->set_ip_gate(ip_trickle_div(iphash(cur_trigger_ip_)) >= static_cast<uint32_t>(P.ip_gate_div_min));
   // delta_additive drives the delta-PHT usefulness attribution only (delta_pht off by default => no-op).
   // The module has no no-prefetch baseline to compute "would have missed", so pass false.
-  pred_->operate(block, cur_trigger_ip_, cache_hit, pf_used, /*delta_additive=*/false, static_cast<sppam_dse::atype>(type), cycle_);
+  // Perceptron PE value on a useful hit = this prefetch's REAL fill latency (what a demand miss would have cost);
+  // consumed here at resolve. A DRAM-covering prefetch reads ~10x an LLC one -- the coverage-weighted signal.
+  double perc_pe = 0.0;
+  if (P.enable_perceptron_filter && pf_used) {
+    auto it = perc_lat_.find(block);
+    perc_pe = (it != perc_lat_.end()) ? static_cast<double>(it->second) : static_cast<double>(P.llc_hit_latency);
+    if (it != perc_lat_.end()) perc_lat_.erase(it);
+  }
+  pred_->operate(block, cur_trigger_ip_, cache_hit, pf_used, /*delta_additive=*/false, static_cast<sppam_dse::atype>(type), cycle_, perc_pe);
   if (spp_)
     spp_->operate(block);
 
@@ -315,6 +327,16 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
     pred_->shadow_fill(block);
     if (prefetch)
       pf_unused_[block] = metadata_in; // freshly prefetched; carry full generation tag
+    // Perceptron: this prefetch's REAL fill latency (issue->fill; DRAM fills read high, LLC low) is its PE value.
+    if (P.enable_perceptron_filter && prefetch) {
+      auto it = perc_issue_.find(block);
+      if (it != perc_issue_.end()) {
+        const uint64_t lat = real_cycle_ >= it->second ? real_cycle_ - it->second : 0;
+        if (perc_lat_.size() >= 65536) perc_lat_.clear();
+        perc_lat_[block] = static_cast<uint32_t>(std::min<uint64_t>(lat, 100000));
+        perc_issue_.erase(it);
+      }
+    }
   }
   bool had_evict = false, evict_was_unused = false;
   uint64_t evb = 0;
@@ -357,7 +379,12 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
         et.valid = false; // resolved (evicted unused)
       }
     }
-    pred_->on_l2_evict(evb, cycle_, evict_was_unused);
+    double perc_ev = 0.0;
+    if (P.enable_perceptron_filter) {
+      if (evict_was_unused) perc_ev = -static_cast<double>(P.llc_hit_latency); // wasted-fill cost (< a covering hit's benefit -> keeps coverage-valuable patterns)
+      perc_lat_.erase(evb); perc_issue_.erase(evb); // done with this block either way
+    }
+    pred_->on_l2_evict(evb, cycle_, evict_was_unused, perc_ev);
     if (P.instr_packed_residency)
       pred_->filter_evict_code(evb); // clear the packed code-residency bit on L2 eviction (no-op for non-code blocks)
   }
@@ -488,6 +515,11 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
   if (from_spp && fill_l2)
     pred_->shadow_fill(block);
   const bool enqueued = prefetch_line(block << BLOCK_SHIFT, fill_l2, gen_tag | (from_spp ? 1u : 0u)); // carry generation tag (diagnostics)
+  // Perceptron: remember this L2 prefetch's issue cycle so the fill hook can measure its real latency (the PE value).
+  if (P.enable_perceptron_filter && enqueued && fill_l2) {
+    if (perc_issue_.size() >= 65536) perc_issue_.clear(); // bound (outstanding, pre-fill)
+    perc_issue_[block] = real_cycle_;
+  }
   // Contract with the predictor: TRUE iff the block was actually placed in L2 -> the predictor marks its
   // residency map only then (a dropped / LLC-only prefetch returns false, so no stale "issued but never
   // filled" bit). set-duel may have redirected fill_l2 to false (LLC-only) above.
