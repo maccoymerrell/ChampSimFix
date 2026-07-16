@@ -200,7 +200,9 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
   sppam_fired_ = false; // reset per-trigger latch before the predictors run
   if (P.enable_ip_gate) // reuse the ip-filter's per-IP yield table as the sparse-page signal (no new state)
     pred_->set_ip_gate(ip_trickle_div(iphash(cur_trigger_ip_)) >= static_cast<uint32_t>(P.ip_gate_div_min));
-  pred_->operate(block, cur_trigger_ip_, cache_hit, pf_used, static_cast<sppam_dse::atype>(type), cycle_);
+  // delta_additive drives the delta-PHT usefulness attribution only (delta_pht off by default => no-op).
+  // The module has no no-prefetch baseline to compute "would have missed", so pass false.
+  pred_->operate(block, cur_trigger_ip_, cache_hit, pf_used, /*delta_additive=*/false, static_cast<sppam_dse::atype>(type), cycle_);
   if (spp_)
     spp_->operate(block);
 
@@ -387,7 +389,7 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
   return metadata_in;
 }
 
-void sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, double /*benefit*/, uint32_t gen_tag)
+bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, double /*benefit*/, uint32_t gen_tag)
 {
   if (!from_spp)
     sppam_fired_ = true;
@@ -400,7 +402,7 @@ void sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
     int st = pred_->shadow_status(block);
     if (st == 2) {
       ++pf_squashed_redundant_;
-      return;
+      return false;
     }
     // Diagnostic: why did the filter pass? region missing vs bit clear.
     if (st == 0) ++pf_pass_region_absent_;
@@ -410,13 +412,13 @@ void sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
   // so SPP keeps learning (never permanently gated).
   if (P.enable_fallthrough && from_spp && sppam_fired_) {
     if (!(P.fallthrough_explore_div && (++spp_ft_ctr_ % P.fallthrough_explore_div == 0)))
-      return;
+      return false;
   }
   const int src = from_spp ? 1 : 0;
   // PE throttle: a source whose last-phase PE was non-positive issues only 1/pe_throttle_div
   // (never fully gated -- a complete gate would erase the very PE signal needed to recover).
   if (P.enable_pe_management && pe_throttle_[src] > 1 && (++pe_pf_count_[src] % pe_throttle_[src]) != 0)
-    return;
+    return false;
   // Per-trigger-IP accuracy filter: throttle triggers whose historical prefetch usefulness is low
   // (graph-walk/pointer-chase loads), sparing predictable streams. Never fully gates (1/trickle).
   // ip_filter_active_ is the auto-backoff: false when IP fails to discriminate (would drop too much useful).
@@ -429,11 +431,11 @@ void sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
                  : P.ip_filter_use_pe ? ip_pe_trickle_div(iph) : ip_trickle_div(iph);
     if (P.ip_filter_pe_veto && div > 1 && ip_pe_positive(iph)) div = 1; // spare a clearly PE-positive IP
     if (div > 1 && (++ip_trickle_ctr_ % div) != 0)
-      return; // graded throttle (still issue 1/div so the IP keeps getting feedback)
+      return false; // graded throttle (still issue 1/div so the IP keeps getting feedback)
   }
   // Set-duel: guard groups + graded follower throttle (redirect L2->LLC / drop). Final placement.
   if (!sd_decide(block, fill_l2))
-    return;
+    return false;
   ++pf_issued_;
   // EXACT per-issuing-IP timeliness: remember which IP issued this block, until it is used (timely) or
   // evicted-unused (then watched for a later re-demand = untimely). Bounded; cap guards a pathological run.
@@ -460,7 +462,11 @@ void sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
   // filtered until the fill lands. SPP always fills L2 (fill_l2=true).
   if (from_spp && fill_l2)
     pred_->shadow_fill(block);
-  prefetch_line(block << BLOCK_SHIFT, fill_l2, gen_tag | (from_spp ? 1u : 0u)); // carry generation tag (diagnostics)
+  const bool enqueued = prefetch_line(block << BLOCK_SHIFT, fill_l2, gen_tag | (from_spp ? 1u : 0u)); // carry generation tag (diagnostics)
+  // Contract with the predictor: TRUE iff the block was actually placed in L2 -> the predictor marks its
+  // residency map only then (a dropped / LLC-only prefetch returns false, so no stale "issued but never
+  // filled" bit). set-duel may have redirected fill_l2 to false (LLC-only) above.
+  return enqueued && fill_l2;
 }
 
 int sppam_plus::dram_bw_index() const
@@ -587,4 +593,4 @@ void sppam_plus::prefetcher_final_stats()
                pe_negact_[1], pe_active_[1], pe_active_[1]?100.0*pe_negact_[1]/pe_active_[1]:0.0);
 }
 
-champsim::modules::prefetcher::register_module<sppam_plus> sppam_plus_module("SPPAM_PLUS");
+champsim::modules::prefetcher::register_module<sppam_plus> sppam_plus_module("SPPAM_PLUS_V2");

@@ -160,7 +160,7 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   void prefetcher_branch_operate(champsim::address /*ip*/, uint8_t /*branch_type*/, champsim::address /*branch_target*/) override {}
 
   // ---- sppam_dse::prefetch_sink ----
-  void issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, double benefit, uint32_t gen_tag = 0) override;
+  bool issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, double benefit, uint32_t gen_tag = 0) override;
   int dram_bw_index() const override;
   int pf_free_space() const override;
   int sd_l2_limit() const override { return sd_l2_limit_value(); }

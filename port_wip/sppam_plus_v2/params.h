@@ -49,6 +49,7 @@ struct params {
   // Shared shadow cache: squash a prefetch (from either engine) to a block already
   // resident in L2 (the prefetch map = L2 residency, cleared on eviction).
   bool enable_shadow_squash = true;
+  bool exact_shadow_test = false;   // TEST ONLY: route the residency filter through a leak-free fill/evict mirror (unbuildable state; measures the coverage lost to stale prefetch-map bits)
   // Hybrid residency filter: on region eviction, spill the region's still-resident blocks into a
   // rolling-clock 1-bit bloom, so residency of evicted (typically sparse/fragmented) regions is not
   // lost. shadow_resident: region-in-table -> exact prefetch_map; region-absent -> bloom. Cheap on
@@ -218,7 +219,7 @@ struct params {
   // only index 64 sets; adding PC bits widens the key space so the SAME spatial pattern from different
   // PCs learns different predictions (gives SPPAM IP correlation). Needs pattern_table_sets/ways bumped
   // to hold the widened keyspace; state grows ~2^pattern_pc_bits. 0 = off (no PC in the pattern key).
-  uint32_t pattern_pc_bits = 0;
+  uint32_t pattern_pc_bits = 4; // PROMOTED default: PC in the pattern key (small accuracy win; needs the bigger PHT below)
   uint32_t pattern_context_src = 0;
   // DEFAULT = contrastive per-block COUNTER mode: real-ChampSim AMAT geomean 0.8349 vs the old
   // positive-only conf-table's 0.8434 (~1% better, HW-free). The counter's +up on accessed /
@@ -257,8 +258,8 @@ struct params {
   int online_theta_train = 0;
 
   // --- Table sizes ---
-  std::size_t pattern_table_sets = 64; // 2^pattern_size suffices for a pattern-indexed table
-  std::size_t pattern_table_ways = 1;
+  std::size_t pattern_table_sets = 1024; // PROMOTED: sized to hold the PC-widened key space (pattern_pc_bits=4)
+  std::size_t pattern_table_ways = 2;
   std::size_t pattern_conf_sets = 1;
   std::size_t pattern_conf_ways = 16;
   std::size_t cpt_sets = 128;
@@ -286,12 +287,87 @@ struct params {
   bool train_demand_only = false;
 
   // --- Directionality ---
-  bool do_negative = false;
+  bool do_negative = false;  // PROMOTED: gated backward scan captures backward-strided pointer-chase (mcf +47% cov)
   bool separate_negative_tables = true;
+  // Backward ONLINE training (learn_on_access): the negative/backward pattern tables are otherwise scrape-only,
+  // and scrape is off under online_learning -> do_negative is dead by default. These add backward training online.
+  bool neg_online_train = false; // PROMOTED: train backward patterns per-access (else the negative tables stay cold)
+  bool neg_train_gated = false;  // PROMOTED: train backward only when the direction is negative (avoids 0-key pollution on forward streams)
+  bool neg_dir_pc = false;       // PROMOTED: direction signal = per-IP ip_dir_ (PC-correlated); cleaner than spatial momentum
+  // Backward self-throttle: gate the backward scan on its own sampled per-IP usefulness (needs enable_ip_filter).
+  // Fires backward until an IP has >= min_samples backward prefetches, then keeps firing only if useful% >= thresh.
+  bool bwd_useful_gate = false;       // PROMOTED: self-throttle backward on its own sampled per-IP usefulness (kills forward-stream residue)
+  int  bwd_useful_thresh = 50;       // require this useful% to keep firing backward for an IP
+  int  bwd_useful_min_samples = 8;   // warmup: fire backward freely until this many samples
   bool scan_forward = true;
-  uint64_t scan_distance_forward = 16;
+  uint64_t scan_distance_forward = 1; // PROMOTED default: single-path (efficiency win vs scan-16; ~same coverage, far fewer wasted prefetches)
   bool scan_backward = true;
   uint64_t scan_distance_backward = 16;
+  // --- Delta-PHT (spatial-context -> next-access DELTA) ---
+  // The position-bitmap predicts fixed offsets AHEAD/BEHIND the trigger; it structurally cannot emit a next
+  // access that lands inside/near the recent window (within |d|<=ps, immediate neighbor). This table keys the
+  // access-map neighborhood centered on the PREVIOUS access and predicts the signed delta to the just-accessed
+  // line -- direction-agnostic, so within-window / backward / near-neighbor targets become reachable. The
+  // signature is inclusive of the access point (always non-zero), so it never trains the illegal 0-key.
+  bool delta_pht = false;             // master enable (supplements the position bitmap)
+  int delta_sig_radius = 6;           // centered access-map window radius -> (2r+1)-bit signature
+  int delta_pht_sets = 512;
+  int delta_pht_ways = 4;
+  int delta_pht_conf_max = 15;        // saturating confidence ceiling
+  int delta_pht_conf_min = 2;         // min confidence to emit a prediction
+  int delta_pht_degree = 2;           // per-trigger prefetches (re-lookup at each predicted position)
+  int delta_pht_max = 32;             // clamp |delta| trained/predicted (page-bounded anyway)
+  // SPP-style path confidence: accumulate product of (conf/conf_max) down the lookahead; once it drops below
+  // this floor, stop extending (the current hop still issues). 0 => no decay gate (depth bounded only by degree).
+  double delta_pht_path_conf = 0.0;
+  // Usefulness SELF-THROTTLE: track the delta-PHT's own useful/useless rate (EMA) and cut speculative DEPTH where
+  // it is inaccurate (irregular graph traces), keeping a shallow probe alive to re-sample. Mirrors the depth-throttle.
+  bool delta_pht_selfthrottle = false;
+  double delta_pht_min_acc = 0.55;    // additive-fraction EMA below which delta MAY be suppressed (AND-ed with unused)
+  double delta_pht_max_unused = 0.15; // unused-evict (pollution) EMA above which delta MAY be suppressed (diagnostic)
+  double delta_pht_max_hitrate = 0.90; // demand hit-rate above which delta is suppressed (saturated -> no headroom)
+  // SET-DUELING throttle: the harm (cross-prefetcher displacement) is invisible per-block, so measure delta's NET
+  // effect directly -- reserve OFF-leader L2 sets (never delta) vs ON-leader sets (always delta), a PSEL counter
+  // tracks which misses less, and follower sets follow the winner. This is the only signal that sees displacement.
+  bool delta_pht_setduel = false;
+  int delta_pht_sd_period = 64;       // 1 OFF-leader + 1 ON-leader per this many L2 sets
+  int delta_pht_sd_max = 1024;        // PSEL saturation (followers use delta iff 2*PSEL >= max)
+  int delta_pht_warmup = 2000;        // outcomes observed before the throttle engages (learn the EMA first)
+  int delta_pht_explore = 64;         // when suppressed, still fire a 1-deep probe every Nth trigger (keep sampling)
+  int delta_pht_ema_shift = 8;        // EMA alpha = 1/(1<<shift)
+  // Cold-start table (prototype): on a NEW region entry the access-map pattern is unlearned, so the +1/+2
+  // page-entry-startup strides are missed. A tiny per-trigger-PC local delta predictor kicks a starting
+  // prefetch stream at region creation. cold_start_pc=false => fixed forward next-N; true => learned dominant
+  // delta per trigger-PC (falls back to +1 when cold). Gated OFF by default (faithful shipping unchanged).
+  bool enable_cold_start = false;
+  uint64_t cold_start_degree = 3;    // prefetches issued at a fresh region entry
+  bool cold_start_pc = false;        // key a learned dominant delta by trigger-PC hash (else fixed +1..+N)
+  uint32_t cold_start_entries = 256; // PC-keyed delta table size (power of 2)
+  // Cross-page PHT (prototype): a SEPARATE table trained ONLY on region crossings. Key = the PREDECESSOR
+  // region's spatial map (the signature it fed the main PHT) + entry offset; value = the NEW region's access
+  // pattern. Predicts a fresh region's footprint from the page we came from -- the cross-page structure the
+  // per-region PHT is blind to at entry. Shallow (no deep lookahead). Gated OFF by default.
+  bool enable_cross_page = false;
+  uint32_t cross_page_degree = 12;   // max prefetches issued per region entry from the cross-page table
+  double cross_page_conf = 0.33;     // cnt/occ threshold to prefetch a predicted offset
+  uint32_t cross_page_min_occ = 2;   // min occurrences of a key before it predicts
+  int cross_page_key = 0;            // key source: 0=SPATIAL (predecessor map signature), 1=IP (crossing PC), 2=both
+  // Region-table eviction POLICY (attacks the region-EVICTED temporal residual). PURE policies (no LRU blend):
+  //  0 = LRU (default)  1 = MRU (evict most-recently-used, keep old)  2 = RANDOM
+  //  3 = ENTROPY (keep access-maps closest to 50/50 = predictable-but-not-done; evict full/empty extremes)
+  //  4 = evict HIGH RESIDENCY (prefetch_map most FULL = fully cached / done)
+  //  5 = evict LOW RESIDENCY  (prefetch_map most EMPTY = L2 footprint already gone)
+  //  6 = evict by USEFULNESS  (region whose prefetches were useless: pf_dead-pf_used high; age tie-break)
+  //  7 = evict FEWEST MISSES  (region with the fewest demand misses = least prefetch value; age tie-break)
+  int region_evict_policy = 0;
+  // Two-level region table: new regions OBSERVE in a small staging table (they still predict); on staging eviction
+  // only GOOD-SHAPE regions (not severely fragmented / not fully-used = medium activity) are PROMOTED to the large
+  // table. Filters thrash at PLACEMENT rather than eviction -> keeps the big table's context without re-prefetch.
+  bool enable_two_level = false;
+  std::size_t stage_sets = 64;
+  std::size_t stage_ways = 4;
+  int stage_promote_min = 3;         // min touched blocks to promote (below = severely fragmented -> drop)
+  int stage_promote_max = 29;        // max touched blocks to promote (above = fully used/done -> drop)
   int forward_momentum_min = -9;   // forward prefetch allowed when momentum > this
   int backward_momentum_min = 8;   // backward prefetch allowed when momentum < this
   // Direction by IP instead of the noisy per-region momentum. Momentum is few-sample, thrashed, and its
@@ -311,6 +387,11 @@ struct params {
   bool pollution_filter = false;        // |per-IP direction counter| >= this -> commit to that one direction
   bool cross_page = false;
 
+  // Diagnostic: at region eviction, accumulate the access-map fill distribution + effective-storage-granularity
+  // (how coarse a bitmap could represent each footprint, and the over-fetch cost of coarsening). For the
+  // region-map compression study (DSpatch-style). No effect on prefetching; dumps to stderr at teardown.
+  bool region_density_report = false;
+
   // --- Aggression ---
   // NOTE: the no_lookahead win was measured under the INVALID demand-only model (berti
   // prefetches dropped -> wrong access stream + uncounted berti-serving benefit).
@@ -319,7 +400,45 @@ struct params {
   uint64_t lookahead_depth = 100;
   uint64_t lookahead_conf_cutoff = 7;
   uint64_t lookahead_conf_factor = 13;
-  bool prob_drop_prefetches = true;
+  // --- Walk-accumulate prediction (alternative to end-over-end lookahead) ---
+  // Instead of prefetching a whole predicted pattern and chaining it, WALK one nearest-predicted offset at a
+  // time (re-forming the spatial signature from map+speculative-path at each step). The nearest bit is the
+  // immediate step; other set bits ACCUMULATE per-absolute-offset evidence (prediction confidence). An offset
+  // is prefetched only when its accumulated evidence >= a threshold that GROWS with distance from the trigger,
+  // so deep prefetches need corroboration from multiple overlapping lookups instead of one pattern's say-so.
+  bool walk_accumulate = false;        // master enable (replaces the forward end-over-end lookahead)
+  int walk_max_depth = 16;             // max walk steps
+  int walk_thresh_base = 1;            // corroborations (predicting walk-steps) needed at distance 1
+  int walk_thresh_slope = 5;           // extra corroborations required per block of distance (/10; fractional)
+  int walk_thresh_cap = 3;             // CAP on required corroborations (a far offset can't need more than the walk can give)
+  int walk_jump_relief = 1;            // reduce the requirement by this per block of REACH>1 (big jump = fewer chances)
+  int walk_advance = 0;                // 0 = advance to NEAREST predicted; 1 = advance to MOST-CORROBORATED (conf,dist tiebreak)
+  int walk_degree = 8;                 // per-trigger prefetch cap (generous backstop; the threshold should govern)
+  bool walk_usefulness_throttle = false; // scale the walk's effective degree by global usefulness (like e2e's current_pf_degree_):
+                                         // unreliable workload -> shallower path (conservative role-2 behaviour)
+  bool walk_replace = false;             // false = walk COEXISTS with the e2e forward path (role-2 alongside role-1);
+                                         // true = walk REPLACES the forward e2e path (A/B measurement of the walk alone)
+  bool walk_fallthrough = false;         // SELECTOR (proper SPP fall-through): run the walk ONLY where role-1 is weak at
+                                         // the trigger -- silent (no learned pattern) OR its pattern usefulness < walk_ft_usefulness
+  int walk_ft_usefulness = 8;            // e2e trigger-pattern usefulness (0-15) below which role-2 (walk) takes over
+  bool walk_setduel = false;             // SELECTOR via SET-DUELING: reserve walk-OFF vs walk-ON leader L2 sets, a PSEL
+                                         // tracks which misses less, follower sets follow the winner (reuses delta_pht_sd_period/max)
+  // PRECISE PATTERN VALIDATION for proper fall-through. modify_pattern_usefulness SPRAYS credit over every pattern
+  // that COULD have predicted a resolved block; instead SAMPLE the ACTUAL triggering pattern at issue (block->pat_key)
+  // and, when that prefetch resolves useful/useless, credit ONLY that pattern. A pattern with low validated accuracy
+  // is BAD -> SUPPRESS e2e there and FALL THROUGH to the walk (role-2). Fixes "e2e always has a weak prediction so
+  // fall-through never fires" -- now it fires exactly on the patterns the sampling proves are wrong.
+  bool pattern_validate = false;         // enable precise per-pattern validation + bad-pattern fall-through to the walk
+  int pv_sample_div = 4;                 // sample 1/N issued e2e prefetches into the block->trigger-pattern table
+  int pv_min_samples = 8;                // resolved samples for a pattern before it can be judged bad
+  int pv_bad_pct = 40;                   // validated accuracy (%) below which a pattern is BAD (fall through)
+  std::size_t pv_sample_cap = 8192;      // block->pattern sample table capacity (bounded)
+  // Feed the precise validation back INTO the confidence values (prediction_counter): a proven-useless prediction
+  // is penalized so it falls below threshold and the position-bitmap goes SILENT there (natural fall-through to SPP);
+  // a proven-useful one is reinforced. This is validation-as-confidence-contributor (vs pv_bad_pct's separate gate).
+  bool pv_feed_confidence = false;
+  int pv_conf_penalty = 8;               // prediction_counter decrement on a proven-useless sampled prediction
+  bool prob_drop_prefetches = false;  // OFF permanently: its current_usefulness-crush over-drops (esp. with a small region table); see analysis
   bool global_or_pattern_usefulness = true; // true = pattern usefulness, false = global
   bool adaptive_usefulness = true;
   uint64_t pattern_usefulness_cutoff = 7;
@@ -692,7 +811,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
 #define SET(field) if (j.contains(#field)) p.field = j.at(#field).get<decltype(p.field)>()
   SET(name);
   SET(page_bits); SET(region_bits); SET(region_sets); SET(region_ways); SET(llc_region_sets); SET(llc_region_ways); SET(region_hash); SET(dedup_analysis); SET(account_shadow_links); SET(within_page_shadow); SET(region_page_aligned_sets);
-  SET(enable_shadow_squash); SET(enable_hybrid_bidding); SET(bid_by_value); SET(bid_explore_div);
+  SET(enable_shadow_squash); SET(exact_shadow_test); SET(enable_hybrid_bidding); SET(bid_by_value); SET(bid_explore_div);
   SET(enable_resid_bloom); SET(resid_bloom_bits); SET(resid_bloom_k); SET(resid_bloom_clear);
   SET(enable_am_bloom); SET(am_bloom_size); SET(am_bloom_k); SET(am_bloom_clear_thresh); SET(am_bloom_clear_frac);
   SET(enable_ip_filter); SET(ip_filter_threshold); SET(ip_filter_min_samples); SET(ip_filter_trickle); SET(ip_filter_age_shift);
@@ -717,10 +836,25 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(mark_after_scrape); SET(clear_after_scrape); SET(clear_filter_after_scrape); SET(scrape_full_window);
   SET(access_map_miss_only); SET(train_demand_only);
   SET(do_negative); SET(separate_negative_tables);
+  SET(neg_online_train); SET(neg_train_gated); SET(neg_dir_pc);
+  SET(bwd_useful_gate); SET(bwd_useful_thresh); SET(bwd_useful_min_samples);
   SET(scan_forward); SET(scan_distance_forward); SET(scan_backward); SET(scan_distance_backward);
+  SET(delta_pht); SET(delta_sig_radius); SET(delta_pht_sets); SET(delta_pht_ways);
+  SET(delta_pht_conf_max); SET(delta_pht_conf_min); SET(delta_pht_degree); SET(delta_pht_max); SET(delta_pht_path_conf);
+  SET(delta_pht_selfthrottle); SET(delta_pht_min_acc); SET(delta_pht_max_unused); SET(delta_pht_max_hitrate); SET(delta_pht_warmup); SET(delta_pht_explore); SET(delta_pht_ema_shift);
+  SET(delta_pht_setduel); SET(delta_pht_sd_period); SET(delta_pht_sd_max);
+  SET(enable_cold_start); SET(cold_start_degree); SET(cold_start_pc); SET(cold_start_entries);
+  SET(enable_cross_page); SET(cross_page_degree); SET(cross_page_conf); SET(cross_page_min_occ); SET(cross_page_key);
+  SET(region_evict_policy);
+  SET(enable_two_level); SET(stage_sets); SET(stage_ways); SET(stage_promote_min); SET(stage_promote_max);
   SET(forward_momentum_min); SET(backward_momentum_min); SET(cross_page);
   SET(ip_direction); SET(ip_direction_min); SET(use_berti_src_ip); SET(pollution_filter);
+  SET(region_density_report);
   SET(do_lookahead); SET(lookahead_depth); SET(lookahead_conf_cutoff); SET(lookahead_conf_factor);
+  SET(walk_accumulate); SET(walk_max_depth); SET(walk_thresh_base); SET(walk_thresh_slope); SET(walk_degree);
+  SET(walk_thresh_cap); SET(walk_jump_relief); SET(walk_advance); SET(walk_usefulness_throttle); SET(walk_replace); SET(walk_fallthrough); SET(walk_ft_usefulness); SET(walk_setduel);
+  SET(pattern_validate); SET(pv_sample_div); SET(pv_min_samples); SET(pv_bad_pct); SET(pv_sample_cap);
+  SET(pv_feed_confidence); SET(pv_conf_penalty);
   SET(prob_drop_prefetches); SET(global_or_pattern_usefulness); SET(adaptive_usefulness);
   SET(pattern_usefulness_cutoff); SET(use_default_prediction); SET(default_pattern); SET(default_prediction);
   SET(prefetch_demand_only); SET(prefetch_degrees_usefulness); SET(prefetch_drop_chance_usefulness);
