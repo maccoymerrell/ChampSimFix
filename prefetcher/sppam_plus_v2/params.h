@@ -440,6 +440,15 @@ struct params {
   int pv_min_samples = 8;                // resolved samples for a pattern before it can be judged bad
   int pv_bad_pct = 40;                   // validated accuracy (%) below which a pattern is BAD (fall through)
   std::size_t pv_sample_cap = 8192;      // block->pattern sample table capacity (bounded)
+  // pf_sample_ replacement policy. false = the legacy unbounded map with clear-on-full (wipes ALL in-flight
+  // samples periodically -> a small table churns and loses most eviction resolutions). true = a FIXED
+  // direct-mapped table with PROBABILISTIC eviction: an in-flight incumbent survives ~pv_sample_evict_div
+  // collisions before a new sample can displace it, and is reclaimed once older than pv_sample_ttl ops. This
+  // keeps the residency time of a sample matched to the prefetch lifetime, so a much smaller table validates
+  // as well (the sampling rate is no longer out of sync with the table size).
+  bool pv_sample_directmap = false;
+  uint32_t pv_sample_ttl = 4096;         // ops before an unresolved in-flight sample becomes reclaimable
+  uint32_t pv_sample_evict_div = 4;      // on a collision, replace the incumbent only 1/N of the time
   // Feed the precise validation back INTO the confidence values (prediction_counter): a proven-useless prediction
   // is penalized so it falls below threshold and the position-bitmap goes SILENT there (natural fall-through to SPP);
   // a proven-useful one is reinforced. This is validation-as-confidence-contributor (vs pv_bad_pct's separate gate).
@@ -823,7 +832,8 @@ struct params {
     {
       const uint64_t E = ip_table_entries ? ip_table_entries : 1;
       const uint64_t iph_bits = lg2(E);
-      const uint64_t samp_entry = 16 /*block tag*/ + iph_bits + lg2(pattern_size + 2) /*position*/ + 1 /*bwd*/;
+      const uint64_t samp_entry = 16 /*block tag*/ + iph_bits + lg2(pattern_size + 2) /*position*/ + 1 /*bwd*/
+                                + (pv_sample_directmap ? (8 /*stamp*/ + 1 /*occ*/) : 0);
       if (enable_ip_filter) {
         uint64_t arrays = 3;                                            // useful + useless + gate_ctr
         if (ip_filter_depth_throttle) arrays += 2;                      // ev + untimely
@@ -931,6 +941,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(walk_accumulate); SET(walk_max_depth); SET(walk_thresh_base); SET(walk_thresh_slope); SET(walk_degree);
   SET(walk_thresh_cap); SET(walk_jump_relief); SET(walk_advance); SET(walk_usefulness_throttle); SET(walk_replace); SET(walk_fallthrough); SET(walk_ft_usefulness); SET(walk_setduel);
   SET(pattern_validate); SET(pv_sample_div); SET(pv_min_samples); SET(pv_bad_pct); SET(pv_sample_cap);
+  SET(pv_sample_directmap); SET(pv_sample_ttl); SET(pv_sample_evict_div);
   SET(pv_feed_confidence); SET(pv_conf_penalty);
   SET(prob_drop_prefetches); SET(global_or_pattern_usefulness); SET(adaptive_usefulness);
   SET(pattern_usefulness_cutoff); SET(use_default_prediction); SET(default_pattern); SET(default_prediction);
