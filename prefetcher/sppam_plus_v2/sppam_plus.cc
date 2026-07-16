@@ -77,10 +77,11 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(ip_filter_use_pe_phase); CFG(ip_pe_phase_soft); CFG(ip_pe_phase_hard); CFG(ip_pe_phase_margin);
   CFG(ip_filter_depth_throttle); CFG(ip_depth_mid); CFG(ip_depth_min); CFG(ip_untimely_thresh); CFG(ip_depth_hitrate_min); CFG(ip_depth_mlp_max);
   CFG(ip_filter_max_useful_loss); CFG(ip_sample_div); CFG(ip_track_timeout);
+  CFG(ip_table_entries); CFG(ip_ctr_bits); CFG(evicted_unused_cap); // DSE-sized IP-filter geometry
   CFG(spp_usefulness_feedback); CFG(spp_per_sig_usefulness); CFG(spp_per_sig_prior);
   CFG(spp_lookahead); CFG(spp_threshold); CFG(spp_share_region_table);
   CFG(spp_ghr); CFG(spp_ghr_entries); CFG(spp_min_delta); CFG(spp_min_conf); CFG(spp_multi_high_throttle);
-  CFG(spp_sig_bits); CFG(spp_pt_sets); CFG(spp_pt_ways); CFG(spp_deltas_per_sig); CFG(spp_conf_bits);
+  CFG(spp_sig_bits); CFG(spp_pt_sets); CFG(spp_pt_ways); CFG(spp_deltas_per_sig); CFG(spp_conf_bits); CFG(spp_st_entries);
   CFG(enable_pe_management); CFG(pe_throttle_div); CFG(pe_phase); CFG(pe_sample_div); CFG(pfht_entries);
   CFG(enable_bw_feedback); CFG(bw_mult);
   CFG(enable_bw_market); CFG(bw_market_target_util);
@@ -97,7 +98,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(enable_instr_prefetch); CFG(instr_la_depth); CFG(instr_conf); CFG(instr_table_entries); CFG(instr_delta_bits); CFG(instr_xlate_entries); CFG(instr_filter_entries);
   CFG(instr_feed_data); CFG(unblock_instructions);
   CFG(instr_nextn); CFG(instr_packed_residency);
-  CFG(pattern_validate); CFG(pv_feed_confidence); CFG(pv_conf_penalty); CFG(pv_sample_div); CFG(pv_min_samples); CFG(pv_bad_pct);
+  CFG(pattern_validate); CFG(pv_feed_confidence); CFG(pv_conf_penalty); CFG(pv_sample_div); CFG(pv_min_samples); CFG(pv_bad_pct); CFG(pv_sample_cap);
 #undef CFG
 
   pfht_.assign(P.pfht_entries ? P.pfht_entries : 1, pf_track{});
