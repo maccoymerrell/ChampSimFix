@@ -485,6 +485,7 @@ struct params {
   uint32_t perc_feat_mask = 0x3F;        // enabled feature tables (bit0 PC,1 off,2 eng,3 depth,4 use,5 tim,6 conf,7 pattern-sig)
   bool perc_pe_signonly = false;         // variance-reduce PE: train on sign(PE)+margin with a FIXED step (not magnitude-scaled)
   std::size_t perc_sig_entries = 1024;   // per-prediction spatial-pattern-signature table (SPPAM key); orthogonal to per-PC usefulness
+  bool perc_pe_norm = false;             // variance-reduce PE: normalize by a ROLLING MEAN of |PE| before quantizing (scale-invariant -> robust to the DSE's unreliable absolute latencies); step then = |PE|/mean clamped to perc_pe_step_max
   std::size_t perc_track_cap = 16384;    // outstanding-prefetch feature snapshots (block->features), trained on EVERY
                                          // hit/eviction outcome -- the dense training trigger (the sampled per-IP
                                          // usefulness/timeliness are FEATURES, not the training signal)
@@ -989,7 +990,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(pv_sample_directmap); SET(pv_sample_ttl); SET(pv_sample_evict_div);
   SET(pv_adaptive_rate); SET(pv_rate_window); SET(pv_churn_hi); SET(pv_churn_lo); SET(pv_div_min); SET(pv_div_max);
   SET(enable_perceptron_filter); SET(perc_pc_entries); SET(perc_weight_max); SET(perc_tau_keep);
-  SET(perc_theta_train); SET(perc_explore_div); SET(perc_label_pe); SET(perc_pe_margin); SET(perc_track_cap); SET(perc_pe_scale); SET(perc_pe_step_max); SET(perc_feat_mask); SET(perc_pe_signonly); SET(perc_sig_entries);
+  SET(perc_theta_train); SET(perc_explore_div); SET(perc_label_pe); SET(perc_pe_margin); SET(perc_track_cap); SET(perc_pe_scale); SET(perc_pe_step_max); SET(perc_feat_mask); SET(perc_pe_signonly); SET(perc_sig_entries); SET(perc_pe_norm);
   SET(pv_feed_confidence); SET(pv_conf_penalty);
   SET(prob_drop_prefetches); SET(global_or_pattern_usefulness); SET(adaptive_usefulness);
   SET(pattern_usefulness_cutoff); SET(use_default_prediction); SET(default_pattern); SET(default_prediction);
