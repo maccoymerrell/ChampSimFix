@@ -107,6 +107,13 @@ struct params {
                                        // AMAT -- cc5 is pollution-limited so throttling HELPS it; sierra is
                                        // coverage-limited and the estimate cannot catch it. Proper gate is
                                        // pollution-based (PE I_POLL), TODO. 100 = never disables.
+  // IP-filter table geometry (DSE-swept). The historical 4096 x uint32 impl was a ~16x over-provision:
+  // a coarse per-IP throttle needs far fewer buckets, and the counters saturate + decay (ip_filter_age_shift)
+  // so a byte suffices. iphash() masks to ip_table_entries; every per-IP array (useful/useless/gate + optional
+  // ev/untimely + optional bwd) is ip_table_entries x ip_ctr_bits.
+  uint32_t ip_table_entries = 4096;    // per-trigger-IP bucket count (power of 2)
+  uint32_t ip_ctr_bits = 8;            // saturating width of each per-IP counter
+  uint32_t evicted_unused_cap = 2048;  // bound on the depth-throttle re-demand watch list (block->IP)
   uint32_t ip_sample_div = 4;          // sample 1/N issued prefetches into the block->IP attribution table
   uint64_t ip_track_timeout = 50000;   // cycles: a pinned in-flight sample older than this is stale ->
                                        // reclaimed and counted USELESS (sppam_b USELESS_ON_TIMEOUT), so
@@ -702,114 +709,176 @@ struct params {
   // Hardware storage estimate (bits), ported from the original SPPAM
   // get_state_bits() accounting (assuming a 48-bit address space). Lets every
   // configuration be checked against a realistic L2-prefetcher budget.
-  uint64_t state_bits() const
+  // Per-term hardware storage breakdown (bits). Every PERSISTENT structure the predictor allocates is
+  // accounted here, gated by the SAME flags that allocate it in the constructor, so the total is exact for
+  // ANY configuration -- not a byte unaccounted. Diagnostic-only structures (region-density report, exact
+  // shadow mirror) are deliberately excluded: they are measurement instruments, not proposed hardware.
+  struct state_terms {
+    uint64_t region = 0, staging = 0, pattern = 0, cpt = 0, llc = 0, misc = 0, spp = 0, mgmt = 0,
+             instr = 0, am = 0, ipf = 0, ip_dir = 0, cold = 0, dpht = 0, xpage = 0, rbloom = 0, rstage = 0;
+    uint64_t total() const
+    {
+      return region + staging + pattern + cpt + llc + misc + spp + mgmt + instr + am + ipf + ip_dir
+           + cold + dpht + xpage + rbloom + rstage;
+    }
+  };
+
+  state_terms state_breakdown() const
   {
     auto lg2 = [](uint64_t x) { uint64_t r = 0; while (x > 1) { x >>= 1; ++r; } return r; };
     const uint64_t bpr = blocks_per_region();
+    const uint64_t off_bits = lg2(bpr);
+    state_terms t;
 
-    // Region table: tag (indexed vpn) + next/prev vpn + access/prefetch bitmaps
-    // + scrape counters + lru.
-    // tag (indexed vpn) + optional next/prev shadow-page links.
-    uint64_t region = region_tag_bits + (account_shadow_links ? region_tag_bits * 2 : 0); // hashed short tag
-    region += bpr * 2;
-    region += scrape_on_idle ? lg2(scrape_idle_time) : 0;
-    region += scrape_on_count ? lg2(scrape_access_count) : 0;
-    region += lg2(region_ways);
-    region *= region_sets * region_ways;
+    // ---- Region table (main): every per-entry field of region_type, each gated exactly as it is allocated/used.
+    uint64_t rpe = region_tag_bits;                                        // hashed short tag
+    rpe += account_shadow_links ? (2 * region_tag_bits + 2) : 0;           // next/prev vpn tags + has_next/has_prev
+    rpe += bpr * 2;                                                        // access_map + prefetch_map
+    rpe += 4;                                                             // momentum (saturating direction)
+    rpe += off_bits;                                                      // last_block (last touched offset)
+    rpe += scrape_on_idle ? lg2(scrape_idle_time) : 0;
+    rpe += scrape_on_count ? lg2(scrape_access_count) : 0;
+    rpe += lg2(region_ways);                                             // lru age
+    rpe += (pattern_pc_bits > 0) ? static_cast<uint64_t>(pattern_pc_bits) : 0;               // pc_pht: per-region PC context
+    rpe += (pattern_context_bits > 0) ? static_cast<uint64_t>(pattern_context_bits) : 0;     // pat_ctx
+    rpe += (enable_cold_start && cold_start_pc) ? lg2(cold_start_entries) : 0;                // entry_ip key
+    rpe += (enable_cross_page || cross_page) ? (region_tag_bits + 1) : 0;                     // xkey (hashed) + xkey_set
+    rpe += (region_evict_policy == 6) ? 24 : 0;                          // pf_used + pf_dead (12b each)
+    rpe += (region_evict_policy == 7) ? 12 : 0;                          // dmiss
+    rpe += delta_pht ? bpr : 0;                                          // delta_map usefulness bits
+    rpe += pattern_perceptron ? (bpr * 8) : 0;                           // block_ip per-block PC hash
+    if (enable_spp && spp_share_region_table)
+      rpe += off_bits + spp_sig_bits;                                    // SPP last_offset + signature folded in
+    t.region = rpe * region_sets * region_ways;
+    if (enable_two_level)
+      t.staging = rpe * stage_sets * stage_ways;                         // staging entries are region_type too
 
-    // Pattern table(s): a TAGGED set-associative table of pattern_table_sets x pattern_table_ways, ONE per
-    // prediction order. PC/context WIDEN the key (pattern_size + pattern_pc_bits + pattern_context_bits) but
-    // the table is sized to the hot working set -- FAR below the 2^key space, most of which is cold -- so it
-    // stores a tag (the key bits above the set index) and tolerates conflict evictions. Per entry: tag +
-    // prediction (per-bit counters, or the conf table) + occurrence count (confidence denominator) + optional
-    // per-pattern usefulness + lru. Doubled for a separate negative (backward) table.
+    // ---- Pattern table(s): TAGGED set-assoc, one per prediction order, x2 for a separate negative table.
+    // Per entry: tag (key bits above the set index) + prediction (per-bit counters or the conf table) +
+    // occurrence count + optional usefulness + optional perceptron weights + lru.
     uint64_t n_orders = 1;
     for (uint32_t s = pattern_size; s > min_pattern_size && s > 0; s /= 2) ++n_orders;
     const uint64_t key_bits = pattern_size + pattern_context_bits + pattern_pc_bits;
     const uint64_t set_idx_bits = lg2(pattern_table_sets);
-    const uint64_t tag_bits = key_bits > set_idx_bits ? key_bits - set_idx_bits : 1; // ~0 only when sets==keyspace (direct-mapped)
+    const uint64_t tag_bits = key_bits > set_idx_bits ? key_bits - set_idx_bits : 1; // ~0 only when sets==keyspace
     const uint64_t pred_bits = table_or_counter ? (pattern_size * 7)
                              : (pattern_conf_ways * pattern_conf_sets) * (pattern_size + 7 + lg2(pattern_conf_ways));
     const uint64_t use_bits = (adaptive_usefulness || global_or_pattern_usefulness) ? (lg2(pattern_usefulness_sample) * 2 + 4) : 0;
-    const uint64_t occ_bits = 12; // occurrence count (confidence = counter/occ)
-    const uint64_t per_entry = tag_bits + pred_bits + occ_bits + use_bits + lg2(pattern_table_ways);
-    uint64_t pattern = per_entry * pattern_table_sets * pattern_table_ways * n_orders * ((do_negative && separate_negative_tables) ? 2 : 1);
+    const uint64_t pw_bits = pattern_perceptron ? (static_cast<uint64_t>(pattern_size) * static_cast<uint64_t>(pp_hist_bits < 0 ? 0 : pp_hist_bits) * 8) : 0;
+    const uint64_t occ_bits = 12;
+    const uint64_t per_entry = tag_bits + pred_bits + occ_bits + use_bits + pw_bits + lg2(pattern_table_ways);
+    t.pattern = per_entry * pattern_table_sets * pattern_table_ways * n_orders * ((do_negative && separate_negative_tables) ? 2 : 1);
 
-    // Cross-page tracker (hashed short tag).
-    uint64_t cpt = (8 + 1 + region_tag_bits) * cpt_sets * cpt_ways;
+    // ---- Cross-page tracker + shadow LLC-residency map (both hashed short tags).
+    t.cpt = (8 + 1 + region_tag_bits) * cpt_sets * cpt_ways;
+    t.llc = llc_region_sets * llc_region_ways * (region_tag_bits + bpr);
 
-    // Shadow LLC-residency map (hashed short tag).
-    uint64_t llc = llc_region_sets * llc_region_ways * (region_tag_bits + bpr);
+    // ---- Misc global counters (+ region-thrash re-reference tag ring).
+    t.misc = (lg2(global_usefulness_sample) * 2 + 4) + (lg2(region_lifespan_sample) * 2 + 4) + (4 + 4 + 8);
+    if (enable_region_thrash_throttle) t.misc += 16 + region_thrash_table * region_tag_bits; // EMA reg + tag ring (rev_tags_)
 
-    // Misc counters (global usefulness, lifespan sampler, lookahead reg, etc.).
-    uint64_t misc = (lg2(global_usefulness_sample) * 2 + 4) + (lg2(region_lifespan_sample) * 2 + 4) + (4 + 4 + 8);
-    if (enable_region_thrash_throttle) misc += 16; // region-thrash EMA register
-
-    // SPP-lite delta prefetcher.
-    uint64_t spp = 0;
+    // ---- SPP-lite delta prefetcher: PT + ST (or region-shared) + optional per-sig filter + optional GHR.
     if (enable_spp) {
-      const uint64_t off_bits = lg2(blocks_per_region());       // last_offset within a region
       const uint64_t delta_bits = 7, conf_bits = spp_conf_bits;
-      // Hashed set-assoc PT: per way = sig tag + lru + delta candidates.
       uint64_t per_way = spp_sig_bits + lg2(spp_pt_ways) + spp_deltas_per_sig * (delta_bits + conf_bits);
-      // Per-pattern usefulness throttle: a used/seen counter pair on each PT entry,
-      // plus a small SAMPLED block->sig filter (partial block tag + sig tag + valid).
       uint64_t per_sig_state = 0;
       if (spp_per_sig_usefulness) {
         per_way += 2 * spp_usefulness_bits;
         per_sig_state = spp_pf_filter_entries * (16 /*partial block tag*/ + spp_sig_bits + 1);
       }
-      const uint64_t pt = spp_pt_sets * spp_pt_ways * per_way;
-      if (spp_share_region_table) {
-        // No separate ST; every region entry gains {last_offset, signature}.
-        region += (off_bits + spp_sig_bits) * region_sets * region_ways;
-        spp = pt;
-      } else {
+      t.spp = spp_pt_sets * spp_pt_ways * per_way + per_sig_state;
+      if (!spp_share_region_table) {                                     // shared case already added last_offset+sig to region
         const uint64_t st_tag = 48 - lg2(region_bits);
-        const uint64_t st = spp_st_entries * (st_tag + off_bits + spp_sig_bits);
-        spp = pt + st;
+        t.spp += spp_st_entries * (st_tag + off_bits + spp_sig_bits);
       }
-      spp += per_sig_state;
+      if (spp_ghr) t.spp += spp_ghr_entries * (spp_sig_bits + off_bits + 1); // ghr_ (sig + landing offset + valid)
     }
 
-    // Bandwidth-management overhead (PE management, bandwidth feedback/market).
+    // ---- Bandwidth/PE management overhead (per-L2-line source tags + PE counters + feedback/market regs).
     uint64_t mgmt = 0;
     if (enable_pe_management) {
-      // Per-L2-line source tags: from_spp + from_dram (1 bit each). Both are needed
-      // -- attribute a useful prefetch to its prefetcher AND split L_LLC/L_DRAM for
-      // I_UPF (dropping from_dram cost the victim ~7%). A PfHT loses too much
-      // attribution here (prefetches used long after fill), so per-line is required.
-      mgmt += 2 * l2_sets * l2_ways;
-      // Per-prefetcher PE counters + snapshots + on/off state (x2 prefetchers).
+      mgmt += 2 * l2_sets * l2_ways;                                     // from_spp + from_dram per L2 line
       mgmt += 2 * (32 + 32 + 32 + 32 + lg2(pe_throttle_div + 1)) + lg2(pe_phase);
     }
-    if (enable_bw_feedback)
-      mgmt += 16 * 5 /*prefetch_degrees_bw*/ + 16 /*miss EMA + bw_util reg*/;
-    if (enable_bw_market)
-      mgmt += 16; // market threshold register
-    mgmt += 2 * 48; // shared: L_DRAM running mean + in-flight-demand register
+    if (enable_bw_feedback) mgmt += 16 * 5 + 16;
+    if (enable_bw_market) mgmt += 16;
+    mgmt += 2 * 48;                                                      // shared: L_DRAM running mean + in-flight register
+    t.mgmt = mgmt;
 
-    // Branch-graph instruction prefetcher (IP-space): tagged 2-delta edge table + vpage->ppage
-    // translation table + physical residency filter.
-    uint64_t instr = 0;
+    // ---- Branch-graph instruction prefetcher: tagged 2-delta edge table + vpage->ppage xlate + residency filter.
     if (enable_instr_prefetch) {
       auto po2 = [](uint64_t n) { uint64_t r = 1; while (r < n) r <<= 1; return r; };
       const uint64_t db = (instr_delta_bits > 0 && instr_delta_bits <= 16) ? instr_delta_bits : 8;
-      const uint64_t per_edge = 16 /*hashed tag*/ + 1 /*valid*/ + 2 * db /*deltas*/ + 2 * 4 /*4-bit counters*/;
-      instr += po2(instr_table_entries) * per_edge;
-      // Translation: per entry a vpage tag + physical page number (48-bit space, 4 KiB pages -> 36-bit VPN/PPN).
-      instr += po2(instr_xlate_entries) * (36 + 36);
-      instr += po2(instr_filter_entries) * 16; // 16-bit block tag per residency bucket (approximate)
+      const uint64_t per_edge = 16 + 1 + 2 * db + 2 * 4;
+      t.instr = po2(instr_table_entries) * per_edge + po2(instr_xlate_entries) * (36 + 36);
+      if (!instr_packed_residency)                                       // packed residency reuses SPPAM's maps -> no private filter
+        t.instr += po2(instr_filter_entries) * 16;
     }
 
-    // Access-map bloom: blocks_per_region filters x am_bloom_size bits + per-offset counter/hand.
-    uint64_t am = 0;
+    // ---- Access-map bloom.
     if (enable_am_bloom)
-      am = blocks_per_region() * (static_cast<uint64_t>(am_bloom_size) + lg2(am_bloom_clear_thresh) + lg2(am_bloom_size));
+      t.am = bpr * (static_cast<uint64_t>(am_bloom_size) + lg2(am_bloom_clear_thresh) + lg2(am_bloom_size));
 
-    return region + pattern + cpt + llc + misc + spp + mgmt + instr + am;
+    // ---- IP-filter tables: per-IP throttle counters + sampled block->{pattern,IP} attribution + validation.
+    {
+      const uint64_t E = ip_table_entries ? ip_table_entries : 1;
+      const uint64_t iph_bits = lg2(E);
+      const uint64_t samp_entry = 16 /*block tag*/ + iph_bits + lg2(pattern_size + 2) /*position*/ + 1 /*bwd*/;
+      if (enable_ip_filter) {
+        uint64_t arrays = 3;                                            // useful + useless + gate_ctr
+        if (ip_filter_depth_throttle) arrays += 2;                      // ev + untimely
+        if (bwd_useful_gate) arrays += 2;                               // bwd_useful + bwd_useless
+        t.ipf += arrays * E * ip_ctr_bits;
+      }
+      if (enable_ip_filter || pattern_validate)                         // pf_sample_ shared by filtering & validation
+        t.ipf += pv_sample_cap * samp_entry;
+      if (enable_ip_filter && ip_filter_depth_throttle)                 // evicted_unused_ re-demand watch list (block->IP)
+        t.ipf += evicted_unused_cap * (16 + iph_bits);
+      if (pattern_validate) {                                           // pat_val_ (u,n) keyed by the pattern key
+        const uint64_t pv_entries = (key_bits < 20) ? (uint64_t{1} << key_bits) : (uint64_t{1} << 20);
+        t.ipf += pv_entries * (2 * 12);
+      }
+    }
+
+    // ---- Per-IP stride-direction table (fixed 256 x int8; feeds neg_dir_pc / ip_direction).
+    if (ip_direction || neg_dir_pc) t.ip_dir = 256 * 8;
+
+    // ---- Cold-start PC-keyed delta table (delta + confidence).
+    if (enable_cold_start && cold_start_pc) t.cold = cold_start_entries * (8 + 4);
+
+    // ---- Delta-PHT (spatial-context -> signed delta) + per-region speculative/walk overlays.
+    if (delta_pht) {
+      t.dpht = static_cast<uint64_t>(delta_pht_sets) * delta_pht_ways * (16 /*tag*/ + 8 /*delta*/ + spp_conf_bits) + bpr;
+      if (walk_accumulate) t.dpht += 3 * bpr;                           // walk_spec_/issued_/acc_ overlays
+    }
+
+    // ---- Cross-page value table (xpht_): per key a bpr-wide count vector + occ (bounded like the tracker).
+    if (enable_cross_page || cross_page)
+      t.xpage = static_cast<uint64_t>(cpt_sets) * cpt_ways * (region_tag_bits + bpr * 8 + 12);
+
+    // ---- Residency bloom + region-staging spatial gate.
+    if (enable_resid_bloom) t.rbloom = resid_bloom_bits;
+    if (enable_region_staging) t.rstage = staging_entries * (16 /*tag*/ + 8 /*count*/);
+
+    return t;
   }
+
+  uint64_t state_bits() const { return state_breakdown().total(); }
   double state_kib() const { return static_cast<double>(state_bits()) / 8.0 / 1024.0; }
+
+  // Human-readable per-term breakdown in KiB (for budget audits). Terms are omitted when zero.
+  std::string state_report() const
+  {
+    const state_terms t = state_breakdown();
+    auto kib = [](uint64_t bits) { const uint64_t x = (bits * 10 + 4096) / 8192; return std::to_string(x / 10) + "." + std::to_string(x % 10); };
+    std::string s = "state " + kib(t.total()) + " KiB =";
+    auto add = [&](const char* n, uint64_t b) { if (b) s += " " + std::string(n) + "=" + kib(b); };
+    add("region", t.region); add("staging", t.staging); add("pattern", t.pattern); add("cpt", t.cpt);
+    add("llc", t.llc); add("misc", t.misc); add("spp", t.spp); add("mgmt", t.mgmt); add("instr", t.instr);
+    add("am", t.am); add("ipf", t.ipf); add("ip_dir", t.ip_dir); add("cold", t.cold); add("dpht", t.dpht);
+    add("xpage", t.xpage); add("rbloom", t.rbloom); add("rstage", t.rstage);
+    return s;
+  }
 };
 
 // Overrides any subset of fields present in `j`.
@@ -827,6 +896,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(ip_filter_use_pe_phase); SET(ip_pe_phase_soft); SET(ip_pe_phase_hard); SET(ip_pe_phase_margin);
   SET(ip_filter_depth_throttle); SET(ip_depth_mid); SET(ip_depth_min); SET(ip_untimely_thresh); SET(ip_depth_hitrate_min); SET(ip_depth_mlp_max);
   SET(ip_filter_max_useful_loss); SET(ip_sample_div); SET(ip_track_timeout);
+  SET(ip_table_entries); SET(ip_ctr_bits); SET(evicted_unused_cap);
   SET(enable_fallthrough); SET(fallthrough_explore_div);
   SET(enable_spp); SET(spp_st_entries); SET(spp_sig_bits); SET(spp_lookahead); SET(spp_threshold); SET(spp_share_region_table); SET(spp_usefulness_feedback);
   SET(spp_ghr); SET(spp_ghr_entries); SET(spp_min_delta); SET(spp_min_conf); SET(spp_multi_high_throttle);
