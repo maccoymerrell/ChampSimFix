@@ -135,6 +135,7 @@ public:
     if ((P.pattern_validate || P.enable_ip_filter) && P.pv_sample_directmap) {
       std::size_t n = 1; while (n < P.pv_sample_cap) n <<= 1;   // fixed direct-mapped sample table (power of two)
       pf_sdm_.assign(n, pf_samp_t{}); pf_sdm_mask_ = static_cast<uint32_t>(n - 1);
+      pv_div_cur_ = P.pv_div_min ? P.pv_div_min : 1;            // adaptive rate starts at the floor, backs off as churn rises
     }
   }
 
@@ -940,6 +941,7 @@ private:
   std::vector<pf_samp_t> pf_sdm_;                        // fixed direct-mapped table w/ probabilistic eviction (pv_sample_directmap=true)
   uint32_t pf_sdm_mask_ = 0;
   static uint64_t sdm_idx(uint64_t b) { return (b * 0x9E3779B97F4A7C15ull) >> 24; }
+  uint32_t pv_div_cur_ = 4, pv_win_place_ = 0, pv_win_churn_ = 0; // adaptive sample-rate controller
   struct pat_val_t { uint32_t u = 0, n = 0; };
   std::unordered_map<uint64_t, pat_val_t> pat_val_;      // pattern key -> validated useful / useless counts
   std::vector<uint32_t> ip_useful_, ip_useless_;         // per-trigger-IP-bucket sampled useful / useless (ip_n_ entries)
@@ -1068,7 +1070,9 @@ private:
   {
     if (!P.pattern_validate && !P.enable_ip_filter) return;
     pv_lfsr_ ^= pv_lfsr_ << 13; pv_lfsr_ ^= pv_lfsr_ >> 17; pv_lfsr_ ^= pv_lfsr_ << 5;
-    if (pv_lfsr_ % static_cast<uint32_t>(P.ip_sample_div ? P.ip_sample_div : 1) != 0) return;
+    const uint32_t div = (P.pv_sample_directmap && P.pv_adaptive_rate) ? pv_div_cur_
+                       : (P.ip_sample_div ? P.ip_sample_div : 1);
+    if (pv_lfsr_ % (div ? div : 1) != 0) return;
     const pf_samp_t ns{pk, static_cast<uint16_t>(iph), static_cast<int8_t>(bit), backward,
                        static_cast<uint32_t>(block), static_cast<uint32_t>(cycle_), true};
     if (P.pv_sample_directmap) {
@@ -1077,9 +1081,19 @@ private:
       // lifetime -- a much smaller table then resolves as many samples as the big clear-on-full map.
       pf_samp_t& slot = pf_sdm_[sdm_idx(block) & pf_sdm_mask_];
       const bool stale = slot.occ && (static_cast<uint32_t>(cycle_) - slot.stamp) > P.pv_sample_ttl;
+      bool churn = false;                                      // displaced a LIVE (unresolved, non-stale) incumbent
       if (!slot.occ || stale) slot = ns;                       // free / aged-out -> take it
       else { pv_lfsr_ ^= pv_lfsr_ << 7;                        // occupied by a live incumbent -> evict only 1/N
-             if (pv_lfsr_ % (P.pv_sample_evict_div ? P.pv_sample_evict_div : 1) == 0) slot = ns; } // else drop new sample
+             if (pv_lfsr_ % (P.pv_sample_evict_div ? P.pv_sample_evict_div : 1) == 0) { slot = ns; churn = true; } } // else drop new sample
+      if (P.pv_adaptive_rate) {                                // self-tune div to hold the churn rate in [lo,hi]%
+        ++pv_win_place_; if (churn) ++pv_win_churn_;
+        if (pv_win_place_ >= P.pv_rate_window) {
+          const uint32_t ch = 100u * pv_win_churn_ / pv_win_place_;
+          if (ch > P.pv_churn_hi && pv_div_cur_ < P.pv_div_max) pv_div_cur_ <<= 1;        // too much churn -> sample less
+          else if (ch < P.pv_churn_lo && pv_div_cur_ > P.pv_div_min) pv_div_cur_ >>= 1;   // headroom -> sample more
+          pv_win_place_ = pv_win_churn_ = 0;
+        }
+      }
     } else {
       if (pf_sample_.size() >= P.pv_sample_cap) pf_sample_.clear(); // legacy crude bound; sampling tolerates loss
       pf_sample_[block] = ns;

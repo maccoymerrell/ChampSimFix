@@ -100,6 +100,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(instr_nextn); CFG(instr_packed_residency);
   CFG(pattern_validate); CFG(pv_feed_confidence); CFG(pv_conf_penalty); CFG(pv_sample_div); CFG(pv_min_samples); CFG(pv_bad_pct); CFG(pv_sample_cap);
   CFG(pv_sample_directmap); CFG(pv_sample_ttl); CFG(pv_sample_evict_div); // direct-mapped probabilistic sample table
+  CFG(pv_adaptive_rate); CFG(pv_rate_window); CFG(pv_churn_hi); CFG(pv_churn_lo); CFG(pv_div_min); CFG(pv_div_max); // adaptive sample rate
 #undef CFG
 
   pfht_.assign(P.pfht_entries ? P.pfht_entries : 1, pf_track{});

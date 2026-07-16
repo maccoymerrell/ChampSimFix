@@ -449,6 +449,18 @@ struct params {
   bool pv_sample_directmap = false;
   uint32_t pv_sample_ttl = 4096;         // ops before an unresolved in-flight sample becomes reclaimable
   uint32_t pv_sample_evict_div = 4;      // on a collision, replace the incumbent only 1/N of the time
+  // Adaptive sampling rate (directmap only). The sample table is a short-lived issue->resolve holding area;
+  // with only ~64 active IPs and PERSISTENT decaying per-IP/pattern counters, we don't need many CONCURRENT
+  // samples -- so we can shrink the table hard and SAMPLE LESS to match. This controller self-tunes
+  // ip_sample_div to hold the rate at which live (unresolved) incumbents are displaced -- the "forced
+  // eviction" churn -- inside [pv_churn_lo, pv_churn_hi]%: too much churn -> sample less (raise div), plenty
+  // of headroom -> sample more (lower div). Decouples table size from prefetch volume.
+  bool pv_adaptive_rate = false;
+  uint32_t pv_rate_window = 2048;        // sample placements per rate adjustment
+  uint32_t pv_churn_hi = 25;             // % of placements displacing a live incumbent, above which -> sample less
+  uint32_t pv_churn_lo = 6;              // ...below which -> sample more
+  uint32_t pv_div_min = 4;               // sample-rate divisor floor
+  uint32_t pv_div_max = 256;             // ...and ceiling
   // Feed the precise validation back INTO the confidence values (prediction_counter): a proven-useless prediction
   // is penalized so it falls below threshold and the position-bitmap goes SILENT there (natural fall-through to SPP);
   // a proven-useful one is reinforced. This is validation-as-confidence-contributor (vs pv_bad_pct's separate gate).
@@ -942,6 +954,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(walk_thresh_cap); SET(walk_jump_relief); SET(walk_advance); SET(walk_usefulness_throttle); SET(walk_replace); SET(walk_fallthrough); SET(walk_ft_usefulness); SET(walk_setduel);
   SET(pattern_validate); SET(pv_sample_div); SET(pv_min_samples); SET(pv_bad_pct); SET(pv_sample_cap);
   SET(pv_sample_directmap); SET(pv_sample_ttl); SET(pv_sample_evict_div);
+  SET(pv_adaptive_rate); SET(pv_rate_window); SET(pv_churn_hi); SET(pv_churn_lo); SET(pv_div_min); SET(pv_div_max);
   SET(pv_feed_confidence); SET(pv_conf_penalty);
   SET(prob_drop_prefetches); SET(global_or_pattern_usefulness); SET(adaptive_usefulness);
   SET(pattern_usefulness_cutoff); SET(use_default_prediction); SET(default_pattern); SET(default_prediction);
