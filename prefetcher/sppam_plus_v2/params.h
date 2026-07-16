@@ -466,6 +466,20 @@ struct params {
   uint32_t pv_churn_lo = 6;              // ...below which -> sample more
   uint32_t pv_div_min = 4;               // sample-rate divisor floor
   uint32_t pv_div_max = 256;             // ...and ceiling
+
+  // --- Perceptron prefetch filter (PROTOTYPE; predictor logic lives in the DSE copy until validated) ---
+  // One LEARNED gate that supersedes the heuristic throttles (ip-filter volume/depth, backward gate, etc.).
+  // Hashed-perceptron: score = sum of small per-feature weight tables; keep if score >= perc_tau_keep. Features:
+  // trigger PC, region offset, engine, lookahead depth, + the pre-aggregated per-IP usefulness/timeliness buckets.
+  // Trained at sample resolution on usefulness (perc_label_pe -> PE-sign instead). See perceptron_filter_design.md.
+  bool enable_perceptron_filter = false;
+  std::size_t perc_pc_entries = 1024;    // per-PC weight table depth (power of two)
+  int perc_weight_max = 31;              // saturating weight bound (~6-bit signed)
+  int perc_tau_keep = 0;                 // keep if score >= this (<=0 = permissive cold start)
+  int perc_theta_train = 24;             // train when |score| < this OR the decision was wrong (confidence margin)
+  uint32_t perc_explore_div = 16;        // issue 1/N of "drop" decisions anyway (exploration -> counterfactual labels)
+  bool perc_label_pe = false;            // train on PE-sign (needs the glue's PE sampling) instead of usefulness
+  int perc_pe_margin = 0;                // with perc_label_pe: only train when |PE| exceeds this (skip the noisy middle)
   // Feed the precise validation back INTO the confidence values (prediction_counter): a proven-useless prediction
   // is penalized so it falls below threshold and the position-bitmap goes SILENT there (natural fall-through to SPP);
   // a proven-useful one is reinforced. This is validation-as-confidence-contributor (vs pv_bad_pct's separate gate).
@@ -966,6 +980,8 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(pattern_validate); SET(pv_sample_div); SET(pv_min_samples); SET(pv_bad_pct); SET(pv_sample_cap);
   SET(pv_sample_directmap); SET(pv_sample_ttl); SET(pv_sample_evict_div);
   SET(pv_adaptive_rate); SET(pv_rate_window); SET(pv_churn_hi); SET(pv_churn_lo); SET(pv_div_min); SET(pv_div_max);
+  SET(enable_perceptron_filter); SET(perc_pc_entries); SET(perc_weight_max); SET(perc_tau_keep);
+  SET(perc_theta_train); SET(perc_explore_div); SET(perc_label_pe); SET(perc_pe_margin);
   SET(pv_feed_confidence); SET(pv_conf_penalty);
   SET(prob_drop_prefetches); SET(global_or_pattern_usefulness); SET(adaptive_usefulness);
   SET(pattern_usefulness_cutoff); SET(use_default_prediction); SET(default_pattern); SET(default_prediction);
