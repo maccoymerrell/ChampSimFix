@@ -15,13 +15,13 @@
  */
 
 #include "tracereader.h"
-#include "wrong_path_tracereader.h"
 
 #include <fstream>
 #include <string>
 
 #include "inf_stream.h"
 #include "repeatable.h"
+#include "wrong_path_tracereader.h"
 
 namespace champsim
 {
@@ -57,8 +57,12 @@ using repeatable_reader_t = champsim::repeatable<champsim::bulk_tracereader<T, S
 
 champsim::tracereader get_tracereader(const std::string& fname, uint8_t cpu, bool is_cloudsuite, bool repeat, bool wrong_path_trace)
 {
-  if (wrong_path_trace) {
+  if (wrong_path_trace && !repeat) {
     return champsim::tracereader{champsim::wrong_path_tracereader(fname, cpu)};
+  }
+
+  if (wrong_path_trace && repeat) {
+    return champsim::tracereader{champsim::repeatable<champsim::wrong_path_tracereader, const std::string, const uint8_t>(fname, cpu)};
   }
 
   if (is_cloudsuite && repeat) {

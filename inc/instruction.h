@@ -94,10 +94,20 @@ struct program_ordered {
 };
 } // namespace champsim
 
+namespace detail
+{
+template <typename SourceType, typename TargetType>
+auto type_caster = [](const SourceType& src) -> TargetType {
+  return static_cast<TargetType>(src);
+};
+} // namespace detail
+
 struct ooo_model_instr : champsim::program_ordered<ooo_model_instr> {
   champsim::address ip{};
   champsim::chrono::clock::time_point ready_time{};
 
+  uint8_t instr_size = 0; // TODO: Remove
+  uint64_t raw_ip = 0;    // TODO: Remove
   bool is_branch = false;
   bool branch_taken = false;
   bool branch_prediction = false;
@@ -194,6 +204,17 @@ private:
 public:
   ooo_model_instr(uint8_t cpu, input_instr instr) : ooo_model_instr(instr, {cpu, cpu}) {}
   ooo_model_instr(uint8_t /*cpu*/, cloudsuite_instr instr) : ooo_model_instr(instr, {instr.asid[0], instr.asid[1]}) {}
+  ooo_model_instr(const uint64_t ip_, const bool is_branch_, const bool branch_taken_, const uint8_t cpu, const branch_type br_type,
+                  const std::vector<uint8_t>& dst_reg, const std::vector<uint8_t>& src_reg, const std::vector<uint64_t>& dst_mem,
+                  const std::vector<uint64_t>& src_mem, const uint8_t instr_size_)
+      : ip(ip_), instr_size(instr_size_), raw_ip(ip_), is_branch(is_branch_), branch_taken(branch_taken_), asid({cpu, cpu}), branch(br_type)
+  {
+    std::transform(std::begin(dst_reg), std::end(dst_reg), std::back_inserter(this->destination_registers),
+                   detail::type_caster<uint64_t, PHYSICAL_REGISTER_ID>);
+    std::transform(std::begin(src_reg), std::end(src_reg), std::back_inserter(this->source_registers), detail::type_caster<uint64_t, PHYSICAL_REGISTER_ID>);
+    std::transform(std::begin(dst_mem), std::end(dst_mem), std::back_inserter(this->destination_memory), detail::type_caster<uint64_t, champsim::address>);
+    std::transform(std::begin(src_mem), std::end(src_mem), std::back_inserter(this->source_memory), detail::type_caster<uint64_t, champsim::address>);
+  }
 
   [[nodiscard]] std::size_t num_mem_ops() const { return std::size(destination_memory) + std::size(source_memory); }
 };

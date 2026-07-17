@@ -31,11 +31,10 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
-#include <iomanip>
-#include <iostream>
 #include <libtar.h>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <boost/bimap.hpp>
@@ -46,16 +45,16 @@
 
 #include "inf_stream.h"
 #include "instruction.h"
-#include "util/detect.h"
 #include "wrong_path_tracereader_verification_constants.h"
 
 namespace champsim
 {
 class wrong_path_tracereader
 {
-  const uint8_t cpu;
-  const std::string trace_file;
+  uint8_t cpu;
+  std::string trace_file;
   std::filesystem::path trace_extract_dir;
+  bool moved = false;
 
   void cleanup() const { std::filesystem::remove_all(trace_extract_dir); }
 
@@ -85,22 +84,22 @@ class wrong_path_tracereader
   template <const char* magic, const std::size_t magic_length, const std::size_t position>
   bool check_file_type(const std::string& file_name) const;
 
-  std::function<bool(const std::string&)> is_tar = [this](const std::string& file_name) -> bool {
+  std::function<bool(const std::string&)> is_tar = [this] [[nodiscard]] (const std::string& file_name) -> bool {
     return check_file_type<tar_magic, sizeof(tar_magic), tar_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_gzip = [this](const std::string& file_name) -> bool {
+  std::function<bool(const std::string&)> is_gzip = [this] [[nodiscard]] (const std::string& file_name) -> bool {
     return (file_name.substr(std::size(file_name) - 2) == "gz") && check_file_type<gzip_magic, sizeof(gzip_magic), gzip_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_lzma = [this](const std::string& file_name) -> bool {
+  std::function<bool(const std::string&)> is_lzma = [this] [[nodiscard]] (const std::string& file_name) -> bool {
     return (file_name.substr(std::size(file_name) - 2) == "xz") && check_file_type<lzma_magic, sizeof(lzma_magic), lzma_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_bzip2 = [this](const std::string& file_name) -> bool {
+  std::function<bool(const std::string&)> is_bzip2 = [this] [[nodiscard]] (const std::string& file_name) -> bool {
     return (file_name.substr(std::size(file_name) - 3) == "bz2") && check_file_type<bzip2_magic, sizeof(bzip2_magic), bzip2_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_zstd = [this](const std::string& file_name) -> bool {
+  std::function<bool(const std::string&)> is_zstd = [this] [[nodiscard]] (const std::string& file_name) -> bool {
     return (file_name.substr(std::size(file_name) - 3) == "zst") && check_file_type<zstd_magic, sizeof(zstd_magic), zstd_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_lz4 = [this](const std::string& file_name) -> bool {
+  std::function<bool(const std::string&)> is_lz4 = [this] [[nodiscard]] (const std::string& file_name) -> bool {
     return (file_name.substr(std::size(file_name) - 3) == "lz4") && check_file_type<lz4_magic, sizeof(lz4_magic), lz4_magic_position>(file_name);
   };
 
@@ -177,6 +176,14 @@ class wrong_path_tracereader
         retval |= chunk;                          // Add the bits to the decoded value
         chunk_id++;
       }
+
+      // Perform sign extension
+      const bool sign_bit = ((chunks.back() & 0x7f) >> 6); // The last element of chunks holds the MSB byte
+      uint64_t sign_extension_mask = sign_bit ? 0xffffffff'ffffffff : 0x00000000'00000000;
+      sign_extension_mask >>= chunk_id * 7;
+      sign_extension_mask <<= chunk_id * 7;
+      retval |= sign_extension_mask;
+
       return retval;
     }
 
@@ -184,12 +191,12 @@ class wrong_path_tracereader
     [[nodiscard]] std::bitset<512> sleb_wide_decoder(const std::vector<char>& chunks) const noexcept
     {
       std::size_t bit_idx = 0;
-      bool msb = static_cast<bool>(chunks.back() & 0x40);
+      const bool msb = static_cast<bool>(chunks.back() & 0x40);
 
       std::bitset<512> parsed_bits;
       parsed_bits.reset();
       for (auto i = chunks.rbegin(); i != chunks.rend(); i++) {
-        uint8_t chunk = static_cast<uint8_t>(*i & 0x7f);
+        const uint8_t chunk = static_cast<uint8_t>(*i & 0x7f);
         parsed_bits <<= 7;
         parsed_bits |= chunk;
         bit_idx += 7;
@@ -207,7 +214,7 @@ class wrong_path_tracereader
 
     [[nodiscard]] char read()
     {
-      auto byte = decompress();
+      const auto byte = decompress();
       if (!byte)
         throw std::runtime_error("[ERROR] Ran out of compressed stream. Exiting...");
 
@@ -226,6 +233,8 @@ class wrong_path_tracereader
 
       if (chunks.size() > 10)
         throw std::runtime_error("[ERROR] ULEB of more than 10 bytes detected");
+      if (chunks.size() == 0)
+        throw std::runtime_error("[ERROR] Empty ULEB detected");
 
       return uleb_decoder(chunks);
     }
@@ -242,6 +251,8 @@ class wrong_path_tracereader
 
       if (chunks.size() > 10)
         throw std::runtime_error("[ERROR] SLEB of more than 10 bytes detected");
+      if (chunks.size() == 0)
+        throw std::runtime_error("[ERROR] Empty SLEB detected");
 
       return sleb_decoder(chunks);
     }
@@ -258,6 +269,8 @@ class wrong_path_tracereader
 
       if (chunks.size() > 74)
         throw std::runtime_error("[ERROR] SLEB_WIDE of more than 74 bytes detected");
+      if (chunks.size() == 0)
+        throw std::runtime_error("[ERROR] Empty SLEB_WIDE detected");
 
       return sleb_wide_decoder(chunks);
     }
@@ -285,7 +298,7 @@ class wrong_path_tracereader
     [[nodiscard]] double parse_f64()
     {
       double retval = 0.0f;
-      auto bytes = read_bytes(8);
+      const auto bytes = read_bytes(8);
       std::memcpy(&retval, bytes.data(), 8);
       return retval;
     }
@@ -375,7 +388,7 @@ class wrong_path_tracereader
     };
 
     typedef boost::bimap<std::string, uint64_t> bimap_type;
-    typedef bimap_type::value_type position;
+    typedef bimap_type::value_type ids_value_type;
     std::map<std::string, bimap_type> ids;
     std::map<uint32_t, Template> templates;
 
@@ -394,10 +407,10 @@ class wrong_path_tracereader
     {
       const std::size_t bytes_to_read = sizeof(prolog.fixed_size.magic_bytes) + sizeof(prolog.fixed_size.isa) + sizeof(prolog.fixed_size.flags);
 
-      auto buffer = compressed_header_stream.read_bytes(bytes_to_read);
+      const auto buffer = compressed_header_stream.read_bytes(bytes_to_read);
       std::memcpy(&(prolog.fixed_size), std::data(buffer), bytes_to_read);
 
-      fmt::print("Magic = {:X}\nISA = {:X}\nFlags = {:#010b}\n", prolog.fixed_size.magic_bytes, prolog.fixed_size.isa, prolog.fixed_size.flags);
+      fmt::print(stderr, "Magic = {:X}\nISA = {:X}\nFlags = {:#010b}\n", prolog.fixed_size.magic_bytes, prolog.fixed_size.isa, prolog.fixed_size.flags);
 
       using namespace wrong_path_trace_constants;
       if (prolog.fixed_size.magic_bytes != magic_bytes)
@@ -411,7 +424,8 @@ class wrong_path_tracereader
       prolog.total_target_instructions = compressed_header_stream.parse_uleb();
       prolog.simpoint_weight = compressed_header_stream.parse_f64();
 
-      fmt::print("Start Instructions = {}\nWarmup Instructions = {}\n"
+      fmt::print(stderr,
+                 "Start Instructions = {}\nWarmup Instructions = {}\n"
                  "Total Target Instructions = {}\nSimPoint Weight = {}\n",
                  prolog.start_instructions, prolog.warmup_instructions, prolog.total_target_instructions, prolog.simpoint_weight);
     }
@@ -429,27 +443,27 @@ class wrong_path_tracereader
       prolog.comment = compressed_header_stream.parse_string();
       prolog.target_name = compressed_header_stream.parse_string();
 
-      fmt::print("Command = {}\nDatetime = {}\nComment = {}\nTarget Name = {}\n", prolog.command, prolog.datetime, prolog.comment, prolog.target_name);
+      fmt::print(stderr, "Command = {}\nDatetime = {}\nComment = {}\nTarget Name = {}\n", prolog.command, prolog.datetime, prolog.comment, prolog.target_name);
     }
 
     void parse_encoding_maps()
     {
       const uint64_t encoding_size = compressed_header_stream.parse_uleb();
-      const auto initial_bytes_read = compressed_header_stream.total_bytes_read;
+      const uint64_t initial_bytes_read = compressed_header_stream.total_bytes_read;
 
       const uint64_t n_maps = compressed_header_stream.parse_uleb();
-      fmt::print("Reading {} maps of size {} bytes\n", n_maps, encoding_size);
+      fmt::print(stderr, "Reading {} maps of size {} bytes\n", n_maps, encoding_size);
       for (uint64_t i = 0; i < n_maps; i++) {
         const std::string map_name = compressed_header_stream.parse_string();
         const uint64_t n_entries = compressed_header_stream.parse_uleb();
 
-        fmt::print("Reading {} values from {}\n", n_entries, map_name);
+        fmt::print(stderr, "Reading {} values from {}\n", n_entries, map_name);
         for (uint64_t j = 0; j < n_entries; j++) {
           const uint64_t value = compressed_header_stream.parse_uleb();
           const std::string name = compressed_header_stream.parse_string();
-          ids[map_name].insert(position(name, value));
+          ids[std::move(map_name)].insert(std::move(ids_value_type(std::move(name), value)));
 
-          fmt::print("[{}] {}->{}\n", map_name, value, name);
+          fmt::print(stderr, "[{}] {}->{}\n", map_name, value, name);
         }
       }
 
@@ -497,7 +511,8 @@ class wrong_path_tracereader
           dep.store_addr_dep.emplace_back(compressed_header_stream.parse_uleb());
       }
 
-      fmt::print("New Dependency Block\n"
+      fmt::print(stderr,
+                 "New Dependency Block\n"
                  "\tFlags = {:#010b}\n"
                  "\tDestination Dependencies = {::#x}\n"
                  "\tStore Data Dependencies = {::#x}\n"
@@ -528,7 +543,8 @@ class wrong_path_tracereader
       instr.instr_size = static_cast<uint8_t>(compressed_header_stream.read());
       instr.instr_bytes = compressed_header_stream.read_bytes(static_cast<std::size_t>(instr.instr_size));
 
-      fmt::print("New Instruction:\n"
+      fmt::print(stderr,
+                 "New Instruction:\n"
                  "\tPC Delta = {}\n"
                  "\tOpcode = {}\n"
                  "\tBranch Type = {}\n"
@@ -544,7 +560,7 @@ class wrong_path_tracereader
                  instr.pc_delta, instr.opcode, instr.branch_type, instr.flags, instr.n_src, instr.n_dst, instr.src_regs, instr.dst_regs, instr.max_dep_loads,
                  instr.max_dep_stores, instr.instr_size, instr.instr_bytes);
       if (instr.immidiate)
-        fmt::print("\tImmediate = {:#x}\n", instr.immidiate.value());
+        fmt::print(stderr, "\tImmediate = {:#x}\n", instr.immidiate.value());
 
       if (instr.flags & ids["insn_flag"].left.at("CST_INSN_FLAG_HAS_DEP_BLOCK"))
         instr.dependency = parse_dependency(instr.n_dst, instr.max_dep_stores, instr.max_dep_loads);
@@ -585,7 +601,8 @@ class wrong_path_tracereader
         }
       }
 
-      fmt::print("Profile Block detected\n"
+      fmt::print(stderr,
+                 "Profile Block detected\n"
                  "\tExec CP {}\n"
                  "\tExec WP {}\n"
                  "\tTaken CP {}\n"
@@ -620,7 +637,8 @@ class wrong_path_tracereader
         templates[template_id].targets.emplace_back(compressed_header_stream.parse_uleb());
       templates[template_id].symbol_name = compressed_header_stream.parse_string();
 
-      fmt::print("Template {}:\n\tStart PC = {:#x}\n\tNumber of Instructions = {}\n\t"
+      fmt::print(stderr,
+                 "Template {}:\n\tStart PC = {:#x}\n\tNumber of Instructions = {}\n\t"
                  "Fall Through PC = {:#x}\n\tSymbol Name = {}\n\tNumber of Targets = {}\n\t"
                  "Targets = {::#x}\n",
                  template_id, templates[template_id].start_pc, templates[template_id].num_instr, templates[template_id].fall_through_pc,
@@ -640,7 +658,7 @@ class wrong_path_tracereader
     void parse_templates()
     {
       const uint64_t num_templates = compressed_header_stream.parse_uleb();
-      fmt::print("Reading {} templates\n", num_templates);
+      fmt::print(stderr, "Reading {} templates\n", num_templates);
 
       for (uint64_t i = 0; i < num_templates; i++)
         parse_one_template();
@@ -668,7 +686,7 @@ class wrong_path_tracereader
   {
   public:
     virtual ooo_model_instr read() = 0;
-    virtual bool eof() const noexcept = 0;
+    virtual bool eof() const = 0;
     virtual ~body_wrapper() = default;
   };
 
@@ -680,6 +698,7 @@ class wrong_path_tracereader
     const header_wrapper& header;
     bool eof_ = false; // Set to true when the compressed_body_stream runs out
     const uint8_t cpu;
+    uint32_t last_template_id; // Used for IFRAME validate. Set by handle_entry consumed by handle_iframe
 
     // Note: The trace contains register file values but ChampSim doesn't care about them. We maintain this regfile for posterity's sake only
     std::map<uint64_t, std::map<uint64_t, std::bitset<512>>> regfile;
@@ -691,17 +710,21 @@ class wrong_path_tracereader
 
       overlay_key(const uint32_t tid, const uint64_t ip) : template_id(tid), ipos(ip) {}
       [[nodiscard]] bool operator<(const overlay_key& other) const noexcept { return std::tie(template_id, ipos) < std::tie(other.template_id, other.ipos); }
+      std::string format() const noexcept { return fmt::format("(Template ID = {}, Instruction Position = {})", template_id, ipos); }
     };
-    std::map<overlay_key, std::map<uint64_t, std::bitset<512>>> overlay;
+    std::map<overlay_key, std::map<uint64_t, std::bitset<512>>> overlay; // Each overlay value is a fid -> delta map
 
     // Members needed to read the trace in bulk
     constexpr static std::size_t buffer_size = 128;
-    std::deque<ooo_model_instr> instr_buffer;
+    std::deque<ooo_model_instr> instr_buffer; // Holds the decoded instructions without branch instruction fixes
+    // TODO: Remove this
+    std::deque<ooo_model_instr> instr_buffer_fixed; // Holds the decoded instructions with branch instruction fixes
 
     // Members needed to walk the trace
     uint32_t previous_template_id = 0;
     uint32_t previous_thread_id = 0;
     uint32_t seq_num = 0;
+    uint64_t cp_instruction_num = 0; // Counts the number of parsed correct path instructions
     std::set<uint64_t> valid_body_tags;
 
     struct field_delta_section {
@@ -769,10 +792,10 @@ class wrong_path_tracereader
     void verify_integrity()
     {
       uint32_t trace_magic_bytes;
-      auto buffer = compressed_body_stream.read_bytes(sizeof(trace_magic_bytes));
+      const auto buffer = compressed_body_stream.read_bytes(sizeof(trace_magic_bytes));
       std::memcpy(&trace_magic_bytes, std::data(buffer), sizeof(trace_magic_bytes));
 
-      fmt::print("Body Magic Bytes = {:X}\n", trace_magic_bytes);
+      fmt::print(stderr, "Body Magic Bytes = {:X}\n", trace_magic_bytes);
 
       // Verify integrity
       using namespace wrong_path_trace_constants;
@@ -781,12 +804,172 @@ class wrong_path_tracereader
             fmt::format("[ERROR] Can't verify integrity of trace body. Magic bytes don't match. Expected {:X}, got {:X}", magic_bytes, trace_magic_bytes));
     }
 
-    [[nodiscard]] ooo_model_instr generate_instruction(const header_wrapper::Instruction& /*instruction_template*/,
-                                                       const std::map<uint64_t, std::bitset<512>>& /*deltas*/) const
+    [[nodiscard]] ooo_model_instr generate_instruction(uint64_t& instruction_pc, const header_wrapper::Instruction& instruction_template,
+                                                       const std::map<uint64_t, std::bitset<512>>& deltas)
     {
-#warning "incomplete implementation"
-      // TODO: Finish this
-      throw std::runtime_error(fmt::format("[ERROR] {} is not implemented\n", __PRETTY_FUNCTION__));
+      // Useful functions
+      auto bitset_to_uint64_t = [] [[nodiscard]] (const std::bitset<512>& bits) -> uint64_t {
+        try {
+          return static_cast<uint64_t>(bits.to_ullong());
+        } catch (const std::overflow_error& er) {
+          throw std::runtime_error(fmt::format("[ERROR] Can't cast bitset with value {} to uint64_t", bits.to_string()));
+        }
+      };
+
+      auto extract_suffix = [] [[nodiscard]] (const std::string& str, const char* prefix) constexpr noexcept -> uint64_t {
+        uint64_t value;
+        const std::string suffix_string = str.substr(std::string_view(prefix).size());
+        std::istringstream iss(std::move(suffix_string));
+        iss >> value;
+        return value;
+      };
+
+      // Compute the PC
+      instruction_pc += instruction_template.pc_delta;
+
+      // Apply the overlays
+      uint8_t opcode_id = instruction_template.opcode;
+      uint8_t branch_type_id = instruction_template.branch_type;
+      std::vector<uint64_t> src_mem, dst_mem;
+      uint64_t n_loads = 0;
+      uint64_t n_stores = 0;
+      uint64_t max_observed_load_count = 0;
+      uint64_t max_observed_store_count = 0;
+      for (const auto& [fid, delta] : deltas) {
+        const std::string& fid_name = header.ids.at("field_id").right.at(fid);
+        if (fid_name == "CST_FID_N_LOADS") {
+          n_loads = bitset_to_uint64_t(delta);
+        } else if (fid_name == "CST_FID_N_STORES") {
+          n_stores = bitset_to_uint64_t(delta);
+        } else if (fid_name == "CST_FID_METAFLAGS") {
+          /* Not implemented */
+        } else if (fid_name.rfind("CST_FID_LOAD_ADDR", 0) == 0) {
+          src_mem.emplace_back(bitset_to_uint64_t(delta));
+          max_observed_load_count = std::max(max_observed_load_count, extract_suffix(fid_name, "CST_FID_LOAD_ADDR"));
+        } else if (fid_name.rfind("CST_FID_STORE_ADDR", 0) == 0) {
+          dst_mem.emplace_back(bitset_to_uint64_t(delta));
+          max_observed_store_count = std::max(max_observed_store_count, extract_suffix(fid_name, "CST_FID_STORE_ADDR"));
+        } else if (fid_name.rfind("CST_FID_LOAD_DATA", 0) == 0) {
+          /* Not implemented */
+          max_observed_load_count = std::max(max_observed_load_count, extract_suffix(fid_name, "CST_FID_LOAD_DATA"));
+        } else if (fid_name.rfind("CST_FID_STORE_DATA", 0) == 0) {
+          /* Not implemented */
+          max_observed_store_count = std::max(max_observed_store_count, extract_suffix(fid_name, "CST_FID_STORE_DATA"));
+        } else if (fid_name.rfind("CST_FID_DST_REG", 0) == 0) {
+          const uint64_t reg_index = extract_suffix(fid_name, "CST_FID_DST_REG");
+          if (reg_index >= instruction_template.dst_regs.size())
+            throw std::runtime_error(
+                fmt::format("[ERROR] Observed data for register #{} for an instruction with {} registers", reg_index, instruction_template.dst_regs.size()));
+          const uint64_t reg_id = instruction_template.dst_regs.at(reg_index);
+          regfile[previous_thread_id][reg_id] = delta;
+        } else if (fid_name.rfind("CST_FID_LOAD_SIZE", 0) == 0) {
+          /* Not implemented */
+          max_observed_load_count = std::max(max_observed_load_count, extract_suffix(fid_name, "CST_FID_LOAD_SIZE"));
+        } else if (fid_name.rfind("CST_FID_STORE_SIZE", 0) == 0) {
+          /* Not implemented */
+          max_observed_store_count = std::max(max_observed_store_count, extract_suffix(fid_name, "CST_FID_STORE_SIZE"));
+        } else if (fid_name.rfind("CST_FID_DST_REG_WIDTH", 0) == 0) {
+          /* Not implemented */
+        } else if (fid_name.rfind("CST_FID_SRC_LANE_MASK", 0) == 0) {
+          /* Not implemented */
+        } else if (fid_name.rfind("CST_FID_DST_LANE_MASK", 0) == 0) {
+          /* Not implemented */
+        } else if (fid_name.rfind("CST_FID_LOAD_DATA_LANE_MASK", 0) == 0) {
+          /* Not implemented */
+        } else if (fid_name.rfind("CST_FID_STORE_DATA_LANE_MASK", 0) == 0) {
+          /* Not implemented */
+        } else if (fid_name == "CST_FID_INSN_BYTES_LO") {
+          /* Not implemented */
+        } else if (fid_name == "CST_FID_INSN_BYTES_HI") {
+          /* Not implemented */
+        } else if (fid_name == "CST_FID_INSN_OPCODE") {
+          opcode_id = static_cast<uint8_t>(bitset_to_uint64_t(delta));
+        } else if (fid_name == "CST_FID_INSN_BRANCH_TYPE") {
+          branch_type_id = static_cast<uint8_t>(bitset_to_uint64_t(delta));
+        } else if (fid_name == "CST_FID_INSN_FLAGS") {
+          /* Not implemented */
+        } else if (fid_name == "CST_FID_INSN_IMMEDIATE") {
+          /* Not implemented */
+        } else if (fid_name == "CST_FID_INSN_SIZE") {
+          /* Not implemented */
+        } else if (fid_name == "CST_FID_EXTENDED") {
+          /* Not implemented */
+        } else {
+          throw std::runtime_error(fmt::format("[ERROR] Unknown FID: {} detected", fid_name));
+        }
+      }
+      if (max_observed_load_count > n_loads) {
+        throw std::runtime_error(fmt::format("[ERROR] Observed data for load #{} for an instruction with {} loads", max_observed_load_count, n_loads));
+      }
+      if (max_observed_store_count > n_stores) {
+        throw std::runtime_error(fmt::format("[ERROR] Observed data for store #{} for an instruction with {} stores", max_observed_store_count, n_stores));
+      }
+
+      // Identify if this instruction is a branch or not
+      if (header.ids.find("opcode") == header.ids.end())
+        throw std::runtime_error("[ERROR] Opcode encoding map is missing");
+      if (header.ids.at("opcode").right.find(opcode_id) == header.ids.at("opcode").right.end())
+        throw std::runtime_error(fmt::format("[ERROR] Found an instruction with unknown opcode ID {}", opcode_id));
+      const std::string& opcode_name = header.ids.at("opcode").right.at(opcode_id);
+
+      const std::set<std::string> branch_opcodes{"GEN_OP_BRANCH", "GEN_OP_RET", "GEN_OP_SYSCALL"};
+      const bool is_branch = (branch_opcodes.find(opcode_name) != branch_opcodes.end());
+
+      // TODO: Identify branch direction via FIDs
+      const bool branch_taken = false; // Branch direction is fixed later
+
+      branch_type br_type{NOT_BRANCH};
+      if (is_branch) {
+        if (header.ids.find("branch_type") == header.ids.end())
+          throw std::runtime_error("[ERROR] Branch Type encoding map is missing");
+        if (header.ids.at("branch_type").right.find(branch_type_id) == header.ids.at("branch_type").right.end())
+          throw std::runtime_error(fmt::format("[ERROR] Found an branch instruction with unknown type ID {}", branch_type_id));
+        const std::string& branch_type_name = header.ids.at("branch_type").right.at(branch_type_id);
+
+        if (branch_type_name == "BRANCH_NONE")
+          throw std::runtime_error("[ERROR] Can't infer whether instruction is a branch instruction or not");
+        else if (branch_type_name == "BRANCH_DIRECT_JUMP")
+          br_type = branch_type::BRANCH_DIRECT_JUMP;
+        else if (branch_type_name == "BRANCH_INDIRECT_JUMP")
+          br_type = branch_type::BRANCH_INDIRECT;
+        else if (branch_type_name == "BRANCH_DIRECT_CALL")
+          br_type = branch_type::BRANCH_DIRECT_CALL;
+        else if (branch_type_name == "BRANCH_INDIRECT_CALL")
+          br_type = branch_type::BRANCH_INDIRECT_CALL;
+        else if (branch_type_name == "BRANCH_RETURN")
+          br_type = branch_type::BRANCH_RETURN;
+        else if (branch_type_name == "BRANCH_SYSCALL_TYPE")
+          br_type = branch_type::BRANCH_DIRECT_CALL;
+        else if (branch_type_name == "BRANCH_COND_DIRECT")
+          br_type = branch_type::BRANCH_DIRECT_JUMP;
+        else if (branch_type_name == "BRANCH_REP")
+          br_type = branch_type::BRANCH_OTHER;
+      }
+
+      std::vector<std::string> dst_reg_names;
+      for (const auto& reg : instruction_template.dst_regs)
+        dst_reg_names.emplace_back(header.ids.at("reg").right.at(reg));
+      std::vector<std::string> src_reg_names;
+      for (const auto& reg : instruction_template.src_regs)
+        src_reg_names.emplace_back(header.ids.at("reg").right.at(reg));
+      std::string branch_type_name = "NOT_BRANCH";
+      if (br_type == branch_type::BRANCH_DIRECT_JUMP) {
+        branch_type_name = "BRANCH_DIRECT_JUMP";
+      } else if (br_type == branch_type::BRANCH_INDIRECT) {
+        branch_type_name = "BRANCH_INDIRECT";
+      } else if (br_type == branch_type::BRANCH_DIRECT_CALL) {
+        branch_type_name = "BRANCH_DIRECT_CALL";
+      } else if (br_type == branch_type::BRANCH_INDIRECT_CALL) {
+        branch_type_name = "BRANCH_INDIRECT_CALL";
+      } else if (br_type == branch_type::BRANCH_RETURN) {
+        branch_type_name = "BRANCH_RETURN";
+      } else if (br_type == branch_type::BRANCH_OTHER) {
+        branch_type_name = "BRANCH_OTHER";
+      }
+
+      // Construct an ooo_model_instr and return
+      return ooo_model_instr(instruction_pc, is_branch, branch_taken, cpu, br_type, instruction_template.dst_regs, instruction_template.src_regs, dst_mem,
+                             src_mem, instruction_template.instr_size);
     }
 
     // Applies the deltas to the overlays and constructs a vector of ooo_model_instr from a single body entry
@@ -794,11 +977,12 @@ class wrong_path_tracereader
     {
 #warning "WP is not supported yet"
       // TODO: Add support for WP
-      fmt::print("Generating instructions from template {}\n", entry.template_id);
+
+      fmt::print(stderr, "Generating instructions from template {}\n", entry.template_id);
 
       if (header.templates.find(entry.template_id) == header.templates.end())
         throw std::runtime_error(fmt::format("[ERROR] Unknown template ID {} found", entry.template_id));
-      auto& instructions = header.templates.at(entry.template_id).instructions;
+      const auto& instructions = header.templates.at(entry.template_id).instructions;
 
       // Apply the overlay delta changes
       const auto& deltas = entry.cp_delta.records;
@@ -810,17 +994,17 @@ class wrong_path_tracereader
         const overlay_key key(entry.template_id, delta.ipos);
         if (overlay.find(key) == overlay.end())
           overlay[key][delta.fid] = delta.delta;
-
-        overlay[key][delta.fid] = add_bitset(overlay[key][delta.fid], delta.delta);
+        else
+          overlay[key][delta.fid] = add_bitset(overlay[key][delta.fid], delta.delta);
       }
 
-      // Generate the instructions
       const std::size_t num_instr = instructions.size();
       std::vector<ooo_model_instr> retvec;
       retvec.reserve(num_instr);
+      auto pc = header.templates.at(entry.template_id).start_pc;
       for (uint64_t ipos = 0; ipos < num_instr; ipos++) {
         const overlay_key key(entry.template_id, ipos);
-        retvec.emplace_back(generate_instruction(instructions[ipos], overlay[key]));
+        retvec.emplace_back(generate_instruction(pc, instructions[ipos], overlay[key]));
       }
 
       return retvec;
@@ -856,9 +1040,9 @@ class wrong_path_tracereader
 
     [[nodiscard]] field_delta_section read_field_delta_section(uint32_t& ipos)
     {
-      fmt::print("Reading Field Delta Section\n");
       field_delta_section field_delta;
-      ipos = static_cast<uint32_t>(static_cast<uint64_t>(ipos) + compressed_body_stream.parse_uleb());
+      const uint64_t ipos_delta = compressed_body_stream.parse_uleb();
+      ipos = static_cast<uint32_t>(static_cast<uint64_t>(ipos) + ipos_delta);
       field_delta.ipos = ipos;
       field_delta.fid = compressed_body_stream.parse_uleb();
       field_delta.delta = compressed_body_stream.parse_sleb_wide();
@@ -871,18 +1055,27 @@ class wrong_path_tracereader
 
     [[nodiscard]] delta_section read_cp_delta_section()
     {
-      fmt::print("Reading Correct Path Delta Section\n");
+      const uint64_t section_size = compressed_body_stream.parse_uleb();
+      const uint64_t initial_bytes_read = compressed_body_stream.total_bytes_read;
+
       delta_section cp_delta;
       const uint64_t n_records = compressed_body_stream.parse_uleb();
       uint32_t ipos = 0;
       for (uint64_t i = 0; i < n_records; i++)
         cp_delta.records.emplace_back(read_field_delta_section(ipos));
+
+      if (compressed_body_stream.total_bytes_read - initial_bytes_read != section_size) {
+        throw std::runtime_error("[ERROR] Correct Path Delta section overflowed its size");
+      }
+
       return cp_delta;
     }
 
     [[nodiscard]] wp_chain_section read_wp_chain_section()
     {
-      fmt::print("Reading Wrong Path Chain Section\n");
+      const uint64_t section_size = compressed_body_stream.parse_uleb();
+      const uint64_t initial_bytes_read = compressed_body_stream.total_bytes_read;
+
       wp_chain_section wp_chain;
       wp_chain.num_wp = compressed_body_stream.parse_uleb();
       for (uint64_t i = 0; i < wp_chain.num_wp; i++) {
@@ -890,12 +1083,18 @@ class wrong_path_tracereader
         wp_chain.wp_deltas.emplace_back(read_cp_delta_section());
       }
 
+      if (compressed_body_stream.total_bytes_read - initial_bytes_read != section_size) {
+        throw std::runtime_error("[ERROR] Wrong Path Chain section overflowed its size");
+      }
+
       return wp_chain;
     }
 
     [[nodiscard]] wp_events_section read_wp_events_section()
     {
-      fmt::print("Reading Wrong Path Events Section\n");
+      const uint64_t section_size = compressed_body_stream.parse_uleb();
+      const uint64_t initial_bytes_read = compressed_body_stream.total_bytes_read;
+
       wp_events_section wp_events;
       wp_events.num_events = compressed_body_stream.parse_uleb();
       int32_t wp_index = -1;
@@ -913,43 +1112,58 @@ class wrong_path_tracereader
 
 #warning "incomplete implementation"
       // TODO: Do something here
+
+      if (compressed_body_stream.total_bytes_read - initial_bytes_read != section_size) {
+        throw std::runtime_error("[ERROR] Wrong Path Events section overflowed its size");
+      }
+
       return wp_events;
     }
 
     [[nodiscard]] body_entry handle_entry()
     {
-      fmt::print("Decoding BODY_TAG_ENTRY section\n");
       body_entry retval;
-      const int64_t template_id_delta = compressed_body_stream.parse_sleb();
 
+      const int64_t template_id_delta = compressed_body_stream.parse_sleb();
+      const uint32_t current_template_id = static_cast<uint32_t>(static_cast<int64_t>(previous_template_id) + template_id_delta);
+      if (header.templates.find(current_template_id) == header.templates.end())
+        throw std::runtime_error(fmt::format("[ERROR] Unknown template ID {} found in trace body. Exiting...\n", current_template_id));
+      previous_template_id = current_template_id;
+      seq_num += 1;
+
+      retval.template_id = current_template_id;
       retval.cp_delta = read_cp_delta_section();
       if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
         retval.wp_chain = read_wp_chain_section();
         retval.wp_events = read_wp_events_section();
       }
 
-      // Get the current correct path template
-      const uint32_t current_template_id = static_cast<uint32_t>(static_cast<int64_t>(previous_template_id) + template_id_delta);
-      if (header.templates.find(current_template_id) == header.templates.end())
-        throw std::runtime_error(fmt::format("[ERROR] Unknown template ID {} found in trace body. Exiting...\n", current_template_id));
-      retval.template_id = current_template_id;
-
-      previous_template_id = current_template_id;
-      seq_num += 1;
-
+      last_template_id = retval.template_id; // Record the most recent template ID. Used for IFRAME validation
       return retval;
     }
 
     void handle_iframe()
     {
+#warning "Wrong Path validation not implemented"
+      // TODO: Implement wrong path validation
+
       delta_section cp_delta = read_cp_delta_section();
       if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
         wp_chain_section wp_chain = read_wp_chain_section();
         wp_events_section wp_events = read_wp_events_section();
       }
 
-#warning "incomplete implementation"
-      // TODO: Validate the state here
+      // Validate the overlay state
+      const auto& deltas = cp_delta.records;
+      for (const auto& delta : deltas) {
+        const overlay_key key(last_template_id, delta.ipos);
+        if (overlay.find(key) == overlay.end())
+          throw std::runtime_error(fmt::format("[ERROR] IFRAME validation failed! Overlay key {} not found in the overlay map", key.format()));
+        if (overlay[key][delta.fid] != delta.delta)
+          throw std::runtime_error(
+              fmt::format("[ERROR] IFRAME validation failed! Delta value mismatch for key {} and FID {}\n\tExpected Value = {}\n\tStored Value = {}",
+                          key.format(), delta.fid, delta.delta.to_string(), overlay[key][delta.fid].to_string()));
+      }
     }
 
     void handle_end()
@@ -966,29 +1180,23 @@ class wrong_path_tracereader
     }
 
     // Reads the next instruction from the trace, constructs an ooo_model_instr from it, and return it
-    [[nodiscard]] std::vector<ooo_model_instr> get_next_instr()
+    [[nodiscard]] std::vector<ooo_model_instr> get_next_instrs()
     {
       while (true) {
         const uint8_t tag = compressed_body_stream.read();
         if (valid_body_tags.find(tag) == valid_body_tags.end())
           throw std::runtime_error(fmt::format("[ERROR] Found unexpected tag value of {}. Expected values: {}. Exiting...", tag, valid_body_tags));
 
-        fmt::print("Found tag ID = {}: ", tag);
-        if (tag == header.ids.at("body_tag").left.at("BODY_TAG_THREAD_SWITCH")) {
-          fmt::print("BODY_TAG_THREAD_SWITCH\n");
+        if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_THREAD_SWITCH") {
           handle_thread_switch();
-        } else if (tag == header.ids.at("body_tag").left.at("BODY_TAG_REGFILE")) {
-          fmt::print("BODY_TAG_REGFILE\n");
+        } else if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_REGFILE") {
           handle_regfile();
-        } else if (tag == header.ids.at("body_tag").left.at("BODY_TAG_ENTRY")) {
-          fmt::print("BODY_TAG_ENTRY\n");
+        } else if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_ENTRY") {
           const body_entry entry = handle_entry();
           return construct_instructions(entry);
-        } else if (tag == header.ids.at("body_tag").left.at("BODY_TAG_IFRAME")) {
-          fmt::print("BODY_TAG_IFRAME\n");
+        } else if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_IFRAME") {
           handle_iframe();
-        } else if (tag == header.ids.at("body_tag").left.at("BODY_TAG_END")) {
-          fmt::print("BODY_TAG_END\n");
+        } else if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_END") {
           handle_end();
           return {};
         }
@@ -996,10 +1204,15 @@ class wrong_path_tracereader
     }
 
     // Returns the next instruction from the instruction buffer
-    [[nodiscard]] ooo_model_instr pop_from_instr_buffer() noexcept
+    [[nodiscard]] ooo_model_instr pop_from_instr_buffer()
     {
-      auto retval = instr_buffer.front();
-      instr_buffer.pop_front();
+      // TODO: Revert back to instr_buffer
+      if (instr_buffer_fixed.size() == 0)
+        throw std::runtime_error(fmt::format("[ERROR] Attempting to pop from empty instruction buffer"));
+
+      const auto retval = instr_buffer_fixed.front();
+      instr_buffer_fixed.pop_front();
+      cp_instruction_num++;
       return retval;
     }
 
@@ -1011,7 +1224,7 @@ class wrong_path_tracereader
 
       using namespace wrong_path_trace_constants;
       for (const auto& [_, value] : header.ids.at("body_tag"))
-        valid_body_tags.insert(value);
+        valid_body_tags.emplace(std::move(value));
     }
 
     [[nodiscard]] ooo_model_instr read() override
@@ -1019,7 +1232,8 @@ class wrong_path_tracereader
       // No more instruction left in the stream
       if (eof_) {
         // Drain the buffer
-        if (instr_buffer.size() > 0)
+        // TODO: Revert back to instr_buffer
+        if (instr_buffer_fixed.size() > 0)
           return pop_from_instr_buffer();
 
         // We should never reach this point
@@ -1027,13 +1241,39 @@ class wrong_path_tracereader
       }
 
       // Time to re-fill the buffer
-      if ((instr_buffer.size() == 0)) {
-        const std::size_t num_instr_to_fill = buffer_size - instr_buffer.size();
-        for (std::size_t i = 0; i < num_instr_to_fill; i++) {
-          auto instrs = get_next_instr();
-          instr_buffer.insert(std::end(instr_buffer), std::begin(instrs), std::end(instrs));
-          if (instrs.size() == 0)
-            eof_ = true;
+      // TODO: Revert back to instr_buffer
+      if ((instr_buffer_fixed.size() == 0)) {
+        if (instr_buffer.size() == 0) { // Populate the instr_buffer if its empty
+          while (instr_buffer.size() < buffer_size) {
+            const auto instrs = get_next_instrs();
+            instr_buffer.insert(std::end(instr_buffer), std::make_move_iterator(std::begin(instrs)), std::make_move_iterator(std::end(instrs)));
+            if (instrs.size() == 0) {
+              eof_ = true;
+              break;
+            }
+          }
+        }
+
+        // Populate the instr_buffer_fixed using instr_buffer
+        // TODO: Revert back to instr_buffer
+        using iter_type = typename decltype(instr_buffer)::iterator;
+        iter_type i = instr_buffer.begin();
+        while (i != instr_buffer.end()) {
+          if (!(*i).is_branch) { // All non-branch instruction can be moved directly
+            instr_buffer_fixed.emplace_back(std::move(*i));
+            instr_buffer.erase(i);
+            i = instr_buffer.begin();
+          } else {
+            // The instruction after the branch is available
+            if (std::distance(i, instr_buffer.end()) > 0) {
+              iter_type target = i + 1; // j points to the instruction executed after the branch
+              (*i).branch_taken = ((*i).raw_ip + (*i).instr_size) != (*target).raw_ip;
+              instr_buffer_fixed.emplace_back(std::move(*i));
+              instr_buffer.erase(i);
+              i = instr_buffer.begin();
+            } else
+              i++;
+          }
         }
       }
 
@@ -1041,7 +1281,15 @@ class wrong_path_tracereader
       return pop_from_instr_buffer();
     }
 
-    [[nodiscard]] bool eof() const noexcept override { return (instr_buffer.size() == 0 && eof_); }
+    [[nodiscard]] bool eof() const override
+    {
+      const bool retval = (instr_buffer.size() == 0 && eof_);
+      if (retval && (header.prolog.total_target_instructions != cp_instruction_num))
+        throw std::runtime_error(fmt::format("[ERROR] Trace has {} correct path instructions, but only {} were parsed", header.prolog.total_target_instructions,
+                                             cp_instruction_num));
+
+      return retval;
+    }
 
     ~body_parser() override = default;
   };
@@ -1050,7 +1298,15 @@ class wrong_path_tracereader
   std::unique_ptr<body_wrapper> body_stream = nullptr;
 
 public:
-  [[nodiscard]] ooo_model_instr operator()() { return body_stream->read(); }
+  [[nodiscard]] ooo_model_instr operator()()
+  {
+    const ooo_model_instr& instr = body_stream->read();
+
+    fmt::print(stderr, "{:x}: branch = {}, taken = {}, dst regs = {}, src regs = {}\n", instr.raw_ip, instr.is_branch, instr.branch_taken,
+               instr.destination_registers, instr.source_registers);
+
+    return instr;
+  }
 
   wrong_path_tracereader(const std::string& tf, const uint8_t cpu_idx) : cpu(cpu_idx), trace_file(tf)
   {
@@ -1067,6 +1323,19 @@ public:
   {
   }
 
+  wrong_path_tracereader& operator=(wrong_path_tracereader& other) = default;
+  wrong_path_tracereader& operator=(wrong_path_tracereader&& other)
+  {
+    this->cleanup(); // Reset the state of this object
+    this->cpu = std::move(other.cpu);
+    this->trace_file = std::move(other.trace_file);
+    this->trace_extract_dir = std::move(other.trace_extract_dir);
+    this->header_stream = std::move(other.header_stream);
+    this->construct_body_stream(); // Create a fresh copy of the body stream
+    other.moved = true;            // Prevent deleting the extracted trace directory
+    return *this;
+  }
+
   [[nodiscard]] bool eof() const
   {
     if (!body_stream)
@@ -1075,7 +1344,11 @@ public:
     return body_stream->eof();
   };
 
-  ~wrong_path_tracereader() { cleanup(); }
+  ~wrong_path_tracereader()
+  {
+    if (!moved)
+      cleanup();
+  }
 };
 
 void wrong_path_tracereader::parse_trace()
@@ -1086,7 +1359,6 @@ void wrong_path_tracereader::parse_trace()
   construct_header_stream();
   header_stream->parse();
   construct_body_stream();
-  std::cout << std::flush;
 }
 
 // Verifies the magic bytes of file_name. Return true if magic bytes match
@@ -1122,7 +1394,7 @@ void wrong_path_tracereader::verify_trace_file_type() const
     extract_dir = base_extract_dir;
     extract_dir += std::to_string(suffix);
   }
-  fmt::print("New dir: {}\n", extract_dir.string());
+  fmt::print(stderr, "New dir: {}\n", extract_dir.string());
   const bool success = std::filesystem::create_directory(extract_dir);
   if (!success)
     throw std::runtime_error("[ERROR] Could not create the directory to extract the wrong path trace. Exiting...");
@@ -1132,24 +1404,24 @@ void wrong_path_tracereader::verify_trace_file_type() const
 
 void wrong_path_tracereader::extract_trace() const
 {
-  auto open = [] [[nodiscard]] (const char* file_name) -> TAR* {
+  const auto open = [] [[nodiscard]] (const char* file_name) -> TAR* {
     TAR* handle = nullptr;
-    int retval = tar_open(&handle, file_name, nullptr, O_RDONLY, 0, TAR_GNU);
+    const int retval = tar_open(&handle, file_name, nullptr, O_RDONLY, 0, TAR_GNU);
     if (retval != 0)
       throw std::runtime_error(fmt::format("[ERROR] Can't open trace: {}. Exiting...", file_name));
     return handle;
   };
 
-  auto close = [](TAR* handle) {
-    auto retval = tar_close(handle);
+  const auto close = [](TAR* handle) -> void {
+    const auto retval = tar_close(handle);
     if (retval != 0)
       throw std::runtime_error("[ERROR] Can't close trace. Exiting...");
   };
 
-  std::unique_ptr<TAR, decltype(close)> trace{open(trace_file.c_str()), close};
+  const std::unique_ptr<TAR, decltype(close)> trace{open(trace_file.c_str()), close};
 
   // Extract the trace files to the extract dir
-  int retval = tar_extract_all(trace.get(), const_cast<char*>(trace_extract_dir.c_str()));
+  const int retval = tar_extract_all(trace.get(), const_cast<char*>(trace_extract_dir.c_str()));
   if (retval != 0)
     throw std::runtime_error(fmt::format("[ERROR] Can't extract trace: {}. Exiting...", trace_file));
 }
@@ -1174,7 +1446,7 @@ void wrong_path_tracereader::extract_trace() const
 
 void wrong_path_tracereader::construct_header_stream()
 {
-  const std::string header_file_name = get_header_path().string();
+  const std::string& header_file_name = get_header_path().string();
   if (is_gzip(header_file_name)) {
     header_stream.reset(new header_parser<champsim::inf_istream<champsim::decomp_tags::gzip_tag_t<>>>(header_file_name));
   } else if (is_lzma(header_file_name)) {
@@ -1192,7 +1464,7 @@ void wrong_path_tracereader::construct_header_stream()
 
 void wrong_path_tracereader::construct_body_stream()
 {
-  const std::string body_file_name = get_body_path().string();
+  const std::string& body_file_name = get_body_path().string();
   if (is_gzip(body_file_name)) {
     body_stream.reset(new body_parser<champsim::inf_istream<champsim::decomp_tags::gzip_tag_t<>>>(cpu, body_file_name, *header_stream));
   } else if (is_lzma(body_file_name)) {
