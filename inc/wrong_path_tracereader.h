@@ -715,7 +715,7 @@ class wrong_path_tracereader
     std::map<overlay_key, std::map<uint64_t, std::bitset<512>>> overlay; // Each overlay value is a fid -> delta map
 
     // Members needed to read the trace in bulk
-    constexpr static std::size_t buffer_size = 128;
+    constexpr static std::size_t buffer_size = 128; // instr_buffer refill is triggered when it has less than buffer_size instructions
     std::deque<ooo_model_instr> instr_buffer; // Holds the decoded instructions without branch instruction fixes
     // TODO: Remove this
     std::deque<ooo_model_instr> instr_buffer_fixed; // Holds the decoded instructions with branch instruction fixes
@@ -1283,10 +1283,13 @@ class wrong_path_tracereader
 
     [[nodiscard]] bool eof() const override
     {
-      const bool retval = (instr_buffer.size() == 0 && eof_);
-      if (retval && (header.prolog.total_target_instructions != cp_instruction_num))
-        throw std::runtime_error(fmt::format("[ERROR] Trace has {} correct path instructions, but only {} were parsed", header.prolog.total_target_instructions,
-                                             cp_instruction_num));
+      const bool retval = (instr_buffer_fixed.size() == 0 && eof_);
+      const bool unbounded_trace = header.prolog.total_target_instructions == 0; // The trace was collected until the application exited
+      const bool comsumed_expected_num_cp_instructions = header.prolog.total_target_instructions == cp_instruction_num;
+      if (retval && !unbounded_trace && !comsumed_expected_num_cp_instructions)
+        throw std::runtime_error(fmt::format(
+            "[ERROR] Trace has {} correct path instructions, but only {} were parsed",
+            header.prolog.total_target_instructions != 0 ? fmt::format("{}", header.prolog.total_target_instructions) : "unbounded", cp_instruction_num));
 
       return retval;
     }
@@ -1321,6 +1324,7 @@ public:
   wrong_path_tracereader(champsim::wrong_path_tracereader&& other)
       : cpu(other.cpu), trace_file(std::move(other.trace_file)), header_stream(std::move(other.header_stream)), body_stream(std::move(other.body_stream))
   {
+    other.moved = true;
   }
 
   wrong_path_tracereader& operator=(wrong_path_tracereader& other) = default;
