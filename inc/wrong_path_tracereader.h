@@ -715,7 +715,6 @@ class wrong_path_tracereader
     std::map<overlay_key, std::map<uint64_t, std::bitset<512>>> overlay; // Each overlay value is a fid -> delta map
 
     // Members needed to read the trace in bulk
-    constexpr static std::size_t buffer_size = 128; // instr_buffer refill is triggered when it has less than buffer_size instructions
     std::deque<ooo_model_instr> instr_buffer;       // Holds the decoded instructions without branch instruction fixes
     // TODO: Remove this
     std::deque<ooo_model_instr> instr_buffer_fixed; // Holds the decoded instructions with branch instruction fixes
@@ -984,6 +983,8 @@ class wrong_path_tracereader
         throw std::runtime_error(fmt::format("[ERROR] Unknown template ID {} found", entry.template_id));
       const auto& instructions = header.templates.at(entry.template_id).instructions;
 
+      fmt::print(stderr, "Generating {} instructions. instr_buffer has {} instructions\n", instructions.size(), instr_buffer.size());
+
       // Apply the overlay delta changes
       const auto& deltas = entry.cp_delta.records;
       for (const auto& delta : deltas) {
@@ -1244,13 +1245,13 @@ class wrong_path_tracereader
       // TODO: Revert back to instr_buffer
       if ((instr_buffer_fixed.size() == 0)) {
         if (instr_buffer.size() == 0) { // Populate the instr_buffer if its empty
-          while (instr_buffer.size() < buffer_size) {
-            const auto instrs = get_next_instrs();
-            instr_buffer.insert(std::end(instr_buffer), std::make_move_iterator(std::begin(instrs)), std::make_move_iterator(std::end(instrs)));
-            if (instrs.size() == 0) {
-              eof_ = true;
-              break;
-            }
+          const auto instrs = get_next_instrs();
+          instr_buffer.insert(std::end(instr_buffer), std::make_move_iterator(std::begin(instrs)), std::make_move_iterator(std::end(instrs)));
+          fmt::print(stderr, "instr_buffer has {} instructions\n", instr_buffer.size());
+          if (instrs.size() == 0)
+          {
+            // TODO: Add trace inferred wrong path implementation here
+            eof_ = true;
           }
         }
 
@@ -1283,6 +1284,7 @@ class wrong_path_tracereader
 
     [[nodiscard]] bool eof() const override
     {
+      // TODO: Revert to instr_buffer
       const bool retval = (instr_buffer_fixed.size() == 0 && eof_);
 
       // Each instruction in the source application can potentially result in multiple trace instructions. For example, one `rep` in X86 can result in tens of
