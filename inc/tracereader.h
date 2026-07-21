@@ -29,12 +29,22 @@
 
 namespace champsim
 {
+// Default case: most trace readers don't support wrong path instructions
+template <typename T, typename = std::void_t<>>
+struct supports_wrong_path : std::false_type {
+};
+
+// Special case: wrong_path_tracereader supports wrong path instrctions
+template <typename T>
+struct supports_wrong_path<T, std::void_t<decltype(std::declval<T>()(false))>> : std::true_type {
+};
+
 class tracereader
 {
   static uint64_t instr_unique_id; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
   struct reader_concept {
     virtual ~reader_concept() = default;
-    virtual ooo_model_instr operator()() = 0;
+    virtual ooo_model_instr operator()(const bool correct_path) = 0;
     [[nodiscard]] virtual bool eof() const = 0;
   };
 
@@ -46,7 +56,13 @@ class tracereader
     template <typename U>
     using has_eof = decltype(std::declval<U>().eof());
 
-    ooo_model_instr operator()() override { return intern_(); }
+    ooo_model_instr operator()(const bool correct_path = true) override
+    {
+      if constexpr (supports_wrong_path<T>::value)
+        return intern_(correct_path);
+      else
+        return intern_();
+    }
     [[nodiscard]] bool eof() const override
     {
       if constexpr (champsim::is_detected_v<has_eof, T>) {
@@ -64,9 +80,9 @@ public:
   {
   }
 
-  auto operator()()
+  auto operator()(const bool correct_path = true)
   {
-    auto retval = (*pimpl_)();
+    auto retval = (*pimpl_)(correct_path);
     retval.instr_id = instr_unique_id++;
     return retval;
   }

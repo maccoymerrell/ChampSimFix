@@ -25,7 +25,7 @@ struct trace_workload_source : public champsim::modules::workload_source {
         builder.get_parameter<bool>("repeat", true, false)))
   {}
 
-  ooo_model_instr next_instruction() override { return reader_(); }
+  ooo_model_instr next_instruction(const bool) override { return reader_(); }
   [[nodiscard]] bool eof() const override { return reader_.eof(); }
 };
 

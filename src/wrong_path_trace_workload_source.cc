@@ -18,19 +18,15 @@ struct wrong_path_trace_workload_source : public champsim::modules::workload_sou
   champsim::tracereader reader_;
 
   explicit wrong_path_trace_workload_source(champsim::modules::ModuleBuilder builder)
-    : reader_(get_tracereader(
-        builder.get_parameter<std::string>("trace_file"),
-        builder.get_parameter<uint8_t>("cpu"),
-        builder.get_parameter<bool>("cloudsuite", true, false),
-        builder.get_parameter<bool>("repeat", true, false),
-        true))
-  {}
+      : reader_(get_tracereader(builder.get_parameter<std::string>("trace_file"), builder.get_parameter<uint8_t>("cpu"),
+                                builder.get_parameter<bool>("cloudsuite", true, false), builder.get_parameter<bool>("repeat", true, false), true))
+  {
+  }
 
-  ooo_model_instr next_instruction() override { return reader_(); }
+  ooo_model_instr next_instruction(const bool correct_path = true) override { return reader_(correct_path); }
   [[nodiscard]] bool eof() const override { return reader_.eof(); }
 };
 
-static champsim::modules::workload_source::register_module<wrong_path_trace_workload_source>
-    trace_ws_reg("WRONG_PATH_TRACE_WORKLOAD_SOURCE");
+static champsim::modules::workload_source::register_module<wrong_path_trace_workload_source> trace_ws_reg("WRONG_PATH_TRACE_WORKLOAD_SOURCE");
 
 } // anonymous namespace

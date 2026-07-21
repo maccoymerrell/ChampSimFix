@@ -22,6 +22,7 @@
 #include <fmt/ranges.h>
 
 #include "instruction.h"
+#include "tracereader.h"
 
 namespace champsim
 {
@@ -33,7 +34,7 @@ struct repeatable {
   T intern_{std::apply([](auto... x) { return T{x...}; }, args_)};
   explicit repeatable(Args... args) : args_(args...) {}
 
-  auto operator()()
+  auto operator()(const bool correct_path = true)
   {
     // Reopen trace if we've reached the end of the file
     if (intern_.eof()) {
@@ -41,7 +42,10 @@ struct repeatable {
       intern_ = T{std::apply([](auto... x) { return T{x...}; }, args_)};
     }
 
-    return intern_();
+    if constexpr (supports_wrong_path<T>::value)
+      return intern_(correct_path);
+    else
+      return intern_();
   }
 
   [[nodiscard]] bool eof() const { return false; }

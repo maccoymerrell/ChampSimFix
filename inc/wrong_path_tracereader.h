@@ -685,7 +685,8 @@ class wrong_path_tracereader
   class body_wrapper
   {
   public:
-    virtual ooo_model_instr read() = 0;
+    // If correct_path is true, fetch from the next correct path BB, else fetch from the wrong path chain
+    virtual ooo_model_instr read(const bool correct_path = true) = 0;
     virtual bool eof() const = 0;
     virtual ~body_wrapper() = default;
   };
@@ -715,7 +716,7 @@ class wrong_path_tracereader
     std::map<overlay_key, std::map<uint64_t, std::bitset<512>>> overlay; // Each overlay value is a fid -> delta map
 
     // Members needed to read the trace in bulk
-    std::deque<ooo_model_instr> instr_buffer;       // Holds the decoded instructions without branch instruction fixes
+    std::deque<ooo_model_instr> instr_buffer; // Holds the decoded instructions without branch instruction fixes
     // TODO: Remove this
     std::deque<ooo_model_instr> instr_buffer_fixed; // Holds the decoded instructions with branch instruction fixes
 
@@ -1181,8 +1182,9 @@ class wrong_path_tracereader
     }
 
     // Reads the next instruction from the trace, constructs an ooo_model_instr from it, and return it
-    [[nodiscard]] std::vector<ooo_model_instr> get_next_instrs()
+    [[nodiscard]] std::vector<ooo_model_instr> get_next_instrs(const bool correct_path = true)
     {
+      fmt::print(stderr, "Fetching from {} path\n", correct_path ? "correct" : "wrong");
       while (true) {
         const uint8_t tag = compressed_body_stream.read();
         if (valid_body_tags.find(tag) == valid_body_tags.end())
@@ -1228,7 +1230,7 @@ class wrong_path_tracereader
         valid_body_tags.emplace(std::move(value));
     }
 
-    [[nodiscard]] ooo_model_instr read() override
+    [[nodiscard]] ooo_model_instr read(const bool correct_path = true) override
     {
       // No more instruction left in the stream
       if (eof_) {
@@ -1245,11 +1247,10 @@ class wrong_path_tracereader
       // TODO: Revert back to instr_buffer
       if ((instr_buffer_fixed.size() == 0)) {
         if (instr_buffer.size() == 0) { // Populate the instr_buffer if its empty
-          const auto instrs = get_next_instrs();
+          const auto instrs = get_next_instrs(correct_path);
           instr_buffer.insert(std::end(instr_buffer), std::make_move_iterator(std::begin(instrs)), std::make_move_iterator(std::end(instrs)));
           fmt::print(stderr, "instr_buffer has {} instructions\n", instr_buffer.size());
-          if (instrs.size() == 0)
-          {
+          if (instrs.size() == 0) {
             // TODO: Add trace inferred wrong path implementation here
             eof_ = true;
           }
@@ -1308,9 +1309,9 @@ class wrong_path_tracereader
   std::unique_ptr<body_wrapper> body_stream = nullptr;
 
 public:
-  [[nodiscard]] ooo_model_instr operator()()
+  [[nodiscard]] ooo_model_instr operator()(const bool correct_path = true)
   {
-    const ooo_model_instr& instr = body_stream->read();
+    const ooo_model_instr& instr = body_stream->read(correct_path);
 
     fmt::print(stderr, "{:x}: branch = {}, taken = {}, dst regs = {}, src regs = {}\n", instr.raw_ip, instr.is_branch, instr.branch_taken,
                instr.destination_registers, instr.source_registers);

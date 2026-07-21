@@ -1096,7 +1096,7 @@ struct module_base {
     virtual ~workload_source() = default;
 
     // Provide the next instruction. Called by the core when it has input queue space.
-    virtual ooo_model_instr next_instruction() = 0;
+    virtual ooo_model_instr next_instruction(const bool correct_path) = 0;
 
     // True when the source has no more instructions to provide.
     [[nodiscard]] virtual bool eof() const = 0;
