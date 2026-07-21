@@ -716,7 +716,7 @@ class wrong_path_tracereader
 
     // Members needed to read the trace in bulk
     constexpr static std::size_t buffer_size = 128; // instr_buffer refill is triggered when it has less than buffer_size instructions
-    std::deque<ooo_model_instr> instr_buffer; // Holds the decoded instructions without branch instruction fixes
+    std::deque<ooo_model_instr> instr_buffer;       // Holds the decoded instructions without branch instruction fixes
     // TODO: Remove this
     std::deque<ooo_model_instr> instr_buffer_fixed; // Holds the decoded instructions with branch instruction fixes
 
@@ -1284,8 +1284,13 @@ class wrong_path_tracereader
     [[nodiscard]] bool eof() const override
     {
       const bool retval = (instr_buffer_fixed.size() == 0 && eof_);
+
+      // Each instruction in the source application can potentially result in multiple trace instructions. For example, one `rep` in X86 can result in tens of
+      // trace instructions Moreover, the writer collects the trace till cp_instruction_num instructions are reached *and* the last executing basic block is
+      // finished
+      const bool comsumed_expected_num_cp_instructions = header.prolog.total_target_instructions <= cp_instruction_num;
       const bool unbounded_trace = header.prolog.total_target_instructions == 0; // The trace was collected until the application exited
-      const bool comsumed_expected_num_cp_instructions = header.prolog.total_target_instructions == cp_instruction_num;
+
       if (retval && !unbounded_trace && !comsumed_expected_num_cp_instructions)
         throw std::runtime_error(fmt::format(
             "[ERROR] Trace has {} correct path instructions, but only {} were parsed",
