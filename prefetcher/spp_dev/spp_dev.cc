@@ -360,8 +360,11 @@ void spp_dev::PATTERN_TABLE::read_pattern(uint32_t curr_sig, std::vector<typenam
       pf_conf = depth ? (_parent->GHR.global_accuracy * c_delta[set][way] / c_sig[set] * lookahead_conf / 100) : local_conf;
 
       if (pf_conf >= PF_THRESHOLD) {
+	      // Check :: pf_q_tail is within bounds before writing
+	      if(pf_q_tail < delta_q.size() && pf_q_tail < confidence_q.size()){
         confidence_q[pf_q_tail] = pf_conf;
         delta_q[pf_q_tail] = delta[set][way];
+	      }
 
         // Lookahead path follows the most confident entry
         if (pf_conf > max_conf) {
