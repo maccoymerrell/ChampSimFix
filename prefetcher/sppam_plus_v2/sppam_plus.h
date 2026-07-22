@@ -35,8 +35,9 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   // Instruction prefetches not yet demand-used (block -> 1), for coverage/accuracy stats.
   // Resolved useful on an instruction demand hit, useless on eviction. Separate from the
   // data path's pf_unused_ so the two streams' accuracy never mix.
-  std::unordered_map<uint64_t, uint8_t> instr_pf_unused_;
+  std::unordered_map<uint64_t, uint32_t> instr_pf_unused_; // value = issue real-cycle (for the BG fill-latency PE); membership = "instruction prefetch, not yet demand-used"
   uint64_t instr_useful_ = 0;   // instruction prefetch later demand-hit before eviction
+  uint64_t instr_pf_issued_ = 0, data_pf_issued_ = 0; // instruction-activity gate: prefetch-issue counts -> instr fraction fed to the perceptron (datacenter discriminator)
   uint64_t instr_useless_ = 0;  // instruction prefetch evicted before any demand use
 
   uint64_t cycle_ = 0;          // monotonic operate counter (predictor timing)
@@ -95,11 +96,9 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   bool ip_filter_active_ = true;            // auto-backoff: set false by ip_age_tick when IP stops discriminating
   uint64_t dbg_ins_=0, dbg_skip_=0, dbg_use_=0, dbg_evict_=0; // sample-table diagnostics
   std::unordered_map<uint64_t, uint32_t> pf_evicted_unused_; // evicted-unused block -> tag, to detect later demand
-  // Perceptron filter (optional): feed it the REAL per-prefetch fill latency as the PE training value.
-  // perc_issue_ holds a block's issue real-cycle from issue until fill; perc_lat_ then holds its fill latency
-  // (issue->fill, DRAM fills read high, LLC low) until the demand-hit/eviction resolve consumes it.
-  std::unordered_map<uint64_t, uint64_t> perc_issue_; // block -> issue real-cycle (pre-fill)
-  std::unordered_map<uint64_t, uint32_t> perc_lat_;   // block -> fill latency (post-fill), the PE value
+  // (perc_sdm_ removed: it was a near-exact duplicate of pf_track/pfht_ below -- same key, same issue->fill->lat
+  //  lifecycle. The perceptron's fill-latency PE now reads pfht_ directly; the only unique field, `cost`, moved to
+  //  pf_track. ONE outcome table now serves the per-IP filter, PE-management, AND the perceptron's PE magnitude.)
 
   // ---- I-POP-style Prefetch-Effectiveness throttle: PE = I_UPF - I_POLL - I_LAT ----
   // Per source (index 0 = SPPAM, 1 = SPP), in real-cycle latency units. Attribution is
@@ -120,6 +119,7 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   struct poll_track {
     bool valid = false;
     uint64_t block = 0;  // a useful line this prefetch evicted; a later demand miss on it is pollution
+    uint64_t pf_block = 0; // the prefetch that evicted it (to charge I_POLL to its perceptron reward)
     bool from_spp = false;
     uint16_t iph = 0;    // trigger-IP hash of the prefetch that evicted this victim (per-IP PE)
   };
@@ -166,6 +166,8 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
 
   // ---- sppam_dse::prefetch_sink ----
   bool issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, double benefit, uint32_t gen_tag = 0) override;
+  bool perc_gate(uint64_t block, int engine, int depth, uint64_t pc, int conf, uint64_t sig) override; // gate the separate SPP engine through the perceptron
+  void perc_note_issue_ext(uint64_t block) override;
   int dram_bw_index() const override;
   int pf_free_space() const override;
   int sd_l2_limit() const override { return sd_l2_limit_value(); }

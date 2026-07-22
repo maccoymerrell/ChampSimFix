@@ -295,7 +295,15 @@ public:
       // delta-PHT self-throttle credit: additive iff this was a TIMELY useful hit on a block the no-prefetch
       // baseline actually MISSED (covered_direct semantics). Redundant hits on already-covered blocks don't count,
       // so on saturated traces (where delta just pollutes) the EMA collapses and the throttle engages.
-      if (pred_) pred_->operate(block, ip, cache_hit, useful_pf, useful_timely && base_missed, type, ++pred_ops_);
+      // Per-prefetch PE value for perceptron training: a useful prefetch saved a full DRAM latency (if it
+      // covered a DRAM fetch) or just an LLC hit -- the DRAM-covering hits are ~10x more valuable, the signal
+      // usefulness throws away.
+      const double pf_val = useful_pf ? (useful_from_dram ? sm_->avg_dram_latency() : static_cast<double>(P.llc_hit_latency)) : 0.0;
+      // Feed the perceptron's MSHR/bandwidth-pressure feature (the glue does this in the module; without it the
+      // feature is dead-at-0 in the DSE). NOTE: this is DRAM-bandwidth utilization, not MSHR occupancy -- arguably
+      // a better pressure signal (separates bandwidth-idle latency-bound workloads from bandwidth-contended ones).
+      if (pred_ && P.enable_perceptron_filter) pred_->perc_set_mshr(dram_bw_index());
+      if (pred_) pred_->operate(block, ip, cache_hit, useful_pf, useful_timely && base_missed, type, ++pred_ops_, pf_val);
       if (spp_) spp_->operate(block);
       if (bidding_) flush_winner();
     }
@@ -433,7 +441,10 @@ private:
         if (it != pf_dens_.end()) { m_.pf_useless_dens[it->second]++; pf_dens_.erase(it); }
       }
       if (res.evicted_from_spp && spp_) spp_->reward(false, res.evicted_block); // SPP prefetch evicted unused -> useless
-      if (pred_) pred_->on_l2_evict(res.evicted_block, cycle, res.evicted_unused_prefetch);
+      // Evicted-unused prefetch cost: the wasted bandwidth (approx one LLC-hit worth). Kept smaller than a
+      // DRAM-covering hit's benefit ON PURPOSE -- an IP with rare-but-DRAM-covering hits should stay net-positive.
+      const double ev_val = res.evicted_unused_prefetch ? -static_cast<double>(P.llc_hit_latency) : 0.0;
+      if (pred_) pred_->on_l2_evict(res.evicted_block, cycle, res.evicted_unused_prefetch, ev_val);
     }
   }
 

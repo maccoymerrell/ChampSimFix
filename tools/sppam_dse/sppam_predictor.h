@@ -139,6 +139,24 @@ public:
       pf_sdm_.assign(n, pf_samp_t{}); pf_sdm_mask_ = static_cast<uint32_t>(n - 1);
       pv_div_cur_ = P.pv_div_min ? P.pv_div_min : 1;            // adaptive rate starts at the floor, backs off as churn rises
     }
+    if (P.enable_perceptron_filter) {                          // perceptron weight tables (prototype)
+      std::size_t n = 1; while (n < P.perc_pc_entries) n <<= 1;
+      pw_pc_.assign(n, 0); pw_pc_mask_ = static_cast<uint32_t>(n - 1);
+      // Context tables sized PERC_ENGINES x base so perc_engine_split can index them by (engine, bucket) -- a
+      // separate learned weight per engine (the split-only partitions past the base go unused when the flag is off).
+      pw_eng_.assign(PERC_ENGINES, 0); pw_dep_.assign(PERC_ENGINES * 16, 0);  // pw_off_ dropped (offset feature removed)
+      pw_use_.assign(PERC_ENGINES * 8, 0); pw_tim_.assign(PERC_ENGINES * 8, 0); pw_conf_.assign(PERC_ENGINES * 16, 0);
+      { std::size_t sn = 1; while (sn < P.perc_sig_entries) sn <<= 1; pw_sig_.assign(sn, 0); pw_sig_mask_ = static_cast<uint32_t>(sn - 1); }
+      { std::size_t tn = 1; while (tn < P.perc_track_cap) tn <<= 1; perc_track_.assign(tn, perc_ent{}); perc_track_mask_ = static_cast<uint32_t>(tn - 1); }
+      pw_mshr_.assign(PERC_ENGINES * 16, 0); pw_guse_.assign(PERC_ENGINES * 16, 0); pw_gtim_.assign(PERC_ENGINES * 16, 0); // aggregate-harm tables (per-engine capable)
+      pw_hit_.assign(PERC_ENGINES * 16, 0); pw_conj_.assign(PERC_CONJ, 0); // hit-rate + the {use,tim,mshr,hit} conjunction (non-additive interaction)
+      pw_usemshr_.assign(PW_USEMSHR, 0); pw_timmshr_.assign(PW_TIMMSHR, 0); pw_confmshr_.assign(PW_CONFMSHR, 0); pw_crit_.assign(PW_CRIT, 0); // DSE-derived interactions
+      { std::size_t pn = 1; while (pn < P.perc_pc_entries) pn <<= 1; pw_pcpath_.assign(pn, 0); pw_pcpath_mask_ = static_cast<uint32_t>(pn - 1);   // PC-path (chain of recent trigger PCs)
+        pw_pcdelta_.assign(pn, 0); pw_pcdelta_mask_ = static_cast<uint32_t>(pn - 1); }                                                          // PC XOR delta (PC<->data correlation)
+      pip_bias_.assign(ip_n_, 0); // per-IP bias (per-context personalization)
+      if (ip_useful_.empty()) { ip_useful_.assign(ip_n_, 0); ip_useless_.assign(ip_n_, 0); } // per-IP usefulness (f[4]) LIVE even when the ip-filter is off (credited at perc_resolve)
+      if (ip_ev_.empty()) { ip_ev_.assign(ip_n_, 0); ip_untimely_.assign(ip_n_, 0); }         // per-IP untimeliness (f[5]) LIVE: perc_resolve seeds the evicted-unused watch, operate() scores the re-demand
+    }
   }
 
   ~sppam_predictor()
@@ -192,6 +210,16 @@ public:
                    P.name.c_str(), (unsigned long long)tu, (unsigned long long)tl, active, (unsigned long long)dbg_ip_throttled_,
                    (unsigned long long)tev, (unsigned long long)tut, nunt);
     }
+    if (P.enable_perceptron_filter) {
+      const uint64_t seen = dbg_perc_keep_ + dbg_perc_explore_ + dbg_perc_drop_;
+      const double K = dbg_keep_res_ ? 100.0 * static_cast<double>(dbg_keep_res_u_) / static_cast<double>(dbg_keep_res_) : 0.0;
+      const double Dd = dbg_drop_res_ ? 100.0 * static_cast<double>(dbg_drop_res_u_) / static_cast<double>(dbg_drop_res_) : 0.0;
+      std::fprintf(stderr, "[perc] %s scored=%llu drop_rate=%.1f%% trained=%llu mask=0x%x | DISCRIM kept_useful=%.1f%% dropped_useful=%.1f%% gap=%.1f\n",
+                   P.name.c_str(), (unsigned long long)seen,
+                   seen ? 100.0 * static_cast<double>(dbg_perc_drop_) / static_cast<double>(seen) : 0.0,
+                   (unsigned long long)dbg_perc_train_, P.perc_feat_mask, K, Dd, K - Dd);
+      if (P.perc_dump_weights) perc_dump();
+    }
     if (P.pattern_validate) {
       uint64_t tot = dbg_pv_bad_ + dbg_pv_good_; if (!tot) tot = 1;
       std::fprintf(stderr, "[pv] %s triggers_bad=%.1f%% patterns_scored=%zu (bad=%zu) samples_live=%zu\n", P.name.c_str(),
@@ -214,7 +242,7 @@ public:
                    (unsigned long long)xpage_issued_, xpht_.size());
   }
 
-  void operate(uint64_t block, uint64_t ip, bool cache_hit, bool useful_prefetch, bool delta_additive, atype type, uint64_t cycle)
+  void operate(uint64_t block, uint64_t ip, bool cache_hit, bool useful_prefetch, bool delta_additive, atype type, uint64_t cycle, double pf_value = 0.0)
   {
     cycle_ = cycle;
     region_just_created_ = false; // set by add_to_pagemap when this access allocates a fresh region entry
@@ -223,16 +251,26 @@ public:
     }
     // Depth-throttle: a demand for a block that was an evicted-unused prefetch = UNTIMELY (right address, evicted
     // before use) -> attribute to the prefetch's IP so it gets a shallower (timelier) depth, not a volume drop.
-    if (P.enable_ip_filter && P.ip_filter_depth_throttle && !evicted_unused_.empty() &&
+    if (((P.enable_ip_filter && P.ip_filter_depth_throttle) || P.enable_perceptron_filter) && !evicted_unused_.empty() &&
         (type == atype::LOAD || type == atype::RFO)) {
       auto eu = evicted_unused_.find(block);
-      if (eu != evicted_unused_.end()) { ++ip_untimely_[eu->second]; evicted_unused_.erase(eu); }
+      if (eu != evicted_unused_.end()) {
+        if (!ip_untimely_.empty()) ++ip_untimely_[eu->second];                          // per-IP untimely numerator (f[5])
+        perc_untimely_ema_ += (1.0 - perc_untimely_ema_) * (1.0 / 1024.0);              // global untimely numerator (f[10])
+        evicted_unused_.erase(eu);
+      }
     }
     // Demand-miss-rate EMA (the LLC-pressure half of the bandwidth-feedback index).
     if (P.enable_bw_feedback)
       miss_ema_ += (((cache_hit ? 0.0 : 1.0) - miss_ema_) * (1.0 / 256.0));
     if (P.delta_pht_selfthrottle && (type == atype::LOAD || type == atype::RFO)) // demand hit-rate = coverage saturation
       demand_hit_ema_ += ((cache_hit ? 1.0 : 0.0) - demand_hit_ema_) * (1.0 / 1024.0);
+    if (P.enable_perceptron_filter && (type == atype::LOAD || type == atype::RFO)) { // perceptron per-demand context (all live, ip-filter-independent)
+      perc_hit_ema_ += ((cache_hit ? 1.0 : 0.0) - perc_hit_ema_) * (1.0 / 1024.0);   // hit-rate feature (relative-impact)
+      perc_pc_path_ = (perc_pc_path_ << 5) ^ ((ip >> P.perc_pc_lobit) & 0x1Fu);       // roll this trigger PC into the PC-chain/path hash
+      perc_last_trigger_ = block;                                                     // baseline for the next prefetch's PC^delta feature
+      if (P.perc_profile) { perc_pc_ring_[2] = perc_pc_ring_[1]; perc_pc_ring_[1] = perc_pc_ring_[0]; perc_pc_ring_[0] = static_cast<uint32_t>(ip); } // raw last-3 trigger PCs
+    }
     // Set-duel: a demand MISS in an OFF-leader set (no delta) argues delta would help (PSEL up); a miss in an
     // ON-leader set (has delta) argues delta is not helping / is displacing (PSEL down). Net-benefit incl. pollution.
     if (P.delta_pht_setduel && !cache_hit && (type == atype::LOAD || type == atype::RFO)) {
@@ -250,6 +288,7 @@ public:
       increase_usefulness_counter();
       note_delta_block(block, /*additive=*/delta_additive, /*is_use=*/true);
       pf_sample_resolve(block, /*useful=*/true); // credit the ACTUAL trigger pattern (precise validation)
+      if (P.enable_perceptron_filter) perc_resolve(block, P.perc_label_pe ? pf_value : 1.0); // dense training on PE (or usefulness=+1)
       if (P.region_evict_policy >= 6) { region_type* r = regions_.probe_key(region_of(block)); if (r && r->pf_used < 65535) ++r->pf_used; }
     }
     if (!cache_hit)
@@ -268,7 +307,7 @@ public:
   // a not-yet-used evicted prefetch lowers pattern/global usefulness; otherwise
   // an optional scrape-on-evict harvests the region; the evicted block is always
   // removed from the prefetch-map filter.
-  void on_l2_evict(uint64_t evicted_block, uint64_t cycle, bool was_unused_prefetch)
+  void on_l2_evict(uint64_t evicted_block, uint64_t cycle, bool was_unused_prefetch, double pf_value = 0.0)
   {
     cycle_ = cycle;
     dbg_exact_.erase(evicted_block); // DIAGNOSTIC: pure mirror — evict always removes (unlike the region-gated prefetch_map clear)
@@ -278,6 +317,7 @@ public:
       decrease_usefulness_counter();
       note_delta_block(evicted_block, /*additive=*/false, /*is_use=*/false); // died unused -> pollution
       pf_sample_resolve(evicted_block, /*useful=*/false); // the trigger pattern predicted a block that died unused
+      if (P.enable_perceptron_filter) perc_resolve(evicted_block, P.perc_label_pe ? pf_value : -1.0); // dense training on PE (or usefulness=-1)
       if (P.region_evict_policy >= 6) { region_type* r = regions_.probe_key(region_of(evicted_block)); if (r && r->pf_dead < 65535) ++r->pf_dead; }
       if (P.pollution_filter)
         return; // keep the prefetch-map bit -> this proven-useless block won't be re-prefetched
@@ -938,12 +978,320 @@ private:
   // ip_trickle_div then throttles a trigger IP whose sampled usefulness is low -- sppam's real accuracy loop.
   uint32_t ip_n_ = 4096, ip_mask_ = 0xFFFu; // per-IP throttle-table depth + index mask (set from P.ip_table_entries)
   struct pf_samp_t { uint64_t pat = 0; uint16_t iph = 0; int8_t bit = -1; bool bwd = false; // bit = prediction_counter index (depth-0 e2e), -1 else; bwd = backward-scan prefetch
-                     uint32_t tag = 0; uint32_t stamp = 0; bool occ = false; }; // tag/stamp/occ used only by the direct-mapped policy
+                     uint32_t tag = 0; uint32_t stamp = 0; bool occ = false; // tag/stamp/occ used only by the direct-mapped policy
+                     uint16_t pfeat[6] = {0,0,0,0,0,0}; bool hasf = false; }; // perceptron feature indices captured at issue (prototype)
   std::unordered_map<uint64_t, pf_samp_t> pf_sample_;    // legacy clear-on-full map (pv_sample_directmap=false)
   std::vector<pf_samp_t> pf_sdm_;                        // fixed direct-mapped table w/ probabilistic eviction (pv_sample_directmap=true)
   uint32_t pf_sdm_mask_ = 0;
   static uint64_t sdm_idx(uint64_t b) { return (b * 0x9E3779B97F4A7C15ull) >> 24; }
   uint32_t pv_div_cur_ = 4, pv_win_place_ = 0, pv_win_churn_ = 0; // adaptive sample-rate controller
+
+  // --- Perceptron prefetch filter (PROTOTYPE): one learned gate over all throttle signals ---
+  // 0 PC,1 off(dropped),2 eng,3 dep,4 use,5 tim,6 conf,7 sig, AGGREGATE-HARM: 8 mshr,9 g-useless,10 g-untimely,
+  // 11 hit-rate (churn/relative-impact context), 12 CONJUNCTION of {use,tim,mshr,hit} (path-based: the gate's value
+  // is a non-additive function of these -- "high pressure" means keep on a useful IP but drop on a polluting one --
+  // which a sum-of-independent-weights hashed perceptron cannot represent (the XOR limitation; cf. Jimenez path-based).
+  // 13 PC-PATH (hash of the recent trigger-PC chain -- datacenter PCs recur strongly; PPF/path-based use PC history),
+  // 14 PC XOR DELTA (an XOR-combined feature a la PPF -- captures PC<->data-address correlation, strong on datacenter).
+  static constexpr int PERC_NF = 19; // + 4 DSE-derived pairwise interaction features (use^mshr, tim^mshr, conf^mshr, criticality)
+  static constexpr int PERC_ENGINES = 4; // 0=SPPAM fwd, 1=SPPAM bwd, 2=delta/SPP, 3=branch-graph (declared early: profiler members below use it)
+  static constexpr int PERC_CONJ = 256; // combined-feature table depth (use2|tim2|mshr2|hit2, 2 bits each)
+  std::vector<int16_t> pw_pc_, pw_off_, pw_eng_, pw_dep_, pw_use_, pw_tim_, pw_conf_, pw_sig_,
+                       pw_mshr_, pw_guse_, pw_gtim_, pw_hit_, pw_conj_, pw_pcpath_, pw_pcdelta_, // + PC-path + PC^delta tables
+                       pw_usemshr_, pw_timmshr_, pw_confmshr_, pw_crit_; // DSE-derived pairwise interactions (contention-gated + criticality)
+  // interaction table sizes (direct product index): use(8)xmshr(16), tim(8)xmshr(16), conf(16)xmshr(16), use(8)xhit(16)
+  static constexpr int PW_USEMSHR = 128, PW_TIMMSHR = 128, PW_CONFMSHR = 256, PW_CRIT = 128;
+  uint32_t pw_pcpath_mask_ = 0, pw_pcdelta_mask_ = 0;
+  uint64_t perc_pc_path_ = 0;      // rolling hash of recent trigger PCs (the PC chain / path); updated per demand
+  uint64_t perc_last_trigger_ = 0; // last demand block, so a prefetch's PC^delta feature can use (target - trigger)
+  // FEATURE-SIGNAL PROFILER (perc_profile): per feature -> per bucket -> PE-outcome-bucket counts, GLOBAL and
+  // Emits one sampled line per resolved prefetch: raw signals (pc, sig, delta, last-N trigger PCs) + context buckets
+  // + the per-prefetch PE. All feature/XOR/path-depth/dropout-slice sweeps run OFFLINE against these tuples, with the
+  // AGGREGATE metric PE x coverage (sum PE per candidate bucket), not per-prefetch PE. Sampled to bound stderr volume.
+  uint64_t perc_prof_ctr_ = 0;
+  uint32_t perc_pc_ring_[3] = {0, 0, 0}; // raw last-3 trigger PCs (path/sequence experiments)
+  uint32_t perc_last_rpc_ = 0, perc_last_rsig_ = 0, perc_last_rdelta_ = 0, perc_last_rp1_ = 0, perc_last_rp2_ = 0;
+  uint64_t perc_raw_ap_ = 0, perc_raw_nxip_ = 0; // extraneous-feature raw stash: SPPAM spatial bitmap (engines 0/1), BG next-pc (engine 3)
+  uint32_t perc_last_rap_ = 0, perc_last_rnxip_ = 0; // snapshotted at perc_keep, copied into the perc_ent at note_issue
+public:
+  void perc_set_raw_bg(uint64_t nxip) { if (P.perc_profile) perc_raw_nxip_ = nxip; } // glue hands the BG next-pc block in before perc_keep
+private:
+  std::vector<int16_t> pip_bias_; // PER-IP bias (mask bit 0x2000): each trigger-IP's own learned keep/drop offset -- the
+  // original Jimenez perceptron's per-BRANCH bias weight w0, applied per-IP. Breaks the global weight-sharing so mcf's
+  // IPs can all drift "keep" while xalan's drift "drop" (the piecewise/per-context personalization a shared linear sum can't).
+  uint32_t pw_pc_mask_ = 0, pw_sig_mask_ = 0, perc_lfsr_ = 0x2545F491;
+  double pe_ema_ = 30.0; // rolling mean of |PE| (perc_pe_norm): normalizes the reward -> scale-invariant, lower variance
+  // Aggregate-harm signals -- per-prefetch PE is blind to COLLECTIVE pollution/bandwidth harm (a prefetch can look
+  // locally useful yet still net-pollute). MSHR/bandwidth pressure (set by the glue each access) + global useless,
+  // untimely, and demand-hit RATE EMAs give the gate the system-level context PE can't see.
+  int perc_mshr_idx_ = 0;                          // 0..15 MSHR-occupancy/bandwidth pressure, refreshed by the glue
+  double perc_useless_ema_ = 0.0;                  // fraction of resolved prefetches that died unused (truly-bad)
+  double perc_untimely_ema_ = 0.0;                 // fraction of unused-evicted prefetches later re-demanded (right addr, too early)
+  double perc_hit_ema_ = 0.5;                      // global demand L2 hit-rate (relative-impact: churn hurts a HIGH-hit cache far more)
+  uint16_t perc_last_feat_[PERC_NF] = {0}; uint32_t perc_last_iph_ = 0; bool perc_last_valid_ = false; // features + trigger-IP hash from the last perc_keep
+  uint64_t dbg_perc_keep_ = 0, dbg_perc_drop_ = 0, dbg_perc_explore_ = 0, dbg_perc_train_ = 0, dbg_perc_veto_ = 0;
+  uint64_t dbg_keep_res_ = 0, dbg_keep_res_u_ = 0, dbg_drop_res_ = 0, dbg_drop_res_u_ = 0; // discrimination: resolved useful-rate of kept vs (explored-)dropped
+  bool perc_last_explored_ = false;
+  struct perc_ent { std::array<uint16_t, PERC_NF> f{}; uint32_t tag = 0; uint32_t stamp = 0; uint32_t iph = 0; bool occ = false; bool explored = false;
+    uint32_t lat = 0; float cost = 0.0f; bool filled = false; // fill latency + accrued I_LAT/I_POLL cost -- the perceptron PE MAGNITUDE, folded in here so the glue no longer needs a duplicate perc_sdm_ table (UNIFIED with the feature snapshot)
+    uint32_t r_pc = 0, r_sig = 0, r_delta = 0, r_p1 = 0, r_p2 = 0,   // raw signals for the offline feature/encoding/depth sweep (perc_profile)
+             r_block = 0, r_ap = 0, r_nxip = 0; }; // "extraneous" methodology-check signals: page(block), opposite-dir spatial pattern(ap), BG next-pc(nxip)
+  std::vector<perc_ent> perc_track_; uint32_t perc_track_mask_ = 0; // SMALL fixed direct-mapped table w/ probabilistic
+  // eviction -- the SAME validated policy as pf_sdm_ (large per-outstanding tracking tables are prohibitively expensive);
+  // training fires on the sampled entries that survive to their hit/eviction resolve.
+  static uint64_t pext(uint64_t v, uint64_t mask) { uint64_t r = 0; int k = 0; while (mask) { if (mask & 1u) { r |= ((v & 1u) << k); ++k; } v >>= 1; mask >>= 1; } return r; }
+  // PC -> table index. PCs are few: a full-address multiply-hash injects entropy that buries the signal, so the
+  // default is a contiguous bit SLICE (drop the low alignment bits, keep a key window); drop-out keeps a fixed set
+  // of wide-ranging non-consecutive bits (pext) and packs them low.
+  uint32_t perc_pc_index(uint64_t pc) const {
+    switch (P.perc_pc_encoding) {
+      case 1: return static_cast<uint32_t>((pc >> P.perc_pc_lobit) & pw_pc_mask_);            // contiguous slice
+      case 2: return static_cast<uint32_t>(pext(pc, P.perc_pc_dropmask) & pw_pc_mask_);       // random drop-out
+      default: return static_cast<uint32_t>(((pc * 0x9E3779B97F4A7C15ull) >> 40) & pw_pc_mask_); // legacy hash
+    }
+  }
+  int perc_use_bucket(uint32_t iph) const {
+    if (ip_useful_.empty()) return 4;                    // neutral until warm
+    uint32_t u = ip_useful_[iph], l = ip_useless_[iph], t = u + l;
+    return t < 4 ? 4 : std::min(7, static_cast<int>(8u * u / t)); // 0=useless .. 7=useful
+  }
+  int perc_tim_bucket(uint32_t iph) const {
+    if (ip_ev_.empty()) return 4;
+    uint32_t ev = ip_ev_[iph], un = ip_untimely_[iph];
+    return ev < 4 ? 4 : std::min(7, static_cast<int>(8u * un / ev)); // 7 = mostly untimely (right addr, too early)
+  }
+  // engine ids: 0 = SPPAM spatial forward, 1 = SPPAM spatial backward, 2 = delta-PHT (SPP-like delta fall-through),
+  // 3 = branch-graph (instruction next-PC). Each engine feeds its OWN signature (6-bit spatial pattern / delta
+  // signature / next-PC); we fold the engine into the shared sig index so those signatures don't collide.
+  uint32_t perc_sig_index(int engine, uint64_t sig) const {
+    const uint64_t e = static_cast<uint64_t>(engine < 0 ? 0 : (engine >= PERC_ENGINES ? PERC_ENGINES - 1 : engine));
+    return static_cast<uint32_t>((((sig ^ (e * 0x9E3779B185EBCA87ull)) * 0x9E3779B97F4A7C15ull) >> 40) & pw_sig_mask_);
+  }
+  int perc_score(uint64_t block, int engine, int depth, uint64_t pc, int conf, uint64_t sig, uint16_t f[PERC_NF]) const {
+    const uint32_t iph = iphash(pc);
+    const int eng = engine < 0 ? 0 : (engine >= PERC_ENGINES ? PERC_ENGINES - 1 : engine);
+    f[0] = static_cast<uint16_t>(perc_pc_index(pc));            // PC (bit-slice / drop-out, NOT the full address)
+    f[1] = 0;                                                  // offset feature DROPPED (redundant with the spatial signature)
+    f[2] = static_cast<uint16_t>(eng);                         // which engine proposed this block
+    f[3] = static_cast<uint16_t>(depth < 0 ? 0 : (depth > 15 ? 15 : depth));
+    f[4] = static_cast<uint16_t>(perc_use_bucket(iph));        // per-IP usefulness (LIVE via perc_resolve, ip-filter-independent)
+    f[5] = static_cast<uint16_t>(perc_tim_bucket(iph));        // per-IP untimeliness (LIVE via perc_resolve watch + operate() re-demand, ip-filter-independent)
+    f[6] = static_cast<uint16_t>(conf < 0 ? 0 : (conf > 15 ? 15 : conf)); // engine per-prediction confidence (0..15)
+    f[7] = static_cast<uint16_t>(perc_sig_index(eng, sig));    // engine-partitioned signature (spatial pattern / delta-sig / next-PC)
+    f[8] = static_cast<uint16_t>(perc_mshr_idx_ < 0 ? 0 : (perc_mshr_idx_ > 15 ? 15 : perc_mshr_idx_)); // aggregate: MSHR/bandwidth pressure
+    f[9] = static_cast<uint16_t>(std::clamp(static_cast<int>(perc_useless_ema_ * 15.0 + 0.5), 0, 15));  // aggregate: global useless (truly-bad) rate
+    f[10] = static_cast<uint16_t>(std::clamp(static_cast<int>(perc_untimely_ema_ * 15.0 + 0.5), 0, 15)); // aggregate: global untimely (too-early) rate
+    f[11] = static_cast<uint16_t>(std::clamp(static_cast<int>(perc_hit_ema_ * 15.0 + 0.5), 0, 15));      // aggregate: demand hit-rate (relative-impact context)
+    // CONJUNCTION (path-based): a single weight per COMBINATION of {usefulness, untimeliness, pressure, hit-rate},
+    // each coarsened to 2 bits. Lets the gate represent the non-additive relation the independent per-feature
+    // weights above cannot (e.g. high pressure => keep when useful, drop when polluting).
+    f[12] = static_cast<uint16_t>((((f[4] >> 1) & 3u) << 6) | (((f[5] >> 1) & 3u) << 4) | (((f[8] >> 2) & 3u) << 2) | ((f[11] >> 2) & 3u));
+    f[13] = static_cast<uint16_t>(perc_pc_path_ & pw_pcpath_mask_);             // PC-PATH: hash of the recent trigger-PC chain (datacenter PCs recur)
+    { const uint64_t d = block - perc_last_trigger_;                            // prefetch distance from the triggering demand
+      f[14] = static_cast<uint16_t>((perc_pc_index(pc) ^ static_cast<uint32_t>((d * 0x9E3779B97F4A7C15ull) >> 48)) & pw_pcdelta_mask_); } // PC XOR delta (PC<->data correlation)
+    // DSE-derived PAIRWISE interactions (direct product index). The sweep showed discrimination lives in signals XOR'd
+    // with CONTENTION (mshr): use^mshr was the universal #1, then tim^mshr/conf^mshr, plus criticality = per-IP value x
+    // global hit-rate. These are the non-additive relations the independent per-feature weights cannot represent.
+    f[15] = static_cast<uint16_t>((f[4] << 4) | f[8]);  // use^mshr:  per-IP usefulness x DRAM-contention  (0..127)
+    f[16] = static_cast<uint16_t>((f[5] << 4) | f[8]);  // tim^mshr:  per-IP untimeliness x DRAM-contention (0..127)
+    f[17] = static_cast<uint16_t>((f[6] << 4) | f[8]);  // conf^mshr: engine confidence x DRAM-contention   (0..255)
+    f[18] = static_cast<uint16_t>((f[4] << 4) | f[11]); // criticality: per-IP usefulness x global hit-rate window (0..127)
+    const uint32_t m = P.perc_feat_mask;
+    const int es8 = P.perc_engine_split ? eng * 8 : 0, es16 = P.perc_engine_split ? eng * 16 : 0; // per-engine context-table offset
+    return ((m & 1) ? pw_pc_[f[0]] : 0) + ((m & 4) ? pw_eng_[f[2]] : 0)
+         + ((m & 8) ? pw_dep_[es16 + f[3]] : 0) + ((m & 16) ? pw_use_[es8 + f[4]] : 0) + ((m & 32) ? pw_tim_[es8 + f[5]] : 0)
+         + ((m & 64) ? pw_conf_[es16 + f[6]] : 0) + ((m & 128) ? pw_sig_[f[7]] : 0)
+         + ((m & 256) ? pw_mshr_[es16 + f[8]] : 0) + ((m & 512) ? pw_guse_[es16 + f[9]] : 0) + ((m & 1024) ? pw_gtim_[es16 + f[10]] : 0)
+         + ((m & 2048) ? pw_hit_[es16 + f[11]] : 0) + ((m & 4096) ? pw_conj_[f[12]] : 0)
+         + ((m & 0x4000) ? pw_pcpath_[f[13]] : 0) + ((m & 0x8000) ? pw_pcdelta_[f[14]] : 0)   // PC-path + PC^delta (PPF-style)
+         + ((m & 0x10000) ? pw_usemshr_[f[15]] : 0) + ((m & 0x20000) ? pw_timmshr_[f[16]] : 0)   // DSE interactions: contention-gated
+         + ((m & 0x40000) ? pw_confmshr_[f[17]] : 0) + ((m & 0x80000) ? pw_crit_[f[18]] : 0)      // ...and criticality
+         + ((m & 0x2000) && !pip_bias_.empty() ? pip_bias_[iph] : 0);           // per-IP bias (per-context keep/drop offset)
+  }
+  // Final gate: true = issue. On a "drop", still issue 1/perc_explore_div of the time (exploration) so dropped
+  // regions of the feature space keep producing labels. Stashes the feature vector for the sampler to record.
+public: // perc_keep + perc_note_issue are the engine call sites' entry points (SPPAM internal, plus the glue's branch-graph functor)
+  bool perc_keep(uint64_t block, int engine, int depth, uint64_t pc, int conf, uint64_t sig) {
+    int y = perc_score(block, engine, depth, pc, conf, sig, perc_last_feat_);
+    perc_last_iph_ = iphash(pc);                              // stash for per-IP usefulness crediting at resolve
+    if (P.perc_profile) { perc_last_rpc_ = static_cast<uint32_t>(pc); perc_last_rsig_ = static_cast<uint32_t>(sig); // raw signals for the offline sweep
+      perc_last_rdelta_ = static_cast<uint32_t>(block - perc_last_trigger_); perc_last_rp1_ = perc_pc_ring_[1]; perc_last_rp2_ = perc_pc_ring_[2];
+      perc_last_rap_ = (engine <= 1) ? static_cast<uint32_t>(perc_raw_ap_) : 0u;   // opposite-dir spatial pattern source (SPPAM engines only)
+      perc_last_rnxip_ = static_cast<uint32_t>(perc_raw_nxip_); perc_raw_nxip_ = 0; } // BG next-pc block (consumed per gate)
+    perc_last_valid_ = true; perc_last_explored_ = false;
+    if (y >= P.perc_tau_keep) { ++dbg_perc_keep_; return true; }
+    // UNTIMELY VETO (DSE lesson): the score says drop, but if this trigger IP is strongly UNTIMELY (right address,
+    // evicted-before-use), do NOT volume-drop it -- that kills coverage on pointer-chasers (mcf). Leave it to
+    // depth-throttle (which shortens its lookahead). The perceptron only drops TRULY-BAD (wrong-address) IPs.
+    if (P.perc_untimely_veto && !ip_ev_.empty()) {
+      const uint32_t iph = perc_last_iph_; // = iphash(pc)
+      if (ip_ev_[iph] >= 4 && 100u * ip_untimely_[iph] >= static_cast<uint32_t>(P.ip_untimely_thresh) * ip_ev_[iph]) {
+        ++dbg_perc_veto_; return true; // keep (trained normally: perc_last_valid_ stays true)
+      }
+    }
+    perc_lfsr_ ^= perc_lfsr_ << 13; perc_lfsr_ ^= perc_lfsr_ >> 17; perc_lfsr_ ^= perc_lfsr_ << 5;
+    if (P.perc_explore_div && (perc_lfsr_ % P.perc_explore_div == 0)) { ++dbg_perc_explore_; perc_last_explored_ = true; return true; }
+    ++dbg_perc_drop_; perc_last_valid_ = false; // dropped for real -> no sample/label
+    return false;
+  }
+  // Train on a per-prefetch VALUE. usefulness (used=+1 / evicted=-1) is a poor proxy for performance -- a
+  // DRAM-covering hit saves ~10x an LLC hit, and a "useful" prefetch can still net-pollute. So val carries the
+  // PE magnitude (latency saved on a hit, cost on an eviction): sign = keep/drop, magnitude = training step.
+  void perc_train(const uint16_t f[PERC_NF], uint32_t iph, double val) {
+    if (P.perc_label_pe && std::abs(val) < static_cast<double>(P.perc_pe_margin)) return; // skip ambiguous (small |PE|)
+    const bool keep_lbl = val >= 0.0;
+    const uint32_t mm = P.perc_feat_mask;                       // confidence check uses the SAME masked score as the gate
+    const int e8 = P.perc_engine_split ? f[2] * 8 : 0, e16 = P.perc_engine_split ? f[2] * 16 : 0; // per-engine offset (engine = f[2])
+    const int y = ((mm & 1) ? pw_pc_[f[0]] : 0) + ((mm & 4) ? pw_eng_[f[2]] : 0) + ((mm & 8) ? pw_dep_[e16 + f[3]] : 0)
+                + ((mm & 16) ? pw_use_[e8 + f[4]] : 0) + ((mm & 32) ? pw_tim_[e8 + f[5]] : 0) + ((mm & 64) ? pw_conf_[e16 + f[6]] : 0)
+                + ((mm & 128) ? pw_sig_[f[7]] : 0) + ((mm & 256) ? pw_mshr_[e16 + f[8]] : 0)
+                + ((mm & 512) ? pw_guse_[e16 + f[9]] : 0) + ((mm & 1024) ? pw_gtim_[e16 + f[10]] : 0)
+                + ((mm & 2048) ? pw_hit_[e16 + f[11]] : 0) + ((mm & 4096) ? pw_conj_[f[12]] : 0)
+                + ((mm & 0x4000) ? pw_pcpath_[f[13]] : 0) + ((mm & 0x8000) ? pw_pcdelta_[f[14]] : 0)
+                + ((mm & 0x10000) ? pw_usemshr_[f[15]] : 0) + ((mm & 0x20000) ? pw_timmshr_[f[16]] : 0)
+                + ((mm & 0x40000) ? pw_confmshr_[f[17]] : 0) + ((mm & 0x80000) ? pw_crit_[f[18]] : 0)
+                + ((mm & 0x2000) && !pip_bias_.empty() ? pip_bias_[iph] : 0);
+    const bool wrong = (y >= P.perc_tau_keep) != keep_lbl;
+    if (!wrong && std::abs(y) >= P.perc_theta_train) return; // confident-correct -> no update
+    int step = 1;                                            // usefulness / sign-only PE: unit step (low variance)
+    if (P.perc_label_pe && !P.perc_pe_signonly) {            // QUANTIZE the PE reward into a bounded signed level [1..pe_step_max]
+      if (P.perc_pe_norm) pe_ema_ += (std::abs(val) - pe_ema_) * (1.0 / 64.0);   // SMOOTH: rolling mean of |PE|
+      const double sc = (P.perc_pe_norm && pe_ema_ > 1.0) ? pe_ema_ : P.perc_pe_scale; // normalize by the mean (scale-invariant) or a fixed scale
+      if (sc > 0.0) step = std::clamp(static_cast<int>(std::abs(val) / sc) + 1, 1, P.perc_pe_step_max);
+    }
+    const int d = keep_lbl ? step : -step;
+    const uint32_t m = P.perc_feat_mask;
+    auto upd = [&](std::vector<int16_t>& w, uint16_t i) { w[i] = static_cast<int16_t>(std::clamp(w[i] + d, -P.perc_weight_max, P.perc_weight_max)); };
+    if (m & 1) upd(pw_pc_, f[0]);
+    if (m & 4) upd(pw_eng_, f[2]);                             // (bit 2 / offset feature dropped)
+    if (m & 8) upd(pw_dep_, e16 + f[3]); if (m & 16) upd(pw_use_, e8 + f[4]); if (m & 32) upd(pw_tim_, e8 + f[5]);
+    if (m & 64) upd(pw_conf_, e16 + f[6]); if (m & 128) upd(pw_sig_, f[7]);
+    if (m & 256) upd(pw_mshr_, e16 + f[8]); if (m & 512) upd(pw_guse_, e16 + f[9]); if (m & 1024) upd(pw_gtim_, e16 + f[10]);
+    if (m & 2048) upd(pw_hit_, e16 + f[11]); if (m & 4096) upd(pw_conj_, f[12]);
+    if (m & 0x4000) upd(pw_pcpath_, f[13]); if (m & 0x8000) upd(pw_pcdelta_, f[14]);
+    if (m & 0x10000) upd(pw_usemshr_, f[15]); if (m & 0x20000) upd(pw_timmshr_, f[16]);
+    if (m & 0x40000) upd(pw_confmshr_, f[17]); if (m & 0x80000) upd(pw_crit_, f[18]);
+    if ((m & 0x2000) && !pip_bias_.empty()) upd(pip_bias_, static_cast<uint16_t>(iph));
+    ++dbg_perc_train_;
+  }
+  // Snapshot the last gate's feature vector for dense training when this block's L2 outcome lands. Used by the
+  // engine call sites that gate through perc_keep (SPPAM, delta-PHT, and the glue's branch-graph functor).
+  // UNIFIED sampling: perc_track_ now also holds the fill latency + accrued cost the glue used to duplicate in a
+  // separate perc_sdm_ table. The glue feeds these; perc_track_lat reads the PE magnitude back at resolve.
+  void perc_note_fill(uint64_t block, uint32_t lat) { // glue calls at fill (issue->fill latency, DRAM high / LLC low)
+    if (perc_track_.empty()) return;
+    perc_ent& e = perc_track_[sdm_idx(block) & perc_track_mask_];
+    if (e.occ && e.tag == static_cast<uint32_t>(block) && !e.filled) { e.lat = lat; e.filled = true; }
+  }
+  void perc_add_cost(uint64_t block, float delta) { // glue calls for I_LAT (at fill) and I_POLL (on victim re-miss)
+    if (perc_track_.empty()) return;
+    perc_ent& e = perc_track_[sdm_idx(block) & perc_track_mask_];
+    if (e.occ && e.tag == static_cast<uint32_t>(block)) e.cost += delta;
+  }
+  // Returns true iff a filled entry exists; hands back its fill latency + accrued cost (the perceptron PE magnitude).
+  bool perc_track_lat(uint64_t block, uint32_t& lat, float& cost) const {
+    if (perc_track_.empty()) return false;
+    const perc_ent& e = perc_track_[sdm_idx(block) & perc_track_mask_];
+    if (e.occ && e.tag == static_cast<uint32_t>(block)) { lat = e.lat; cost = e.cost; return e.filled; }
+    return false;
+  }
+  void perc_note_issue(uint64_t block) {
+    if (!(perc_last_valid_ || perc_last_explored_)) return;
+    // SAMPLE like the glue's pfht_ (1/pe_sample_div). A DENSE insert SATURATES the pinned table: live entries never
+    // survive to their true hit/eviction resolve -- they all time out USELESS, biasing training toward drop (the
+    // 92%-drop mcf collapse). Sampling keeps occupancy low so pin + useless-on-timeout reflects REAL outcomes.
+    if (P.pe_sample_div > 1 && (++perc_sample_ctr_ % P.pe_sample_div) != 0) return;
+    perc_track_insert(block, perc_last_feat_, perc_last_iph_, perc_last_explored_);
+  }
+  uint32_t perc_sample_ctr_ = 0;
+private:
+  // DENSE training path: snapshot the feature vector of EVERY kept L2 prefetch, then train when the actual
+  // outcome lands (a demand hit = useful, an evicted-unused = useless). Outcomes resolve far more often than
+  // the sparse per-IP sampling, which stays as an INPUT FEATURE (usefulness/timeliness buckets), not the trigger.
+  void perc_track_insert(uint64_t block, const uint16_t f[PERC_NF], uint32_t iph, bool explored) {
+    // SMALL fixed direct-mapped table. ESTABLISHED balanced-sampling policy (mirrors the glue's pfht_ USELESS_ON_TIMEOUT):
+    // PIN a recent in-flight incumbent -- NEVER churn-overwrite it. A churn-overwrite biases training toward
+    // fast-resolving USEFUL prefetches (useful hits resolve quickly; useless ones resolve LATE at eviction, so an
+    // overwrite table drops them). On timeout, resolve the stale incumbent USELESS_ON_TIMEOUT (it sat unresolved past
+    // the window => it was useless) before reusing its slot -- this is what removes the under-sampling bias.
+    if (perc_track_.empty()) return;
+    perc_ent& e = perc_track_[sdm_idx(block) & perc_track_mask_];
+    const bool stale = e.occ && (static_cast<uint32_t>(cycle_) - e.stamp) > P.perc_track_ttl; // DEDICATED long ttl (op-clock): a short ttl times out not-yet-demanded useful prefetches as useless -> over-drop
+    if (e.occ && !stale) return;                              // PIN the recent incumbent; drop this new snapshot
+    if (stale) perc_resolve_entry(e, e.tag, -static_cast<double>(P.llc_hit_latency)); // useless-on-timeout -> frees the slot
+    for (int k = 0; k < PERC_NF; ++k) e.f[k] = f[k];
+    e.tag = static_cast<uint32_t>(block); e.stamp = static_cast<uint32_t>(cycle_); e.iph = iph; e.occ = true; e.explored = explored;
+    e.lat = 0; e.cost = 0.0f; e.filled = false; // reset the unified fill-latency/cost fields for the new prefetch
+    if (P.perc_profile) { e.r_pc = perc_last_rpc_; e.r_sig = perc_last_rsig_; e.r_delta = perc_last_rdelta_; e.r_p1 = perc_last_rp1_; e.r_p2 = perc_last_rp2_;
+      e.r_block = static_cast<uint32_t>(block); e.r_ap = perc_last_rap_; e.r_nxip = perc_last_rnxip_; }
+  }
+  // Resolve a tracked entry (looked up by the caller) with per-prefetch PE. Shared by the direct block lookup and by
+  // USELESS_ON_TIMEOUT (which passes the incumbent's own tag as `block`).
+  void perc_resolve_entry(perc_ent& e, uint64_t block, double val) {
+    const bool useful = val >= 0.0;               // discrimination diagnostic: was this kept/dropped prefetch actually useful?
+    if (e.explored) { ++dbg_drop_res_; if (useful) ++dbg_drop_res_u_; }
+    else { ++dbg_keep_res_; if (useful) ++dbg_keep_res_u_; }
+    // Feed the LIVE aggregate/per-IP discriminators (independent of the ip-filter): per-IP usefulness (f[4]) and the
+    // global useless-rate (f[9]). A useful resolve is also not-untimely; the untimely numerator arrives via the glue.
+    if (!ip_useful_.empty()) { if (useful) ++ip_useful_[e.iph]; else ++ip_useless_[e.iph]; ip_age_tick(); }
+    perc_useless_ema_ += ((useful ? 0.0 : 1.0) - perc_useless_ema_) * (1.0 / 1024.0);
+    if (!useful) { // evicted-unused: seed the per-IP untimely watch (denominator now; a later re-demand in operate() is the numerator)
+      if (!ip_ev_.empty()) ++ip_ev_[e.iph];
+      if (evicted_unused_.size() >= static_cast<std::size_t>(P.evicted_unused_cap)) evicted_unused_.clear(); // crude bound (sampling tolerates loss)
+      evicted_unused_[block] = static_cast<uint16_t>(e.iph);
+      perc_untimely_ema_ += (0.0 - perc_untimely_ema_) * (1.0 / 1024.0); // assume truly-bad until a re-demand corrects it
+    }
+    if (P.perc_profile && (++perc_prof_ctr_ % 32 == 0)) { // sampled RAW tuple for the offline feature sweep (aggregate PE x coverage)
+      // cols: eng,pc,sig,delta,depth,use,tim,conf,mshr,hit,guse,gtim,p1,p2,block,ap,nxip,PE
+      //   block=predicted block (page/VPN-delta), ap=SPPAM spatial bitmap (opposite-dir via bit-reverse), nxip=BG next-pc block
+      std::fprintf(stderr, "PROF,%d,%u,%u,%u,%d,%d,%d,%d,%d,%d,%d,%d,%u,%u,%u,%u,%u,%.1f\n",
+                   e.f[2], e.r_pc, e.r_sig, e.r_delta, e.f[3], e.f[4], e.f[5], e.f[6], e.f[8], e.f[11], e.f[9], e.f[10],
+                   e.r_p1, e.r_p2, e.r_block, e.r_ap, e.r_nxip, val);
+    }
+    perc_train(e.f.data(), e.iph, val);
+    e.occ = false;
+  }
+  void perc_resolve(uint64_t block, double val) { // val = per-prefetch PE (or +/-1 usefulness fallback)
+    if (perc_track_.empty()) return;
+    perc_ent& e = perc_track_[sdm_idx(block) & perc_track_mask_];
+    if (!e.occ || e.tag != static_cast<uint32_t>(block)) return; // displaced / never sampled -> no training event
+    perc_resolve_entry(e, block, val);
+  }
+public:
+  // Resolve a tracked prefetch from engines gated via the sink/glue (branch-graph, SPP) so they TRAIN the
+  // perceptron. Without this, used branch-graph prefetches never resolve -> the gate only ever sees BG as
+  // useless -> drops all BG. pe > 0 = useful (latency saved), pe < 0 = useless (wasted-fill cost).
+  void perc_resolve_ext(uint64_t block, double pe) { perc_resolve(block, pe); }
+private:
+  // The glue calls these to feed the aggregate-harm signals the perceptron can't derive itself.
+public:
+  void perc_set_mshr(int idx) { perc_mshr_idx_ = idx; }                    // MSHR/bandwidth pressure 0..15, refreshed per access
+private:
+  // Per-feature accumulated weight magnitude -> which features actually carry signal (sum|w|/mean|w| high = used).
+  void perc_dump() const {
+    auto stat = [&](const std::vector<int16_t>& w, const char* nm) {
+      if (w.empty()) return;
+      long sum = 0, maxa = 0; std::size_t nnz = 0;
+      for (int16_t x : w) { long a = x < 0 ? -x : x; sum += a; if (a > maxa) maxa = a; if (a) ++nnz; }
+      std::fprintf(stderr, "  %-4s entries=%zu sum|w|=%ld mean|w|=%.2f max|w|=%ld nonzero=%zu(%d%%)\n",
+                   nm, w.size(), sum, static_cast<double>(sum) / static_cast<double>(w.size()), maxa, nnz,
+                   static_cast<int>(100 * nnz / w.size()));
+    };
+    std::fprintf(stderr, "[perc-weights] %s (sum|w| = signal accumulated per feature):\n", P.name.c_str());
+    stat(pw_pc_, "PC"); stat(pw_eng_, "eng"); stat(pw_dep_, "dep");
+    stat(pw_use_, "use"); stat(pw_tim_, "tim"); stat(pw_conf_, "conf"); stat(pw_sig_, "sig");
+    stat(pw_mshr_, "mshr"); stat(pw_guse_, "guse"); stat(pw_gtim_, "gtim"); // aggregate-harm features
+    stat(pw_hit_, "hit"); stat(pw_conj_, "conj"); // hit-rate + conjunction (non-additive interaction)
+    stat(pw_pcpath_, "pcpa"); stat(pw_pcdelta_, "pcdl"); // PC-path + PC^delta (PPF-style)
+    stat(pip_bias_, "pipb"); // per-IP bias (per-context personalization)
+    auto small = [&](const std::vector<int16_t>& w, const char* nm) {
+      if (w.empty() || w.size() > 16) return;
+      std::string s; for (int16_t x : w) { s += std::to_string(x); s += ' '; }
+      std::fprintf(stderr, "    %-4s = [ %s]\n", nm, s.c_str());
+    };
+    small(pw_eng_, "eng"); small(pw_dep_, "dep"); small(pw_use_, "use"); small(pw_tim_, "tim"); small(pw_conf_, "conf");
+    small(pw_mshr_, "mshr"); small(pw_guse_, "guse"); small(pw_gtim_, "gtim"); small(pw_hit_, "hit");
+  }
   struct pat_val_t { uint32_t u = 0, n = 0; };
   std::unordered_map<uint64_t, pat_val_t> pat_val_;      // pattern key -> validated useful / useless counts
   std::vector<uint32_t> ip_useful_, ip_useless_;         // per-trigger-IP-bucket sampled useful / useless (ip_n_ entries)
@@ -1075,8 +1423,8 @@ private:
     const uint32_t div = (P.pv_sample_directmap && P.pv_adaptive_rate) ? pv_div_cur_
                        : (P.ip_sample_div ? P.ip_sample_div : 1);
     if (pv_lfsr_ % (div ? div : 1) != 0) return;
-    const pf_samp_t ns{pk, static_cast<uint16_t>(iph), static_cast<int8_t>(bit), backward,
-                       static_cast<uint32_t>(block), static_cast<uint32_t>(cycle_), true};
+    pf_samp_t ns{pk, static_cast<uint16_t>(iph), static_cast<int8_t>(bit), backward,
+                 static_cast<uint32_t>(block), static_cast<uint32_t>(cycle_), true};
     if (P.pv_sample_directmap) {
       // Fixed direct-mapped table: an in-flight incumbent survives ~pv_sample_evict_div collisions and is
       // reclaimed once older than pv_sample_ttl ops, so the sample's residency time tracks the prefetch
@@ -1514,7 +1862,8 @@ private:
     // IP-FILTER throttle (faithful): a low-usefulness trigger IP is throttled. Action depends on WHY it's low:
     // UNTIMELY (right addr, evicted-before-use) -> cap DEPTH (shallower lands in time); TRULY-BAD -> volume trickle.
     int ip_depth_cap = 1 << 20; // no cap by default
-    if (P.enable_ip_filter && !ip_useful_.empty()) {
+    // The perceptron filter SUPERSEDES the ip-filter throttle (its counters stay live as perceptron features).
+    if (P.enable_ip_filter && !P.enable_perceptron_filter && !ip_useful_.empty()) {
       uint32_t tiph = iphash(ip);
       if (P.ip_filter_depth_throttle && ip_is_untimely(tiph)) {
         uint32_t div = ip_trickle_div(tiph); // reuse the bands: harsher band -> shallower cap
@@ -1615,9 +1964,14 @@ private:
         if (dpht_spec_[nd]) break; // path revisits a predicted block -> stop (avoid a delta cycle)
         dpht_spec_[nd] = 1;        // extend the speculative trajectory (issued or squashed)
         // Set-duel: never fill delta into OFF-leader sets; followers gated by PSEL. Path still advances (above).
-        if (delta_sd_allow(step) && !r_addr->prefetch_map[nd]) {
-          if (sink_->issue_prefetch(step, true, false, 1.0, 0)) {
+        // Perceptron final gate (engine 2 = delta): drop is learned over the DELTA signature that predicted this block.
+        const bool perc_drop = P.enable_perceptron_filter
+                             && !perc_keep(step, 2, k, ip, static_cast<int>(e->conf), delta_sig(r_addr, cur, dpht_spec_.data()));
+        if (delta_sd_allow(step) && !r_addr->prefetch_map[nd] && !perc_drop) {
+          const bool placed = sink_->issue_prefetch(step, true, false, 1.0, 0);
+          if (placed) {
             mark_prefetch(r_addr, nd, step);
+            if (P.enable_perceptron_filter) perc_note_issue(step);
             if (P.delta_pht_selfthrottle) { // tag the block as delta-sourced for usefulness attribution
               if (r_addr->delta_map.empty()) r_addr->delta_map.assign(blocks_per_region_, false);
               r_addr->delta_map[nd] = true;
@@ -1824,6 +2178,12 @@ private:
                 uint64_t soff = offset_of(step);
                 bool already = same_region ? (r_addr ? r_addr->prefetch_map[soff] : false) : check_pagemap(step, true);
                 if (!already) {
+                  // PERCEPTRON final gate (prototype): learned keep/drop over all throttle signals. Runs AFTER
+                  // the residency filter (above) and supersedes the ip-filter/depth throttle. engine 0=SPPAM-fwd, 1=bwd.
+                  if (P.perc_profile) perc_raw_ap_ = ap; // stash the raw spatial bitmap for the opposite-direction methodology-check feature
+                  if (P.enable_perceptron_filter && !perc_keep(step, forward ? 0 : 1, lookaheads, ip, current_usefulness, pat_key(ap, cctx_pc)))
+                    continue; // dropped (and not chosen for exploration); sig = the SPPAM pattern key that predicted this block
+
                   bool fill_l2 = (pf_issued < l2_fill_limit);
                   if (!fill_l2 && check_llc_pagemap(step)) {
                     // already in LLC map -> filter
@@ -1833,6 +2193,7 @@ private:
                     /*gen_tag=*/ ((static_cast<uint32_t>(lookaheads > 15 ? 15 : lookaheads)) << 1)
                                  | ((static_cast<uint32_t>(order > 7 ? 7 : order)) << 5)
                                  | ((static_cast<uint32_t>(sstep > 7 ? 7 : sstep)) << 9)); // src=SPPAM, depth,order,scan
+                    if (P.enable_perceptron_filter && placed && fill_l2) perc_note_issue(step); // dense training snapshot
                     if (fill_l2) {
                       if (placed) { // MARK residency only when the prefetch actually filled L2 (no stale bit on drop)
                         if (same_region && r_addr) mark_prefetch(r_addr, soff, step);

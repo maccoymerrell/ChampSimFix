@@ -104,12 +104,15 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(pv_adaptive_rate); CFG(pv_rate_window); CFG(pv_churn_hi); CFG(pv_churn_lo); CFG(pv_div_min); CFG(pv_div_max); // adaptive sample rate
   // Perceptron prefetch filter (optional sub-in; OFF by default). Trained on the glue's REAL per-prefetch fill latency.
   CFG(enable_perceptron_filter); CFG(perc_pc_entries); CFG(perc_weight_max); CFG(perc_tau_keep); CFG(perc_theta_train);
-  CFG(perc_explore_div); CFG(perc_label_pe); CFG(perc_pe_margin); CFG(perc_track_cap); CFG(perc_pe_scale); CFG(perc_pe_step_max);
-  CFG(perc_feat_mask); CFG(perc_pe_signonly); CFG(perc_sig_entries); CFG(perc_pe_norm);
+  CFG(perc_explore_div); CFG(perc_label_pe); CFG(perc_pe_margin); CFG(perc_track_cap); CFG(perc_track_ttl); CFG(perc_pe_scale); CFG(perc_pe_step_max);
+  CFG(perc_feat_mask); CFG(perc_pe_signonly); CFG(perc_sig_entries); CFG(perc_pe_norm); CFG(perc_pe_cost); CFG(perc_untimely_veto); CFG(perc_pc_encoding); CFG(perc_pc_lobit); CFG(perc_pc_dropmask); CFG(perc_dump_weights); CFG(perc_gate_instr); CFG(perc_engine_split); CFG(perc_profile);
+  CFG(perc_load_gate); CFG(perc_load_gate_thresh); CFG(perc_instr_gate); CFG(perc_instr_gate_pct); // NOTE: the module loads knobs via CFG()/get_parameter, NOT the apply_json SET() list -- new knobs MUST be added here too
 #undef CFG
 
   pfht_.assign(P.pfht_entries ? P.pfht_entries : 1, pf_track{});
   poll_.assign(P.pfht_entries ? P.pfht_entries : 1, poll_track{});
+  // (perc_sdm_ removed -- the perceptron's fill-latency + cost now live in the predictor's perc_track_ entry, fed via
+  //  pred_->perc_note_fill()/perc_add_cost() from the glue's real-cycle fill/pollution hooks. One less sampling table.)
   if (P.pe_sample_div == 0)
     P.pe_sample_div = 1;
 
@@ -151,7 +154,17 @@ void sppam_plus::prefetcher_initialize()
 uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::address ip, bool cache_hit, bool useful_prefetch, access_type type,
                                               uint32_t metadata_in)
 {
+  real_cycle_ = cache_->current_cycle(); // TRUE ChampSim cycle -- the fill-latency / pfht_ / pe-management clock (was NEVER assigned -> stuck at 0 -> all real-cycle timing broken)
   const uint64_t block = addr.to<uint64_t>() >> BLOCK_SHIFT;
+  // Refresh the perceptron's aggregate MSHR/bandwidth-pressure feature before any gate (BG or data) runs this access.
+  if (P.enable_perceptron_filter) {
+    pred_->perc_set_rc(real_cycle_);   // real cycle for self-measured fill latency (issue stamp at perc_note_issue)
+    pred_->perc_set_mshr(dram_bw_index());
+    // Instruction-activity gate: fraction of prefetch issues that are instruction (BG). ~0 on data-bound mcf/xalan,
+    // 0.5-0.6 on the instruction-bound datacenter -> a clean runtime flag to back the data perceptron off there.
+    const uint64_t tot_pf = instr_pf_issued_ + data_pf_issued_;
+    pred_->perc_set_instr_pct(tot_pf ? static_cast<int>(100 * instr_pf_issued_ / tot_pf) : 0);
+  }
   // Set-duel: observe every demand (instruction + data) by set before any routing, so the guard
   // hit-rate reflects total L2 residency in those sets.
   if (type == access_type::LOAD || type == access_type::RFO) {
@@ -169,19 +182,42 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
   if (ipred_ && cache_->current_access_is_instruction()) {
     if (cache_hit) { // an instruction demand hit a block we prefetched -> useful, resolve it
       auto iit = instr_pf_unused_.find(block);
-      if (iit != instr_pf_unused_.end()) { ++instr_useful_; instr_pf_unused_.erase(iit); }
+      if (iit != instr_pf_unused_.end()) {
+        ++instr_useful_; instr_pf_unused_.erase(iit);
+        // CRITICAL: train the perceptron on this USED branch-graph prefetch (PE = its real fill latency). Without
+        // this the gate never sees a BG prefetch resolve useful -> it learns to drop all BG (the datacenter harm).
+        if (P.enable_perceptron_filter && P.perc_gate_instr) {
+          uint32_t lat = 0; float cost = 0.0f; // BG fill latency is fed via the is_instr_pf branch of the fill hook (perc_note_fill)
+          const bool filled = pred_->perc_track_lat(block, lat, cost);
+          double pe = filled ? static_cast<double>(lat) : static_cast<double>(P.llc_hit_latency);
+          if (P.perc_pe_cost) pe += static_cast<double>(cost);
+          pred_->perc_note_used(pe);                 // probe: demand-USED BG prefetch getting a negative PE label
+          pred_->perc_resolve_ext(block, pe);        // net PE = latency saved - its own contention/pollution cost (frees the entry)
+        }
+      }
     }
     const uint64_t ip_block = ip.to<uint64_t>() >> BLOCK_SHIFT;
     // Track each issued instruction prefetch by BLOCK (only if actually enqueued). The fill hook
     // recognizes our instruction prefetches by membership here -- NOT a metadata tag, because the
     // metadata space is fully contested (berti encodes its source IP in bits 9-31, so any tag bit
     // collides with berti's data-prefetch fills and steals them from the data-path bookkeeping).
-    ipred_->operate(ip_block, block, [this](uint64_t b) {
+    const uint64_t trig_ip = ip.to<uint64_t>();
+    ipred_->operate(ip_block, block, [this, trig_ip](uint64_t b, uint64_t nx_ip, double conf, int depth) -> bool {
+      // Perceptron final gate (engine 3 = branch-graph): learned drop over the predicted NEXT-PC signature. A drop
+      // returns false so the branch graph doesn't mark it resident (it can be re-proposed and re-gated later).
+      const bool gate_bg = P.enable_perceptron_filter && P.perc_gate_instr; // datacenter prefetching is instruction-DOMINATED; the data-tuned features can't discriminate BG prefetches, so this is optionally off
+      if (gate_bg
+          && !pred_->perc_keep(b, 3, depth, trig_ip, static_cast<int>(conf * 15.0), nx_ip))
+        return false;
       bool fl2 = true;
-      if (!sd_decide(b, fl2))    // set-duel may drop or redirect the instruction prefetch
-        return;
-      if (prefetch_line(b << BLOCK_SHIFT, fl2, 0) && fl2)
-        instr_pf_unused_[b] = 1; // only track L2-resident instruction prefetches (LLC gives no feedback)
+      if (!sd_decide(b, fl2))    // set-duel may drop or redirect the instruction prefetch (kept off the re-propose list)
+        return true;
+      ++instr_pf_issued_;                          // instruction-activity gate: count BG prefetch issues (datacenter discriminator)
+      if (prefetch_line(b << BLOCK_SHIFT, fl2, 0) && fl2) {
+        instr_pf_unused_[b] = static_cast<uint32_t>(real_cycle_) | 1u; // issue cycle for the BG fill-latency PE (|1 so it's never 0 = the "no issue" sentinel)
+        if (gate_bg) pred_->perc_note_issue(b);   // training snapshot for the branch-graph gate (perc_track_ holds features+lat+cost)
+      }
+      return true;
     });
     // By default the instruction stream is exclusive to the branch graph. With instr_feed_data
     // the same access ALSO falls through to the data path below, so we can measure the branch
@@ -233,9 +269,13 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
   // consumed here at resolve. A DRAM-covering prefetch reads ~10x an LLC one -- the coverage-weighted signal.
   double perc_pe = 0.0;
   if (P.enable_perceptron_filter && pf_used) {
-    auto it = perc_lat_.find(block);
-    perc_pe = (it != perc_lat_.end()) ? static_cast<double>(it->second) : static_cast<double>(P.llc_hit_latency);
-    if (it != perc_lat_.end()) perc_lat_.erase(it);
+    // PE = latency SAVED (real fill latency; fallback L_LLC if not yet filled), net of the I_LAT+I_POLL this prefetch
+    // caused -- all read from its perc_track_ entry (the unified table). operate() below frees it at resolve.
+    uint32_t lat = 0; float cost = 0.0f;
+    const bool filled = pred_->perc_track_lat(block, lat, cost);
+    perc_pe = filled ? static_cast<double>(lat) : static_cast<double>(P.llc_hit_latency);
+    if (P.perc_pe_cost) perc_pe += static_cast<double>(cost);
+    pred_->perc_note_used(perc_pe); // probe: how often a demand-USED prefetch gets a negative PE label (PE-vs-IPC misalignment)
   }
   pred_->operate(block, cur_trigger_ip_, cache_hit, pf_used, /*delta_additive=*/false, static_cast<sppam_dse::atype>(type), cycle_, perc_pe);
   if (spp_)
@@ -283,6 +323,8 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
             const double pollcost = w * avg_lat(); // I_POLL (-): pf evicted a useful line, now a demand miss
             if (P.enable_pe_management) i_poll_[v.from_spp ? 1 : 0] += pollcost;
             if (P.enable_ip_filter && (P.ip_filter_use_pe || P.ip_filter_use_pe_phase)) ip_pe_[v.iph] -= pollcost;
+            if (P.enable_perceptron_filter && P.perc_pe_cost) // charge I_POLL to the EVICTING prefetch's perceptron PE
+              pred_->perc_add_cost(v.pf_block, -static_cast<float>(pollcost));
             v.valid = false;
           }
         }
@@ -316,7 +358,9 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
 uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/, long /*way*/, bool prefetch, champsim::address evicted_addr,
                                            uint32_t metadata_in)
 {
+  real_cycle_ = cache_->current_cycle(); // TRUE ChampSim cycle for the fill-latency measurement (issue->fill)
   const uint64_t block = addr.to<uint64_t>() >> BLOCK_SHIFT;
+  if (P.enable_perceptron_filter) pred_->perc_set_rc(real_cycle_); // keep the perceptron's real-cycle clock current for perc_fill_measure
   const bool pe_terms = P.enable_pe_management || (P.enable_ip_filter && (P.ip_filter_use_pe || P.ip_filter_pe_veto || P.ip_filter_use_pe_phase));
   // Our instruction prefetches are identified by membership in instr_pf_unused_ (populated at
   // issue), keeping them out of the data maps (shadow residency, pf_unused, pfht) -- and, crucially,
@@ -325,17 +369,20 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
   if (!is_instr_pf) {
     // Shadow cache: any (data) fill marks the block resident.
     pred_->shadow_fill(block);
-    if (prefetch)
+    if (prefetch) {
       pf_unused_[block] = metadata_in; // freshly prefetched; carry full generation tag
-    // Perceptron: this prefetch's REAL fill latency (issue->fill; DRAM fills read high, LLC low) is its PE value.
-    if (P.enable_perceptron_filter && prefetch) {
-      auto it = perc_issue_.find(block);
-      if (it != perc_issue_.end()) {
-        const uint64_t lat = real_cycle_ >= it->second ? real_cycle_ - it->second : 0;
-        if (perc_lat_.size() >= 65536) perc_lat_.clear();
-        perc_lat_[block] = static_cast<uint32_t>(std::min<uint64_t>(lat, 100000));
-        perc_issue_.erase(it);
-      }
+      // DSE-faithful PE: measure THIS prefetch's real fill latency directly into perc_track_ (every data fill, not
+      // gated on pfht_ sampling) -> DRAM-covering useful prefetches get their true high PE, not the llc_hit fallback.
+      if (P.enable_perceptron_filter) pred_->perc_fill_measure(block);
+    }
+  } else if (P.enable_perceptron_filter && P.perc_gate_instr) {
+    // BG fill latency for the perceptron PE -- BG is NOT in pfht_, so feed perc_note_fill here (mirrors the pfht_
+    // hook below for data). Without this, used BG prefetches trained at the L_LLC fallback -> BG undervalued -> dropped.
+    auto it = instr_pf_unused_.find(block);
+    if (it != instr_pf_unused_.end() && it->second != 0) {
+      const uint32_t lat = static_cast<uint32_t>(real_cycle_) - it->second; // wrap-safe (latency << 2^32)
+      pred_->perc_note_fill(block, std::min<uint32_t>(lat, 100000));
+      it->second = 0; // mark filled (don't re-measure on a second fill)
     }
   }
   bool had_evict = false, evict_was_unused = false;
@@ -344,7 +391,13 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
     evb = evicted_addr.to<uint64_t>() >> BLOCK_SHIFT;
     if (ipred_) { // an instruction prefetch evicted before any demand use -> useless
       auto iit = instr_pf_unused_.find(evb);
-      if (iit != instr_pf_unused_.end()) { ++instr_useless_; instr_pf_unused_.erase(iit); }
+      if (iit != instr_pf_unused_.end()) {
+        ++instr_useless_; instr_pf_unused_.erase(iit);
+        // Train the perceptron on this USELESS branch-graph prefetch (negative PE = wasted-fill cost) -- the
+        // counterpart to the used-resolve above, so BG training sees BOTH outcomes.
+        if (P.enable_perceptron_filter && P.perc_gate_instr)
+          pred_->perc_resolve_ext(evb, -static_cast<double>(P.llc_hit_latency)); // perc_track_ frees its own entry
+      }
     }
     auto uit = pf_unused_.find(evb);
     evict_was_unused = (uit != pf_unused_.end());
@@ -380,11 +433,11 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
       }
     }
     double perc_ev = 0.0;
-    if (P.enable_perceptron_filter) {
-      if (evict_was_unused) perc_ev = -static_cast<double>(P.llc_hit_latency); // wasted-fill cost (< a covering hit's benefit -> keeps coverage-valuable patterns)
-      perc_lat_.erase(evb); perc_issue_.erase(evb); // done with this block either way
+    if (P.enable_perceptron_filter && evict_was_unused) {
+      perc_ev = -static_cast<double>(P.llc_hit_latency); // wasted-fill cost (< a covering hit's benefit -> keeps coverage-valuable patterns)
+      if (P.perc_pe_cost) { uint32_t lat = 0; float cost = 0.0f; pred_->perc_track_lat(evb, lat, cost); perc_ev += static_cast<double>(cost); } // fold accrued I_LAT+I_POLL
     }
-    pred_->on_l2_evict(evb, cycle_, evict_was_unused, perc_ev);
+    pred_->on_l2_evict(evb, cycle_, evict_was_unused, perc_ev); // on_l2_evict frees the perc_track_ entry
     if (P.instr_packed_residency)
       pred_->filter_evict_code(evb); // clear the packed code-residency bit on L2 eviction (no-op for non-code blocks)
   }
@@ -414,6 +467,7 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
       e.filled = true;
       e.lat = (real_cycle_ >= e.issue) ? (real_cycle_ - e.issue) : 0;
       if (pe_terms) { lat_sum_ += e.lat; ++lat_n_; }
+      if (P.enable_perceptron_filter) pred_->perc_note_fill(block, static_cast<uint32_t>(std::min<uint64_t>(e.lat, 100000))); // feed the perceptron's PE magnitude (unified into perc_track_)
       const int src = e.from_spp ? 1 : 0;
       if (!prefetch) {
         // Promoted: a demand merged into this prefetch's MSHR before it filled -> useful, timely.
@@ -430,11 +484,13 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
           const double serv = (e.lat > P.pe_dram_lat_threshold) ? P.pe_serv_dram : P.pe_serv_llc;
           if (P.enable_pe_management) i_lat_[src] += w * serv;
           if (P.enable_ip_filter && (P.ip_filter_use_pe || P.ip_filter_use_pe_phase)) ip_pe_[e.iph] -= w * serv; // I_LAT (-)
+          if (P.enable_perceptron_filter && P.perc_pe_cost) // ALSO charge I_LAT to THIS prefetch's perceptron PE
+            pred_->perc_add_cost(block, -static_cast<float>(w * serv));
         }
         // I_POLL setup: displaced a USEFUL line (a demand line or used prefetch) -> remember
-        // the victim (+ its prefetch's IP); a later demand miss on it is a pollution miss.
+        // the victim, the evicting prefetch (to charge its perceptron PE), and its IP; a later demand miss = pollution.
         if (had_evict && !evict_was_unused)
-          poll_[evb % poll_.size()] = poll_track{true, evb, e.from_spp, e.iph};
+          poll_[evb % poll_.size()] = poll_track{true, evb, block, e.from_spp, e.iph};
       }
     }
   }
@@ -515,15 +571,23 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
   if (from_spp && fill_l2)
     pred_->shadow_fill(block);
   const bool enqueued = prefetch_line(block << BLOCK_SHIFT, fill_l2, gen_tag | (from_spp ? 1u : 0u)); // carry generation tag (diagnostics)
-  // Perceptron: remember this L2 prefetch's issue cycle so the fill hook can measure its real latency (the PE value).
-  if (P.enable_perceptron_filter && enqueued && fill_l2) {
-    if (perc_issue_.size() >= 65536) perc_issue_.clear(); // bound (outstanding, pre-fill)
-    perc_issue_[block] = real_cycle_;
-  }
+  if (enqueued) ++data_pf_issued_;               // instruction-activity gate: count data prefetch issues (denominator of the instr-pf fraction)
+  // (Perceptron issue tracking is perc_note_issue -> perc_track_; the fill latency is fed later by the pfht_ fill
+  //  hook via pred_->perc_note_fill(). No separate perc_sdm_ insert.)
   // Contract with the predictor: TRUE iff the block was actually placed in L2 -> the predictor marks its
   // residency map only then (a dropped / LLC-only prefetch returns false, so no stale "issued but never
   // filled" bit). set-duel may have redirected fill_l2 to false (LLC-only) above.
   return enqueued && fill_l2;
+}
+
+// Perceptron gate for the separate SPP engine (which reaches the perceptron only through the sink).
+bool sppam_plus::perc_gate(uint64_t block, int engine, int depth, uint64_t pc, int conf, uint64_t sig)
+{
+  return !P.enable_perceptron_filter || pred_->perc_keep(block, engine, depth, pc, conf, sig);
+}
+void sppam_plus::perc_note_issue_ext(uint64_t block)
+{
+  if (P.enable_perceptron_filter) pred_->perc_note_issue(block);
 }
 
 int sppam_plus::dram_bw_index() const

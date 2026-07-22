@@ -482,13 +482,45 @@ struct params {
   int perc_pe_margin = 0;                // with perc_label_pe: only train when |PE| exceeds this (skip the noisy middle)
   double perc_pe_scale = 30.0;           // PE magnitude -> training-step size (~L_LLC): high-PE (DRAM-covering) hits train harder
   int perc_pe_step_max = 4;              // cap the per-example weight step so no single high-PE outcome dominates
-  uint32_t perc_feat_mask = 0x3F;        // enabled feature tables (bit0 PC,1 off,2 eng,3 depth,4 use,5 tim,6 conf,7 pattern-sig)
+  // enabled feature tables. bits: 0x1 PC, 0x4 eng, 0x8 depth, 0x10 use, 0x20 tim, 0x40 conf, 0x80 sig, 0x100 mshr,
+  // 0x200 guse, 0x400 gtim, 0x800 hit, 0x1000 conj, 0x2000 pip-bias, 0x4000 pcpath, 0x8000 pcdelta, 0x10000 use^mshr,
+  // 0x20000 tim^mshr, 0x40000 conf^mshr, 0x80000 criticality. Default = DSE-derived strong set (contention-XORs +
+  // criticality + PC/sig/path); drops the weak/superseded ones (guse, gtim, coarse conj, pip-bias, offset).
+  uint32_t perc_feat_mask = 0xFC9F5;
   bool perc_pe_signonly = false;         // variance-reduce PE: train on sign(PE)+margin with a FIXED step (not magnitude-scaled)
   std::size_t perc_sig_entries = 1024;   // per-prediction spatial-pattern-signature table (SPPAM key); orthogonal to per-PC usefulness
   bool perc_pe_norm = false;             // variance-reduce PE: normalize by a ROLLING MEAN of |PE| before quantizing (scale-invariant -> robust to the DSE's unreliable absolute latencies); step then = |PE|/mean clamped to perc_pe_step_max
-  std::size_t perc_track_cap = 16384;    // outstanding-prefetch feature snapshots (block->features), trained on EVERY
-                                         // hit/eviction outcome -- the dense training trigger (the sampled per-IP
-                                         // usefulness/timeliness are FEATURES, not the training signal)
+  bool perc_pe_cost = true;              // fold the prefetch's COST (I_LAT bandwidth at fill + I_POLL pollution on victim re-miss) into its per-prefetch perceptron PE. Without it the reward is I_UPF-only (useless~=-L_LLC) and the DSE showed that gives almost no filtering signal -- one DRAM-covering hit outweighs ~54 useless fills. The COST terms are where the contention features get their signal.
+  bool perc_untimely_veto = true;        // DSE lesson [[dse-lessons-consolidated]]: NEVER volume-drop an UNTIMELY prefetch (right address, evicted-before-use) -- that kills coverage on pointer-chasers (mcf). depth-throttle handles untimely by SHORTENING lookahead. So the perceptron may only drop TRULY-BAD (wrong-address) IPs: when the trigger IP's untimely fraction (ip_untimely_/ip_ev_) >= ip_untimely_thresh, VETO the drop (force keep, leave it to depth-throttle). Complements ip_filter_depth_throttle, does not replace it.
+  bool perc_load_gate = false;           // CONTENTION-GATE the drop (DSE lesson #3, the datacenter residual): PE mis-aligns with IPC on bandwidth-bound datacenter/graph workloads, so the PE-trained perceptron drops GENUINELY-USEFUL prefetches there (merced/sierra/tahoe ~-1..-2%). Those workloads run at LOW MSHR occupancy, so only DROP when the trigger's MSHR/bandwidth pressure index >= perc_load_gate_thresh -- under light load a dropped prefetch cannot be hurting anyone, so keep it and spare the datacenter. High-pressure single-core (xalan) keeps dropping. Complements untimely-veto (which routes by WHY: untimely->depth); this routes by WHEN (only drop under real contention).
+  int perc_load_gate_thresh = 2;         // MSHR-pressure index (0..15) below which perc_load_gate force-keeps a would-be drop. (TESTED INEFFECTIVE: datacenter is bandwidth-bound = HIGH mshr, so the gate never fires -- kept off. Premise was backwards.)
+  bool perc_instr_gate = false;          // INSTRUCTION-ACTIVITY GATE (the datacenter fix): the DATA perceptron only helps on data-bound workloads (mcf/xalan); on instruction-bound datacenter/graph workloads (merced/tahoe/sierra) dropping data prefetches only loses coverage (measured: perceptron NEVER beats pe-management-alone there, even at max sampling). The clean runtime discriminator is instruction-prefetch activity: instr_pf/(instr_pf+data_pf) is ~0.00 on mcf, 0.15 on xalan, but 0.5-0.6 on the datacenter. When that fraction >= perc_instr_gate_pct, the perceptron backs off (force-keep) so the datacenter -> ~pe-management; mcf/xalan (fraction ~0) stay fully aggressive.
+  int perc_instr_gate_pct = 40;          // instruction-pf fraction (%%, of instr+data prefetch issues) at/above which perc_instr_gate force-keeps a would-be drop. 40 cleanly separates xalan(~15) from the datacenter(~53-60).
+  // PC feature ENCODING (PCs are few -> a full 48-bit hash injects entropy/noise; a targeted slice keeps the signal).
+  int perc_pc_encoding = 1;              // 0 = multiply-hash (legacy), 1 = contiguous bit SLICE [lobit .. lobit+log2(entries)), 2 = random DROP-OUT (fixed wide-ranging non-consecutive bits)
+  int perc_pc_lobit = 2;                 // slice: low bit (drop the bottom lobit alignment-noise bits)
+  uint64_t perc_pc_dropmask = 0x5555555555555555ull; // drop-out: which PC bits to keep (pext-style), then pack low
+  bool perc_dump_weights = false;        // at teardown, print accumulated weight magnitude per feature table + top entries (which features carry signal)
+  bool perc_gate_instr = false;          // gate branch-graph (instruction) prefetches through the perceptron too; false = data engines only (BG uses its own instr_conf gate). Datacenter prefetching is instruction-DOMINATED and the data-tuned features can't discriminate BG prefetches (BG is ~83% net-positive / nearly UNFILTERABLE, see [[perceptron-strong-features]]). Measured: gating BG costs -3..-5% on merced/sierra/tahoe; un-gated ~-1%. So default FALSE.
+  bool perc_engine_split = false;        // PER-ENGINE feature weights for the context features (use/tim/conf/dep/mshr/guse/gtim/hit): each table is indexed by (engine, bucket), so the SAME feature value scores differently for a branch-graph vs a data prefetch. The discriminator between "gate all engines with one shared model" (current) and "every feature 4-way per-engine" (extreme).
+  bool perc_profile = false;             // FEATURE-SIGNAL PROFILER (analysis, not gating): accumulate per-feature-value -> useful/useless histograms at every resolve, then at teardown report the mutual information I(feature;outcome) GLOBALLY and CONDITIONED ON ENGINE. Finds which features carry strong signal and which need engine-partitioning BEFORE tuning. Keep perc_tau_keep very low so nothing is dropped (profile the full stream).
+  std::size_t perc_track_cap = 256;       // direct-mapped feature-snapshot table depth (po2); a kept prefetch's feature
+                                         // vector is held until its hit/eviction outcome trains the perceptron -- the
+                                         // dense training trigger (sampled per-IP usefulness/timeliness are FEATURES,
+                                         // not the trigger). Small: the eviction policy tracks the prefetch lifetime.
+  // DENSE useful/useless training (the DSE architecture): the DSE ranks features by AGGREGATE (coverage-weighted) PE,
+  // but sparse per-prefetch PE training (1/pe_sample_div, step ~ |PE|) over-weights mcf's DRAM-covering hits and only
+  // learns mcf. Usefulness (+1 used / -1 evicted) needs NO latency, so it can train on EVERY prefetch -- and per-event
+  // ±1 naturally coverage-weights (a 100-miss pattern gets 100 events), matching the DSE's aggregate view. Features are
+  // still the DSE strong set (perc_feat_mask, unchanged). Store the gate feature vector per issued prefetch keyed by
+  // block; train at its hit (useful) or unused-eviction (useless). See [[perceptron-instr-gate]] [[perceptron-strong-features]].
+  bool perc_dense_train = false;          // ON = dense useful/useless training (block-keyed snapshot, every prefetch); OFF = legacy sparse-PE (perc_track_ 1/pe_sample_div). Forces the ±1 usefulness label.
+  std::size_t perc_dense_cap = 16384;     // dense snapshot table depth (po2): must hold in-flight (issued-but-unresolved) prefetches without heavy churn. Overwrite-on-collision (each prefetch resolves once).
+  uint32_t perc_track_ttl = 65536;       // ops before a pinned perc_track_ sample times out USELESS. DEDICATED (not the
+                                         // shared pv_sample_ttl): perc_track_'s clock is the predictor OP counter, and a
+                                         // SHORT ttl times out useful-but-not-yet-demanded prefetches as useless-on-timeout
+                                         // -> useless-heavy training -> 90% drop -> mcf -30%. Long ttl lets coverage
+                                         // prefetches (pointer-chasers) reach their demand hit before timing out (mcf +2%).
   // Feed the precise validation back INTO the confidence values (prediction_counter): a proven-useless prediction
   // is penalized so it falls below threshold and the position-bitmap goes SILENT there (natural fall-through to SPP);
   // a proven-useful one is reinforced. This is validation-as-confidence-contributor (vs pv_bad_pct's separate gate).
@@ -532,9 +564,12 @@ struct params {
   uint64_t pe_phase = 1024;       // demands per PE evaluation phase
   uint64_t pe_throttle_div = 8;   // non-positive-PE prefetcher throttled to 1/N (NEVER gated -- a
                                   // complete gate is unrecoverable: no prefetch -> no PE signal)
-  std::size_t pfht_entries = 2048; // shared sampled prefetch-outcome table (PE + per-IP filter attribution)
+  std::size_t pfht_entries = 256;  // shared sampled prefetch-outcome table (PE + per-IP filter attribution)
   uint32_t pfht_tag_bits = 8;     // hashed PfHT tag width (for the state estimate)
-  uint64_t pe_sample_div = 2;     // shared attribution: track 1/N issued prefetches (probabilistic sampling,
+  uint64_t pe_sample_div = 16;    // shared attribution: track 1/N issued prefetches (probabilistic sampling,
+  // RULE: pe_sample_div MUST scale with 1/pfht_entries. A small table needs a SPARSE sample or it saturates ->
+  // biased per-IP/PE attribution -> mis-throttle (pfht_ 256 @ div 2 tanked mcf -30%; 256 wants div ~16, matching
+  // the proven 2048 @ div 2 occupancy). Same table-size<->sample-rate coupling as perc_track_. Keep them matched.
                                   // same anti-thrash trick as spp_pf_sample_div -- few live PfHT entries
                                   // so each survives long enough to resolve). PE sign is scale-invariant.
   double pe_pf_demand_weight = 0.5; // Berti's prefetch-stream accesses count as DEMAND in the PE terms
@@ -852,8 +887,16 @@ struct params {
     // ---- Bandwidth/PE management overhead (per-L2-line source tags + PE counters + feedback/market regs).
     uint64_t mgmt = 0;
     if (enable_pe_management) {
-      mgmt += 2 * l2_sets * l2_ways;                                     // from_spp + from_dram per L2 line
+      // NB: NO per-L2-line source tags. The source (from_spp) and DRAM-ness (inferred from the fill latency) are read
+      // from the pfht_ SAMPLING table below -- that is the whole point of sampling. Only the per-source PE counters.
       mgmt += 2 * (32 + 32 + 32 + 32 + lg2(pe_throttle_div + 1)) + lg2(pe_phase);
+    }
+    // pfht_ (sampled prefetch-outcome tracker) + poll_ (pollution victims): the sampling table the whole design leans
+    // on for PE + per-IP attribution. SHARED by PE-management and the ip-filter; allocated whenever either is on.
+    if (enable_pe_management || enable_ip_filter) {
+      const uint64_t iph_b = lg2(ip_table_entries > 1 ? static_cast<uint64_t>(ip_table_entries) : 2);
+      mgmt += static_cast<uint64_t>(pfht_entries) * (1 + pfht_tag_bits + 1 + 16 + 1 + 17 + iph_b);  // pf_track: valid+tag+from_spp+issue+filled+lat+iph
+      mgmt += static_cast<uint64_t>(pfht_entries) * (1 + pfht_tag_bits + pfht_tag_bits + 1 + iph_b); // poll_track: valid+victim-tag+pf-tag+from_spp+iph
     }
     if (enable_bw_feedback) mgmt += 16 * 5 + 16;
     if (enable_bw_market) mgmt += 16;
@@ -920,10 +963,14 @@ struct params {
     if (enable_perceptron_filter) {
       auto po2 = [](uint64_t n) { uint64_t r = 1; while (r < n) r <<= 1; return r; };
       const uint64_t wbits = lg2(2 * (perc_weight_max > 0 ? static_cast<uint64_t>(perc_weight_max) : 1) + 1) + 1; // signed weight
-      const uint64_t entries = po2(perc_pc_entries) + bpr + 4 + 16 + 8 + 8 + 16 + po2(perc_sig_entries); // PC,off,eng,dep,use,tim,conf,sig
+      const uint64_t ctxm = perc_engine_split ? 4 : 1; // context tables (dep,use,tim,conf,mshr,guse,gtim,hit) are per-engine when split
+      const uint64_t entries = po2(perc_pc_entries) + 4 + ctxm * (16 + 8 + 8 + 16 + 16 + 16 + 16 + 16) + po2(perc_sig_entries) + 256 + 2 * po2(perc_pc_entries)
+                             + 128 + 128 + 256 + 128; // + PC-path + PC^delta + 4 DSE interaction tables (use^mshr, tim^mshr, conf^mshr, criticality); offset dropped
       t.perc = entries * wbits;
-      t.perc += perc_track_cap * (8 * 10 + 1); // predictor perc_track_: 8 feature indices (~10b) + explored bit
-      t.perc += perc_track_cap * (16 + 16);    // glue perc_issue_/perc_lat_: block tag + real fill latency
+      // ONE unified sampling table (perc_track_): feature snapshot + fill-latency + accrued cost (perc_sdm_ removed).
+      t.perc += po2(perc_track_cap) * (19 * 10 + 16 + 16 + 16 + 1 + 1 + 17 + 16 + 1); // 19 feat (~10b) + tag+stamp+iph+occ+explored + lat(17b)+cost(~16b)+filled
+      if (!enable_ip_filter) t.perc += 2ull * ip_table_entries * 16; // per-IP usefulness (ip_useful_/ip_useless_) owned by the perceptron when the ip-filter is off
+      t.perc += static_cast<uint64_t>(ip_table_entries) * wbits; // per-IP bias (pip_bias_): one signed weight per IP
     }
 
     return t;
@@ -1000,7 +1047,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(pv_sample_directmap); SET(pv_sample_ttl); SET(pv_sample_evict_div);
   SET(pv_adaptive_rate); SET(pv_rate_window); SET(pv_churn_hi); SET(pv_churn_lo); SET(pv_div_min); SET(pv_div_max);
   SET(enable_perceptron_filter); SET(perc_pc_entries); SET(perc_weight_max); SET(perc_tau_keep);
-  SET(perc_theta_train); SET(perc_explore_div); SET(perc_label_pe); SET(perc_pe_margin); SET(perc_track_cap); SET(perc_pe_scale); SET(perc_pe_step_max); SET(perc_feat_mask); SET(perc_pe_signonly); SET(perc_sig_entries); SET(perc_pe_norm);
+  SET(perc_theta_train); SET(perc_explore_div); SET(perc_label_pe); SET(perc_pe_margin); SET(perc_track_cap); SET(perc_track_ttl); SET(perc_pe_scale); SET(perc_pe_step_max); SET(perc_feat_mask); SET(perc_pe_signonly); SET(perc_sig_entries); SET(perc_pe_norm); SET(perc_pe_cost); SET(perc_untimely_veto); SET(perc_load_gate); SET(perc_load_gate_thresh); SET(perc_instr_gate); SET(perc_instr_gate_pct); SET(perc_pc_encoding); SET(perc_pc_lobit); SET(perc_pc_dropmask); SET(perc_dump_weights); SET(perc_gate_instr); SET(perc_engine_split); SET(perc_profile);
   SET(pv_feed_confidence); SET(pv_conf_penalty);
   SET(prob_drop_prefetches); SET(global_or_pattern_usefulness); SET(adaptive_usefulness);
   SET(pattern_usefulness_cutoff); SET(use_default_prediction); SET(default_pattern); SET(default_prediction);

@@ -66,9 +66,9 @@ public:
       uint64_t pblk;
       if (xlate(nx_ip, pblk)) { // only issue what we can translate to a physical address
         if (!probe(pblk)) {
-          issue(pblk);
-          mark(pblk);
-          ++issued_;
+          // issue() returns false iff the perceptron gate drops it -> don't mark resident (can be re-proposed/re-gated).
+          // Signature = the predicted next-IP block (nx_ip), conf = dominant-edge share, depth = walk distance.
+          if (issue(pblk, nx_ip, conf, d)) { mark(pblk); ++issued_; }
         }
       }
       cur = nx_ip;
@@ -79,7 +79,7 @@ public:
     for (int k = 1; k <= P.instr_nextn; ++k) {
       const uint64_t pb = phys_block + static_cast<uint64_t>(k);
       if ((pb >> 6) != (phys_block >> 6)) break; // stay within the 4 KiB code page
-      if (!probe(pb)) { issue(pb); mark(pb); ++issued_; }
+      if (!probe(pb)) { if (issue(pb, pb, 1.0, 0)) { mark(pb); ++issued_; } } // sequential residual: sig = next-line target, conf = 1
     }
     last_ip_ = ip_block;
     have_last_ = true;

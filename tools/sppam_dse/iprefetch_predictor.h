@@ -66,7 +66,7 @@ public:
       uint64_t pblk;
       if (xlate(nx_ip, pblk)) { // only issue what we can translate to a physical address
         if (!probe(pblk)) {
-          issue(pblk);
+          issue(pblk, nx_ip, conf, d); // pass next-pc block + edge confidence + walk depth (for the perceptron gate/profiler)
           mark(pblk);
           ++issued_;
         }

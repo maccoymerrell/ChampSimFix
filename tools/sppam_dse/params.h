@@ -466,6 +466,40 @@ struct params {
   uint32_t pv_churn_lo = 6;              // ...below which -> sample more
   uint32_t pv_div_min = 4;               // sample-rate divisor floor
   uint32_t pv_div_max = 256;             // ...and ceiling
+
+  // --- Perceptron prefetch filter (PROTOTYPE) ---
+  // One LEARNED gate that supersedes the heuristic throttles (ip-filter volume/depth, backward gate, etc.).
+  // Hashed-perceptron: score = sum of small per-feature weight tables; keep if score >= perc_tau_keep. Features:
+  // trigger PC, region offset, engine, lookahead depth, + the pre-aggregated per-IP usefulness/timeliness buckets.
+  // Trained at sample resolution on usefulness (perc_label_pe -> PE-sign instead). See perceptron_filter_design.md.
+  bool enable_perceptron_filter = false;
+  std::size_t perc_pc_entries = 1024;    // per-PC weight table depth (power of two)
+  int perc_weight_max = 31;              // saturating weight bound (~6-bit signed)
+  int perc_tau_keep = 0;                 // keep if score >= this (<=0 = permissive cold start)
+  int perc_theta_train = 24;             // train when |score| < this OR the decision was wrong (confidence margin)
+  uint32_t perc_explore_div = 16;        // issue 1/N of "drop" decisions anyway (exploration -> counterfactual labels)
+  bool perc_label_pe = false;            // train on PE-sign (needs the glue's PE sampling) instead of usefulness
+  int perc_pe_margin = 0;                // with perc_label_pe: only train when |PE| exceeds this (skip the noisy middle)
+  double perc_pe_scale = 30.0;           // PE magnitude -> training-step size (~L_LLC): high-PE (DRAM-covering) hits train harder
+  int perc_pe_step_max = 4;              // cap the per-example weight step so no single high-PE outcome dominates
+  uint32_t perc_feat_mask = 0x3F;        // enabled feature tables (bit0 PC,1 off,2 eng,3 depth,4 use,5 tim,6 conf,7 pattern-sig)
+  bool perc_pe_signonly = false;         // variance-reduce PE: train on sign(PE)+margin with a FIXED step (not magnitude-scaled)
+  std::size_t perc_sig_entries = 1024;   // per-prediction spatial-pattern-signature table (SPPAM key); orthogonal to per-PC usefulness
+  bool perc_pe_norm = false;             // variance-reduce PE: normalize by a ROLLING MEAN of |PE| before quantizing (scale-invariant -> robust to the DSE's unreliable absolute latencies); step then = |PE|/mean clamped to perc_pe_step_max
+  // PC feature ENCODING (PCs are few -> a full 48-bit hash injects entropy/noise; a targeted slice keeps the signal).
+  int perc_pc_encoding = 1;              // 0 = multiply-hash (legacy), 1 = contiguous bit SLICE [lobit .. lobit+log2(entries)), 2 = random DROP-OUT (fixed wide-ranging non-consecutive bits)
+  int perc_pc_lobit = 2;                 // slice: low bit (drop the bottom lobit alignment-noise bits)
+  uint64_t perc_pc_dropmask = 0x5555555555555555ull; // drop-out: which PC bits to keep (pext-style), then pack low
+  bool perc_dump_weights = false;        // at teardown, print accumulated weight magnitude per feature table + top entries (which features carry signal)
+  bool perc_engine_split = false;        // PER-ENGINE feature weights for context features (use/tim/conf/dep/mshr/guse/gtim/hit): table indexed by (engine, bucket) so same value scores differently per engine.
+  bool perc_profile = false;             // FEATURE-SIGNAL PROFILER: per-feature-value useful/useless histograms -> mutual information I(feature;outcome) global + per-engine at teardown. Analysis, not gating.
+  bool perc_gate_instr = true;           // gate branch-graph (instruction) prefetches through the perceptron too; false = data engines only (BG uses its own confidence gate). Datacenter prefetching is instruction-DOMINATED and the data-tuned features can't discriminate BG prefetches.
+  std::size_t perc_track_cap = 4096;     // direct-mapped feature-snapshot table depth (po2); a kept prefetch's feature
+                                         // vector is held until its hit/eviction outcome trains the perceptron -- the
+                                         // dense training trigger (sampled per-IP usefulness/timeliness are FEATURES,
+                                         // not the trigger). Small: the eviction policy tracks the prefetch lifetime.
+  uint32_t perc_track_ttl = 2000000000;  // perc_track_ useless-on-timeout window (op-clock). Added so the current predictor builds; huge = effectively no timeout (match the pre-timeout DSE).
+  bool perc_untimely_veto = false;        // DSE default OFF (depth-throttle not used here). Added so the current predictor builds.
   // Feed the precise validation back INTO the confidence values (prediction_counter): a proven-useless prediction
   // is penalized so it falls below threshold and the position-bitmap goes SILENT there (natural fall-through to SPP);
   // a proven-useful one is reinforced. This is validation-as-confidence-contributor (vs pv_bad_pct's separate gate).
@@ -742,11 +776,11 @@ struct params {
   // shadow mirror) are deliberately excluded: they are measurement instruments, not proposed hardware.
   struct state_terms {
     uint64_t region = 0, staging = 0, pattern = 0, cpt = 0, llc = 0, misc = 0, spp = 0, mgmt = 0,
-             instr = 0, am = 0, ipf = 0, ip_dir = 0, cold = 0, dpht = 0, xpage = 0, rbloom = 0, rstage = 0;
+             instr = 0, am = 0, ipf = 0, ip_dir = 0, cold = 0, dpht = 0, xpage = 0, rbloom = 0, rstage = 0, perc = 0;
     uint64_t total() const
     {
       return region + staging + pattern + cpt + llc + misc + spp + mgmt + instr + am + ipf + ip_dir
-           + cold + dpht + xpage + rbloom + rstage;
+           + cold + dpht + xpage + rbloom + rstage + perc;
     }
   };
 
@@ -894,6 +928,20 @@ struct params {
     if (enable_resid_bloom) t.rbloom = resid_bloom_bits;
     if (enable_region_staging) t.rstage = staging_entries * (16 /*tag*/ + 8 /*count*/);
 
+    // ---- Perceptron prefetch filter (optional): per-feature weight tables + per-outstanding-prefetch training buffers.
+    if (enable_perceptron_filter) {
+      auto po2 = [](uint64_t n) { uint64_t r = 1; while (r < n) r <<= 1; return r; };
+      const uint64_t wbits = lg2(2 * (perc_weight_max > 0 ? static_cast<uint64_t>(perc_weight_max) : 1) + 1) + 1; // signed weight
+      const uint64_t ctxm = perc_engine_split ? 4 : 1; // context tables (dep,use,tim,conf,mshr,guse,gtim,hit) are per-engine when split
+      const uint64_t entries = po2(perc_pc_entries) + 4 + ctxm * (16 + 8 + 8 + 16 + 16 + 16 + 16 + 16) + po2(perc_sig_entries) + 256 + 2 * po2(perc_pc_entries); // + PC-path + PC^delta; offset dropped
+      t.perc = entries * wbits;
+      // Both training buffers are SMALL fixed direct-mapped tables (po2 slots), not per-outstanding maps.
+      t.perc += po2(perc_track_cap) * (13 * 10 + 16 + 16 + 16 + 1 + 1); // predictor perc_track_: 13 feature indices (~10b) + tag + stamp + iph + occ + explored
+      t.perc += po2(perc_track_cap) * (16 + 16 + 17 + 1 + 1);     // glue perc_sdm_: tag + issue-cycle + fill latency (<=100k, 17b) + filled + occ
+      if (!enable_ip_filter) t.perc += 2ull * ip_table_entries * 16; // per-IP usefulness (ip_useful_/ip_useless_) owned by the perceptron when the ip-filter is off
+      t.perc += static_cast<uint64_t>(ip_table_entries) * wbits; // per-IP bias (pip_bias_): one signed weight per IP
+    }
+
     return t;
   }
 
@@ -910,7 +958,7 @@ struct params {
     add("region", t.region); add("staging", t.staging); add("pattern", t.pattern); add("cpt", t.cpt);
     add("llc", t.llc); add("misc", t.misc); add("spp", t.spp); add("mgmt", t.mgmt); add("instr", t.instr);
     add("am", t.am); add("ipf", t.ipf); add("ip_dir", t.ip_dir); add("cold", t.cold); add("dpht", t.dpht);
-    add("xpage", t.xpage); add("rbloom", t.rbloom); add("rstage", t.rstage);
+    add("xpage", t.xpage); add("rbloom", t.rbloom); add("rstage", t.rstage); add("perc", t.perc);
     return s;
   }
 };
@@ -967,6 +1015,8 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(pattern_validate); SET(pv_sample_div); SET(pv_min_samples); SET(pv_bad_pct); SET(pv_sample_cap);
   SET(pv_sample_directmap); SET(pv_sample_ttl); SET(pv_sample_evict_div);
   SET(pv_adaptive_rate); SET(pv_rate_window); SET(pv_churn_hi); SET(pv_churn_lo); SET(pv_div_min); SET(pv_div_max);
+  SET(enable_perceptron_filter); SET(perc_pc_entries); SET(perc_weight_max); SET(perc_tau_keep);
+  SET(perc_theta_train); SET(perc_explore_div); SET(perc_label_pe); SET(perc_pe_margin); SET(perc_track_cap); SET(perc_pe_scale); SET(perc_pe_step_max); SET(perc_feat_mask); SET(perc_pe_signonly); SET(perc_sig_entries); SET(perc_pe_norm); SET(perc_pc_encoding); SET(perc_pc_lobit); SET(perc_pc_dropmask); SET(perc_dump_weights); SET(perc_gate_instr); SET(perc_engine_split); SET(perc_profile);
   SET(pv_feed_confidence); SET(pv_conf_penalty);
   SET(prob_drop_prefetches); SET(global_or_pattern_usefulness); SET(adaptive_usefulness);
   SET(pattern_usefulness_cutoff); SET(use_default_prediction); SET(default_pattern); SET(default_prediction);
