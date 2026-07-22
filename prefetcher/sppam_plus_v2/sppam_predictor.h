@@ -1241,6 +1241,13 @@ public: // perc_keep + perc_note_issue are the engine call sites' entry points (
     // INSTRUCTION-ACTIVITY GATE: on instruction-bound workloads the data perceptron only loses coverage (it never
     // beats pe-management there). instr-pf fraction cleanly flags them -> back off (force keep). See [[perceptron-complements-pe-mgmt]].
     if (P.perc_instr_gate && perc_instr_pct_ >= P.perc_instr_gate_pct) { ++dbg_perc_veto_; ++dbg_perc_igate_; return true; }
+    // USE-VETO: never drop a prefetch whose trigger IP has HIGH per-IP accuracy (the ip_filter's protective logic). The
+    // per-IP-usefulness signal WINS over the PC/sig features here -- spares the high-accuracy datacenter/LLM prefetches
+    // the aggressive filter would otherwise wrongly drop, while still filtering low-accuracy IPs hard.
+    if (P.perc_use_veto && !ip_useful_.empty()) {
+      const uint32_t iph = perc_last_iph_;
+      if (ip_useful_[iph] + ip_useless_[iph] >= 8u && perc_use_bucket(iph) >= P.perc_use_veto_thresh) { ++dbg_perc_veto_; return true; }
+    }
     // PE GATE: PE says whether DROPPING can even help. If the trigger IP's sampled avg PE is clearly GOOD, prefetching
     // helps regardless of usefulness -> do NOT filter (we can't discern a filtering win). Only bad-PE IPs get dropped.
     if (P.perc_pe_gate && !ip_pe_cnt_.empty()) {

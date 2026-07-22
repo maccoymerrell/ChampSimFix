@@ -538,6 +538,8 @@ struct params {
   bool perc_eval_log = false;
   int perc_eval_log_div = 512;
   bool perc_sig_xor_pc = false;           // mix the trigger PC into the signature index (in addition to engine) -> disambiguates (PC,sig) pairs that currently ALIAS to one weight and cause misattribution (the tahoe bad-drop driver).
+  bool perc_use_veto = false;             // USE-VETO (the ip_filter's protective logic as a floor): never DROP a prefetch whose trigger IP has HIGH per-IP accuracy (use bucket >= perc_use_veto_thresh). Lets the perceptron filter aggressively on low-accuracy IPs (xalan) while sparing high-accuracy ones (datacenter/LLM) that the PC/sig features would otherwise wrongly drop. The per-IP-accuracy signal WINS where it's strong -- exactly why a single-feature accuracy filter never over-drops those.
+  int perc_use_veto_thresh = 6;           // use bucket (0=useless..7=useful) at/above which a would-be drop is vetoed. 6 = top-quartile accuracy.
   bool perc_pe_gate = false;              // enable the per-IP PE veto on drops (only meaningful with perc_dense_train).
   int perc_pe_gate_thresh = 60;           // veto a drop when the trigger IP's sampled avg PE >= this (units = L_LLC-ish; DRAM-covering ~ hundreds). ~60 clears the mostly-LLC IPs, spares DRAM-covering-but-low-usefulness ones.
   int perc_pe_gate_min_samples = 8;       // require this many sampled PE observations for the IP before the gate trusts it.
