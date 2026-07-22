@@ -516,6 +516,25 @@ struct params {
   // block; train at its hit (useful) or unused-eviction (useless). See [[perceptron-instr-gate]] [[perceptron-strong-features]].
   bool perc_dense_train = false;          // ON = dense useful/useless training (block-keyed snapshot, every prefetch); OFF = legacy sparse-PE (perc_track_ 1/pe_sample_div). Forces the ±1 usefulness label.
   std::size_t perc_dense_cap = 16384;     // dense snapshot table depth (po2): must hold in-flight (issued-but-unresolved) prefetches without heavy churn. Overwrite-on-collision (each prefetch resolves once).
+  // VICTIM TABLE (PPF-style anti-over-filter): sample DROPPED prefetches; if a dropped block is later DEMANDED, the drop
+  // was BAD (lost coverage) -> train that feature vector back toward KEEP with a HEAVY step. This is what stops the
+  // dense filter from over-dropping useful prefetches (the whole failure mode). See the user's design + PPF reject table.
+  bool perc_victim = false;               // enable the victim table (only meaningful with perc_dense_train).
+  std::size_t perc_victim_cap = 8192;     // victim table depth (po2), block-keyed, overwrite-on-collision.
+  int perc_victim_sample_div = 1;         // sample 1/N of real drops into the victim table (1 = every drop).
+  int perc_victim_penalty = 4;            // heavy KEEP training step applied when a dropped (victim) block is re-demanded.
+  // PE GATE (per-IP sampled PE decides whether filtering can even help): high per-IP PE => prefetching helps regardless of
+  // usefulness => VETO the drop; low/bad PE + high useless => filter. PE is the "does dropping help performance" signal,
+  // separate from the usefulness the perceptron predicts. Per-IP avg PE is sampled from prefetch fills (perc_note_ip_pe).
+  int perc_pe_ema_shift = 4;              // per-IP PE components are a ROLLING EMA (alpha = 1/2^shift), NOT a run-cumulative avg -- so PE tracks RECENT phase behavior, not a whole-run number that drowns the signal. 4 => alpha 1/16.
+  // Per-COMPONENT quantization scale (cycles per feature bucket): the 3 PE terms have very different magnitudes
+  // (I_UPF ~200, I_LAT ~10, I_POLL ~500), so a shared scale kills I_LAT (->bucket 0) and saturates I_POLL. Each /scale, clamp 0..15.
+  int perc_upf_scale = 32;                // I_UPF ~0..480 cyc -> buckets 0..15
+  int perc_lat_scale = 1;                 // I_LAT ~0..12 cyc (the Eq4 service cost) -> buckets 0..12
+  int perc_poll_scale = 48;               // I_POLL ~0..720 cyc -> buckets 0..15
+  bool perc_pe_gate = false;              // enable the per-IP PE veto on drops (only meaningful with perc_dense_train).
+  int perc_pe_gate_thresh = 60;           // veto a drop when the trigger IP's sampled avg PE >= this (units = L_LLC-ish; DRAM-covering ~ hundreds). ~60 clears the mostly-LLC IPs, spares DRAM-covering-but-low-usefulness ones.
+  int perc_pe_gate_min_samples = 8;       // require this many sampled PE observations for the IP before the gate trusts it.
   uint32_t perc_track_ttl = 65536;       // ops before a pinned perc_track_ sample times out USELESS. DEDICATED (not the
                                          // shared pv_sample_ttl): perc_track_'s clock is the predictor OP counter, and a
                                          // SHORT ttl times out useful-but-not-yet-demanded prefetches as useless-on-timeout

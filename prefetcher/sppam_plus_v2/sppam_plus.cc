@@ -107,6 +107,9 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(perc_explore_div); CFG(perc_label_pe); CFG(perc_pe_margin); CFG(perc_track_cap); CFG(perc_track_ttl); CFG(perc_pe_scale); CFG(perc_pe_step_max);
   CFG(perc_feat_mask); CFG(perc_pe_signonly); CFG(perc_sig_entries); CFG(perc_pe_norm); CFG(perc_pe_cost); CFG(perc_untimely_veto); CFG(perc_pc_encoding); CFG(perc_pc_lobit); CFG(perc_pc_dropmask); CFG(perc_dump_weights); CFG(perc_gate_instr); CFG(perc_engine_split); CFG(perc_profile);
   CFG(perc_load_gate); CFG(perc_load_gate_thresh); CFG(perc_instr_gate); CFG(perc_instr_gate_pct); // NOTE: the module loads knobs via CFG()/get_parameter, NOT the apply_json SET() list -- new knobs MUST be added here too
+  CFG(perc_dense_train); CFG(perc_dense_cap); CFG(perc_victim); CFG(perc_victim_cap); CFG(perc_victim_sample_div); CFG(perc_victim_penalty);
+  CFG(perc_pe_gate); CFG(perc_pe_gate_thresh); CFG(perc_pe_gate_min_samples); CFG(perc_pe_ema_shift);
+  CFG(perc_upf_scale); CFG(perc_lat_scale); CFG(perc_poll_scale);
 #undef CFG
 
   pfht_.assign(P.pfht_entries ? P.pfht_entries : 1, pf_track{});
@@ -159,6 +162,9 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
   // Refresh the perceptron's aggregate MSHR/bandwidth-pressure feature before any gate (BG or data) runs this access.
   if (P.enable_perceptron_filter) {
     pred_->perc_set_rc(real_cycle_);   // real cycle for self-measured fill latency (issue stamp at perc_note_issue)
+    // VICTIM CHECK: if this demanded block was a DROPPED prefetch, the drop lost coverage -> heavy KEEP retrain (punish
+    // over-filtering). Runs on the demand before this access generates/gates new prefetches.
+    if (P.perc_victim) pred_->perc_victim_check(block);
     pred_->perc_set_mshr(dram_bw_index());
     // Instruction-activity gate: fraction of prefetch issues that are instruction (BG). ~0 on data-bound mcf/xalan,
     // 0.5-0.6 on the instruction-bound datacenter -> a clean runtime flag to back the data perceptron off there.
@@ -276,6 +282,8 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
     perc_pe = filled ? static_cast<double>(lat) : static_cast<double>(P.llc_hit_latency);
     if (P.perc_pe_cost) perc_pe += static_cast<double>(cost);
     pred_->perc_note_used(perc_pe); // probe: how often a demand-USED prefetch gets a negative PE label (PE-vs-IPC misalignment)
+    // DENSE training: this prefetch was demand-USED -> useful (+1), first-outcome (retires its dense entry).
+    if (P.perc_dense_train) pred_->perc_dense_resolve(block, /*useful=*/true);
   }
   pred_->operate(block, cur_trigger_ip_, cache_hit, pf_used, /*delta_additive=*/false, static_cast<sppam_dse::atype>(type), cycle_, perc_pe);
   if (spp_)
@@ -325,6 +333,8 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
             if (P.enable_ip_filter && (P.ip_filter_use_pe || P.ip_filter_use_pe_phase)) ip_pe_[v.iph] -= pollcost;
             if (P.enable_perceptron_filter && P.perc_pe_cost) // charge I_POLL to the EVICTING prefetch's perceptron PE
               pred_->perc_add_cost(v.pf_block, -static_cast<float>(pollcost));
+            if (P.enable_perceptron_filter && (P.perc_pe_gate || (P.perc_feat_mask & 0x700000u))) // 3-way split: per-IP I_POLL
+              pred_->perc_note_ip_poll(v.iph, static_cast<float>(pollcost));
             v.valid = false;
           }
         }
@@ -436,6 +446,8 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
     if (P.enable_perceptron_filter && evict_was_unused) {
       perc_ev = -static_cast<double>(P.llc_hit_latency); // wasted-fill cost (< a covering hit's benefit -> keeps coverage-valuable patterns)
       if (P.perc_pe_cost) { uint32_t lat = 0; float cost = 0.0f; pred_->perc_track_lat(evb, lat, cost); perc_ev += static_cast<double>(cost); } // fold accrued I_LAT+I_POLL
+      // DENSE training: this prefetch was evicted WITHOUT a demand hit -> useless (-1), first-outcome.
+      if (P.perc_dense_train) pred_->perc_dense_resolve(evb, /*useful=*/false);
     }
     pred_->on_l2_evict(evb, cycle_, evict_was_unused, perc_ev); // on_l2_evict frees the perc_track_ entry
     if (P.instr_packed_residency)
@@ -468,6 +480,10 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
       e.lat = (real_cycle_ >= e.issue) ? (real_cycle_ - e.issue) : 0;
       if (pe_terms) { lat_sum_ += e.lat; ++lat_n_; }
       if (P.enable_perceptron_filter) pred_->perc_note_fill(block, static_cast<uint32_t>(std::min<uint64_t>(e.lat, 100000))); // feed the perceptron's PE magnitude (unified into perc_track_)
+      // PE-split signal: per-IP I_UPF = latency SAVED (fill latency), capped to a sane DRAM max so a stale/garbage
+      // measurement (the old 100000-cap outliers) can't poison the EMA. I_LAT is fed separately at the Eq4 event below.
+      if (P.enable_perceptron_filter && (P.perc_pe_gate || (P.perc_feat_mask & 0x700000u)))
+        pred_->perc_note_ip_upf(e.iph, static_cast<float>(std::min<uint64_t>(e.lat, 1500)));
       const int src = e.from_spp ? 1 : 0;
       if (!prefetch) {
         // Promoted: a demand merged into this prefetch's MSHR before it filled -> useful, timely.
@@ -486,6 +502,8 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
           if (P.enable_ip_filter && (P.ip_filter_use_pe || P.ip_filter_use_pe_phase)) ip_pe_[e.iph] -= w * serv; // I_LAT (-)
           if (P.enable_perceptron_filter && P.perc_pe_cost) // ALSO charge I_LAT to THIS prefetch's perceptron PE
             pred_->perc_add_cost(block, -static_cast<float>(w * serv));
+          if (P.enable_perceptron_filter && (P.perc_pe_gate || (P.perc_feat_mask & 0x700000u))) // per-IP I_LAT: the TRUE Eq4 service cost
+            pred_->perc_note_ip_lat(e.iph, static_cast<float>(w * serv));
         }
         // I_POLL setup: displaced a USEFUL line (a demand line or used prefetch) -> remember
         // the victim, the evicting prefetch (to charge its perceptron PE), and its IP; a later demand miss = pollution.

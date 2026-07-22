@@ -149,9 +149,12 @@ public:
       { std::size_t sn = 1; while (sn < P.perc_sig_entries) sn <<= 1; pw_sig_.assign(sn, 0); pw_sig_mask_ = static_cast<uint32_t>(sn - 1); }
       { std::size_t tn = 1; while (tn < P.perc_track_cap) tn <<= 1; perc_track_.assign(tn, perc_ent{}); perc_track_mask_ = static_cast<uint32_t>(tn - 1); }
       if (P.perc_dense_train) { std::size_t dn = 1; while (dn < P.perc_dense_cap) dn <<= 1; perc_dense_.assign(dn, dense_ent{}); perc_dense_mask_ = static_cast<uint32_t>(dn - 1); }
+      if (P.perc_victim) { std::size_t vn = 1; while (vn < P.perc_victim_cap) vn <<= 1; perc_victim_.assign(vn, dense_ent{}); perc_victim_mask_ = static_cast<uint32_t>(vn - 1); }
+      if (P.perc_pe_gate || (P.perc_feat_mask & 0x700000u)) { ip_pe_sum_.assign(ip_n_, 0.0f); ip_lat_sum_.assign(ip_n_, 0.0f); ip_poll_sum_.assign(ip_n_, 0.0f); ip_pe_cnt_.assign(ip_n_, 0); }
       pw_mshr_.assign(PERC_ENGINES * 16, 0); pw_guse_.assign(PERC_ENGINES * 16, 0); pw_gtim_.assign(PERC_ENGINES * 16, 0); // aggregate-harm tables (per-engine capable)
       pw_hit_.assign(PERC_ENGINES * 16, 0); pw_conj_.assign(PERC_CONJ, 0); // hit-rate + the {use,tim,mshr,hit} conjunction (non-additive interaction)
       pw_usemshr_.assign(PW_USEMSHR, 0); pw_timmshr_.assign(PW_TIMMSHR, 0); pw_confmshr_.assign(PW_CONFMSHR, 0); pw_crit_.assign(PW_CRIT, 0); // DSE-derived interactions
+      pw_upf_.assign(16, 0); pw_lat_.assign(16, 0); pw_poll_.assign(16, 0); // 3-way PE split (separate per-IP benefit/bandwidth/pollution weights)
       { std::size_t pn = 1; while (pn < P.perc_pc_entries) pn <<= 1; pw_pcpath_.assign(pn, 0); pw_pcpath_mask_ = static_cast<uint32_t>(pn - 1);   // PC-path (chain of recent trigger PCs)
         pw_pcdelta_.assign(pn, 0); pw_pcdelta_mask_ = static_cast<uint32_t>(pn - 1); }                                                          // PC XOR delta (PC<->data correlation)
       pip_bias_.assign(ip_n_, 0); // per-IP bias (per-context personalization)
@@ -227,6 +230,27 @@ public:
                    (unsigned long long)dbg_skip_margin_, (unsigned long long)dbg_skip_conf_, (unsigned long long)tp, (unsigned long long)tn);
       std::fprintf(stderr, "[perc-igate] %s perc_instr_pct=%d (thresh=%d gate=%d) force_keeps=%llu\n",
                    P.name.c_str(), perc_instr_pct_, P.perc_instr_gate_pct, (int)P.perc_instr_gate, (unsigned long long)dbg_perc_igate_);
+      if (P.perc_dense_train || P.perc_victim || P.perc_pe_gate)
+        std::fprintf(stderr, "[perc-v2] %s dense=%d victim=%d(hits=%llu) pe_gate=%d(vetoes=%llu)\n", P.name.c_str(),
+                     (int)P.perc_dense_train, (int)P.perc_victim, (unsigned long long)dbg_victim_hit_,
+                     (int)P.perc_pe_gate, (unsigned long long)dbg_perc_pegate_);
+      if (P.perc_dump_weights && dbg_fh_n_) {
+        // RAW PE audit (cycles): I_UPF should track fill latency (LLC ~35 / DRAM ~hundreds), I_LAT the queueing above
+        // the DRAM base (0 idle, grows w/ load), I_POLL the pollution cost. If these are 0 or absurd, PE is broken.
+        std::fprintf(stderr, "[feat-audit] %s RAW-PE cycles: I_UPF avg=%.1f max=%.0f (n=%llu) | I_LAT avg=%.1f max=%.0f | I_POLL avg=%.1f max=%.0f (n=%llu)\n",
+                     P.name.c_str(), dbg_upf_n_ ? dbg_upf_sum_ / dbg_upf_n_ : 0.0, dbg_upf_max_, (unsigned long long)dbg_upf_n_,
+                     dbg_upf_n_ ? dbg_lat_sum_ / dbg_upf_n_ : 0.0, dbg_lat_max_,
+                     dbg_poll_n_ ? dbg_poll_sum_ / dbg_poll_n_ : 0.0, dbg_poll_max_, (unsigned long long)dbg_poll_n_);
+        static const char* fn[PERC_NF] = {"PC","off","eng","dep","use","tim","conf","sig","mshr","guse","gtim","hit","conj","pcpath","pcdelta","use^m","tim^m","conf^m","crit","I_UPF","I_LAT","I_POLL"};
+        const uint32_t mm = P.perc_feat_mask;
+        for (int i = 0; i < PERC_NF; ++i) {
+          double sum = 0; uint64_t nz = 0; for (int b = 0; b < 16; ++b) { sum += static_cast<double>(b) * dbg_fh_[i][b]; if (b) nz += dbg_fh_[i][b]; }
+          char hist[128]; int off = 0; for (int b = 0; b < 16 && off < 110; ++b) off += std::snprintf(hist + off, sizeof(hist) - off, "%llu%s", (unsigned long long)((dbg_fh_[i][b] * 100 + dbg_fh_n_ / 2) / dbg_fh_n_), b < 15 ? "," : "");
+          const bool on = (i == 0) ? (mm & 1) : (i == 2) ? (mm & 4) : (mm & (1u << i)); // rough: is this table masked in?
+          std::fprintf(stderr, "[feat-audit] %s f%-2d %-7s %s mean=%.2f nonzero=%.0f%% hist%%=[%s]\n", P.name.c_str(), i, fn[i],
+                       on ? "ON " : "off", sum / dbg_fh_n_, 100.0 * nz / dbg_fh_n_, hist);
+        }
+      }
       const uint64_t up = dbg_used_pe_pos_, un = dbg_used_pe_neg_;
       std::fprintf(stderr, "[perc-misalign] %s demand-USED prefetches: PE>=0=%llu PE<0=%llu (used-but-negative-PE=%.1f%% <- PE-vs-IPC misalignment)\n",
                    P.name.c_str(), (unsigned long long)up, (unsigned long long)un,
@@ -1011,12 +1035,13 @@ private:
   // which a sum-of-independent-weights hashed perceptron cannot represent (the XOR limitation; cf. Jimenez path-based).
   // 13 PC-PATH (hash of the recent trigger-PC chain -- datacenter PCs recur strongly; PPF/path-based use PC history),
   // 14 PC XOR DELTA (an XOR-combined feature a la PPF -- captures PC<->data-address correlation, strong on datacenter).
-  static constexpr int PERC_NF = 19; // + 4 DSE-derived pairwise interaction features (use^mshr, tim^mshr, conf^mshr, criticality)
+  static constexpr int PERC_NF = 22; // 19 + the 3-way PE split (I_UPF, I_LAT, I_POLL as separate per-IP sampled features)
   static constexpr int PERC_ENGINES = 4; // 0=SPPAM fwd, 1=SPPAM bwd, 2=delta/SPP, 3=branch-graph (declared early: profiler members below use it)
   static constexpr int PERC_CONJ = 256; // combined-feature table depth (use2|tim2|mshr2|hit2, 2 bits each)
   std::vector<int16_t> pw_pc_, pw_off_, pw_eng_, pw_dep_, pw_use_, pw_tim_, pw_conf_, pw_sig_,
                        pw_mshr_, pw_guse_, pw_gtim_, pw_hit_, pw_conj_, pw_pcpath_, pw_pcdelta_, // + PC-path + PC^delta tables
-                       pw_usemshr_, pw_timmshr_, pw_confmshr_, pw_crit_; // DSE-derived pairwise interactions (contention-gated + criticality)
+                       pw_usemshr_, pw_timmshr_, pw_confmshr_, pw_crit_, // DSE-derived pairwise interactions (contention-gated + criticality)
+                       pw_upf_, pw_lat_, pw_poll_; // 3-way PE split: separate per-IP latency-saved / bandwidth-cost / pollution weight tables (16 buckets each)
   // interaction table sizes (direct product index): use(8)xmshr(16), tim(8)xmshr(16), conf(16)xmshr(16), use(8)xhit(16)
   static constexpr int PW_USEMSHR = 128, PW_TIMMSHR = 128, PW_CONFMSHR = 256, PW_CRIT = 128;
   uint32_t pw_pcpath_mask_ = 0, pw_pcdelta_mask_ = 0;
@@ -1060,6 +1085,12 @@ private:
   // High used_pe_neg fraction on a bandwidth-bound trace = DSE lesson #3 (PE label wrong), NOT a sampling shortfall.
   uint64_t dbg_used_pe_pos_ = 0, dbg_used_pe_neg_ = 0;
   uint64_t dbg_perc_igate_ = 0; // instruction-activity gate force-keeps (datacenter back-off)
+  uint64_t dbg_perc_pegate_ = 0; // PE-gate force-keeps (good-PE IP -> don't filter)
+  // FEATURE AUDIT: per-feature value histogram (0..15 clamp) sampled at gate + RAW PE-component ranges in CYCLES, to
+  // verify every input is alive/sensible and that PE actually reflects latency-saved (DRAM vs LLC), not garbage.
+  uint64_t dbg_fh_[PERC_NF][16] = {{0}}; uint64_t dbg_fh_n_ = 0; uint32_t dbg_audit_ctr_ = 0;
+  double dbg_upf_sum_ = 0, dbg_lat_sum_ = 0, dbg_poll_sum_ = 0; uint64_t dbg_upf_n_ = 0, dbg_poll_n_ = 0;
+  float dbg_upf_max_ = 0, dbg_lat_max_ = 0, dbg_poll_max_ = 0;
   uint64_t dbg_keep_res_ = 0, dbg_keep_res_u_ = 0, dbg_drop_res_ = 0, dbg_drop_res_u_ = 0; // discrimination: resolved useful-rate of kept vs (explored-)dropped
   bool perc_last_explored_ = false;
   struct perc_ent { std::array<uint16_t, PERC_NF> f{}; uint32_t tag = 0; uint32_t stamp = 0; uint32_t iph = 0; bool occ = false; bool explored = false;
@@ -1070,8 +1101,10 @@ private:
   // DENSE useful/useless training table: gate feature snapshot per ISSUED prefetch, keyed by block, trained ±1 at its
   // hit (useful) or unused-eviction (useless). No latency, no sampling, overwrite-on-collision (each prefetch resolves
   // once). Separate from perc_track_ (which carries PE latency/cost for the legacy sparse path).
-  struct dense_ent { std::array<uint16_t, PERC_NF> f{}; uint32_t tag = 0; uint32_t iph = 0; bool occ = false; };
+  struct dense_ent { std::array<uint16_t, PERC_NF> f{}; uint32_t tag = 0; uint32_t iph = 0; bool occ = false; bool explored = false; };
   std::vector<dense_ent> perc_dense_; uint32_t perc_dense_mask_ = 0;
+  std::vector<dense_ent> perc_victim_; uint32_t perc_victim_mask_ = 0; uint32_t perc_victim_ctr_ = 0; // PPF-style reject table: dropped prefetches, re-trained toward KEEP if re-demanded
+  std::vector<float> ip_pe_sum_, ip_lat_sum_, ip_poll_sum_; std::vector<uint32_t> ip_pe_cnt_; // per-IP sampled PE COMPONENTS: I_UPF(=ip_pe_sum_ latency saved), I_LAT(bandwidth), I_POLL(pollution). Gate uses net = upf-lat-poll; the 3 also feed separate features.
   std::vector<perc_ent> perc_track_; uint32_t perc_track_mask_ = 0; // SMALL fixed direct-mapped table w/ probabilistic
   // eviction -- the SAME validated policy as pf_sdm_ (large per-outstanding tracking tables are prohibitively expensive);
   // training fires on the sampled entries that survive to their hit/eviction resolve.
@@ -1132,6 +1165,17 @@ private:
     f[16] = static_cast<uint16_t>((f[5] << 4) | f[8]);  // tim^mshr:  per-IP untimeliness x DRAM-contention (0..127)
     f[17] = static_cast<uint16_t>((f[6] << 4) | f[8]);  // conf^mshr: engine confidence x DRAM-contention   (0..255)
     f[18] = static_cast<uint16_t>((f[4] << 4) | f[11]); // criticality: per-IP usefulness x global hit-rate window (0..127)
+    // 3-WAY PE SPLIT: the fixed I_UPF - I_POLL - I_LAT collapse mis-weights per workload; expose the components as
+    // SEPARATE per-IP sampled features so the perceptron learns their relative weight (bandwidth-bound vs capacity-bound).
+    // Each = per-IP avg component / perc_pe_scale, clamped to 0..15.
+    { auto peb = [&](const std::vector<float>& s, int scale) -> uint16_t { // s[iph] = rolling EMA (cycles) -> 4-bit bucket via a PER-COMPONENT scale
+        if (ip_pe_cnt_.empty() || iph >= ip_pe_cnt_.size() || ip_pe_cnt_[iph] == 0) return 0;
+        int b = static_cast<int>(s[iph] / static_cast<float>(scale < 1 ? 1 : scale));
+        return static_cast<uint16_t>(b < 0 ? 0 : (b > 15 ? 15 : b)); };
+      f[19] = peb(ip_pe_sum_,   P.perc_upf_scale);  // I_UPF: per-IP latency saved (benefit)
+      f[20] = peb(ip_lat_sum_,  P.perc_lat_scale);  // I_LAT: per-IP DRAM-queueing bandwidth cost
+      f[21] = peb(ip_poll_sum_, P.perc_poll_scale); // I_POLL: per-IP pollution cost
+    }
     const uint32_t m = P.perc_feat_mask;
     const int es8 = P.perc_engine_split ? eng * 8 : 0, es16 = P.perc_engine_split ? eng * 16 : 0; // per-engine context-table offset
     return ((m & 1) ? pw_pc_[f[0]] : 0) + ((m & 4) ? pw_eng_[f[2]] : 0)
@@ -1142,6 +1186,7 @@ private:
          + ((m & 0x4000) ? pw_pcpath_[f[13]] : 0) + ((m & 0x8000) ? pw_pcdelta_[f[14]] : 0)   // PC-path + PC^delta (PPF-style)
          + ((m & 0x10000) ? pw_usemshr_[f[15]] : 0) + ((m & 0x20000) ? pw_timmshr_[f[16]] : 0)   // DSE interactions: contention-gated
          + ((m & 0x40000) ? pw_confmshr_[f[17]] : 0) + ((m & 0x80000) ? pw_crit_[f[18]] : 0)      // ...and criticality
+         + ((m & 0x100000) ? pw_upf_[f[19]] : 0) + ((m & 0x200000) ? pw_lat_[f[20]] : 0) + ((m & 0x400000) ? pw_poll_[f[21]] : 0) // 3-way PE split
          + ((m & 0x2000) && !pip_bias_.empty() ? pip_bias_[iph] : 0);           // per-IP bias (per-context keep/drop offset)
   }
   // Final gate: true = issue. On a "drop", still issue 1/perc_explore_div of the time (exploration) so dropped
@@ -1149,6 +1194,8 @@ private:
 public: // perc_keep + perc_note_issue are the engine call sites' entry points (SPPAM internal, plus the glue's branch-graph functor)
   bool perc_keep(uint64_t block, int engine, int depth, uint64_t pc, int conf, uint64_t sig) {
     int y = perc_score(block, engine, depth, pc, conf, sig, perc_last_feat_);
+    if (P.perc_dump_weights && (++dbg_audit_ctr_ & 63u) == 0) { ++dbg_fh_n_; // FEATURE AUDIT: sample 1/64 gates
+      for (int i = 0; i < PERC_NF; ++i) { uint16_t v = perc_last_feat_[i]; ++dbg_fh_[i][v > 15 ? 15 : v]; } }
     perc_last_iph_ = iphash(pc);                              // stash for per-IP usefulness crediting at resolve
     if (P.perc_profile) { perc_last_rpc_ = static_cast<uint32_t>(pc); perc_last_rsig_ = static_cast<uint32_t>(sig); // raw signals for the offline sweep
       perc_last_rdelta_ = static_cast<uint32_t>(block - perc_last_trigger_); perc_last_rp1_ = perc_pc_ring_[1]; perc_last_rp2_ = perc_pc_ring_[2];
@@ -1171,9 +1218,22 @@ public: // perc_keep + perc_note_issue are the engine call sites' entry points (
     // INSTRUCTION-ACTIVITY GATE: on instruction-bound workloads the data perceptron only loses coverage (it never
     // beats pe-management there). instr-pf fraction cleanly flags them -> back off (force keep). See [[perceptron-complements-pe-mgmt]].
     if (P.perc_instr_gate && perc_instr_pct_ >= P.perc_instr_gate_pct) { ++dbg_perc_veto_; ++dbg_perc_igate_; return true; }
+    // PE GATE: PE says whether DROPPING can even help. If the trigger IP's sampled avg PE is clearly GOOD, prefetching
+    // helps regardless of usefulness -> do NOT filter (we can't discern a filtering win). Only bad-PE IPs get dropped.
+    if (P.perc_pe_gate && !ip_pe_cnt_.empty()) {
+      const uint32_t iph = perc_last_iph_;
+      // NET PE = I_UPF - I_LAT - I_POLL (not raw latency): a bandwidth-bound IP has high latency but high cost -> net PE
+      // low -> DON'T veto (filtering can help). Only genuinely PE-positive IPs (benefit outweighs cost) are spared.
+      const float net = ip_pe_sum_[iph] - ip_lat_sum_[iph] - ip_poll_sum_[iph]; // EMAs -> already recent-avg cycles, no /cnt
+      if (ip_pe_cnt_[iph] >= static_cast<uint32_t>(P.perc_pe_gate_min_samples)
+          && net >= static_cast<float>(P.perc_pe_gate_thresh)) {
+        ++dbg_perc_veto_; ++dbg_perc_pegate_; return true;
+      }
+    }
     perc_lfsr_ ^= perc_lfsr_ << 13; perc_lfsr_ ^= perc_lfsr_ >> 17; perc_lfsr_ ^= perc_lfsr_ << 5;
     if (P.perc_explore_div && (perc_lfsr_ % P.perc_explore_div == 0)) { ++dbg_perc_explore_; perc_last_explored_ = true; return true; }
     ++dbg_perc_drop_; perc_last_valid_ = false; // dropped for real -> no sample/label
+    if (P.perc_victim) perc_victim_insert(block, perc_last_feat_, perc_last_iph_); // PPF reject table: watch for a re-demand
     return false;
   }
   // Train on a per-prefetch VALUE. usefulness (used=+1 / evicted=-1) is a poor proxy for performance -- a
@@ -1194,6 +1254,7 @@ public: // perc_keep + perc_note_issue are the engine call sites' entry points (
                 + ((mm & 0x4000) ? pw_pcpath_[f[13]] : 0) + ((mm & 0x8000) ? pw_pcdelta_[f[14]] : 0)
                 + ((mm & 0x10000) ? pw_usemshr_[f[15]] : 0) + ((mm & 0x20000) ? pw_timmshr_[f[16]] : 0)
                 + ((mm & 0x40000) ? pw_confmshr_[f[17]] : 0) + ((mm & 0x80000) ? pw_crit_[f[18]] : 0)
+                + ((mm & 0x100000) ? pw_upf_[f[19]] : 0) + ((mm & 0x200000) ? pw_lat_[f[20]] : 0) + ((mm & 0x400000) ? pw_poll_[f[21]] : 0)
                 + ((mm & 0x2000) && !pip_bias_.empty() ? pip_bias_[iph] : 0);
     const bool wrong = (y >= P.perc_tau_keep) != keep_lbl;
     if (!wrong && std::abs(y) >= P.perc_theta_train) { ++dbg_skip_conf_; return; } // confident-correct -> no update
@@ -1204,18 +1265,7 @@ public: // perc_keep + perc_note_issue are the engine call sites' entry points (
       if (sc > 0.0) step = std::clamp(static_cast<int>(std::abs(val) / sc) + 1, 1, P.perc_pe_step_max);
     }
     const int d = keep_lbl ? step : -step;
-    const uint32_t m = P.perc_feat_mask;
-    auto upd = [&](std::vector<int16_t>& w, uint16_t i) { w[i] = static_cast<int16_t>(std::clamp(w[i] + d, -P.perc_weight_max, P.perc_weight_max)); };
-    if (m & 1) upd(pw_pc_, f[0]);
-    if (m & 4) upd(pw_eng_, f[2]);                             // (bit 2 / offset feature dropped)
-    if (m & 8) upd(pw_dep_, e16 + f[3]); if (m & 16) upd(pw_use_, e8 + f[4]); if (m & 32) upd(pw_tim_, e8 + f[5]);
-    if (m & 64) upd(pw_conf_, e16 + f[6]); if (m & 128) upd(pw_sig_, f[7]);
-    if (m & 256) upd(pw_mshr_, e16 + f[8]); if (m & 512) upd(pw_guse_, e16 + f[9]); if (m & 1024) upd(pw_gtim_, e16 + f[10]);
-    if (m & 2048) upd(pw_hit_, e16 + f[11]); if (m & 4096) upd(pw_conj_, f[12]);
-    if (m & 0x4000) upd(pw_pcpath_, f[13]); if (m & 0x8000) upd(pw_pcdelta_, f[14]);
-    if (m & 0x10000) upd(pw_usemshr_, f[15]); if (m & 0x20000) upd(pw_timmshr_, f[16]);
-    if (m & 0x40000) upd(pw_confmshr_, f[17]); if (m & 0x80000) upd(pw_crit_, f[18]);
-    if ((m & 0x2000) && !pip_bias_.empty()) upd(pip_bias_, static_cast<uint16_t>(iph));
+    perc_apply(f, iph, d);
     if (keep_lbl) ++dbg_tr_pos_[eng_dbg]; else ++dbg_tr_neg_[eng_dbg];
     ++dbg_perc_train_;
   }
@@ -1252,14 +1302,101 @@ public: // perc_keep + perc_note_issue are the engine call sites' entry points (
   }
   void perc_note_issue(uint64_t block) {
     if (!(perc_last_valid_ || perc_last_explored_)) return;
-    // SAMPLE like the glue's pfht_ (1/pe_sample_div). A DENSE insert SATURATES the pinned table: live entries never
-    // survive to their true hit/eviction resolve -- they all time out USELESS, biasing training toward drop (the
-    // 92%-drop mcf collapse). Sampling keeps occupancy low so pin + useless-on-timeout reflects REAL outcomes.
+    // DENSE PATH: snapshot EVERY issued prefetch's gate features (no 1/pe_sample_div, no PE latency); train on its
+    // real useful(hit)/useless(evict) outcome. The coarse features (use/tim/hit/pe) are the CLEANLY-SAMPLED inputs;
+    // the DIRECT features (PC/sig/delta/pcpath) come from current prefetcher state. Label = usefulness (first-outcome).
+    if (P.perc_dense_train) { perc_dense_insert(block, perc_last_feat_, perc_last_iph_, perc_last_explored_); return; }
+    // SPARSE (legacy) PATH: sample like the glue's pfht_ (1/pe_sample_div) into the PE-latency table. A DENSE insert
+    // SATURATES the pinned table: live entries never survive to their true resolve -> all time out USELESS.
     if (P.pe_sample_div > 1 && (++perc_sample_ctr_ % P.pe_sample_div) != 0) return;
     perc_track_insert(block, perc_last_feat_, perc_last_iph_, perc_last_explored_);
   }
   uint32_t perc_sample_ctr_ = 0;
+  // DENSE feature snapshot: block-keyed, one entry per issued prefetch, overwrite-on-collision (each prefetch resolves
+  // once -- first-outcome). No latency, no pin/timeout. Trained at its hit(useful=+1)/evict-unused(useless=-1).
+  void perc_dense_insert(uint64_t block, const uint16_t f[PERC_NF], uint32_t iph, bool explored) {
+    if (perc_dense_.empty()) return;
+    dense_ent& e = perc_dense_[sdm_idx(block) & perc_dense_mask_];
+    for (int k = 0; k < PERC_NF; ++k) e.f[k] = f[k];
+    e.tag = static_cast<uint32_t>(block); e.iph = iph; e.occ = true; e.explored = explored;
+  }
+  // Resolve a dense entry on its true outcome and train ONCE (first-outcome: retire the slot). useful=+1, useless=-1.
+  // Returns true iff it trained (the block was tracked) -- lets the glue know a real outcome landed.
+  bool perc_dense_resolve(uint64_t block, bool useful) {
+    if (perc_dense_.empty()) return false;
+    dense_ent& e = perc_dense_[sdm_idx(block) & perc_dense_mask_];
+    if (!e.occ || e.tag != static_cast<uint32_t>(block)) return false;
+    e.occ = false;
+    // feed the same live per-IP usefulness/timeliness discriminators the sampled path fed (so the coarse FEATURES stay
+    // warm off the dense stream too), then train the perceptron on the dense ±1 label.
+    if (!ip_useful_.empty()) { if (useful) ++ip_useful_[e.iph]; else ++ip_useless_[e.iph]; ip_age_tick(); }
+    perc_train(e.f.data(), e.iph, useful ? 1.0 : -1.0);
+    return true;
+  }
+  // Masked weight update by a signed step d (shared by perc_train and the victim heavy-keep). engine = f[2].
+  void perc_apply(const uint16_t f[PERC_NF], uint32_t iph, int d) {
+    const int e8 = P.perc_engine_split ? f[2] * 8 : 0, e16 = P.perc_engine_split ? f[2] * 16 : 0;
+    const uint32_t m = P.perc_feat_mask;
+    auto upd = [&](std::vector<int16_t>& w, uint16_t i) { w[i] = static_cast<int16_t>(std::clamp(w[i] + d, -P.perc_weight_max, P.perc_weight_max)); };
+    if (m & 1) upd(pw_pc_, f[0]);
+    if (m & 4) upd(pw_eng_, f[2]);
+    if (m & 8) upd(pw_dep_, e16 + f[3]); if (m & 16) upd(pw_use_, e8 + f[4]); if (m & 32) upd(pw_tim_, e8 + f[5]);
+    if (m & 64) upd(pw_conf_, e16 + f[6]); if (m & 128) upd(pw_sig_, f[7]);
+    if (m & 256) upd(pw_mshr_, e16 + f[8]); if (m & 512) upd(pw_guse_, e16 + f[9]); if (m & 1024) upd(pw_gtim_, e16 + f[10]);
+    if (m & 2048) upd(pw_hit_, e16 + f[11]); if (m & 4096) upd(pw_conj_, f[12]);
+    if (m & 0x4000) upd(pw_pcpath_, f[13]); if (m & 0x8000) upd(pw_pcdelta_, f[14]);
+    if (m & 0x10000) upd(pw_usemshr_, f[15]); if (m & 0x20000) upd(pw_timmshr_, f[16]);
+    if (m & 0x40000) upd(pw_confmshr_, f[17]); if (m & 0x80000) upd(pw_crit_, f[18]);
+    if (m & 0x100000) upd(pw_upf_, f[19]); if (m & 0x200000) upd(pw_lat_, f[20]); if (m & 0x400000) upd(pw_poll_, f[21]);
+    if ((m & 0x2000) && !pip_bias_.empty()) upd(pip_bias_, static_cast<uint16_t>(iph));
+  }
+  // VICTIM TABLE: record a DROPPED prefetch's feature vector (sampled). If the block is later demanded, the drop lost
+  // coverage -> perc_victim_check trains it back toward KEEP with a heavy step (punish over-filtering).
+  void perc_victim_insert(uint64_t block, const uint16_t f[PERC_NF], uint32_t iph) {
+    if (perc_victim_.empty()) return;
+    if (P.perc_victim_sample_div > 1 && (++perc_victim_ctr_ % static_cast<uint32_t>(P.perc_victim_sample_div)) != 0) return;
+    dense_ent& e = perc_victim_[sdm_idx(block) & perc_victim_mask_];
+    for (int k = 0; k < PERC_NF; ++k) e.f[k] = f[k];
+    e.tag = static_cast<uint32_t>(block); e.iph = iph; e.occ = true;
+  }
+public:
+  // Glue calls on every demand: if this block was a DROPPED prefetch (in the victim table), the drop was BAD ->
+  // heavy KEEP retrain + retire the entry. Returns true iff it was a victim (a punished bad drop).
+  bool perc_victim_check(uint64_t block) {
+    if (perc_victim_.empty()) return false;
+    dense_ent& e = perc_victim_[sdm_idx(block) & perc_victim_mask_];
+    if (!e.occ || e.tag != static_cast<uint32_t>(block)) return false;
+    e.occ = false;
+    perc_apply(e.f.data(), e.iph, P.perc_victim_penalty); // heavy KEEP (+): this pattern SHOULD NOT have been dropped
+    ++dbg_victim_hit_;
+    return true;
+  }
+  // Glue feeds the 3 sampled PE components per trigger IP at a prefetch fill: upf=latency saved, lat=DRAM-queueing
+  // bandwidth cost. (I_POLL arrives separately at the pollution event via perc_note_ip_poll.) One shared sample count.
+  // ROLLING EMAs (alpha=1/2^perc_pe_ema_shift), each fed at ITS OWN event with the TRUE component value:
+  //  I_UPF  = fill latency saved  (fed at fill),  I_LAT = the real Eq4 service cost this pf imposes (fed at Eq4),
+  //  I_POLL = pollution cost       (fed on a polluted re-miss). Never cumulative -> tracks recent phase.
+  void perc_note_ip_upf(uint32_t iph, float upf) { // latency saved (cycles), capped to a sane DRAM max upstream
+    if (ip_pe_sum_.empty() || iph >= ip_pe_sum_.size()) return;
+    const float a = 1.0f / static_cast<float>(1u << P.perc_pe_ema_shift);
+    ip_pe_sum_[iph] += (upf - ip_pe_sum_[iph]) * a;
+    if (ip_pe_cnt_[iph] < 255) ++ip_pe_cnt_[iph];   // recent-activity warmth (decayed in ip_age_tick)
+    dbg_upf_sum_ += upf; ++dbg_upf_n_; if (upf > dbg_upf_max_) dbg_upf_max_ = upf;
+  }
+  void perc_note_ip_lat(uint32_t iph, float lat) { // TRUE I_LAT = w*serv (~pe_serv_dram), NOT fill-latency-minus-base
+    if (ip_lat_sum_.empty() || iph >= ip_lat_sum_.size()) return;
+    const float a = 1.0f / static_cast<float>(1u << P.perc_pe_ema_shift);
+    ip_lat_sum_[iph] += (lat - ip_lat_sum_[iph]) * a;
+    dbg_lat_sum_ += lat; if (lat > dbg_lat_max_) dbg_lat_max_ = lat;
+  }
+  void perc_note_ip_poll(uint32_t iph, float poll) { // pollution charged to the polluting prefetch's IP (rolling EMA)
+    if (ip_poll_sum_.empty() || iph >= ip_poll_sum_.size()) return;
+    const float a = 1.0f / static_cast<float>(1u << P.perc_pe_ema_shift);
+    ip_poll_sum_[iph] += (poll - ip_poll_sum_[iph]) * a;
+    dbg_poll_sum_ += poll; ++dbg_poll_n_; if (poll > dbg_poll_max_) dbg_poll_max_ = poll; // audit: raw I_POLL cycles
+  }
 private:
+  uint64_t dbg_victim_hit_ = 0;
   // DENSE training path: snapshot the feature vector of EVERY kept L2 prefetch, then train when the actual
   // outcome lands (a demand hit = useful, an evicted-unused = useless). Outcomes resolve far more often than
   // the sparse per-IP sampling, which stays as an INPUT FEATURE (usefulness/timeliness buckets), not the trigger.
@@ -1412,6 +1549,7 @@ private:
     for (auto& v : ip_useless_) v >>= 1;
     for (auto& v : ip_ev_) v >>= 1;
     for (auto& v : ip_untimely_) v >>= 1;
+    for (auto& v : ip_pe_cnt_) v >>= 1; // PE-EMA warmth decays -> the gate only trusts RECENTLY-active IPs (phase-aware)
     for (auto& v : ip_bwd_useful_) v >>= 1;
     for (auto& v : ip_bwd_useless_) v >>= 1;
   }
