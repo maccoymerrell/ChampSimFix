@@ -1132,9 +1132,11 @@ private:
   // engine ids: 0 = SPPAM spatial forward, 1 = SPPAM spatial backward, 2 = delta-PHT (SPP-like delta fall-through),
   // 3 = branch-graph (instruction next-PC). Each engine feeds its OWN signature (6-bit spatial pattern / delta
   // signature / next-PC); we fold the engine into the shared sig index so those signatures don't collide.
-  uint32_t perc_sig_index(int engine, uint64_t sig) const {
+  uint32_t perc_sig_index(int engine, uint64_t sig, uint64_t pc = 0) const {
     const uint64_t e = static_cast<uint64_t>(engine < 0 ? 0 : (engine >= PERC_ENGINES ? PERC_ENGINES - 1 : engine));
-    return static_cast<uint32_t>((((sig ^ (e * 0x9E3779B185EBCA87ull)) * 0x9E3779B97F4A7C15ull) >> 40) & pw_sig_mask_);
+    uint64_t k = sig ^ (e * 0x9E3779B185EBCA87ull);
+    if (P.perc_sig_xor_pc) k ^= (pc >> P.perc_pc_lobit) * 0xD6E8FEB86659FD93ull; // disambiguate (PC,sig) pairs that alias
+    return static_cast<uint32_t>(((k * 0x9E3779B97F4A7C15ull) >> 40) & pw_sig_mask_);
   }
   int perc_score(uint64_t block, int engine, int depth, uint64_t pc, int conf, uint64_t sig, uint16_t f[PERC_NF]) const {
     const uint32_t iph = iphash(pc);
@@ -1146,7 +1148,7 @@ private:
     f[4] = static_cast<uint16_t>(perc_use_bucket(iph));        // per-IP usefulness (LIVE via perc_resolve, ip-filter-independent)
     f[5] = static_cast<uint16_t>(perc_tim_bucket(iph));        // per-IP untimeliness (LIVE via perc_resolve watch + operate() re-demand, ip-filter-independent)
     f[6] = static_cast<uint16_t>(conf < 0 ? 0 : (conf > 15 ? 15 : conf)); // engine per-prediction confidence (0..15)
-    f[7] = static_cast<uint16_t>(perc_sig_index(eng, sig));    // engine-partitioned signature (spatial pattern / delta-sig / next-PC)
+    f[7] = static_cast<uint16_t>(perc_sig_index(eng, sig, pc)); // engine-partitioned signature (+ optional PC-mix via perc_sig_xor_pc)
     f[8] = static_cast<uint16_t>(perc_mshr_idx_ < 0 ? 0 : (perc_mshr_idx_ > 15 ? 15 : perc_mshr_idx_)); // aggregate: MSHR/bandwidth pressure
     f[9] = static_cast<uint16_t>(std::clamp(static_cast<int>(perc_useless_ema_ * 15.0 + 0.5), 0, 15));  // aggregate: global useless (truly-bad) rate
     f[10] = static_cast<uint16_t>(std::clamp(static_cast<int>(perc_untimely_ema_ * 15.0 + 0.5), 0, 15)); // aggregate: global untimely (too-early) rate
@@ -1191,6 +1193,27 @@ private:
   }
   // Final gate: true = issue. On a "drop", still issue 1/perc_explore_div of the time (exploration) so dropped
   // regions of the feature space keep producing labels. Stashes the feature vector for the sampler to record.
+  // PER-EVALUATION log: print each ACTIVE feature's CONTRIBUTION (its weight-table value) + bucket for a sampled drop,
+  // so post-processing can see which features drove the score. Sum of contributions == y. Block joins to PBAD (re-demand).
+  uint32_t perc_evlog_ctr_ = 0;
+  void perc_log_eval(uint64_t block, int y) {
+    const uint16_t* f = perc_last_feat_; const uint32_t m = P.perc_feat_mask;
+    const int e8 = P.perc_engine_split ? f[2] * 8 : 0, e16 = P.perc_engine_split ? f[2] * 16 : 0;
+    std::fprintf(stderr, "PDROP,%llu,y=%d", (unsigned long long)block, y);
+    auto pr = [&](const char* nm, int c, int fb) { std::fprintf(stderr, ",%s=%d@%d", nm, c, fb); };
+    if (m & 1) pr("PC", pw_pc_[f[0]], f[0]);            if (m & 4) pr("eng", pw_eng_[f[2]], f[2]);
+    if (m & 8) pr("dep", pw_dep_[e16 + f[3]], f[3]);    if (m & 16) pr("use", pw_use_[e8 + f[4]], f[4]);
+    if (m & 32) pr("tim", pw_tim_[e8 + f[5]], f[5]);    if (m & 64) pr("conf", pw_conf_[e16 + f[6]], f[6]);
+    if (m & 128) pr("sig", pw_sig_[f[7]], f[7]);        if (m & 256) pr("mshr", pw_mshr_[e16 + f[8]], f[8]);
+    if (m & 512) pr("guse", pw_guse_[e16 + f[9]], f[9]); if (m & 1024) pr("gtim", pw_gtim_[e16 + f[10]], f[10]);
+    if (m & 2048) pr("hit", pw_hit_[e16 + f[11]], f[11]); if (m & 4096) pr("conj", pw_conj_[f[12]], f[12]);
+    if (m & 0x4000) pr("pcpath", pw_pcpath_[f[13]], f[13]); if (m & 0x8000) pr("pcdelta", pw_pcdelta_[f[14]], f[14]);
+    if (m & 0x10000) pr("use^m", pw_usemshr_[f[15]], f[15]); if (m & 0x20000) pr("tim^m", pw_timmshr_[f[16]], f[16]);
+    if (m & 0x40000) pr("conf^m", pw_confmshr_[f[17]], f[17]); if (m & 0x80000) pr("crit", pw_crit_[f[18]], f[18]);
+    if (m & 0x100000) pr("I_UPF", pw_upf_[f[19]], f[19]); if (m & 0x200000) pr("I_LAT", pw_lat_[f[20]], f[20]);
+    if (m & 0x400000) pr("I_POLL", pw_poll_[f[21]], f[21]);
+    std::fprintf(stderr, "\n");
+  }
 public: // perc_keep + perc_note_issue are the engine call sites' entry points (SPPAM internal, plus the glue's branch-graph functor)
   bool perc_keep(uint64_t block, int engine, int depth, uint64_t pc, int conf, uint64_t sig) {
     int y = perc_score(block, engine, depth, pc, conf, sig, perc_last_feat_);
@@ -1233,6 +1256,7 @@ public: // perc_keep + perc_note_issue are the engine call sites' entry points (
     perc_lfsr_ ^= perc_lfsr_ << 13; perc_lfsr_ ^= perc_lfsr_ >> 17; perc_lfsr_ ^= perc_lfsr_ << 5;
     if (P.perc_explore_div && (perc_lfsr_ % P.perc_explore_div == 0)) { ++dbg_perc_explore_; perc_last_explored_ = true; return true; }
     ++dbg_perc_drop_; perc_last_valid_ = false; // dropped for real -> no sample/label
+    if (P.perc_eval_log && (++perc_evlog_ctr_ % static_cast<uint32_t>(P.perc_eval_log_div)) == 0) perc_log_eval(block, y); // sampled per-eval contribution dump
     if (P.perc_victim) perc_victim_insert(block, perc_last_feat_, perc_last_iph_); // PPF reject table: watch for a re-demand
     return false;
   }
@@ -1369,6 +1393,7 @@ public:
     e.occ = false;
     perc_apply(e.f.data(), e.iph, P.perc_victim_penalty); // heavy KEEP (+): this pattern SHOULD NOT have been dropped
     ++dbg_victim_hit_;
+    if (P.perc_eval_log) std::fprintf(stderr, "PBAD,%llu\n", (unsigned long long)block); // this dropped block was re-demanded = BAD drop
     return true;
   }
   // Glue feeds the 3 sampled PE components per trigger IP at a prefetch fill: upf=latency saved, lat=DRAM-queueing

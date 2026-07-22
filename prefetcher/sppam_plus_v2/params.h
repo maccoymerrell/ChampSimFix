@@ -532,6 +532,12 @@ struct params {
   int perc_upf_scale = 32;                // I_UPF ~0..480 cyc -> buckets 0..15
   int perc_lat_scale = 1;                 // I_LAT ~0..12 cyc (the Eq4 service cost) -> buckets 0..12
   int perc_poll_scale = 48;               // I_POLL ~0..720 cyc -> buckets 0..15
+  // PER-EVALUATION LOGGING (diagnostic): sample 1/perc_eval_log_div DROPS and print each ACTIVE feature's CONTRIBUTION
+  // (weight-table value) + bucket to the final score -> post-process which features drive GOOD vs BAD drops. A drop is
+  // BAD iff its block is later demanded (a victim-table hit) -> logged as PBAD; join PDROP<->PBAD by block. No averages.
+  bool perc_eval_log = false;
+  int perc_eval_log_div = 512;
+  bool perc_sig_xor_pc = false;           // mix the trigger PC into the signature index (in addition to engine) -> disambiguates (PC,sig) pairs that currently ALIAS to one weight and cause misattribution (the tahoe bad-drop driver).
   bool perc_pe_gate = false;              // enable the per-IP PE veto on drops (only meaningful with perc_dense_train).
   int perc_pe_gate_thresh = 60;           // veto a drop when the trigger IP's sampled avg PE >= this (units = L_LLC-ish; DRAM-covering ~ hundreds). ~60 clears the mostly-LLC IPs, spares DRAM-covering-but-low-usefulness ones.
   int perc_pe_gate_min_samples = 8;       // require this many sampled PE observations for the IP before the gate trusts it.

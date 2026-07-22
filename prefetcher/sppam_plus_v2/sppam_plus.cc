@@ -109,7 +109,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(perc_load_gate); CFG(perc_load_gate_thresh); CFG(perc_instr_gate); CFG(perc_instr_gate_pct); // NOTE: the module loads knobs via CFG()/get_parameter, NOT the apply_json SET() list -- new knobs MUST be added here too
   CFG(perc_dense_train); CFG(perc_dense_cap); CFG(perc_victim); CFG(perc_victim_cap); CFG(perc_victim_sample_div); CFG(perc_victim_penalty);
   CFG(perc_pe_gate); CFG(perc_pe_gate_thresh); CFG(perc_pe_gate_min_samples); CFG(perc_pe_ema_shift);
-  CFG(perc_upf_scale); CFG(perc_lat_scale); CFG(perc_poll_scale);
+  CFG(perc_upf_scale); CFG(perc_lat_scale); CFG(perc_poll_scale); CFG(perc_eval_log); CFG(perc_eval_log_div); CFG(perc_sig_xor_pc);
 #undef CFG
 
   pfht_.assign(P.pfht_entries ? P.pfht_entries : 1, pf_track{});
