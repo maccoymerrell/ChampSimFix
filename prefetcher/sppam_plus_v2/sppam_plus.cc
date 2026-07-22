@@ -194,12 +194,17 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
         // CRITICAL: train the perceptron on this USED branch-graph prefetch (PE = its real fill latency). Without
         // this the gate never sees a BG prefetch resolve useful -> it learns to drop all BG (the datacenter harm).
         if (P.enable_perceptron_filter && P.perc_gate_instr) {
-          uint32_t lat = 0; float cost = 0.0f; // BG fill latency is fed via the is_instr_pf branch of the fill hook (perc_note_fill)
+          uint32_t lat = 0; float cost = 0.0f; // BG fill latency (perc_note_fill from the is_instr_pf fill branch)
           const bool filled = pred_->perc_track_lat(block, lat, cost);
           double pe = filled ? static_cast<double>(lat) : static_cast<double>(P.llc_hit_latency);
           if (P.perc_pe_cost) pe += static_cast<double>(cost);
-          pred_->perc_note_used(pe);                 // probe: demand-USED BG prefetch getting a negative PE label
-          pred_->perc_resolve_ext(block, pe);        // net PE = latency saved - its own contention/pollution cost (frees the entry)
+          pred_->perc_note_used(pe);
+          // Feed BG's per-IP I_UPF (latency saved) + train DENSELY on the used outcome (builds BG's per-IP usefulness
+          // FEATURE and trains the gate) -- BG rides its own path, so without this its PCs never reach the sampling tables.
+          const uint32_t bgiph = pred_->perc_dense_iph(block);
+          if (bgiph != 0xFFFFFFFFu) pred_->perc_note_ip_upf(bgiph, static_cast<float>(std::min<double>(pe, 1500.0)));
+          if (P.perc_dense_train) pred_->perc_dense_resolve(block, /*useful=*/true);
+          else pred_->perc_resolve_ext(block, pe);
         }
       }
     }
@@ -408,8 +413,10 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
         ++instr_useless_; instr_pf_unused_.erase(iit);
         // Train the perceptron on this USELESS branch-graph prefetch (negative PE = wasted-fill cost) -- the
         // counterpart to the used-resolve above, so BG training sees BOTH outcomes.
-        if (P.enable_perceptron_filter && P.perc_gate_instr)
-          pred_->perc_resolve_ext(evb, -static_cast<double>(P.llc_hit_latency)); // perc_track_ frees its own entry
+        if (P.enable_perceptron_filter && P.perc_gate_instr) {
+          if (P.perc_dense_train) pred_->perc_dense_resolve(evb, /*useful=*/false); // dense: BG evicted-unused = useless
+          else pred_->perc_resolve_ext(evb, -static_cast<double>(P.llc_hit_latency));
+        }
       }
     }
     auto uit = pf_unused_.find(evb);

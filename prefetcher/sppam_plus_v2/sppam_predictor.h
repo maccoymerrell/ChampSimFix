@@ -1346,6 +1346,12 @@ public: // perc_keep + perc_note_issue are the engine call sites' entry points (
   }
   // Resolve a dense entry on its true outcome and train ONCE (first-outcome: retire the slot). useful=+1, useless=-1.
   // Returns true iff it trained (the block was tracked) -- lets the glue know a real outcome landed.
+  // Trigger-IP hash stored for an in-flight dense entry (for the glue to attribute BG per-IP PE). 0xFFFFFFFF = not tracked.
+  uint32_t perc_dense_iph(uint64_t block) const {
+    if (perc_dense_.empty()) return 0xFFFFFFFFu;
+    const dense_ent& e = perc_dense_[sdm_idx(block) & perc_dense_mask_];
+    return (e.occ && e.tag == static_cast<uint32_t>(block)) ? e.iph : 0xFFFFFFFFu;
+  }
   bool perc_dense_resolve(uint64_t block, bool useful) {
     if (perc_dense_.empty()) return false;
     dense_ent& e = perc_dense_[sdm_idx(block) & perc_dense_mask_];
