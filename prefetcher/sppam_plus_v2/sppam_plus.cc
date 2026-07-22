@@ -162,9 +162,10 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
   // Refresh the perceptron's aggregate MSHR/bandwidth-pressure feature before any gate (BG or data) runs this access.
   if (P.enable_perceptron_filter) {
     pred_->perc_set_rc(real_cycle_);   // real cycle for self-measured fill latency (issue stamp at perc_note_issue)
-    // VICTIM CHECK: if this demanded block was a DROPPED prefetch, the drop lost coverage -> heavy KEEP retrain (punish
-    // over-filtering). Runs on the demand before this access generates/gates new prefetches.
-    if (P.perc_victim) pred_->perc_victim_check(block);
+    // VICTIM CHECK: a dropped-prefetch block that MISSES on a later demand = the drop genuinely lost coverage (BAD drop)
+    // -> heavy KEEP retrain. Gated on !cache_hit: a re-demand that HITS was covered some other way, so the drop cost
+    // nothing and must NOT be punished (otherwise natural reuse retrains everything back to keep -> under-filtering).
+    if (P.perc_victim && !cache_hit) pred_->perc_victim_check(block);
     pred_->perc_set_mshr(dram_bw_index());
     // Instruction-activity gate: fraction of prefetch issues that are instruction (BG). ~0 on data-bound mcf/xalan,
     // 0.5-0.6 on the instruction-bound datacenter -> a clean runtime flag to back the data perceptron off there.
@@ -292,7 +293,8 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
   // Shared sampled-prefetch USE resolve on the merged pfht_ (PE's I_UPF + IP-filter's useful). The
   // entry is freed here (resolved useful); if never used it stays PINNED until its line is evicted
   // (resolved useless in the fill hook) -- so useless prefetches are never lost to churn.
-  const bool pe_terms = P.enable_pe_management || (P.enable_ip_filter && (P.ip_filter_use_pe || P.ip_filter_pe_veto || P.ip_filter_use_pe_phase));
+  const bool pe_terms = P.enable_pe_management || (P.enable_ip_filter && (P.ip_filter_use_pe || P.ip_filter_pe_veto || P.ip_filter_use_pe_phase))
+    || (P.enable_perceptron_filter && (P.perc_pe_cost || P.perc_pe_gate || (P.perc_feat_mask & 0x700000u))); // perceptron's PE cost/features need the I_LAT/I_POLL machinery even with the throttles OFF
   if ((P.enable_pe_management || P.enable_ip_filter) && pf_used) {
     pf_track& e = pfht_[block % pfht_.size()];
     if (e.valid && e.block == block) {
@@ -371,7 +373,8 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
   real_cycle_ = cache_->current_cycle(); // TRUE ChampSim cycle for the fill-latency measurement (issue->fill)
   const uint64_t block = addr.to<uint64_t>() >> BLOCK_SHIFT;
   if (P.enable_perceptron_filter) pred_->perc_set_rc(real_cycle_); // keep the perceptron's real-cycle clock current for perc_fill_measure
-  const bool pe_terms = P.enable_pe_management || (P.enable_ip_filter && (P.ip_filter_use_pe || P.ip_filter_pe_veto || P.ip_filter_use_pe_phase));
+  const bool pe_terms = P.enable_pe_management || (P.enable_ip_filter && (P.ip_filter_use_pe || P.ip_filter_pe_veto || P.ip_filter_use_pe_phase))
+    || (P.enable_perceptron_filter && (P.perc_pe_cost || P.perc_pe_gate || (P.perc_feat_mask & 0x700000u))); // perceptron's PE cost/features need the I_LAT/I_POLL machinery even with the throttles OFF
   // Our instruction prefetches are identified by membership in instr_pf_unused_ (populated at
   // issue), keeping them out of the data maps (shadow residency, pf_unused, pfht) -- and, crucially,
   // NOT stealing berti's data-prefetch fills, which a metadata tag bit would (berti uses bits 9-31).
@@ -421,7 +424,7 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
       if (pf_evicted_unused_.size() < 300000) pf_evicted_unused_[evb] = tag; // watch for a later demand (untimely)
       // EXACT per-issuing-IP: this IP's prefetch was evicted unused -> count it, and watch evb for a
       // re-demand (untimely). All evicted-unused prefetches (not sampled), keyed by the issuing IP.
-      if (P.ip_filter_depth_throttle) {
+      if (P.ip_filter_depth_throttle || P.enable_perceptron_filter) { // the perceptron's per-IP timeliness FEATURE needs this even with depth-throttle OFF
         if (auto pi = pf_issue_iph_.find(evb); pi != pf_issue_iph_.end()) {
           ++ip_ev_[pi->second];
           if (pf_evict_iph_.size() < 400000) pf_evict_iph_[evb] = pi->second;
@@ -473,7 +476,7 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
   // Shared fill resolve on the merged pfht_: confirm the sampled prefetch filled, and if a demand
   // had already merged into its MSHR (promoted) resolve it USEFUL. PE additionally books its fill
   // latency and, for a prefetch that filled ahead of an in-flight demand, I_LAT/I_POLL (Eq4/Eq3).
-  if (P.enable_pe_management || P.enable_ip_filter) {
+  if (P.enable_pe_management || P.enable_ip_filter || P.enable_perceptron_filter) { // perceptron needs the fill-latency / I_UPF / usefulness feed even with the throttles off
     pf_track& e = pfht_[block % pfht_.size()];
     if (e.valid && e.block == block && !e.filled) {
       e.filled = true;
@@ -565,13 +568,13 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
   ++pf_issued_;
   // EXACT per-issuing-IP timeliness: remember which IP issued this block, until it is used (timely) or
   // evicted-unused (then watched for a later re-demand = untimely). Bounded; cap guards a pathological run.
-  if (P.enable_ip_filter && P.ip_filter_depth_throttle && pf_issue_iph_.size() < 400000)
+  if (((P.enable_ip_filter && P.ip_filter_depth_throttle) || P.enable_perceptron_filter) && pf_issue_iph_.size() < 400000)
     pf_issue_iph_[block] = static_cast<uint16_t>(iphash(cur_trigger_ip_));
   // Sampled attribution into the SHARED pfht_ (serves PE's I_UPF/I_LAT/I_POLL AND the per-IP filter):
   // hold 1/pe_sample_div of ISSUED prefetches. PINNED insert -- take only a FREE slot, never clobber
   // an in-flight (valid) entry, so a long-lived useless prefetch survives to its eviction resolve
   // (removing the bias that plagued a churn-overwrite table).
-  if ((P.enable_pe_management || P.enable_ip_filter) && (++pe_sample_ctr_ % P.pe_sample_div == 0)) {
+  if ((P.enable_pe_management || P.enable_ip_filter || P.enable_perceptron_filter) && (++pe_sample_ctr_ % P.pe_sample_div == 0)) {
     pf_track& slot = pfht_[block % pfht_.size()];
     const bool stale = slot.valid && (real_cycle_ - slot.issue) > P.ip_track_timeout;
     if (!slot.valid || stale) {
