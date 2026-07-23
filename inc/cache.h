@@ -233,6 +233,10 @@ public:
   // current access is an instruction fetch (ip and v_address share a block). The
   // prefetcher reads it during prefetcher_cache_operate to route the packet.
   bool current_access_is_instr_ = false;
+  // Stamp prefetches issued by this cache with ip = address (PC == address for
+  // instruction lines). Enabled by an L1I instruction prefetcher so its prefetches
+  // stay PC-carrying (ip == v_address) to lower-level instruction prefetchers.
+  bool prefetch_ip_from_addr_ = false;
   std::vector<access_type> pref_activate_mask;
 
   using stats_type = cache_stats;
@@ -293,6 +297,7 @@ public:
 
   bool is_virtual_prefetch() const final { return virtual_prefetch; }
   void set_prefetch_instructions(bool enable) override { prefetch_instructions_ = enable; }
+  void set_prefetch_ip_from_address(bool enable) override { prefetch_ip_from_addr_ = enable; }
   bool current_access_is_instruction() const override { return current_access_is_instr_; }
 
   // NOLINTBEGIN

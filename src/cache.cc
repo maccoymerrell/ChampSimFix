@@ -673,6 +673,10 @@ bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint3
     pf_packet.address = pf_addr;
     pf_packet.v_address = virtual_prefetch ? pf_addr : champsim::address{};
     pf_packet.is_translated = !virtual_prefetch;
+    // Instruction prefetch: carry the PC (== the instruction line's address) so lower-level
+    // instruction prefetchers see a PC-carrying access (ip == v_address) rather than ip = 0.
+    if (prefetch_ip_from_addr_)
+      pf_packet.ip = pf_packet.v_address;
 
     internal_PQ.emplace_back(pf_packet, true, !fill_this_level);
     ++sim_stats.pf_issued;

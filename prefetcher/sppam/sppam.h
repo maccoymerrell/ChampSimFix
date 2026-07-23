@@ -417,6 +417,10 @@ class sppam : public champsim::modules::prefetcher
   uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, bool cache_hit, bool useful_prefetch, access_type type, uint32_t metadata_in) override;
   uint32_t prefetcher_cache_fill(champsim::address addr, long set, long way, bool prefetch, champsim::address evicted_addr, uint32_t metadata_in) override;
   void prefetcher_initialize() override {
+    // Make instruction fetches visible (treated like data). ChampSimRuntime blocks instruction fetches
+    // (ip == v_address) from the prefetcher by default (DPC4 parity); opt in for an instruction-visible
+    // baseline. See CACHE::should_activate_prefetcher.
+    cache_->set_prefetch_instructions(true);
     engine.initialize(intern_);
   }
   void prefetcher_cycle_operate() override;

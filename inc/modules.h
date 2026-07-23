@@ -897,6 +897,14 @@ struct module_base {
      */
     virtual void set_prefetch_instructions(bool /*enable*/) {}
     /**
+     * Stamp prefetches this cache issues with ip = address (the PC of an
+     * instruction line IS its address). An L1I instruction prefetcher (e.g. EPI)
+     * enables this so its prefetches reach lower levels as PC-carrying instruction
+     * accesses (ip == v_address), keeping the instruction PC visible to L2/LLC
+     * instruction prefetchers instead of arriving PC-less. Default no-op.
+     */
+    virtual void set_prefetch_ip_from_address(bool /*enable*/) {}
+    /**
      * True iff the access currently being handed to prefetcher_cache_operate is
      * an instruction fetch (ip and v_address share a block). Only meaningful when
      * set_prefetch_instructions(true) was requested. Default false.

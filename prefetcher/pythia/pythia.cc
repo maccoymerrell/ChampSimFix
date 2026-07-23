@@ -16,6 +16,11 @@ void pythia::prefetcher_initialize()
 {
   init_knobs();
 
+  // Make instruction fetches visible to Pythia (treated like data accesses). ChampSimRuntime blocks
+  // instruction fetches (ip == v_address) from the prefetcher by default (DPC4 parity); opt in so an
+  // instruction-visible baseline is measured. See CACHE::should_activate_prefetcher.
+  cache_->set_prefetch_instructions(true);
+
   last_evicted_tracker = NULL;
   brain_featurewise = new LearningEngineFeaturewise(PYTHIA::alpha, PYTHIA::gamma, PYTHIA::epsilon, (uint32_t)Actions.size(), PYTHIA::seed, PYTHIA::policy,
                                                     PYTHIA::learning_type);
