@@ -1517,6 +1517,8 @@ private:
     stat(pw_mshr_, "mshr"); stat(pw_guse_, "guse"); stat(pw_gtim_, "gtim"); // aggregate-harm features
     stat(pw_hit_, "hit"); stat(pw_conj_, "conj"); // hit-rate + conjunction (non-additive interaction)
     stat(pw_pcpath_, "pcpa"); stat(pw_pcdelta_, "pcdl"); // PC-path + PC^delta (PPF-style)
+    stat(pw_usemshr_, "u^m"); stat(pw_timmshr_, "t^m"); stat(pw_confmshr_, "c^m"); stat(pw_crit_, "crit"); // DSE mshr-interactions
+    stat(pw_upf_, "UPF"); stat(pw_lat_, "LAT"); stat(pw_poll_, "POLL"); // 3-way PE split (benefit / bandwidth / pollution)
     stat(pip_bias_, "pipb"); // per-IP bias (per-context personalization)
     auto small = [&](const std::vector<int16_t>& w, const char* nm) {
       if (w.empty() || w.size() > 16) return;
@@ -1525,6 +1527,7 @@ private:
     };
     small(pw_eng_, "eng"); small(pw_dep_, "dep"); small(pw_use_, "use"); small(pw_tim_, "tim"); small(pw_conf_, "conf");
     small(pw_mshr_, "mshr"); small(pw_guse_, "guse"); small(pw_gtim_, "gtim"); small(pw_hit_, "hit");
+    small(pw_upf_, "UPF"); small(pw_lat_, "LAT"); small(pw_poll_, "POLL"); // per-bucket PE-split weights = learned latency/pollution throttle
   }
   struct pat_val_t { uint32_t u = 0, n = 0; };
   std::unordered_map<uint64_t, pat_val_t> pat_val_;      // pattern key -> validated useful / useless counts
