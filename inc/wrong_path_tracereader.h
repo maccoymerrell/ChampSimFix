@@ -685,8 +685,8 @@ class wrong_path_tracereader
   class body_wrapper
   {
   public:
-    // If correct_path is true, fetch from the next correct path BB, else fetch from the wrong path chain
-    virtual ooo_model_instr read(const bool correct_path = true) = 0;
+    // Fetch from the next_pc
+    virtual ooo_model_instr read(const uint64_t next_pc = 0xdeadbeef) = 0;
     virtual bool eof() const = 0;
     virtual ~body_wrapper() = default;
   };
@@ -1231,9 +1231,9 @@ class wrong_path_tracereader
 
     // Reads the next instruction from the trace (from the next BODY_TAG_ENTRY), constructs an ooo_model_instr from it, and return it
     // Expects that the stream pointer points to the next BODY_TAG_ENTRY
-    [[nodiscard]] std::vector<ooo_model_instr> get_next_instrs(const bool correct_path = true)
+    [[nodiscard]] std::vector<ooo_model_instr> get_next_instrs(const uint64_t next_pc = 0xdeadbeef)
     {
-      fmt::print(stderr, "Fetching from {} path\n", correct_path ? "correct" : "wrong");
+      fmt::print(stderr, "Fetching from {} path\n", next_pc == 0xdeadbeef ? "correct" : "wrong");
 
       const body_entry entry = handle_entry();
       std::vector<ooo_model_instr> retvec = construct_instructions(entry);
@@ -1267,7 +1267,7 @@ class wrong_path_tracereader
       read_till_next_entry(); // Read from the stream until we reach the first BODY_TAG_ENTRY section (but don't read this section yet)
     }
 
-    [[nodiscard]] ooo_model_instr read(const bool correct_path = true) override
+    [[nodiscard]] ooo_model_instr read(const uint64_t next_pc)
     {
       // No more instruction left in the stream
       if (eof_) {
@@ -1284,7 +1284,7 @@ class wrong_path_tracereader
       // TODO: Revert back to instr_buffer
       if ((instr_buffer_fixed.size() == 0)) {
         if (instr_buffer.size() <= 1) { // Populate the instr_buffer if its empty. It might have one branch instruction left over since last time
-          const auto instrs = get_next_instrs(correct_path);
+          const auto instrs = get_next_instrs(next_pc);
           instr_buffer.insert(std::end(instr_buffer), std::make_move_iterator(std::begin(instrs)), std::make_move_iterator(std::end(instrs)));
           if (instrs.size() == 0) {
             // TODO: Add trace inferred wrong path implementation here
@@ -1346,9 +1346,9 @@ class wrong_path_tracereader
   std::unique_ptr<body_wrapper> body_stream = nullptr;
 
 public:
-  [[nodiscard]] ooo_model_instr operator()(const bool correct_path = true)
+  [[nodiscard]] ooo_model_instr operator()(const uint64_t next_pc = 0xdeadbeef)
   {
-    const ooo_model_instr& instr = body_stream->read(correct_path);
+    const ooo_model_instr& instr = body_stream->read(next_pc);
 
     fmt::print(stderr, "{:x}: branch = {}, taken = {}, dst regs = {}, src regs = {}\n", instr.raw_ip, instr.is_branch, instr.branch_taken,
                instr.destination_registers, instr.source_registers);

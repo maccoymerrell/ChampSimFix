@@ -34,7 +34,7 @@ struct repeatable {
   T intern_{std::apply([](auto... x) { return T{x...}; }, args_)};
   explicit repeatable(Args... args) : args_(args...) {}
 
-  auto operator()(const bool correct_path = true)
+  auto operator()(const uint64_t next_pc = true)
   {
     // Reopen trace if we've reached the end of the file
     if (intern_.eof()) {
@@ -42,8 +42,8 @@ struct repeatable {
       intern_ = T{std::apply([](auto... x) { return T{x...}; }, args_)};
     }
 
-    if constexpr (supports_wrong_path<T>::value)
-      return intern_(correct_path);
+    if constexpr (supports_wrong_path_v<T>)
+      return intern_(next_pc);
     else
       return intern_();
   }

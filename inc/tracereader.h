@@ -36,15 +36,18 @@ struct supports_wrong_path : std::false_type {
 
 // Special case: wrong_path_tracereader supports wrong path instrctions
 template <typename T>
-struct supports_wrong_path<T, std::void_t<decltype(std::declval<T>()(false))>> : std::true_type {
+struct supports_wrong_path<T, std::void_t<decltype(std::declval<T>()(0xdeadbeef))>> : std::true_type {
 };
+
+template <typename T>
+constexpr bool supports_wrong_path_v = supports_wrong_path<T>::value;
 
 class tracereader
 {
   static uint64_t instr_unique_id; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
   struct reader_concept {
     virtual ~reader_concept() = default;
-    virtual ooo_model_instr operator()(const bool correct_path) = 0;
+    virtual ooo_model_instr operator()(const uint64_t next_pc) = 0;
     [[nodiscard]] virtual bool eof() const = 0;
   };
 
@@ -56,10 +59,10 @@ class tracereader
     template <typename U>
     using has_eof = decltype(std::declval<U>().eof());
 
-    ooo_model_instr operator()(const bool correct_path = true) override
+    ooo_model_instr operator()(const uint64_t next_pc = 0xdeadbeef) override
     {
       if constexpr (supports_wrong_path<T>::value)
-        return intern_(correct_path);
+        return intern_(next_pc);
       else
         return intern_();
     }
@@ -80,9 +83,9 @@ public:
   {
   }
 
-  auto operator()(const bool correct_path = true)
+  auto operator()(const uint64_t next_pc = 0xdeadbeef)
   {
-    auto retval = (*pimpl_)(correct_path);
+    auto retval = (*pimpl_)(next_pc);
     retval.instr_id = instr_unique_id++;
     return retval;
   }
