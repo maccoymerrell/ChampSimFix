@@ -747,6 +747,7 @@ class wrong_path_tracereader
 
     struct wp_events_section {
       uint64_t num_events;
+      uint8_t ev_flags;
       std::vector<uint64_t> wp_index;
       std::vector<std::optional<uint64_t>> fault_instr_index;
     };
@@ -803,6 +804,7 @@ class wrong_path_tracereader
         throw std::runtime_error(
             fmt::format("[ERROR] Can't verify integrity of trace body. Magic bytes don't match. Expected {:X}, got {:X}", magic_bytes, trace_magic_bytes));
     }
+
 
     [[nodiscard]] ooo_model_instr generate_instruction(uint64_t& instruction_pc, const header_wrapper::Instruction& instruction_template,
                                                        const std::map<uint64_t, std::bitset<512>>& deltas)
@@ -978,13 +980,10 @@ class wrong_path_tracereader
 #warning "WP is not supported yet"
       // TODO: Add support for WP
 
-      fmt::print(stderr, "Generating instructions from template {}\n", entry.template_id);
-
       if (header.templates.find(entry.template_id) == header.templates.end())
         throw std::runtime_error(fmt::format("[ERROR] Unknown template ID {} found", entry.template_id));
-      const auto& instructions = header.templates.at(entry.template_id).instructions;
-
-      fmt::print(stderr, "Generating {} instructions. instr_buffer has {} instructions\n", instructions.size(), instr_buffer.size());
+      const auto& bb_template = header.templates.at(entry.template_id);
+      const auto& instructions = bb_template.instructions;
 
       // Apply the overlay delta changes
       const auto& deltas = entry.cp_delta.records;
@@ -1003,7 +1002,7 @@ class wrong_path_tracereader
       const std::size_t num_instr = instructions.size();
       std::vector<ooo_model_instr> retvec;
       retvec.reserve(num_instr);
-      auto pc = header.templates.at(entry.template_id).start_pc;
+      auto pc = bb_template.start_pc;
       for (uint64_t ipos = 0; ipos < num_instr; ipos++) {
         const overlay_key key(entry.template_id, ipos);
         retvec.emplace_back(generate_instruction(pc, instructions[ipos], overlay[key]));
@@ -1105,8 +1104,9 @@ class wrong_path_tracereader
         wp_index = wp_index + 1 + static_cast<int32_t>(pos_gap);
         wp_events.wp_index.emplace_back(static_cast<uint64_t>(wp_index));
 
-        const uint8_t ev_flags = static_cast<uint8_t>(compressed_body_stream.read());
-        if (ev_flags & header.ids.at("wp_event_flag").left.at("CST_WP_EVENT_FAULT"))
+        wp_events.ev_flags = static_cast<uint8_t>(compressed_body_stream.read());
+
+        if (wp_events.ev_flags & header.ids.at("wp_event_flag").left.at("CST_WP_EVENT_FAULT"))
           wp_events.fault_instr_index.emplace_back(compressed_body_stream.parse_uleb());
         else
           wp_events.fault_instr_index.emplace_back();
@@ -1120,6 +1120,28 @@ class wrong_path_tracereader
       }
 
       return wp_events;
+    }
+
+    void validate_wp(const wp_chain_section& chain, const wp_events_section& events)
+    {
+      if (events.wp_index.size() == 0)
+        return;
+
+      const uint64_t max_index = *std::max_element(events.wp_index.cbegin(), events.wp_index.cend());
+
+      // Default case: wrong path is valid
+      if (max_index < chain.num_wp)
+        return;
+
+      // Special case: wrong path was detected but not captured due to translation failure
+      const bool no_wp_bbs = (chain.num_wp == 0);
+      const bool single_event = (events.num_events == 1);
+      const bool translation_failure = (events.ev_flags == header.ids.at("wp_event_flag").left.at("CST_WP_EVENT_TRANSLATION_UNAVAIL"));
+      if (no_wp_bbs && single_event && translation_failure)
+        return;
+
+      // We should never reach this point
+      throw std::runtime_error("[ERROR] Illegal wrong path section detected");
     }
 
     [[nodiscard]] body_entry handle_entry()
@@ -1138,6 +1160,7 @@ class wrong_path_tracereader
       if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
         retval.wp_chain = read_wp_chain_section();
         retval.wp_events = read_wp_events_section();
+        validate_wp(retval.wp_chain, retval.wp_events);
       }
 
       last_template_id = retval.template_id; // Record the most recent template ID. Used for IFRAME validation
@@ -1260,10 +1283,9 @@ class wrong_path_tracereader
       // Time to re-fill the buffer
       // TODO: Revert back to instr_buffer
       if ((instr_buffer_fixed.size() == 0)) {
-        if (instr_buffer.size() == 0) { // Populate the instr_buffer if its empty
+        if (instr_buffer.size() <= 1) { // Populate the instr_buffer if its empty. It might have one branch instruction left over since last time
           const auto instrs = get_next_instrs(correct_path);
           instr_buffer.insert(std::end(instr_buffer), std::make_move_iterator(std::begin(instrs)), std::make_move_iterator(std::end(instrs)));
-          fmt::print(stderr, "instr_buffer has {} instructions\n", instr_buffer.size());
           if (instrs.size() == 0) {
             // TODO: Add trace inferred wrong path implementation here
           }
@@ -1280,9 +1302,11 @@ class wrong_path_tracereader
             i = instr_buffer.begin();
           } else {
             // The instruction after the branch is available
-            if (std::distance(i, instr_buffer.end()) > 0) {
+            if (std::distance(i, instr_buffer.end()) > 1) { // There should be at least one instruction after i to resolve the branch
               iter_type target = i + 1; // j points to the instruction executed after the branch
-              (*i).branch_taken = ((*i).raw_ip + (*i).instr_size) != (*target).raw_ip;
+              auto fall_through_pc = ((*i).raw_ip + (*i).instr_size);
+              auto target_pc = (*target).raw_ip;  // Observed next PC
+              (*i).branch_taken = fall_through_pc != target_pc;
               instr_buffer_fixed.emplace_back(std::move(*i));
               instr_buffer.erase(i);
               i = instr_buffer.begin();
