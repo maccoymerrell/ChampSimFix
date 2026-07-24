@@ -827,7 +827,7 @@ class wrong_path_tracereader
       // Compute the PC
       instruction_pc += instruction_template.pc_delta;
 
-      // Apply the overlays
+      // Apply the overlays delta. The deltas are relative to the templates
       uint8_t opcode_id = instruction_template.opcode;
       uint8_t branch_type_id = instruction_template.branch_type;
       std::vector<uint64_t> src_mem, dst_mem;
@@ -1179,12 +1179,14 @@ class wrong_path_tracereader
 
       if (!compressed_body_stream.eof)
         throw std::runtime_error("[ERROR] Unexpected bytes found at the end of body section");
+
+      eof_ = true; // Mark the trace source as finished
     }
 
-    // Reads the next instruction from the trace, constructs an ooo_model_instr from it, and return it
-    [[nodiscard]] std::vector<ooo_model_instr> get_next_instrs(const bool correct_path = true)
+    // Keeps reading the trace until we reach the next BODY_TAG_ENTRY section. Stops right before the BODY_TAG_ENTRY section, i.e. *only* reads the sections
+    // preceding the next BODY_TAG_ENTRY section
+    void read_till_next_entry()
     {
-      fmt::print(stderr, "Fetching from {} path\n", correct_path ? "correct" : "wrong");
       while (true) {
         const uint8_t tag = compressed_body_stream.read();
         if (valid_body_tags.find(tag) == valid_body_tags.end())
@@ -1195,15 +1197,25 @@ class wrong_path_tracereader
         } else if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_REGFILE") {
           handle_regfile();
         } else if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_ENTRY") {
-          const body_entry entry = handle_entry();
-          return construct_instructions(entry);
+          return; // Don't parse the BODY_TAG_ENTRY section yet
         } else if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_IFRAME") {
           handle_iframe();
         } else if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_END") {
-          handle_end();
-          return {};
+          return handle_end();
         }
       }
+    }
+
+    // Reads the next instruction from the trace (from the next BODY_TAG_ENTRY), constructs an ooo_model_instr from it, and return it
+    // Expects that the stream pointer points to the next BODY_TAG_ENTRY
+    [[nodiscard]] std::vector<ooo_model_instr> get_next_instrs(const bool correct_path = true)
+    {
+      fmt::print(stderr, "Fetching from {} path\n", correct_path ? "correct" : "wrong");
+
+      const body_entry entry = handle_entry();
+      std::vector<ooo_model_instr> retvec = construct_instructions(entry);
+      read_till_next_entry(); // Keep reading until we reach the next section (but don't read the section yet) to prepare for the next call
+      return retvec;
     }
 
     // Returns the next instruction from the instruction buffer
@@ -1228,6 +1240,8 @@ class wrong_path_tracereader
       using namespace wrong_path_trace_constants;
       for (const auto& [_, value] : header.ids.at("body_tag"))
         valid_body_tags.emplace(std::move(value));
+
+      read_till_next_entry(); // Read from the stream until we reach the first BODY_TAG_ENTRY section (but don't read this section yet)
     }
 
     [[nodiscard]] ooo_model_instr read(const bool correct_path = true) override
@@ -1252,7 +1266,6 @@ class wrong_path_tracereader
           fmt::print(stderr, "instr_buffer has {} instructions\n", instr_buffer.size());
           if (instrs.size() == 0) {
             // TODO: Add trace inferred wrong path implementation here
-            eof_ = true;
           }
         }
 
@@ -1289,8 +1302,8 @@ class wrong_path_tracereader
       const bool retval = (instr_buffer_fixed.size() == 0 && eof_);
 
       // Each instruction in the source application can potentially result in multiple trace instructions. For example, one `rep` in X86 can result in tens of
-      // trace instructions Moreover, the writer collects the trace till cp_instruction_num instructions are reached *and* the last executing basic block is
-      // finished
+      // trace instructions. Moreover, the writer collects the trace till cp_instruction_num instructions are reached *and* the last executing basic block is
+      // finished, resulting in potentially 5-10 extra trace instructions
       const bool comsumed_expected_num_cp_instructions = header.prolog.total_target_instructions <= cp_instruction_num;
       const bool unbounded_trace = header.prolog.total_target_instructions == 0; // The trace was collected until the application exited
 
