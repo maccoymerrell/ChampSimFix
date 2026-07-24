@@ -97,6 +97,8 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(scan_distance_backward); CFG(backward_momentum_min);
   CFG(bwd_useful_gate); CFG(bwd_useful_thresh); CFG(bwd_useful_min_samples);
   CFG(enable_instr_prefetch); CFG(instr_la_depth); CFG(instr_conf); CFG(instr_table_entries); CFG(instr_delta_bits); CFG(instr_xlate_entries); CFG(instr_filter_entries);
+  CFG(instr_ft_blocks); CFG(instr_dir_bits);
+  CFG(instr_walk_budget); CFG(instr_cost_strong); CFG(instr_cost_weak); CFG(instr_miss_conf);
   CFG(instr_feed_data); CFG(unblock_instructions);
   CFG(instr_nextn); CFG(instr_packed_residency);
   CFG(pattern_validate); CFG(pv_feed_confidence); CFG(pv_conf_penalty); CFG(pv_sample_div); CFG(pv_min_samples); CFG(pv_bad_pct); CFG(pv_sample_cap);
@@ -658,6 +660,7 @@ void sppam_plus::prefetcher_final_stats()
     const double iacc = (iu + il) ? 100.0 * iu / (iu + il) : 0.0;
     fmt::print("[SPPAM+] instr-pf: demands={} issued={} useful={} useless={} accuracy={:.1f}% unencodable-delta={} (resident-at-end={})\n",
                ipred_->demands(), ipred_->issued(), iu, il, iacc, ipred_->unencodable(), instr_pf_unused_.size());
+    ipred_->dump_walk();
   }
   fmt::print("[SPPAM+] prefetches issued: {} | squashed-redundant: {} | filter-passed[region-absent: {}, bit-clear: {}]\n",
              pf_issued_, pf_squashed_redundant_, pf_pass_region_absent_, pf_pass_bit_clear_);

@@ -675,13 +675,29 @@ struct params {
   // v2 instruction refinements (DSE holistic-id/bg_residency findings; default OFF = B, C enables):
   int instr_nextn = 0;                 // sequential fallback: prefetch this many phys blocks ahead within the code page (next-2 ~= full SPPAM on the sequential residual)
   bool instr_packed_residency = false; // branch graph shares SPPAM's PACKED code residency (4KiB-page/both-maps) instead of its own filter -> lower redundancy, zero extra state
-  int instr_la_depth = 8;            // lookahead ceiling (max blocks walked ahead per access)
-  int instr_conf = 60;              // confidence gate (percent): walk deeper only while dominant-edge share >= this
-  // Realistic IP-space encoding (validated in the DSE): cov/acc are flat down to 256 edges, so the
-  // table is tiny. Edge = 16-bit hashed tag + valid + 2x 8-bit IP-delta + 2x 4-bit count = 41 bits;
-  // the residency filter holds a 16-bit block tag (approximate), not a full address. ~2.6 KiB total.
-  std::size_t instr_table_entries = 256;   // branch-edge table slots (rounded up to a power of two)
-  int instr_delta_bits = 8;               // signed IP-block delta width (successor = ip + delta)
+  int instr_la_depth = 32;           // lookahead HARD ceiling; the confidence budget is the real limiter (see below)
+  int instr_conf = 60;              // STRONG/WEAK threshold (percent): a predicted step whose direction confidence
+                                    // (|dir-mid|/mid; a table miss = instr_miss_conf) is >= this is "strong", else "weak".
+  // Confidence-BUDGET walk gate (replaces the hard per-step cutoff): the walk starts each access with
+  // instr_walk_budget and spends instr_cost_strong on a strong step, instr_cost_weak on a weak one; when the
+  // budget goes negative the walk stops. Weak (ambiguous-direction) predictions drain it faster, so the walk
+  // can push through a couple of soft branches but not a run of them. instr_la_depth is a hard safety ceiling.
+  int instr_walk_budget = 10;       // total confidence budget per access
+  int instr_cost_strong = 1;        // budget spent by a strong (confident-direction / fall-through) step
+  int instr_cost_weak = 2;          // budget spent by a weak (ambiguous-direction) step
+  int instr_miss_conf = 0;          // direction confidence (%) assigned to a table MISS (uninformed sequential guess).
+                                    // 0 = a miss is "weak" (long sequential run-ahead drains the budget 2x, curtailing
+                                    // overshoot -- +0.24% datacenter over treating it as strong); 100 = strong/cheap.
+  int instr_ft_blocks = 3;          // L1I-miss noise floor: a forward IP-block delta in [1, instr_ft_blocks] is treated as
+                                    // FALL-THROUGH (not-taken); larger-forward and ALL backward deltas are TAKEN jumps.
+  int instr_dir_bits = 2;           // bimodal direction-counter width: 2-bit Smith counter (strong-NT/weak-NT/weak-T/strong-T).
+                                    // High bit = predicted direction; distance from the midpoint = confidence (strong states only
+                                    // clear a >0.33 gate). 3 gives finer gate resolution. Real bimodal predictors are 2-bit.
+  // PC-block BTB encoding: entry = 16-bit hashed tag + valid + 16-bit signed delta target + 2-bit bimodal
+  // counter (~5 B). Only backward/long-forward TAKEN jumps get an entry; fall-through-only blocks stay absent
+  // (a miss => confident sequential). Single target (L1I-miss noise makes a 2nd target unreliable).
+  std::size_t instr_table_entries = 256;   // BTB slots (rounded up to a power of two)
+  int instr_delta_bits = 12;              // signed IP-block delta width (encodable |delta| < 2^(bits-1) blocks); 12 => <2048 blk = 128 KiB reach
   std::size_t instr_xlate_entries = 32;    // vpage->ppage translation slots (rounded up to a power of two)
   std::size_t instr_filter_entries = 512;  // physical residency-filter buckets (rounded up to a power of two)
 
@@ -930,11 +946,12 @@ struct params {
     mgmt += 2 * 48;                                                      // shared: L_DRAM running mean + in-flight register
     t.mgmt = mgmt;
 
-    // ---- Branch-graph instruction prefetcher: tagged 2-delta edge table + vpage->ppage xlate + residency filter.
+    // ---- Branch-graph instruction prefetcher: PC-block BTB (single delta target + bimodal dir) + vpage->ppage xlate + residency filter.
     if (enable_instr_prefetch) {
       auto po2 = [](uint64_t n) { uint64_t r = 1; while (r < n) r <<= 1; return r; };
       const uint64_t db = (instr_delta_bits > 0 && instr_delta_bits <= 16) ? instr_delta_bits : 8;
-      const uint64_t per_edge = 16 + 1 + 2 * db + 2 * 4;
+      const uint64_t dirb = (instr_dir_bits > 0 && instr_dir_bits <= 8) ? instr_dir_bits : 2;
+      const uint64_t per_edge = 16 + 1 + db + dirb; // tag16 + valid + signed delta target + bimodal dir counter (2b)
       t.instr = po2(instr_table_entries) * per_edge + po2(instr_xlate_entries) * (36 + 36);
       if (!instr_packed_residency)                                       // packed residency reuses SPPAM's maps -> no private filter
         t.instr += po2(instr_filter_entries) * 16;
@@ -1087,6 +1104,8 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(enable_ip_gate); SET(ip_gate_div_min); SET(ip_gate_explore_div);
   SET(gate_adaptive); SET(gate_thrash_min);
   SET(enable_instr_prefetch); SET(instr_la_depth); SET(instr_conf); SET(instr_table_entries); SET(instr_delta_bits); SET(instr_xlate_entries); SET(instr_filter_entries);
+  SET(instr_ft_blocks); SET(instr_dir_bits);
+  SET(instr_walk_budget); SET(instr_cost_strong); SET(instr_cost_weak); SET(instr_miss_conf);
   SET(instr_feed_data); SET(unblock_instructions);
   SET(instr_nextn); SET(instr_packed_residency);
   SET(enable_region_thrash_throttle); SET(region_thrash_min_blocks); SET(region_thrash_table); SET(region_thrash_lo); SET(region_thrash_hi); SET(region_thrash_max_drop);

@@ -1,5 +1,5 @@
 {
- "_description": "EPI (L1I) + berti_plus (L1D) + SPPAM_PLUS_V2 (L2, BG on) -- default high-perf baseline",
+ "_description": "EPI (L1I) + berti_plus (L1D) + SPPAM_PLUS_V2 (L2, BG on: PC-block BTB + bimodal dir + confidence-budget walk)",
  "environment": "ENVIRONMENT",
  "block_size": 64,
  "page_size": 4096,
@@ -404,7 +404,7 @@
      "module": "prefetcher",
      "model": "SPPAM_PLUS_V2",
      "enable_instr_prefetch": true,
-     "instr_la_depth": 8,
+     "instr_la_depth": 32,
      "instr_conf": 60,
      "do_negative": true,
      "neg_online_train": true,
@@ -423,7 +423,13 @@
      "pv_sample_directmap": true,
      "pv_sample_cap": 128,
      "ip_sample_div": 256,
-     "negative_table_sets": 32
+     "negative_table_sets": 32,
+     "instr_walk_budget": 10,
+     "instr_cost_strong": 1,
+     "instr_cost_weak": 2,
+     "instr_miss_conf": 0,
+     "instr_ft_blocks": 3,
+     "instr_dir_bits": 2
     },
     {
      "name": "cpu0_L2C_replacement",
