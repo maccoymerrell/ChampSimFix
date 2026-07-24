@@ -695,38 +695,6 @@ class wrong_path_tracereader
   class body_parser : public body_wrapper
   {
   private:
-    stream_reader<BodyCompressedType> compressed_body_stream;
-    const header_wrapper& header;
-    bool eof_ = false; // Set to true when the compressed_body_stream runs out
-    const uint8_t cpu;
-    uint32_t last_template_id; // Used for IFRAME validate. Set by handle_entry consumed by handle_iframe
-
-    // Note: The trace contains register file values but ChampSim doesn't care about them. We maintain this regfile for posterity's sake only
-    std::map<uint64_t, std::map<uint64_t, std::bitset<512>>> regfile;
-
-    // Persistent overlay
-    struct overlay_key {
-      uint32_t template_id;
-      uint64_t ipos;
-
-      overlay_key(const uint32_t tid, const uint64_t ip) : template_id(tid), ipos(ip) {}
-      [[nodiscard]] bool operator<(const overlay_key& other) const noexcept { return std::tie(template_id, ipos) < std::tie(other.template_id, other.ipos); }
-      std::string format() const noexcept { return fmt::format("(Template ID = {}, Instruction Position = {})", template_id, ipos); }
-    };
-    std::map<overlay_key, std::map<uint64_t, std::bitset<512>>> overlay; // Each overlay value is a fid -> delta map
-
-    // Members needed to read the trace in bulk
-    std::deque<ooo_model_instr> instr_buffer; // Holds the decoded instructions without branch instruction fixes
-    // TODO: Remove this
-    std::deque<ooo_model_instr> instr_buffer_fixed; // Holds the decoded instructions with branch instruction fixes
-
-    // Members needed to walk the trace
-    uint32_t previous_template_id = 0;
-    uint32_t previous_thread_id = 0;
-    uint32_t seq_num = 0;
-    uint64_t cp_instruction_num = 0; // Counts the number of parsed correct path instructions
-    std::set<uint64_t> valid_body_tags;
-
     struct field_delta_section {
       uint64_t ipos;
       uint64_t fid;
@@ -758,6 +726,47 @@ class wrong_path_tracereader
       wp_chain_section wp_chain;
       wp_events_section wp_events;
     };
+
+    stream_reader<BodyCompressedType> compressed_body_stream;
+    const header_wrapper& header;
+    bool eof_ = false; // Set to true when the compressed_body_stream runs out
+    const uint8_t cpu;
+    uint32_t last_template_id; // Used for IFRAME validate. Set by handle_entry consumed by handle_iframe
+
+    // Note: The trace contains register file values but ChampSim doesn't care about them. We maintain this regfile for posterity's sake only
+    std::map<uint64_t, std::map<uint64_t, std::bitset<512>>> regfile;
+
+    // Persistent overlay
+    struct overlay_key {
+      uint32_t template_id;
+      uint64_t ipos;
+
+      overlay_key(const uint32_t tid, const uint64_t ip) : template_id(tid), ipos(ip) {}
+      [[nodiscard]] bool operator<(const overlay_key& other) const noexcept { return std::tie(template_id, ipos) < std::tie(other.template_id, other.ipos); }
+      std::string format() const noexcept { return fmt::format("(Template ID = {}, Instruction Position = {})", template_id, ipos); }
+    };
+
+    using OverlayType = std::map<overlay_key, std::map<uint64_t, std::bitset<512>>>;
+    OverlayType cp_overlay; // Each overlay value is a fid -> delta map
+
+    // This overlay is forked from the correct path overlay at the beginning of the wrong path execution. The deltas on the wrong path are accumulated in this
+    // overlay
+    std::optional<OverlayType> wp_overlay;
+    std::optional<const body_entry> last_body_entry; // The most recent BODY_TAG_ENTRY section that was used to generate instructions
+    uint64_t next_cp_pc = 0xdeadbeef;                // The next PC on the correct path
+    uint64_t next_expected_pc = 0xdeadbeef;
+
+    // Members needed to read the trace in bulk
+    std::deque<ooo_model_instr> instr_buffer; // Holds the decoded instructions without branch instruction fixes
+    // TODO: Remove this
+    std::deque<ooo_model_instr> instr_buffer_fixed; // Holds the decoded instructions with branch instruction fixes
+
+    // Members needed to walk the trace
+    uint32_t previous_template_id = 0;
+    uint32_t previous_thread_id = 0;
+    uint32_t seq_num = 0;
+    uint64_t cp_instruction_num = 0; // Counts the number of parsed correct path instructions
+    std::set<uint64_t> valid_body_tags;
 
     template <std::size_t width>
     [[nodiscard]] std::bitset<width> add_bitset(std::bitset<width> b1, std::bitset<width> b2) const noexcept
@@ -805,9 +814,8 @@ class wrong_path_tracereader
             fmt::format("[ERROR] Can't verify integrity of trace body. Magic bytes don't match. Expected {:X}, got {:X}", magic_bytes, trace_magic_bytes));
     }
 
-
     [[nodiscard]] ooo_model_instr generate_instruction(uint64_t& instruction_pc, const header_wrapper::Instruction& instruction_template,
-                                                       const std::map<uint64_t, std::bitset<512>>& deltas)
+                                                       const std::map<uint64_t, std::bitset<512>>& deltas, uint64_t& next_pc)
     {
       // Useful functions
       auto bitset_to_uint64_t = [] [[nodiscard]] (const std::bitset<512>& bits) -> uint64_t {
@@ -969,46 +977,90 @@ class wrong_path_tracereader
         branch_type_name = "BRANCH_OTHER";
       }
 
+      // TODO: Set the next pc correctly
+      next_pc = 0xdeadbeef;
+
       // Construct an ooo_model_instr and return
       return ooo_model_instr(instruction_pc, is_branch, branch_taken, cpu, br_type, instruction_template.dst_regs, instruction_template.src_regs, dst_mem,
                              src_mem, instruction_template.instr_size);
     }
 
-    // Applies the deltas to the overlays and constructs a vector of ooo_model_instr from a single body entry
-    [[nodiscard]] std::vector<ooo_model_instr> construct_instructions(const body_entry& entry)
+    void apply_deltas_to_overlay(const delta_section& delta_sec, OverlayType& overlay, const uint32_t template_id, const std::size_t num_instrs)
     {
-#warning "WP is not supported yet"
-      // TODO: Add support for WP
-
-      if (header.templates.find(entry.template_id) == header.templates.end())
-        throw std::runtime_error(fmt::format("[ERROR] Unknown template ID {} found", entry.template_id));
-      const auto& bb_template = header.templates.at(entry.template_id);
-      const auto& instructions = bb_template.instructions;
-
-      // Apply the overlay delta changes
-      const auto& deltas = entry.cp_delta.records;
+      const auto& deltas = delta_sec.records;
       for (const auto& delta : deltas) {
-        if (delta.ipos >= instructions.size())
+        if (delta.ipos >= num_instrs)
           throw std::runtime_error(
-              fmt::format("[ERROR] Illegal instruction position {} found for template with {} instructions", delta.ipos, instructions.size()));
+              fmt::format("[ERROR] Illegal instruction position {} found for template {}with {} instructions", delta.ipos, template_id, num_instrs));
 
-        const overlay_key key(entry.template_id, delta.ipos);
+        const overlay_key key(template_id, delta.ipos);
         if (overlay.find(key) == overlay.end())
           overlay[key][delta.fid] = delta.delta;
         else
           overlay[key][delta.fid] = add_bitset(overlay[key][delta.fid], delta.delta);
       }
+    }
 
+    [[nodiscard]] std::vector<ooo_model_instr> continue_wp([[maybe_unused]] const body_entry& entry)
+    {
+#warning "WP is not supported yet"
+      // TODO: Add code to generate WP instructions here
+      return {};
+    }
+
+    [[nodiscard]] std::vector<ooo_model_instr> continue_cp(const body_entry& entry)
+    {
+      const auto& bb_template = header.templates.at(entry.template_id);
+      const auto& instructions = bb_template.instructions;
+
+      apply_deltas_to_overlay(entry.cp_delta, cp_overlay, entry.template_id, instructions.size());
+
+      // Generate instructions
       const std::size_t num_instr = instructions.size();
       std::vector<ooo_model_instr> retvec;
       retvec.reserve(num_instr);
       auto pc = bb_template.start_pc;
+      auto next_pc = pc; // The PC for the instruction after this instruction
       for (uint64_t ipos = 0; ipos < num_instr; ipos++) {
         const overlay_key key(entry.template_id, ipos);
-        retvec.emplace_back(generate_instruction(pc, instructions[ipos], overlay[key]));
+        retvec.emplace_back(generate_instruction(pc, instructions[ipos], cp_overlay[key], next_pc));
       }
 
+      next_cp_pc = next_pc;
+      next_expected_pc = next_pc;
+
       return retvec;
+    }
+
+    [[nodiscard]] std::vector<ooo_model_instr> start_wp(const body_entry& entry)
+    {
+      wp_overlay.emplace(cp_overlay); // Fork off a copy of the current overlay
+      return continue_wp(entry);
+    }
+
+    [[nodiscard]] std::vector<ooo_model_instr> stop_wp(const body_entry& entry)
+    {
+      wp_overlay.reset(); // Discard transient WP state
+      return continue_cp(entry);
+    }
+
+    // Applies the deltas to the overlays and constructs a vector of ooo_model_instr from a single body entry
+    [[nodiscard]] std::vector<ooo_model_instr> construct_instructions(const body_entry& entry, const uint64_t next_pc = 0xdeadbeef)
+    {
+      if (header.templates.find(entry.template_id) == header.templates.end())
+        throw std::runtime_error(fmt::format("[ERROR] Unknown template ID {} found", entry.template_id));
+      const auto& bb_template = header.templates.at(entry.template_id);
+
+      const bool previously_in_wp = wp_overlay.has_value();
+      const bool now_in_wp = (next_pc != bb_template.start_pc) and false; // TODO: Fix this
+
+      if (previously_in_wp && now_in_wp)
+        return continue_wp(entry);
+      else if (previously_in_wp && !now_in_wp)
+        return stop_wp(entry);
+      else if (!previously_in_wp && now_in_wp)
+        return start_wp(entry);
+      return continue_cp(entry);
     }
 
     void handle_thread_switch()
@@ -1112,9 +1164,6 @@ class wrong_path_tracereader
           wp_events.fault_instr_index.emplace_back();
       }
 
-#warning "incomplete implementation"
-      // TODO: Do something here
-
       if (compressed_body_stream.total_bytes_read - initial_bytes_read != section_size) {
         throw std::runtime_error("[ERROR] Wrong Path Events section overflowed its size");
       }
@@ -1167,28 +1216,31 @@ class wrong_path_tracereader
       return retval;
     }
 
-    void handle_iframe()
+    void validate_overlay(OverlayType& overlay, const delta_section& delta_sec) const
     {
-#warning "Wrong Path validation not implemented"
-      // TODO: Implement wrong path validation
-
-      delta_section cp_delta = read_cp_delta_section();
-      if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
-        wp_chain_section wp_chain = read_wp_chain_section();
-        wp_events_section wp_events = read_wp_events_section();
-      }
-
-      // Validate the overlay state
-      const auto& deltas = cp_delta.records;
+      const auto& deltas = delta_sec.records;
       for (const auto& delta : deltas) {
         const overlay_key key(last_template_id, delta.ipos);
-        if (overlay.find(key) == overlay.end())
+        if (overlay.find(key) == cp_overlay.end())
           throw std::runtime_error(fmt::format("[ERROR] IFRAME validation failed! Overlay key {} not found in the overlay map", key.format()));
         if (overlay[key][delta.fid] != delta.delta)
           throw std::runtime_error(
               fmt::format("[ERROR] IFRAME validation failed! Delta value mismatch for key {} and FID {}\n\tExpected Value = {}\n\tStored Value = {}",
                           key.format(), delta.fid, delta.delta.to_string(), overlay[key][delta.fid].to_string()));
       }
+    }
+
+    void handle_iframe()
+    {
+#warning "Wrong Path validation not implemented"
+      delta_section cp_delta = read_cp_delta_section();
+      if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
+        wp_chain_section wp_chain = read_wp_chain_section();
+        wp_events_section wp_events = read_wp_events_section();
+      }
+
+      validate_overlay(cp_overlay, cp_delta);
+      // TODO: Validate wrong path overlay
     }
 
     void handle_end()
@@ -1235,10 +1287,16 @@ class wrong_path_tracereader
     {
       fmt::print(stderr, "Fetching from {} path\n", next_pc == 0xdeadbeef ? "correct" : "wrong");
 
-      const body_entry entry = handle_entry();
-      std::vector<ooo_model_instr> retvec = construct_instructions(entry);
-      read_till_next_entry(); // Keep reading until we reach the next section (but don't read the section yet) to prepare for the next call
-      return retvec;
+      if (next_pc == next_cp_pc or true) { // Fetch from the correct path. TODO: Change this
+        last_body_entry.emplace(handle_entry());
+        std::vector<ooo_model_instr> retvec = construct_instructions(last_body_entry.value(), next_pc);
+        read_till_next_entry(); // Keep reading until we reach the next section (but don't read the section yet) to prepare for the next call
+        return retvec;
+      } else {
+        if (!last_body_entry) // There must always be a last_body_entry present for us to generate wrong path instructions
+          throw std::runtime_error(fmt::format("[ERROR] Can't generate wrong path instruction without the last BODY_TAG_ENTRY section"));
+        return construct_instructions(last_body_entry.value(), next_pc);
+      }
     }
 
     // Returns the next instruction from the instruction buffer
@@ -1267,8 +1325,15 @@ class wrong_path_tracereader
       read_till_next_entry(); // Read from the stream until we reach the first BODY_TAG_ENTRY section (but don't read this section yet)
     }
 
-    [[nodiscard]] ooo_model_instr read(const uint64_t next_pc)
+    [[nodiscard]] ooo_model_instr read(const uint64_t next_pc = 0xdeadbeef)
     {
+      // Flush the buffers if the execution has diverged from what the trace expects
+      const bool path_diverged = next_pc != next_expected_pc;
+      if (path_diverged && false) { // TODO: Fix this
+        instr_buffer_fixed.clear();
+        instr_buffer.clear();
+      }
+
       // No more instruction left in the stream
       if (eof_) {
         // Drain the buffer
@@ -1303,9 +1368,9 @@ class wrong_path_tracereader
           } else {
             // The instruction after the branch is available
             if (std::distance(i, instr_buffer.end()) > 1) { // There should be at least one instruction after i to resolve the branch
-              iter_type target = i + 1; // j points to the instruction executed after the branch
+              iter_type target = i + 1;                     // j points to the instruction executed after the branch
               auto fall_through_pc = ((*i).raw_ip + (*i).instr_size);
-              auto target_pc = (*target).raw_ip;  // Observed next PC
+              auto target_pc = (*target).raw_ip; // Observed next PC
               (*i).branch_taken = fall_through_pc != target_pc;
               instr_buffer_fixed.emplace_back(std::move(*i));
               instr_buffer.erase(i);
