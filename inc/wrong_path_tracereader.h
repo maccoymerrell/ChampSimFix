@@ -1431,22 +1431,25 @@ public:
       std::exit(1);
     }
   }
-  wrong_path_tracereader(champsim::wrong_path_tracereader&& other)
-      : cpu(other.cpu), trace_file(std::move(other.trace_file)), header_stream(std::move(other.header_stream)), body_stream(std::move(other.body_stream))
-  {
-    other.moved = true;
-  }
 
-  wrong_path_tracereader& operator=(wrong_path_tracereader& other) = default;
-  wrong_path_tracereader& operator=(wrong_path_tracereader&& other)
+  void move_from(champsim::wrong_path_tracereader&& other)
   {
-    this->cleanup(); // Reset the state of this object
+    this->cleanup();     // Reset the state of this object
+    this->moved = false; // Reset moved-from state
     this->cpu = std::move(other.cpu);
     this->trace_file = std::move(other.trace_file);
     this->trace_extract_dir = std::move(other.trace_extract_dir);
     this->header_stream = std::move(other.header_stream);
     this->construct_body_stream(); // Create a fresh copy of the body stream
     other.moved = true;            // Prevent deleting the extracted trace directory
+  }
+
+  wrong_path_tracereader(champsim::wrong_path_tracereader&& other) { move_from(std::forward<champsim::wrong_path_tracereader>(other)); }
+
+  wrong_path_tracereader& operator=(wrong_path_tracereader& other) = default;
+  wrong_path_tracereader& operator=(wrong_path_tracereader&& other)
+  {
+    move_from(std::forward<champsim::wrong_path_tracereader>(other));
     return *this;
   }
 
