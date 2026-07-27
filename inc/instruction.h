@@ -107,7 +107,6 @@ struct ooo_model_instr : champsim::program_ordered<ooo_model_instr> {
   champsim::chrono::clock::time_point ready_time{};
 
   uint8_t instr_size = 0; // TODO: Remove
-  uint64_t raw_ip = 0;    // TODO: Remove
   bool is_branch = false;
   bool branch_taken = false;
   bool branch_prediction = false;
@@ -207,7 +206,7 @@ public:
   ooo_model_instr(const uint64_t ip_, const bool is_branch_, const bool branch_taken_, const uint8_t cpu, const branch_type br_type,
                   const std::vector<uint8_t>& dst_reg, const std::vector<uint8_t>& src_reg, const std::vector<uint64_t>& dst_mem,
                   const std::vector<uint64_t>& src_mem, const uint8_t instr_size_)
-      : ip(ip_), instr_size(instr_size_), raw_ip(ip_), is_branch(is_branch_), branch_taken(branch_taken_), asid({cpu, cpu}), branch(br_type)
+      : ip(ip_), instr_size(instr_size_), is_branch(is_branch_), branch_taken(branch_taken_), asid({cpu, cpu}), branch(br_type)
   {
     std::transform(std::begin(dst_reg), std::end(dst_reg), std::back_inserter(this->destination_registers),
                    detail::type_caster<uint64_t, PHYSICAL_REGISTER_ID>);
