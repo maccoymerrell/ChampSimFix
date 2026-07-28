@@ -25,8 +25,7 @@
 inline champsim::modules::ModuleBuilder test_core_defaults(const std::string& ws_name)
 {
   auto b = champsim::defaults::default_core();
-  b.add_submodule("workload_source",
-                  champsim::modules::ModuleBuilder{ws_name, "NULL_WORKLOAD_SOURCE"});
+  b.add_submodule("workload_source", champsim::modules::ModuleBuilder{ws_name, "NULL_WORKLOAD_SOURCE"});
   return b;
 }
 

@@ -6,11 +6,11 @@
 champsim::modules::prefetcher::register_module<spp_dev> spp_dev_register("spp_dev");
 
 spp_dev::spp_dev(champsim::modules::ModuleBuilder builder)
-  : log2_block_size_(builder.get_parameter<unsigned>("log2_block_size")),
-    block_in_page_extent_(champsim::data::bits{builder.get_parameter<unsigned>("log2_page_size")},
-                          champsim::data::bits{builder.get_parameter<unsigned>("log2_block_size")}),
-    tag_extent_(champsim::data::bits{ST_TAG_BIT + builder.get_parameter<unsigned>("log2_page_size")},
-                champsim::data::bits{builder.get_parameter<unsigned>("log2_page_size")})
+    : log2_block_size_(builder.get_parameter<unsigned>("log2_block_size")),
+      block_in_page_extent_(champsim::data::bits{builder.get_parameter<unsigned>("log2_page_size")},
+                            champsim::data::bits{builder.get_parameter<unsigned>("log2_block_size")}),
+      tag_extent_(champsim::data::bits{ST_TAG_BIT + builder.get_parameter<unsigned>("log2_page_size")},
+                  champsim::data::bits{builder.get_parameter<unsigned>("log2_page_size")})
 {
   cache_ = builder.get_parent<champsim::modules::cache_module>();
 }

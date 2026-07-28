@@ -22,12 +22,13 @@
 #include <map>
 #include <optional>
 #include <string>
-
 #include <nlohmann/json.hpp>
 
-namespace champsim {
+namespace champsim
+{
 
-class type_registry {
+class type_registry
+{
 public:
   // A converter takes the JSON *value* from {"type_key": value} and returns
   // the correctly-typed std::any.
@@ -39,16 +40,10 @@ public:
 
   // Register a converter for a type key. Duplicate keys silently
   // overwrite so modules can replace builtins.
-  static void register_type(const std::string& type_key, converter_fn fn)
-  {
-    type_registry_map()[type_key] = std::move(fn);
-  }
+  static void register_type(const std::string& type_key, converter_fn fn) { type_registry_map()[type_key] = std::move(fn); }
 
   // Register a default converter for a JSON value kind.
-  static void register_kind(kind k, converter_fn fn)
-  {
-    kind_registry_map()[k] = std::move(fn);
-  }
+  static void register_kind(kind k, converter_fn fn) { kind_registry_map()[k] = std::move(fn); }
 
   // Try to convert any JSON value into a typed std::any.
   //
@@ -69,9 +64,11 @@ public:
       }
     }
     auto k = kind_of(val);
-    if (!k.has_value()) return false;
+    if (!k.has_value())
+      return false;
     auto reg_it = kind_registry_map().find(*k);
-    if (reg_it == kind_registry_map().end()) return false;
+    if (reg_it == kind_registry_map().end())
+      return false;
     out = reg_it->second(val);
     return true;
   }
@@ -81,31 +78,33 @@ public:
 
   // RAII helper for static registration, analogous to register_module.
   struct register_type_helper {
-    register_type_helper(const std::string& type_key, converter_fn fn)
-    {
-      type_registry::register_type(type_key, std::move(fn));
-    }
+    register_type_helper(const std::string& type_key, converter_fn fn) { type_registry::register_type(type_key, std::move(fn)); }
   };
 
   // RAII helper for kind registration.
   struct register_kind_helper {
-    register_kind_helper(kind k, converter_fn fn)
-    {
-      type_registry::register_kind(k, std::move(fn));
-    }
+    register_kind_helper(kind k, converter_fn fn) { type_registry::register_kind(k, std::move(fn)); }
   };
 
 private:
   static std::optional<kind> kind_of(const nlohmann::json& v)
   {
-    if (v.is_null())                 return std::nullopt;
-    if (v.is_boolean())              return kind::boolean;
-    if (v.is_number_unsigned())      return kind::unsigned_integer;
-    if (v.is_number_integer())       return kind::integer;
-    if (v.is_number_float())         return kind::floating_point;
-    if (v.is_string())               return kind::string;
-    if (v.is_array())                return kind::array;
-    if (v.is_object())               return kind::object;
+    if (v.is_null())
+      return std::nullopt;
+    if (v.is_boolean())
+      return kind::boolean;
+    if (v.is_number_unsigned())
+      return kind::unsigned_integer;
+    if (v.is_number_integer())
+      return kind::integer;
+    if (v.is_number_float())
+      return kind::floating_point;
+    if (v.is_string())
+      return kind::string;
+    if (v.is_array())
+      return kind::array;
+    if (v.is_object())
+      return kind::object;
     return std::nullopt;
   }
 

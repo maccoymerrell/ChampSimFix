@@ -94,7 +94,7 @@ struct DRAM_ADDRESS_MAPPING {
 struct DRAM_CHANNEL final : public champsim::operable {
   // Warmup/ROI flags are propagated from the owning MEMORY_CONTROLLER each phase.
   bool warmup = true;
-  bool roi    = false;
+  bool roi = false;
 
   using response_type = champsim::response;
 

@@ -48,8 +48,7 @@ class json_stat_builder;
  * Authors who only care about one output format may leave the other as
  * a trivial empty body.
  */
-struct module_stat
-{
+struct module_stat {
   virtual ~module_stat() = default;
 
   /**

@@ -32,9 +32,8 @@ struct trace_workload_source : public champsim::modules::instruction_source {
   std::optional<ooo_model_instr> buffer_;
 
   explicit trace_workload_source(champsim::modules::ModuleBuilder builder)
-    : trace_path_(builder.get_parameter<std::string>("trace_file")),
-      cloudsuite_(builder.get_parameter<bool>("cloudsuite", true, false)),
-      repeat_(builder.get_parameter<bool>("repeat", true, true))
+      : trace_path_(builder.get_parameter<std::string>("trace_file")), cloudsuite_(builder.get_parameter<bool>("cloudsuite", true, false)),
+        repeat_(builder.get_parameter<bool>("repeat", true, true))
   {
     stream_label_ = builder.get_parameter<std::string>("stream", true, std::string{});
   }
@@ -63,7 +62,6 @@ struct trace_workload_source : public champsim::modules::instruction_source {
   std::string describe() const override { return trace_path_; }
 };
 
-static champsim::modules::workload_source::register_module<trace_workload_source>
-    trace_ws_reg("TRACE_WORKLOAD_SOURCE");
+static champsim::modules::workload_source::register_module<trace_workload_source> trace_ws_reg("TRACE_WORKLOAD_SOURCE");
 
 } // anonymous namespace

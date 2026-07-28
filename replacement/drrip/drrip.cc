@@ -10,11 +10,9 @@
 champsim::modules::replacement::register_module<drrip> drrip_register("drrip");
 
 drrip::drrip(champsim::modules::ModuleBuilder builder)
-    : NUM_SET(builder.get_parent<champsim::modules::cache_module>()->num_sets()),
-      NUM_WAY(builder.get_parent<champsim::modules::cache_module>()->num_ways()),
-      rrpv(static_cast<std::size_t>(NUM_SET * NUM_WAY)),
-      PSEL(builder.get_parameter<std::size_t>("num_consumers", true, std::size_t{1}),
-           champsim::msl::dscounter<long, PSEL_WIDTH>(champsim::msl::get_sample_rate(NUM_SET)))
+    : NUM_SET(builder.get_parent<champsim::modules::cache_module>()->num_sets()), NUM_WAY(builder.get_parent<champsim::modules::cache_module>()->num_ways()),
+      rrpv(static_cast<std::size_t>(NUM_SET * NUM_WAY)), PSEL(builder.get_parameter<std::size_t>("num_consumers", true, std::size_t{1}),
+                                                              champsim::msl::dscounter<long, PSEL_WIDTH>(champsim::msl::get_sample_rate(NUM_SET)))
 {
 }
 

@@ -41,8 +41,7 @@ namespace champsim
  * override. Modules that do not need phase notifications simply do not
  * inherit ``module_phase``.
  */
-struct module_phase
-{
+struct module_phase {
   virtual ~module_phase() = default;
 
   /**

@@ -14,12 +14,11 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
 
-#include "modules.h"
 #include "json_stat_builder.h"
+#include "modules.h"
 
 namespace
 {
@@ -73,8 +72,8 @@ void champsim::modules::core_module::format_json(const stats_type& stats, champs
       std::accumulate(std::begin(types), std::end(types), 0LL, [btm = stats.branch_type_misses](auto acc, auto next) { return acc + btm.value_or(next, 0); }));
 
   b.add("instructions", stats.instrs())
-   .add("cycles", stats.cycles())
-   .add("Avg ROB occupancy at mispredict", std::ceil(stats.total_rob_occupancy_at_branch_mispredict) / std::ceil(total_mispredictions));
+      .add("cycles", stats.cycles())
+      .add("Avg ROB occupancy at mispredict", std::ceil(stats.total_rob_occupancy_at_branch_mispredict) / std::ceil(total_mispredictions));
 
   auto mpki = b.group("mispredict");
   for (auto type : types) {
@@ -113,20 +112,17 @@ void champsim::modules::core_module::reset_health() { health_last_progress_ = si
 
 std::string champsim::modules::core_module::source_finish_message(const std::string& phase_name) const
 {
-  return fmt::format("{} finished CPU {} instructions: {} cycles: {} cumulative IPC: {:.4g}",
-                     phase_name, consumer_id(), sim_instr(), sim_cycle(),
+  return fmt::format("{} finished CPU {} instructions: {} cycles: {} cumulative IPC: {:.4g}", phase_name, consumer_id(), sim_instr(), sim_cycle(),
                      std::ceil(static_cast<double>(sim_instr())) / std::ceil(static_cast<double>(sim_cycle())));
 }
 
 std::string champsim::modules::core_module::phase_complete_message(const std::string& phase_name) const
 {
-  return fmt::format("{} complete CPU {} instructions: {} cycles: {} cumulative IPC: {:.4g}",
-                     phase_name, consumer_id(), sim_instr(), sim_cycle(),
+  return fmt::format("{} complete CPU {} instructions: {} cycles: {} cumulative IPC: {:.4g}", phase_name, consumer_id(), sim_instr(), sim_cycle(),
                      std::ceil(static_cast<double>(sim_instr())) / std::ceil(static_cast<double>(sim_cycle())));
 }
 
-std::string champsim::modules::core_module::progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate,
-                                                             double cumulative_rate) const
+std::string champsim::modules::core_module::progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const
 {
   return fmt::format("Heartbeat CPU {} instructions: {} cycles: {} heartbeat IPC: {:.4} cumulative IPC: {:.4}", consumer_id(), total_progress, total_cycles,
                      interval_rate, cumulative_rate);
@@ -186,11 +182,10 @@ std::vector<std::string> champsim::modules::cache_module::format_plaintext(const
         "cpu{}->{} {:<12s} ACCESS: {:10d} HIT: {:10d} MISS: {:10d} MISS_MERGE: {:10d}"};
     lines.push_back(fmt::format(hitmiss_fmtstr, cpu, stats.name, "TOTAL", total_hits + total_misses, total_hits, total_misses, total_miss_merge));
     for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION}) {
-      lines.push_back(
-          fmt::format(hitmiss_fmtstr, cpu, stats.name, access_type_names.at(champsim::to_underlying(type)),
-                      hits.value_or(std::pair{type, cpu}, hits_value_type{}) + misses.value_or(std::pair{type, cpu}, misses_value_type{}),
-                      hits.value_or(std::pair{type, cpu}, hits_value_type{}), misses.value_or(std::pair{type, cpu}, misses_value_type{}),
-                      miss_merge.value_or(std::pair{type, cpu}, miss_merge_value_type{})));
+      lines.push_back(fmt::format(hitmiss_fmtstr, cpu, stats.name, access_type_names.at(champsim::to_underlying(type)),
+                                  hits.value_or(std::pair{type, cpu}, hits_value_type{}) + misses.value_or(std::pair{type, cpu}, misses_value_type{}),
+                                  hits.value_or(std::pair{type, cpu}, hits_value_type{}), misses.value_or(std::pair{type, cpu}, misses_value_type{}),
+                                  miss_merge.value_or(std::pair{type, cpu}, miss_merge_value_type{})));
     }
 
     lines.push_back(fmt::format("cpu{}->{} PREFETCH REQUESTED: {:10} ISSUED: {:10} USEFUL: {:10} USELESS: {:10}", cpu, stats.name, stats.pf_requested,
@@ -212,9 +207,9 @@ void champsim::modules::cache_module::format_json(const stats_type& stats, champ
   using fill_value_type = typename decltype(stats.fill)::value_type;
 
   b.add("prefetch requested", stats.pf_requested)
-   .add("prefetch issued", stats.pf_issued)
-   .add("useful prefetch", stats.pf_useful)
-   .add("useless prefetch", stats.pf_useless);
+      .add("prefetch issued", stats.pf_issued)
+      .add("useful prefetch", stats.pf_useful)
+      .add("useless prefetch", stats.pf_useless);
 
   // Discover CPU indices from the data itself (mirrors format_plaintext approach)
   std::vector<std::size_t> cpus;
@@ -243,9 +238,7 @@ void champsim::modules::cache_module::format_json(const stats_type& stats, champ
     }
 
     auto sub = b.group(std::string{access_type_names.at(champsim::to_underlying(type))});
-    sub.add("hit", hit_vec)
-       .add("miss", miss_vec)
-       .add("miss_merge", miss_merge_vec);
+    sub.add("hit", hit_vec).add("miss", miss_vec).add("miss_merge", miss_merge_vec);
   }
 }
 
@@ -274,9 +267,9 @@ std::vector<std::string> champsim::modules::memory_controller_module::format_pla
 void champsim::modules::memory_controller_module::format_json(const stats_type& stats, champsim::json_stat_builder& b)
 {
   b.add("RQ ROW_BUFFER_HIT", stats.RQ_ROW_BUFFER_HIT)
-   .add("RQ ROW_BUFFER_MISS", stats.RQ_ROW_BUFFER_MISS)
-   .add("WQ ROW_BUFFER_HIT", stats.WQ_ROW_BUFFER_HIT)
-   .add("WQ ROW_BUFFER_MISS", stats.WQ_ROW_BUFFER_MISS)
-   .add("AVG DBUS CONGESTED CYCLE", std::ceil(stats.dbus_cycle_congested) / std::ceil(stats.dbus_count_congested))
-   .add("REFRESHES ISSUED", stats.refresh_cycles);
+      .add("RQ ROW_BUFFER_MISS", stats.RQ_ROW_BUFFER_MISS)
+      .add("WQ ROW_BUFFER_HIT", stats.WQ_ROW_BUFFER_HIT)
+      .add("WQ ROW_BUFFER_MISS", stats.WQ_ROW_BUFFER_MISS)
+      .add("AVG DBUS CONGESTED CYCLE", std::ceil(stats.dbus_cycle_congested) / std::ceil(stats.dbus_count_congested))
+      .add("REFRESHES ISSUED", stats.refresh_cycles);
 }

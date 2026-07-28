@@ -24,16 +24,18 @@
 #include "champsim.h"
 #include "deadlock.h"
 #include "instruction.h"
-#include "util/bits.h"   // for bitmask, lg2, splice_bits
+#include "util/bits.h" // for bitmask, lg2, splice_bits
 #include "util/span.h"
 #include "vmem.h"
 
 PageTableWalker::PageTableWalker(champsim::modules::ModuleBuilder builder)
-    : champsim::modules::page_table_walker_module(builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), upper_levels(builder.get_parameter<std::vector<champsim::modules::channel_module*>>("upper_levels")), lower_level(builder.get_parameter<champsim::modules::channel_module*>("lower_level")), NAME(builder.get_name()),
-      MSHR_SIZE(builder.get_parameter<uint32_t>("mshr_size")),
-      MAX_READ(builder.get_parameter<champsim::bandwidth::maximum_type>("max_tag_check")),
+    : champsim::modules::page_table_walker_module(builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+      upper_levels(builder.get_parameter<std::vector<champsim::modules::channel_module*>>("upper_levels")),
+      lower_level(builder.get_parameter<champsim::modules::channel_module*>("lower_level")), NAME(builder.get_name()),
+      MSHR_SIZE(builder.get_parameter<uint32_t>("mshr_size")), MAX_READ(builder.get_parameter<champsim::bandwidth::maximum_type>("max_tag_check")),
       MAX_FILL(builder.get_parameter<champsim::bandwidth::maximum_type>("max_fill")),
-      HIT_LATENCY(builder.get_parameter<unsigned>("latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), vmem(builder.get_parameter<champsim::modules::vmem_module*>("vmem")), pt_levels_(vmem->get_pt_levels())
+      HIT_LATENCY(builder.get_parameter<unsigned>("latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+      vmem(builder.get_parameter<champsim::modules::vmem_module*>("vmem")), pt_levels_(vmem->get_pt_levels())
 {
   log2_page_size_ = builder.get_parameter<unsigned>("log2_page_size");
   auto local_pscl_dims = builder.get_parameter<std::vector<std::array<uint32_t, 3>>>("pscl_dims");
@@ -41,17 +43,16 @@ PageTableWalker::PageTableWalker(champsim::modules::ModuleBuilder builder)
   // Valid PSCL levels are [2, pt_levels]. Level 1 is never cached (handle_fill
   // at level 1 produces the final va_to_pa lookup, not another intermediate
   // step). Levels > pt_levels don't exist in this table.
-  local_pscl_dims.erase(std::remove_if(std::begin(local_pscl_dims), std::end(local_pscl_dims),
-                                        [pt_levels](auto x) { return std::get<0>(x) > pt_levels || std::get<0>(x) < 2; }),
-                         std::end(local_pscl_dims));
+  local_pscl_dims.erase(
+      std::remove_if(std::begin(local_pscl_dims), std::end(local_pscl_dims), [pt_levels](auto x) { return std::get<0>(x) > pt_levels || std::get<0>(x) < 2; }),
+      std::end(local_pscl_dims));
 
   // Ensure every level in [2, pt_levels] has a PSCL entry. Missing levels get
   // a 0-way stub that always misses and silently ignores fills, preserving the
   // invariant std::size(pscl) == pt_levels - 1 so the walk always starts at
   // the correct level and no walk steps are silently skipped.
   for (std::size_t level = 2; level <= pt_levels; ++level) {
-    bool configured = std::any_of(std::begin(local_pscl_dims), std::end(local_pscl_dims),
-                                  [level](const auto& x) { return std::get<0>(x) == level; });
+    bool configured = std::any_of(std::begin(local_pscl_dims), std::end(local_pscl_dims), [level](const auto& x) { return std::get<0>(x) == level; });
     if (!configured) {
       local_pscl_dims.push_back({static_cast<uint32_t>(level), 1, 0});
     }
@@ -146,8 +147,7 @@ long PageTableWalker::poll_cycle()
   // event is an arrival on lower_level->get_returned(), re-checked here
   // every cycle.
   const bool idle = std::empty(lower_level->get_returned()) && std::empty(finished) && std::empty(completed)
-                    && std::all_of(std::cbegin(upper_levels), std::cend(upper_levels),
-                                   [](auto* ul) { return std::empty(ul->get_rq()); });
+                    && std::all_of(std::cbegin(upper_levels), std::cend(upper_levels), [](auto* ul) { return std::empty(ul->get_rq()); });
   return idle ? 1 : 0;
 }
 

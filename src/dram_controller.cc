@@ -28,17 +28,18 @@
 #include "util/units.h"
 
 MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::modules::ModuleBuilder builder)
-    : champsim::modules::memory_controller_module(builder.get_parameter<champsim::chrono::picoseconds>("mc_period")), queues(std::move(builder.get_parameter<std::vector<channel_type*>>("ul_channels"))),
-      channel_width(builder.get_parameter<champsim::data::bytes>("channel_width")),
-      block_size_(builder.get_parameter<unsigned>("block_size", true, 64u)),
-      address_mapping(channel_width, block_size_ / channel_width.count(), builder.get_parameter<std::size_t>("channels"), builder.get_parameter<std::size_t>("bankgroups"),
-                      builder.get_parameter<std::size_t>("banks"), builder.get_parameter<std::size_t>("columns"), builder.get_parameter<std::size_t>("ranks"),
-                      builder.get_parameter<std::size_t>("rows")), data_bus_period(builder.get_parameter<champsim::chrono::picoseconds>("dbus_period"))
+    : champsim::modules::memory_controller_module(builder.get_parameter<champsim::chrono::picoseconds>("mc_period")),
+      queues(std::move(builder.get_parameter<std::vector<channel_type*>>("ul_channels"))),
+      channel_width(builder.get_parameter<champsim::data::bytes>("channel_width")), block_size_(builder.get_parameter<unsigned>("block_size", true, 64u)),
+      address_mapping(channel_width, block_size_ / channel_width.count(), builder.get_parameter<std::size_t>("channels"),
+                      builder.get_parameter<std::size_t>("bankgroups"), builder.get_parameter<std::size_t>("banks"),
+                      builder.get_parameter<std::size_t>("columns"), builder.get_parameter<std::size_t>("ranks"), builder.get_parameter<std::size_t>("rows")),
+      data_bus_period(builder.get_parameter<champsim::chrono::picoseconds>("dbus_period"))
 {
   auto num_channels = address_mapping.channels();
   for (std::size_t i{0}; i < num_channels; ++i) {
-    channels.emplace_back(data_bus_period, builder.get_parameter<champsim::chrono::picoseconds>("mc_period"), builder.get_parameter<std::size_t>("n_rp"), builder.get_parameter<std::size_t>("n_rcd"),
-                          builder.get_parameter<std::size_t>("n_cas"), builder.get_parameter<std::size_t>("n_ras"),
+    channels.emplace_back(data_bus_period, builder.get_parameter<champsim::chrono::picoseconds>("mc_period"), builder.get_parameter<std::size_t>("n_rp"),
+                          builder.get_parameter<std::size_t>("n_rcd"), builder.get_parameter<std::size_t>("n_cas"), builder.get_parameter<std::size_t>("n_ras"),
                           builder.get_parameter<champsim::chrono::microseconds>("refresh_period"), builder.get_parameter<std::size_t>("refreshes_per_period"),
                           channel_width, builder.get_parameter<std::size_t>("rq_size"), builder.get_parameter<std::size_t>("wq_size"), address_mapping);
   }
@@ -114,16 +115,15 @@ long MEMORY_CONTROLLER::poll_cycle()
   // DRAM channel has pending or timer-due work this cycle (bank activity,
   // dbus activity, a due refresh, or an unsettled write mode). Skip at most
   // 1 cycle: new work can arrive on the upper channels at any cycle.
-  const bool uppers_idle = std::all_of(std::cbegin(queues), std::cend(queues), [](auto* ul) {
-    return std::empty(ul->get_rq()) && std::empty(ul->get_wq()) && std::empty(ul->get_pq());
-  });
+  const bool uppers_idle = std::all_of(std::cbegin(queues), std::cend(queues),
+                                       [](auto* ul) { return std::empty(ul->get_rq()) && std::empty(ul->get_wq()) && std::empty(ul->get_pq()); });
   if (!uppers_idle) {
     return 0;
   }
   // Channels are parent-ticked and lag one period behind this controller's
   // (already-advanced) current_time; probe them at the time they would reach.
-  const bool channels_idle = std::all_of(std::cbegin(channels), std::cend(channels),
-                                         [](const auto& chan) { return !chan.would_do_work_at(chan.current_time + chan.clock_period); });
+  const bool channels_idle =
+      std::all_of(std::cbegin(channels), std::cend(channels), [](const auto& chan) { return !chan.would_do_work_at(chan.current_time + chan.clock_period); });
   if (!channels_idle) {
     return 0;
   }
@@ -143,9 +143,9 @@ bool DRAM_CHANNEL::has_pending_work() const
   // bank), banks occupied until a known ready_time, or an active data-bus
   // transfer. Queued-but-unscheduled packets are excluded — with free banks
   // they schedule (and count progress) on the very next operated cycle.
-  return active_request != std::cend(bank_request)
-         || std::any_of(std::cbegin(bank_request), std::cend(bank_request),
-                        [](const auto& b_req) { return b_req.valid || b_req.need_refresh || b_req.under_refresh; });
+  return active_request != std::cend(bank_request) || std::any_of(std::cbegin(bank_request), std::cend(bank_request), [](const auto& b_req) {
+           return b_req.valid || b_req.need_refresh || b_req.under_refresh;
+         });
 }
 
 bool MEMORY_CONTROLLER::has_pending_work() const
@@ -465,7 +465,7 @@ void MEMORY_CONTROLLER::begin_phase(bool warmup, bool roi)
     new_stats.name = "Channel " + std::to_string(chan_idx++);
     chan.sim_stats = new_stats;
     chan.warmup = warmup;
-    chan.roi    = roi;
+    chan.roi = roi;
   }
 
   for (auto* ul : queues) {

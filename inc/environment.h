@@ -25,12 +25,14 @@
 #include "modules.h"
 #include "util/bits.h"
 
-namespace champsim {
+namespace champsim
+{
 
 // Explicit environment: reads a hierarchical JSON configuration where each module
 // specifies its name, interface type ("module"), and model ("model").
 // References to other modules use "@name" syntax and are resolved at construction time.
-class environment final : public champsim::modules::environment_module {
+class environment final : public champsim::modules::environment_module
+{
   // All modules indexed by interface type
   std::map<std::string, std::vector<std::any>> modules_by_type_;
 
@@ -69,9 +71,11 @@ public:
   unsigned get_log2_page_size() const override { return champsim::lg2(page_size_); }
   int get_deadlock_cycles() const override { return deadlock_cycles_; }
 
-  const champsim::modules::ModuleBuilder get_builder_params(const std::string& module_name) const override {
+  const champsim::modules::ModuleBuilder get_builder_params(const std::string& module_name) const override
+  {
     auto it = builder_params_.find(module_name);
-    if (it != builder_params_.end()) return it->second;
+    if (it != builder_params_.end())
+      return it->second;
     return champsim::modules::ModuleBuilder();
   }
 };

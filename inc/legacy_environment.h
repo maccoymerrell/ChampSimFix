@@ -17,17 +17,19 @@
 #ifndef LEGACY_ENVIRONMENT_H
 #define LEGACY_ENVIRONMENT_H
 
+#include <any>
+#include <map>
 #include <string>
 #include <vector>
-#include <map>
-#include <any>
 
 #include "modules.h"
 #include "util/bits.h"
 
-namespace champsim {
+namespace champsim
+{
 
-class legacy_environment final : public champsim::modules::environment_module {
+class legacy_environment final : public champsim::modules::environment_module
+{
   // All modules indexed by interface type
   std::map<std::string, std::vector<std::any>> modules_by_type_;
 
@@ -64,9 +66,11 @@ public:
   int get_deadlock_cycles() const override { return deadlock_cycles_; }
 
   // Expose builder params for test snooping
-  const champsim::modules::ModuleBuilder get_builder_params(const std::string& module_name) const override {
+  const champsim::modules::ModuleBuilder get_builder_params(const std::string& module_name) const override
+  {
     auto it = builder_params_.find(module_name);
-    if (it != builder_params_.end()) return it->second;
+    if (it != builder_params_.end())
+      return it->second;
     return champsim::modules::ModuleBuilder();
   }
 };
