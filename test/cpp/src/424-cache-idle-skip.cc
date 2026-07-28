@@ -143,6 +143,10 @@ SCENARIO("A cache serves a request with identical timing whether or not idle ski
         // matters less than its independence from the skip setting; pin it.
         static std::map<bool, int> observed;
         observed[with_skip] = cycles_to_return;
+        // Assert on every generated pass so this section is never assertion-free
+        // (--warn NoAssertions fails an assertion-free section); the cross-skip
+        // equality is checked once both passes have recorded their timing.
+        REQUIRE(cycles_to_return > 0);
         if (observed.size() == 2) {
           REQUIRE(observed.at(true) == observed.at(false));
         }
