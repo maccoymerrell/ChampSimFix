@@ -646,6 +646,11 @@ public:
   // no-op bind; overridden in types that need a parent pointer (e.g. prefetcher)
   void bind(C*) {}
 
+  // Post-construction identity stamping and nested-instance enrollment; defined
+  // out-of-line below where source_consumer / stream_source / environment_module
+  // are complete types.
+  static void finalize_created_instance(B* instance_ptr, ModuleBuilder& builder);
+
   // create an instance of the module, which will be stored in this base-module-type's static list
   // parent is set on the builder before validation and construction
   static B* create_instance(ModuleBuilder builder, C* parent)
@@ -664,19 +669,11 @@ public:
       // It seems sketchy for the module wrapper to be tracking these separately from the module itself, can we fix this?
       instance_ptr->NAME = builder.get_name();
       instance_ptr->MODEL = builder.get_model();
-      if (auto* as_consumer = dynamic_cast<source_consumer*>(instance_ptr); as_consumer != nullptr) {
-        as_consumer->set_identity_name(builder.get_name());
-      }
-      if (auto* as_source = dynamic_cast<stream_source*>(instance_ptr); as_source != nullptr) {
-        as_source->set_identity_name(builder.get_name());
-      }
-      instance_ptr->bind(builder.get_parent<C>());
-      // Nested-instance enrollment: submodule builders carry the owning
-      // environment; announce the new instance so environment views (and
-      // operable auto-discovery) cover modules created inside parents.
-      if (auto* owner = builder.get_owner(); owner != nullptr) {
-        owner->enroll_nested_instance(registered_interface_name(), builder.get_name(), std::any{instance_ptr});
-      }
+      // Stamp identities and enroll nested instances. Defined out-of-line below,
+      // after source_consumer / stream_source / environment_module are complete:
+      // clang rejects the member access into those still-incomplete types here
+      // (which GCC accepts).
+      finalize_created_instance(instance_ptr, builder);
       if (ModuleBuilder::is_dump_enabled()) {
         auto line = fmt::format("  [{}] created_module = {} (set)\n", builder.get_name(), builder.get_model());
         ModuleBuilder::append_dump_log(line);
@@ -1614,6 +1611,25 @@ struct environment_module : public module_base<environment_module, environment_m
 
   virtual ~environment_module() = default;
 };
+
+// Out-of-line: needs source_consumer / stream_source / environment_module complete.
+template <typename B, typename C>
+void module_base<B, C>::finalize_created_instance(B* instance_ptr, ModuleBuilder& builder)
+{
+  if (auto* as_consumer = dynamic_cast<source_consumer*>(instance_ptr); as_consumer != nullptr) {
+    as_consumer->set_identity_name(builder.get_name());
+  }
+  if (auto* as_source = dynamic_cast<stream_source*>(instance_ptr); as_source != nullptr) {
+    as_source->set_identity_name(builder.get_name());
+  }
+  instance_ptr->bind(builder.get_parent<C>());
+  // Nested-instance enrollment: submodule builders carry the owning environment;
+  // announce the new instance so environment views (and operable auto-discovery)
+  // cover modules created inside parents.
+  if (auto* owner = builder.get_owner(); owner != nullptr) {
+    owner->enroll_nested_instance(registered_interface_name(), builder.get_name(), std::any{instance_ptr});
+  }
+}
 
 } // namespace champsim::modules
 

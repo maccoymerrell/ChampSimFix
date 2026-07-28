@@ -308,6 +308,9 @@ std::vector<phase_stats> main(modules::environment_module& env, std::vector<phas
   std::vector<phase_stats> results;
   for (const auto& phase : phases) {
     const auto& [phase_name, is_warmup, roi, length] = phase;
+    // A structured binding cannot be captured by a lambda in C++17 (clang rejects it);
+    // copy the name into a regular local for on_complete to capture.
+    const auto phase_name_captured = phase_name;
 
     modules::emit_begin_phase(is_warmup);
 
@@ -318,7 +321,7 @@ std::vector<phase_stats> main(modules::environment_module& env, std::vector<phas
     auto on_complete = [&](unsigned source_idx) {
       for (auto& sc : consumers) {
         if (sc.get().consumer_id() == static_cast<int>(source_idx)) {
-          auto msg = sc.get().source_finish_message(phase_name);
+          auto msg = sc.get().source_finish_message(phase_name_captured);
           if (!msg.empty())
             fmt::print("{} (Simulation time: {:%H hr %M min %S sec})\n", msg, elapsed_time());
         }
