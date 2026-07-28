@@ -415,13 +415,16 @@ long O3_CPU::schedule_instruction()
   champsim::bandwidth search_bw{SCHEDULER_SIZE};
   int progress{0};
   for (auto rob_it = std::begin(ROB); rob_it != std::end(ROB) && search_bw.has_remaining(); ++rob_it) {
-    // if there aren't enough physical registers available for the next instruction, stop scheduling
-    unsigned long sources_to_allocate = std::count_if(rob_it->source_registers.begin(), rob_it->source_registers.end(),
-                                                      [&alloc = std::as_const(reg_allocator)](auto srcreg) { return !alloc.isAllocated(srcreg); });
-    if (reg_allocator.count_free_registers() < (sources_to_allocate + rob_it->destination_registers.size())) {
-      break;
-    }
     if (!rob_it->scheduled && rob_it->ready_time <= current_time) {
+      // The free-register rename gate applies only to instructions being
+      // renamed this cycle. An already-scheduled instruction has claimed its
+      // registers, so evaluating the gate against it (and breaking when free
+      // registers fall below its destination count) wrongly blocks scheduling.
+      unsigned long sources_to_allocate = std::count_if(rob_it->source_registers.begin(), rob_it->source_registers.end(),
+                                                        [&alloc = std::as_const(reg_allocator)](auto srcreg) { return !alloc.isAllocated(srcreg); });
+      if (reg_allocator.count_free_registers() < (sources_to_allocate + rob_it->destination_registers.size())) {
+        break;
+      }
       do_scheduling(*rob_it);
       ++progress;
     }

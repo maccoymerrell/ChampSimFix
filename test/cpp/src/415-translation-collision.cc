@@ -60,7 +60,7 @@ SCENARIO("A cache keeps the address for packets that don't need translation")
 
       THEN("The address of the test packet is unmodified")
       {
-        REQUIRE_THAT(mock_ll.addresses, Catch::Matchers::RangeEquals(std::vector{champsim::address{0x11111eef}, test.address}));
+        REQUIRE_THAT(mock_ll.addresses, Catch::Matchers::UnorderedRangeEquals(std::vector{champsim::address{0x11111eef}, test.address}));
       }
     }
   }
