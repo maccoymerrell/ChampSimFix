@@ -24,7 +24,6 @@
 #include <utility>
 #include <vector>
 
-
 namespace champsim
 {
 
@@ -47,8 +46,8 @@ struct phase_stats {
   std::string name;
   std::vector<std::string> trace_names;
   // Pre-collected by collect_phase_stats
-  std::vector<std::string> sim_lines;   // all sim plaintext lines
-  std::vector<std::string> roi_lines;   // all roi plaintext lines
+  std::vector<std::string> sim_lines; // all sim plaintext lines
+  std::vector<std::string> roi_lines; // all roi plaintext lines
   // interface -> [(module_name, json_any)] for JSON compilation
   std::map<std::string, std::vector<std::pair<std::string, std::any>>> sim_json;
   std::map<std::string, std::vector<std::pair<std::string, std::any>>> roi_json;

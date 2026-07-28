@@ -90,7 +90,6 @@ bool champsim::channel::add_rq(const request_type& packet)
   return result;
 }
 
-
 bool champsim::channel::add_wq(const request_type& packet)
 {
   if constexpr (champsim::debug_print) {

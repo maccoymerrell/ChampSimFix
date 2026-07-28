@@ -61,7 +61,6 @@ private:
   using has_value_t = decltype(std::declval<U>().has_value());
 
 public:
-
   [[nodiscard]] bool eof() const { return false; }
 };
 } // namespace champsim

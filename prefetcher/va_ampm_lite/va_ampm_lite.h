@@ -26,8 +26,9 @@ public:
     std::vector<bool> prefetch_map{};
 
     region_type() = default;
-    region_type(champsim::page_number allocate_vpn, std::size_t blocks_per_page)
-      : vpn(allocate_vpn), access_map(blocks_per_page), prefetch_map(blocks_per_page) {}
+    region_type(champsim::page_number allocate_vpn, std::size_t blocks_per_page) : vpn(allocate_vpn), access_map(blocks_per_page), prefetch_map(blocks_per_page)
+    {
+    }
   };
 
   champsim::modules::cache_module* cache_ = nullptr;
@@ -55,11 +56,12 @@ public:
   uint32_t prefetcher_cache_fill(champsim::address addr, long set, long way, bool prefetch, champsim::address evicted_addr, uint32_t metadata_in) override;
 
   va_ampm_lite(champsim::modules::ModuleBuilder builder)
-    : cache_(builder.get_parent<champsim::modules::cache_module>()),
-      page_size_(builder.get_parameter<unsigned>("page_size")),
-      block_size_(builder.get_parameter<unsigned>("block_size")),
-      block_in_page_extent_(champsim::data::bits{builder.get_parameter<unsigned>("log2_page_size")},
-                            champsim::data::bits{builder.get_parameter<unsigned>("log2_block_size")}) {}
+      : cache_(builder.get_parent<champsim::modules::cache_module>()), page_size_(builder.get_parameter<unsigned>("page_size")),
+        block_size_(builder.get_parameter<unsigned>("block_size")),
+        block_in_page_extent_(champsim::data::bits{builder.get_parameter<unsigned>("log2_page_size")},
+                              champsim::data::bits{builder.get_parameter<unsigned>("log2_block_size")})
+  {
+  }
 
   std::size_t blocks_per_page() const { return page_size_ / block_size_; }
   region_type make_region(champsim::page_number vpn) const { return region_type{vpn, blocks_per_page()}; }

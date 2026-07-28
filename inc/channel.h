@@ -27,14 +27,14 @@
 #include "address.h"
 #include "cache_stats.h"
 #include "champsim.h"
-#include "packet.h"
 #include "modules.h"
+#include "packet.h"
 #include "util/ring_buffer.h"
 
 namespace champsim
 {
 
-class channel: public champsim::modules::channel_module
+class channel : public champsim::modules::channel_module
 {
 
   template <typename R>

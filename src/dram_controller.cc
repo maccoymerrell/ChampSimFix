@@ -28,17 +28,18 @@
 #include "util/units.h"
 
 MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::modules::ModuleBuilder builder)
-    : champsim::modules::memory_controller_module(builder.get_parameter<champsim::chrono::picoseconds>("mc_period")), queues(std::move(builder.get_parameter<std::vector<channel_type*>>("ul_channels"))),
-      channel_width(builder.get_parameter<champsim::data::bytes>("channel_width")),
-      block_size_(builder.get_parameter<unsigned>("block_size", true, 64u)),
-      address_mapping(channel_width, block_size_ / channel_width.count(), builder.get_parameter<std::size_t>("channels"), builder.get_parameter<std::size_t>("bankgroups"),
-                      builder.get_parameter<std::size_t>("banks"), builder.get_parameter<std::size_t>("columns"), builder.get_parameter<std::size_t>("ranks"),
-                      builder.get_parameter<std::size_t>("rows")), data_bus_period(builder.get_parameter<champsim::chrono::picoseconds>("dbus_period"))
+    : champsim::modules::memory_controller_module(builder.get_parameter<champsim::chrono::picoseconds>("mc_period")),
+      queues(std::move(builder.get_parameter<std::vector<channel_type*>>("ul_channels"))),
+      channel_width(builder.get_parameter<champsim::data::bytes>("channel_width")), block_size_(builder.get_parameter<unsigned>("block_size", true, 64u)),
+      address_mapping(channel_width, block_size_ / channel_width.count(), builder.get_parameter<std::size_t>("channels"),
+                      builder.get_parameter<std::size_t>("bankgroups"), builder.get_parameter<std::size_t>("banks"),
+                      builder.get_parameter<std::size_t>("columns"), builder.get_parameter<std::size_t>("ranks"), builder.get_parameter<std::size_t>("rows")),
+      data_bus_period(builder.get_parameter<champsim::chrono::picoseconds>("dbus_period"))
 {
   auto num_channels = address_mapping.channels();
   for (std::size_t i{0}; i < num_channels; ++i) {
-    channels.emplace_back(data_bus_period, builder.get_parameter<champsim::chrono::picoseconds>("mc_period"), builder.get_parameter<std::size_t>("n_rp"), builder.get_parameter<std::size_t>("n_rcd"),
-                          builder.get_parameter<std::size_t>("n_cas"), builder.get_parameter<std::size_t>("n_ras"),
+    channels.emplace_back(data_bus_period, builder.get_parameter<champsim::chrono::picoseconds>("mc_period"), builder.get_parameter<std::size_t>("n_rp"),
+                          builder.get_parameter<std::size_t>("n_rcd"), builder.get_parameter<std::size_t>("n_cas"), builder.get_parameter<std::size_t>("n_ras"),
                           builder.get_parameter<champsim::chrono::microseconds>("refresh_period"), builder.get_parameter<std::size_t>("refreshes_per_period"),
                           channel_width, builder.get_parameter<std::size_t>("rq_size"), builder.get_parameter<std::size_t>("wq_size"), address_mapping);
   }
@@ -115,16 +116,15 @@ long MEMORY_CONTROLLER::poll_cycle()
   // Skippable only when no upper channel has a waiting request and no DRAM
   // channel has pending or timer-due work this cycle. Skip at most 1 cycle:
   // new work can arrive on an upper channel at any time.
-  const bool uppers_idle = std::all_of(std::cbegin(queues), std::cend(queues), [](auto* ul) {
-    return std::empty(ul->get_rq()) && std::empty(ul->get_wq()) && std::empty(ul->get_pq());
-  });
+  const bool uppers_idle = std::all_of(std::cbegin(queues), std::cend(queues),
+                                       [](auto* ul) { return std::empty(ul->get_rq()) && std::empty(ul->get_wq()) && std::empty(ul->get_pq()); });
   if (!uppers_idle) {
     return 0;
   }
   // Channels are parent-ticked and lag one period behind this controller's
   // (already-advanced) current_time; probe them at the time they would reach.
-  const bool channels_idle = std::all_of(std::cbegin(channels), std::cend(channels),
-                                         [](const auto& chan) { return !chan.would_do_work_at(chan.current_time + chan.clock_period); });
+  const bool channels_idle =
+      std::all_of(std::cbegin(channels), std::cend(channels), [](const auto& chan) { return !chan.would_do_work_at(chan.current_time + chan.clock_period); });
   if (!channels_idle) {
     return 0;
   }
@@ -504,7 +504,7 @@ void MEMORY_CONTROLLER::begin_phase(bool warmup, bool roi)
     new_stats.name = "Channel " + std::to_string(chan_idx++);
     chan.sim_stats = new_stats;
     chan.warmup = warmup;
-    chan.roi    = roi;
+    chan.roi = roi;
   }
 
   for (auto* ul : queues) {
@@ -673,8 +673,12 @@ bool DRAM_CHANNEL::insert_wq(request_type entry)
 
 void DRAM_CHANNEL::resync_counters()
 {
-  auto occupied = [](const auto& entry) { return entry.has_value(); };
-  auto unchecked = [](const auto& entry) { return entry.has_value() && !entry->forward_checked; };
+  auto occupied = [](const auto& entry) {
+    return entry.has_value();
+  };
+  auto unchecked = [](const auto& entry) {
+    return entry.has_value() && !entry->forward_checked;
+  };
   rq_occupancy_ct = std::count_if(std::cbegin(RQ), std::cend(RQ), occupied);
   wq_occupancy_ct = std::count_if(std::cbegin(WQ), std::cend(WQ), occupied);
   rq_unchecked_ct = std::count_if(std::cbegin(RQ), std::cend(RQ), unchecked);

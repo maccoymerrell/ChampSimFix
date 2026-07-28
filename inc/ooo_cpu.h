@@ -29,10 +29,10 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <unordered_map>
 #include <queue>
 #include <stdexcept>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 #include "bandwidth.h"
@@ -41,10 +41,10 @@
 #include "core_stats.h"
 #include "instruction.h"
 #include "modules.h"
+#include "msl/lru_table.h"
 #include "operable.h"
 #include "register_allocator.h"
 #include "util/ring_buffer.h"
-#include "msl/lru_table.h"
 #include "util/to_underlying.h"
 
 class CACHE;
@@ -283,10 +283,7 @@ private:
 
   // Block-address key for the return index: same shift handle_memory_return
   // applies, so issue-site insert and return-site lookup land on one key.
-  static uint64_t hmr_block_key(champsim::address addr)
-  {
-    return addr.to<uint64_t>() >> champsim::to_underlying(champsim::block_number_extent{}.lower);
-  }
+  static uint64_t hmr_block_key(champsim::address addr) { return addr.to<uint64_t>() >> champsim::to_underlying(champsim::block_number_extent{}.lower); }
 
   // Visit the set bits of `bits` within physical slots [from, to), ascending.
   // fn(slot) returns false to stop; returns false if stopped early.
@@ -458,9 +455,10 @@ private:
     std::sort(std::begin(lq_pending_ready_), std::end(lq_pending_ready_));
     rebuild_rob_mem_handles();
   }
+
 public:
   bool is_warmup() const { return warmup_; }
-  bool is_roi() const    { return roi_; }
+  bool is_roi() const { return roi_; }
 
   void push_instruction(ooo_model_instr instr) final;
   std::size_t instructions_requested() final;
@@ -522,15 +520,33 @@ public:
 
   explicit O3_CPU(champsim::modules::ModuleBuilder builder)
       : core_module(builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
-        DIB(builder.get_parameter<uint32_t>("dib_set"), builder.get_parameter<uint32_t>("dib_way"), {champsim::data::bits{champsim::lg2(builder.get_parameter<std::size_t>("dib_window"))}}, {champsim::data::bits{champsim::lg2(builder.get_parameter<std::size_t>("dib_window"))}}),
-        LQ(builder.get_parameter<uint32_t>("lq_size")), IFETCH_BUFFER_SIZE(builder.get_parameter<uint32_t>("ifetch_buffer_size")), DISPATCH_BUFFER_SIZE(builder.get_parameter<uint32_t>("dispatch_buffer_size")), DECODE_BUFFER_SIZE(builder.get_parameter<uint32_t>("decode_buffer_size")),
-        REGISTER_FILE_SIZE(builder.get_parameter<uint32_t>("register_file_size")), ROB_SIZE(builder.get_parameter<uint32_t>("rob_size")), SQ_SIZE(builder.get_parameter<uint32_t>("sq_size")), DIB_HIT_BUFFER_SIZE(builder.get_parameter<uint32_t>("dib_hit_buffer_size")),
-        FETCH_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("fetch_width")), DECODE_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("decode_width")), DISPATCH_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("dispatch_width")), SCHEDULER_SIZE(builder.get_parameter<champsim::bandwidth::maximum_type>("schedule_width")),
-        EXEC_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("execute_width")), DIB_INORDER_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("dib_inorder_width")), LQ_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("lq_width")), SQ_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("sq_width")), RETIRE_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("retire_width")),
-        BRANCH_MISPREDICT_PENALTY(builder.get_parameter<unsigned>("mispredict_penalty") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), DISPATCH_LATENCY(builder.get_parameter<unsigned>("dispatch_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
-        DECODE_LATENCY(builder.get_parameter<unsigned>("decode_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), SCHEDULING_LATENCY(builder.get_parameter<unsigned>("schedule_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
-        EXEC_LATENCY(builder.get_parameter<unsigned>("execute_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), DIB_HIT_LATENCY(builder.get_parameter<unsigned>("dib_hit_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), L1I_BANDWIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("l1i_bandwidth")),
-        L1D_BANDWIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("l1d_bandwidth")), IN_QUEUE_SIZE(2 * champsim::to_underlying(builder.get_parameter<champsim::bandwidth::maximum_type>("fetch_width"))), L1I_bus(builder.get_parameter<champsim::modules::channel_module*>("fetch_queues")),
+        DIB(builder.get_parameter<uint32_t>("dib_set"), builder.get_parameter<uint32_t>("dib_way"),
+            {champsim::data::bits{champsim::lg2(builder.get_parameter<std::size_t>("dib_window"))}},
+            {champsim::data::bits{champsim::lg2(builder.get_parameter<std::size_t>("dib_window"))}}),
+        LQ(builder.get_parameter<uint32_t>("lq_size")), IFETCH_BUFFER_SIZE(builder.get_parameter<uint32_t>("ifetch_buffer_size")),
+        DISPATCH_BUFFER_SIZE(builder.get_parameter<uint32_t>("dispatch_buffer_size")),
+        DECODE_BUFFER_SIZE(builder.get_parameter<uint32_t>("decode_buffer_size")), REGISTER_FILE_SIZE(builder.get_parameter<uint32_t>("register_file_size")),
+        ROB_SIZE(builder.get_parameter<uint32_t>("rob_size")), SQ_SIZE(builder.get_parameter<uint32_t>("sq_size")),
+        DIB_HIT_BUFFER_SIZE(builder.get_parameter<uint32_t>("dib_hit_buffer_size")),
+        FETCH_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("fetch_width")),
+        DECODE_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("decode_width")),
+        DISPATCH_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("dispatch_width")),
+        SCHEDULER_SIZE(builder.get_parameter<champsim::bandwidth::maximum_type>("schedule_width")),
+        EXEC_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("execute_width")),
+        DIB_INORDER_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("dib_inorder_width")),
+        LQ_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("lq_width")),
+        SQ_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("sq_width")),
+        RETIRE_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("retire_width")),
+        BRANCH_MISPREDICT_PENALTY(builder.get_parameter<unsigned>("mispredict_penalty") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+        DISPATCH_LATENCY(builder.get_parameter<unsigned>("dispatch_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+        DECODE_LATENCY(builder.get_parameter<unsigned>("decode_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+        SCHEDULING_LATENCY(builder.get_parameter<unsigned>("schedule_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+        EXEC_LATENCY(builder.get_parameter<unsigned>("execute_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+        DIB_HIT_LATENCY(builder.get_parameter<unsigned>("dib_hit_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+        L1I_BANDWIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("l1i_bandwidth")),
+        L1D_BANDWIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("l1d_bandwidth")),
+        IN_QUEUE_SIZE(2 * champsim::to_underlying(builder.get_parameter<champsim::bandwidth::maximum_type>("fetch_width"))),
+        L1I_bus(builder.get_parameter<champsim::modules::channel_module*>("fetch_queues")),
         L1D_bus(builder.get_parameter<champsim::modules::channel_module*>("data_queues")), l1i(builder.get_parameter<champsim::modules::cache_module*>("l1i"))
   {
     // Construct branch predictor submodules

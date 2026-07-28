@@ -7,17 +7,15 @@
 
 #include "environment.h"
 
-#include <set>
-
 #include <algorithm>
 #include <cmath>
 #include <functional>
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
-
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
 
@@ -29,11 +27,14 @@
 using json = nlohmann::json;
 using namespace champsim::modules;
 
-namespace {
+namespace
+{
 
 // Try to parse an @-reference string, returning the referenced name if valid.
-std::optional<std::string> try_parse_ref(const std::string& s) {
-  if (!s.empty() && s[0] == '@') return s.substr(1);
+std::optional<std::string> try_parse_ref(const std::string& s)
+{
+  if (!s.empty() && s[0] == '@')
+    return s.substr(1);
   return std::nullopt;
 }
 
@@ -42,34 +43,30 @@ bool is_var(const std::string& s) { return !s.empty() && s[0] == '$'; }
 std::string var_name(const std::string& s) { return s.substr(1); }
 
 // Check if a JSON array is entirely @-references
-bool is_ref_array(const json& arr) {
-  if (!arr.is_array() || arr.empty()) return false;
+bool is_ref_array(const json& arr)
+{
+  if (!arr.is_array() || arr.empty())
+    return false;
   for (auto& elem : arr) {
-    if (!elem.is_string() || !try_parse_ref(elem.get<std::string>())) return false;
+    if (!elem.is_string() || !try_parse_ref(elem.get<std::string>()))
+      return false;
   }
   return true;
 }
 
 // Forward-declare so add_param can recurse via $-variable resolution.
-void add_param(ModuleBuilder& builder, const std::string& key, const json& val,
-               const std::string& mod_name,
-               const std::map<std::string, std::any>& modules_by_name,
-               const std::map<std::string, std::string>& module_interfaces,
-               const json& cli_args);
+void add_param(ModuleBuilder& builder, const std::string& key, const json& val, const std::string& mod_name,
+               const std::map<std::string, std::any>& modules_by_name, const std::map<std::string, std::string>& module_interfaces, const json& cli_args);
 
 // Resolve a $-variable from the CLI args map by re-entering add_param with the
 // resolved JSON value, so any type the dispatch handles (scalar, typed object,
 // reference, array) works for variables too.
-void resolve_var(const std::string& val_str, const std::string& key,
-                 const std::string& mod_name,
-                 const std::map<std::string, std::any>& modules_by_name,
-                 const std::map<std::string, std::string>& module_interfaces,
-                 const json& cli_args, ModuleBuilder& builder)
+void resolve_var(const std::string& val_str, const std::string& key, const std::string& mod_name, const std::map<std::string, std::any>& modules_by_name,
+                 const std::map<std::string, std::string>& module_interfaces, const json& cli_args, ModuleBuilder& builder)
 {
   std::string vn = var_name(val_str);
   if (!cli_args.contains(vn)) {
-    fmt::print("[ENVIRONMENT] ERROR: $-variable '{}' not found in CLI args (used in '{}' param '{}')\n",
-               vn, mod_name, key);
+    fmt::print("[ENVIRONMENT] ERROR: $-variable '{}' not found in CLI args (used in '{}' param '{}')\n", vn, mod_name, key);
     std::exit(-1);
   }
   add_param(builder, key, cli_args[vn], mod_name, modules_by_name, module_interfaces, cli_args);
@@ -79,11 +76,8 @@ void resolve_var(const std::string& val_str, const std::string& key,
 // only structural concerns (null skipping, $-variable and @-reference
 // resolution); everything else flows through type_registry::try_convert, so a
 // new type is a registry registration, not a change here.
-void add_param(ModuleBuilder& builder, const std::string& key, const json& val,
-               const std::string& mod_name,
-               const std::map<std::string, std::any>& modules_by_name,
-               const std::map<std::string, std::string>& module_interfaces,
-               const json& cli_args)
+void add_param(ModuleBuilder& builder, const std::string& key, const json& val, const std::string& mod_name,
+               const std::map<std::string, std::any>& modules_by_name, const std::map<std::string, std::string>& module_interfaces, const json& cli_args)
 {
   if (val.is_null()) {
     return;
@@ -116,8 +110,8 @@ void add_param(ModuleBuilder& builder, const std::string& key, const json& val,
       if (ref_iface.empty()) {
         ref_iface = curr_iface;
       } else if (curr_iface != ref_iface) {
-        fmt::print("[ENVIRONMENT] ERROR: mixed interface types in array '{}' of '{}': expected '{}', got '{}' for '{}'\n",
-                   key, mod_name, ref_iface, curr_iface, rn);
+        fmt::print("[ENVIRONMENT] ERROR: mixed interface types in array '{}' of '{}': expected '{}', got '{}' for '{}'\n", key, mod_name, ref_iface, curr_iface,
+                   rn);
         std::exit(-1);
       }
       refs.push_back(mit->second);
@@ -138,10 +132,8 @@ void add_param(ModuleBuilder& builder, const std::string& key, const json& val,
 // Populate a ModuleBuilder from a JSON node with full type support (typed
 // objects, @-references, $-variables, arrays, scalars) and recursive children.
 // cli_args: flat JSON object for $-variable substitution.
-void populate_builder(const json& node, ModuleBuilder& builder,
-                      const std::map<std::string, std::any>& modules_by_name,
-                      const std::map<std::string, std::string>& module_interfaces,
-                      const json& cli_args, std::vector<ModuleBuilder::scope_frame_type> frames)
+void populate_builder(const json& node, ModuleBuilder& builder, const std::map<std::string, std::any>& modules_by_name,
+                      const std::map<std::string, std::string>& module_interfaces, const json& cli_args, std::vector<ModuleBuilder::scope_frame_type> frames)
 {
   const std::string& name = builder.get_name();
 
@@ -159,7 +151,8 @@ void populate_builder(const json& node, ModuleBuilder& builder,
 
   // Process all JSON parameters (skip reserved keys)
   for (auto& [key, val] : node.items()) {
-    if (key == "name" || key == "module" || key == "model" || key == "children" || key == "_comment" || key == "globals") continue;
+    if (key == "name" || key == "module" || key == "model" || key == "children" || key == "_comment" || key == "globals")
+      continue;
     add_param(builder, key, val, name, modules_by_name, module_interfaces, cli_args);
   }
 
@@ -246,8 +239,9 @@ champsim::environment::environment(ModuleBuilder builder)
   {
     auto& g = ModuleBuilder::globals();
 
-    static const std::set<std::string> reserved{"children", "name",       "module",    "model",     "_comment",           "_description", "environment",
-                                                "num_cores", "cycle_skip", "phases",    "listeners", "heartbeat_frequency", "globals"};
+    static const std::set<std::string> reserved{"children",    "name",      "module",     "model",  "_comment",  "_description",
+                                                "environment", "num_cores", "cycle_skip", "phases", "listeners", "heartbeat_frequency",
+                                                "globals"};
     ModuleBuilder root_scope{"<root>", "<scope>"};
     for (auto& [key, val] : config.items()) {
       if (reserved.count(key) != 0 || val.is_structured() || val.is_null()) {
@@ -265,13 +259,13 @@ champsim::environment::environment(ModuleBuilder builder)
     }
 
     // Canonical system-wide values (derived where not configured)
-    g.add_parameter("block_size",      block_size_);
-    g.add_parameter("page_size",       page_size_);
+    g.add_parameter("block_size", block_size_);
+    g.add_parameter("page_size", page_size_);
     g.add_parameter("log2_block_size", static_cast<unsigned>(champsim::lg2(block_size_)));
-    g.add_parameter("log2_page_size",  static_cast<unsigned>(champsim::lg2(page_size_)));
-    g.add_parameter("num_consumers",   num_consumers);
-    g.add_parameter("num_sources",     num_sources);
-    g.add_parameter("num_streams",     num_streams);
+    g.add_parameter("log2_page_size", static_cast<unsigned>(champsim::lg2(page_size_)));
+    g.add_parameter("num_consumers", num_consumers);
+    g.add_parameter("num_sources", num_sources);
+    g.add_parameter("num_streams", num_streams);
   }
   // Sync cached address extents with the freshly-published globals so the hot
   // path doesn't pay a lookup per address-slice construction.
@@ -325,9 +319,8 @@ champsim::environment::environment(ModuleBuilder builder)
       }
     }
     if (min_ps < std::numeric_limits<ps_rep>::max() && min_ps > 0)
-      deadlock_cycles_ = static_cast<int>(std::max((sum_ps / min_ps)*3, ps_rep{500}));
+      deadlock_cycles_ = static_cast<int>(std::max((sum_ps / min_ps) * 3, ps_rep{500}));
   }
-
 }
 
 // ====== Nested-instance enrollment ======

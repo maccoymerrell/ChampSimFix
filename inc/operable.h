@@ -76,8 +76,8 @@ public:
    */
   virtual bool has_pending_work() const { return false; } // LCOV_EXCL_LINE
 
-  virtual void print_deadlock() {}                  // LCOV_EXCL_LINE
-  virtual void end_simulation() {}                 // LCOV_EXCL_LINE
+  virtual void print_deadlock() {} // LCOV_EXCL_LINE
+  virtual void end_simulation() {} // LCOV_EXCL_LINE
 
   static void set_skip_enabled(bool enabled);
   static bool skip_enabled();

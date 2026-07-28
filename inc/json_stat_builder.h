@@ -71,7 +71,7 @@ public:
    * maps, types with ``to_json`` overloads) is supported. Returns
    * ``*this`` for fluent chaining.
    */
-  template<typename T>
+  template <typename T>
   json_stat_builder& add(const std::string& name, T&& value)
   {
     (*node_)[name] = std::forward<T>(value);
@@ -93,7 +93,7 @@ public:
   }
 
   /** Append a value to a named array under the current object. */
-  template<typename T>
+  template <typename T>
   json_stat_builder& push_back(const std::string& name, T&& value)
   {
     auto& arr = (*node_)[name];
@@ -112,8 +112,8 @@ public:
   bool empty() const { return node_->empty(); }
 
 private:
-  nlohmann::json own_;          // backing storage when not borrowing
-  nlohmann::json* node_;        // points to own_ or to an external node
+  nlohmann::json own_;   // backing storage when not borrowing
+  nlohmann::json* node_; // points to own_ or to an external node
 };
 
 } // namespace champsim

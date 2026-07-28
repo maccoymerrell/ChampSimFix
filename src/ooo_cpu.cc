@@ -170,15 +170,9 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
   return stop_fetch;
 }
 
-void O3_CPU::push_instruction(ooo_model_instr instr)
-{
-  input_queue.push_back(std::move(instr));
-}
+void O3_CPU::push_instruction(ooo_model_instr instr) { input_queue.push_back(std::move(instr)); }
 
-std::size_t O3_CPU::instructions_requested()
-{
-  return IN_QUEUE_SIZE - static_cast<long>(std::size(input_queue));
-}
+std::size_t O3_CPU::instructions_requested() { return IN_QUEUE_SIZE - static_cast<long>(std::size(input_queue)); }
 
 bool O3_CPU::do_init_instruction(ooo_model_instr& arch_instr)
 {
@@ -304,7 +298,8 @@ long O3_CPU::promote_to_decode()
 
   // No pre-scan needed: the predicate requires fetch_completed, so
   // get_span_p stops at exactly the entry a find_if bound would have found.
-  auto [window_begin, window_end] = champsim::get_span_p(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), available_fetch_bandwidth, fetch_complete_and_ready);
+  auto [window_begin, window_end] =
+      champsim::get_span_p(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), available_fetch_bandwidth, fetch_complete_and_ready);
   auto decoded_window_end = champsim::stable_partition_small(window_begin, window_end, is_decoded); // reorder instructions
   auto mark_for_decode = [time = current_time, lat = DECODE_LATENCY, warmup = is_warmup()](auto& x) {
     return x.ready_time = time + (warmup ? champsim::chrono::clock::duration{} : lat);
@@ -421,8 +416,7 @@ long O3_CPU::dispatch_instruction()
 
   // dispatch DISPATCH_WIDTH instructions into the ROB
   while (available_dispatch_bandwidth.has_remaining() && !std::empty(DISPATCH_BUFFER) && DISPATCH_BUFFER.front().ready_time <= current_time
-         && std::size(ROB) != ROB_SIZE
-         && (static_cast<std::size_t>(lq_free_slots_) >= std::size(DISPATCH_BUFFER.front().source_memory))
+         && std::size(ROB) != ROB_SIZE && (static_cast<std::size_t>(lq_free_slots_) >= std::size(DISPATCH_BUFFER.front().source_memory))
          && ((std::size(DISPATCH_BUFFER.front().destination_memory) + std::size(SQ)) <= SQ_SIZE)) {
     ROB.push_back(std::move(DISPATCH_BUFFER.front()));
     DISPATCH_BUFFER.pop_front();
@@ -875,8 +869,8 @@ long O3_CPU::handle_memory_return()
     while (fetch_bw.has_remaining() && consumed < std::size(l1i_entry.instr_depend_on_me)) {
       const auto depend_id = l1i_entry.instr_depend_on_me[consumed];
       auto fetched = std::partition_point(std::begin(IFETCH_BUFFER), std::end(IFETCH_BUFFER), ooo_model_instr::precedes(depend_id));
-      if (fetched != std::end(IFETCH_BUFFER) && fetched->instr_id == depend_id
-          && (fetched->ip.to<uint64_t>() >> block_shamt) == l1i_block && fetched->fetch_issued) {
+      if (fetched != std::end(IFETCH_BUFFER) && fetched->instr_id == depend_id && (fetched->ip.to<uint64_t>() >> block_shamt) == l1i_block
+          && fetched->fetch_issued) {
         fetched->fetch_completed = true;
         fetch_bw.consume();
         ++progress;
@@ -888,7 +882,8 @@ long O3_CPU::handle_memory_return()
 
       ++consumed;
     }
-    l1i_entry.instr_depend_on_me.erase(std::begin(l1i_entry.instr_depend_on_me), std::next(std::begin(l1i_entry.instr_depend_on_me), static_cast<long>(consumed)));
+    l1i_entry.instr_depend_on_me.erase(std::begin(l1i_entry.instr_depend_on_me),
+                                       std::next(std::begin(l1i_entry.instr_depend_on_me), static_cast<long>(consumed)));
 
     // remove this entry if we have serviced all of its instructions
     if (l1i_entry.instr_depend_on_me.empty()) {
@@ -978,36 +973,43 @@ void O3_CPU::fill_from_sources()
 
 bool O3_CPU::source_eof() const
 {
-  if (workload_source_pimpl.empty()) return true;
-  return std::all_of(workload_source_pimpl.begin(), workload_source_pimpl.end(),
-                     [](const auto* src) { return src->eof(); });
+  if (workload_source_pimpl.empty())
+    return true;
+  return std::all_of(workload_source_pimpl.begin(), workload_source_pimpl.end(), [](const auto* src) { return src->eof(); });
 }
 
-void O3_CPU::impl_initialize_branch_predictor() const { std::for_each(branch_module_pimpl.begin(),branch_module_pimpl.end(),[](const auto bp){bp->initialize_branch_predictor();});}
+void O3_CPU::impl_initialize_branch_predictor() const
+{
+  std::for_each(branch_module_pimpl.begin(), branch_module_pimpl.end(), [](const auto bp) { bp->initialize_branch_predictor(); });
+}
 
 void O3_CPU::impl_last_branch_result(champsim::address ip, champsim::address target, bool taken, uint8_t branch_type) const
 {
-  std::for_each(branch_module_pimpl.begin(),branch_module_pimpl.end(),[&](const auto bp){bp->last_branch_result(ip, target, taken, branch_type);});
+  std::for_each(branch_module_pimpl.begin(), branch_module_pimpl.end(), [&](const auto bp) { bp->last_branch_result(ip, target, taken, branch_type); });
 }
 
 bool O3_CPU::impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type) const
 {
   bool predicted = false;
-  std::for_each(branch_module_pimpl.begin(),branch_module_pimpl.end(),[&](const auto bp){predicted |= bp->predict_branch(ip, predicted_target, always_taken, branch_type);});
+  std::for_each(branch_module_pimpl.begin(), branch_module_pimpl.end(),
+                [&](const auto bp) { predicted |= bp->predict_branch(ip, predicted_target, always_taken, branch_type); });
   return predicted;
 }
 
-void O3_CPU::impl_initialize_btb() const { std::for_each(btb_module_pimpl.begin(),btb_module_pimpl.end(),[](const auto btb){btb->initialize_btb();}); }
+void O3_CPU::impl_initialize_btb() const
+{
+  std::for_each(btb_module_pimpl.begin(), btb_module_pimpl.end(), [](const auto btb) { btb->initialize_btb(); });
+}
 
 void O3_CPU::impl_update_btb(champsim::address ip, champsim::address predicted_target, bool taken, uint8_t branch_type) const
 {
-  std::for_each(btb_module_pimpl.begin(),btb_module_pimpl.end(),[&](const auto btb){btb->update_btb(ip, predicted_target, taken, branch_type);});
+  std::for_each(btb_module_pimpl.begin(), btb_module_pimpl.end(), [&](const auto btb) { btb->update_btb(ip, predicted_target, taken, branch_type); });
 }
 
 std::pair<champsim::address, bool> O3_CPU::impl_btb_prediction(champsim::address ip, uint8_t branch_type) const
 {
   std::pair<champsim::address, bool> predict_pair{};
-  std::for_each(btb_module_pimpl.begin(),btb_module_pimpl.end(),[&](const auto btb){predict_pair = btb->btb_prediction(ip, branch_type);});
+  std::for_each(btb_module_pimpl.begin(), btb_module_pimpl.end(), [&](const auto btb) { predict_pair = btb->btb_prediction(ip, branch_type); });
   return predict_pair;
 }
 
@@ -1097,14 +1099,8 @@ bool CacheBus::issue_write(request_type data_packet)
   return lower_level->add_wq(data_packet);
 }
 
-std::vector<std::string> O3_CPU::print_stats(bool roi) const
-{
-  return format_plaintext(roi ? roi_stats : sim_stats);
-}
+std::vector<std::string> O3_CPU::print_stats(bool roi) const { return format_plaintext(roi ? roi_stats : sim_stats); }
 
-void O3_CPU::json_stats(champsim::json_stat_builder& b, bool roi) const
-{
-  format_json(roi ? roi_stats : sim_stats, b);
-}
+void O3_CPU::json_stats(champsim::json_stat_builder& b, bool roi) const { format_json(roi ? roi_stats : sim_stats, b); }
 
 champsim::modules::core_module::register_module<O3_CPU> default_cpu_module("DEFAULT_CORE");

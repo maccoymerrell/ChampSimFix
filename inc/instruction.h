@@ -127,14 +127,15 @@ struct ooo_model_instr : champsim::program_ordered<ooo_model_instr> {
   std::vector<champsim::address> destination_memory = {};
   std::vector<champsim::address> source_memory = {};
 
-
 private:
   template <typename T>
   ooo_model_instr(T instr, champsim::origin local_origin) : ip(instr.ip), is_branch(instr.is_branch), branch_taken(instr.branch_taken), origin(local_origin)
   {
     // Reserve the exact element counts: growth through back_inserter cost up
     // to three reallocations per vector, per instruction read from the trace.
-    auto count_nonzero = [](const auto& arr) { return static_cast<std::size_t>(std::count_if(std::begin(arr), std::end(arr), [](auto x) { return x != 0; })); };
+    auto count_nonzero = [](const auto& arr) {
+      return static_cast<std::size_t>(std::count_if(std::begin(arr), std::end(arr), [](auto x) { return x != 0; }));
+    };
     if (auto n = count_nonzero(instr.destination_registers); n != 0) {
       this->destination_registers.reserve(n);
     }

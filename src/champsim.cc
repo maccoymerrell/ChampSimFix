@@ -25,13 +25,13 @@
 #include <fmt/chrono.h>
 #include <fmt/core.h>
 
-#include "modules.h"
+#include "identity_registry.h"
+#include "json_stat_builder.h"
 #include "module_phase.h"
 #include "module_stat.h"
-#include "json_stat_builder.h"
+#include "modules.h"
 #include "operable.h"
 #include "phase_info.h"
-#include "identity_registry.h"
 
 const auto start_time = std::chrono::steady_clock::now();
 
@@ -43,8 +43,18 @@ namespace champsim
 // Discovery helpers: return the [(interface, name, instance_any)] across the
 // environment so the orchestrator can drive module_phase / module_stat hooks
 // without re-querying typed_view per cycle.
-struct module_phase_entry  { champsim::module_phase* ptr;  std::string interface_name; std::string model; std::string name; };
-struct module_stat_entry   { champsim::module_stat*  ptr;  std::string interface_name; std::string model; std::string name; };
+struct module_phase_entry {
+  champsim::module_phase* ptr;
+  std::string interface_name;
+  std::string model;
+  std::string name;
+};
+struct module_stat_entry {
+  champsim::module_stat* ptr;
+  std::string interface_name;
+  std::string model;
+  std::string name;
+};
 
 static std::vector<module_phase_entry> collect_module_phase(modules::environment_module& env)
 {
@@ -65,7 +75,8 @@ static std::vector<module_stat_entry> collect_module_stat(modules::environment_m
   std::vector<module_stat_entry> out;
   for (const auto& iface : modules::interface_registry::get_interface_names()) {
     auto to_ms = modules::interface_registry::get_to_module_stat(iface);
-    if (!to_ms) continue;
+    if (!to_ms)
+      continue;
     for (const auto& inst : env.view(iface)) {
       auto* ms = to_ms(inst);
       if (ms) {
@@ -109,10 +120,8 @@ long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables
 // COMPLETE when all complete. on_source_complete fires once per source id. EOF
 // is observed by the controllers via source_eof() (the orchestrator carries no
 // workload knowledge). Caches views once per phase.
-void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t length,
-               modules::environment_module& env,
-               std::vector<std::reference_wrapper<modules::phase_controller>>& controllers,
-               champsim::chrono::clock& global_clock,
+void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t length, modules::environment_module& env,
+               std::vector<std::reference_wrapper<modules::phase_controller>>& controllers, champsim::chrono::clock& global_clock,
                std::function<void(unsigned)> on_source_complete)
 {
   // typed_view is expensive; cache once per phase and reuse across all cycles.
@@ -296,8 +305,7 @@ std::vector<phase_stats> main(modules::environment_module& env, std::vector<phas
   // one default controller.
   auto controllers = env.typed_view<modules::phase_controller>("phase_controller");
   if (controllers.empty()) {
-    auto pc_builder = modules::ModuleBuilder("phase_controller", "PHASE_CONTROLLER")
-      .add_parameter("deadlock_cycles", env.get_deadlock_cycles());
+    auto pc_builder = modules::ModuleBuilder("phase_controller", "PHASE_CONTROLLER").add_parameter("deadlock_cycles", env.get_deadlock_cycles());
     controllers.push_back(*modules::phase_controller::create_instance(pc_builder, &env));
   }
 

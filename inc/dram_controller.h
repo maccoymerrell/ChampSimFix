@@ -90,7 +90,7 @@ struct DRAM_ADDRESS_MAPPING {
 struct DRAM_CHANNEL final : public champsim::operable {
   // Warmup/ROI flags are propagated from the owning MEMORY_CONTROLLER each phase.
   bool warmup = true;
-  bool roi    = false;
+  bool roi = false;
 
   using response_type = champsim::response;
 
@@ -159,7 +159,6 @@ private:
   request_array_type::iterator active_request;
 
 public:
-
   // track bankgroup accesses
   std::vector<champsim::chrono::clock::time_point> bankgroup_readytime{address_mapping.ranks() * address_mapping.bankgroups(),
                                                                        champsim::chrono::clock::time_point{}};
@@ -182,11 +181,11 @@ private:
   // Incrementally maintained counters: O(1) reads replacing a full-capacity
   // scan per cycle. All mutation flows through member functions (or
   // modify_*/resync_counters), so they cannot desync.
-  long rq_occupancy_ct = 0;      // RQ slots with has_value
-  long wq_occupancy_ct = 0;      // WQ slots with has_value
-  long rq_unchecked_ct = 0;      // occupied RQ slots with !forward_checked
-  long wq_unchecked_ct = 0;      // occupied WQ slots with !forward_checked
-  long valid_bank_count = 0;     // bank_request entries with valid
+  long rq_occupancy_ct = 0;       // RQ slots with has_value
+  long wq_occupancy_ct = 0;       // WQ slots with has_value
+  long rq_unchecked_ct = 0;       // occupied RQ slots with !forward_checked
+  long wq_unchecked_ct = 0;       // occupied WQ slots with !forward_checked
+  long valid_bank_count = 0;      // bank_request entries with valid
   long refresh_pending_banks = 0; // bank_request entries with need_refresh || under_refresh
 
   // Recompute every counter from the underlying structures.

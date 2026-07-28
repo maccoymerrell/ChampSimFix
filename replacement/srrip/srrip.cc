@@ -8,7 +8,11 @@
 
 champsim::modules::replacement::register_module<srrip> srrip_register("srrip");
 
-srrip::srrip(champsim::modules::ModuleBuilder builder) : srrip(builder.get_parent<champsim::modules::cache_module>(), builder.get_parent<champsim::modules::cache_module>()->num_sets(), builder.get_parent<champsim::modules::cache_module>()->num_ways()) {}
+srrip::srrip(champsim::modules::ModuleBuilder builder)
+    : srrip(builder.get_parent<champsim::modules::cache_module>(), builder.get_parent<champsim::modules::cache_module>()->num_sets(),
+            builder.get_parent<champsim::modules::cache_module>()->num_ways())
+{
+}
 
 srrip::srrip(champsim::modules::cache_module* cache, long sets_, long ways_)
 {

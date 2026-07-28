@@ -44,8 +44,7 @@ class heartbeat_listener : public champsim::modules::listener
 
 public:
   explicit heartbeat_listener(champsim::modules::ModuleBuilder builder)
-      : interval_(builder.get_parameter<uint64_t>("interval", true, 10000000ULL)),
-        out_(builder.get_parameter<std::ostream*>("output_stream", true, &std::cout))
+      : interval_(builder.get_parameter<uint64_t>("interval", true, 10000000ULL)), out_(builder.get_parameter<std::ostream*>("output_stream", true, &std::cout))
   {
   }
 

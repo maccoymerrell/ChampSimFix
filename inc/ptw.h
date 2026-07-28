@@ -25,8 +25,8 @@
 #include "address.h"
 #include "bandwidth.h"
 #include "channel.h"
-#include "operable.h"
 #include "msl/lru_table.h"
+#include "operable.h"
 #include "util/latency_queue.h"
 #include "util/ring_buffer.h"
 #include "waitable.h"
@@ -116,6 +116,7 @@ public:
 private:
   bool warmup_ = true;
   unsigned log2_page_size_ = 12;
+
 public:
   bool is_warmup() const { return warmup_; }
 };
