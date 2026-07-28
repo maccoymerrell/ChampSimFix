@@ -563,7 +563,11 @@ uint32_t spp_dev::GLOBAL_REGISTER::check_entry(offset_type page_offset)
   uint32_t max_conf = 0, max_conf_way = MAX_GHR_ENTRY;
 
   for (uint32_t i = 0; i < MAX_GHR_ENTRY; i++) {
-    if ((offset[i] == page_offset) && (max_conf < confidence[i])) {
+    // Gate on valid[] exactly as update_entry does: an invalid slot holds a
+    // default-constructed offset whose extent differs from page_offset, and
+    // comparing mismatched-extent slices throws. Invalid slots carry confidence 0
+    // and could never win, so this is behavior-preserving.
+    if (valid[i] && (offset[i] == page_offset) && (max_conf < confidence[i])) {
       max_conf = confidence[i];
       max_conf_way = i;
     }
