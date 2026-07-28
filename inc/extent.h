@@ -141,10 +141,13 @@ struct static_extent {
  * width, and an out-of-line call was a measured cost.
  */
 constexpr std::size_t size(dynamic_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
-constexpr std::size_t size(page_number_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
-constexpr std::size_t size(page_offset_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
-constexpr std::size_t size(block_number_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
-constexpr std::size_t size(block_offset_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
+// These cached extent types are not literal types, so their size() overloads
+// cannot be constexpr (clang rejects a constexpr function with a non-literal
+// parameter type). Keep them header-inline for the same hot-path benefit.
+inline std::size_t size(page_number_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
+inline std::size_t size(page_offset_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
+inline std::size_t size(block_number_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
+inline std::size_t size(block_offset_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
 
 // Rewrite the cached page/block extents used by the default constructors of
 // page_number_extent / block_offset_extent etc. Call once after publishing
