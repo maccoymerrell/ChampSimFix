@@ -486,6 +486,10 @@ long CACHE::operate()
   // transform machinery only runs when some upper has a pending request; when
   // all are idle this is a few O(1) has_pending() checks. Byte-identical: an
   // empty queue admits nothing and consumes no bandwidth.
+  // Boundary between entries parked before this cycle and those admitted below.
+  // develop issues this cycle's fresh admissions before older retries, so match
+  // that order when the translation RQ is bandwidth-limited.
+  const auto pre_admit_untranslated = std::size(untranslated_tag_check);
   if (std::any_of(std::begin(upper_levels), std::end(upper_levels), [](auto* ul) { return ul->has_pending(); })) {
     const champsim::bandwidth::maximum_type per_upper_bandwidth =
         std::size(upper_levels) >= 1
@@ -513,7 +517,12 @@ long CACHE::operate()
   // exactly the entries this walk acts on, so when it is zero the walk is a
   // no-op.
   if (lower_translate != nullptr && untranslated_pending_issue_ > 0) {
-    std::for_each(std::begin(untranslated_tag_check), std::end(untranslated_tag_check), [this](auto& x) { this->issue_translation(x); });
+    for (std::size_t i = pre_admit_untranslated; i < std::size(untranslated_tag_check); ++i) {
+      issue_translation(untranslated_tag_check[i]);
+    }
+    for (std::size_t i = 0; i < pre_admit_untranslated; ++i) {
+      issue_translation(untranslated_tag_check[i]);
+    }
   }
 
   // Perform tag checks. inflight_tag_check is translated-only and time-ordered,

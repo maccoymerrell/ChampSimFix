@@ -88,31 +88,39 @@ static std::vector<module_stat_entry> collect_module_stat(modules::environment_m
   return out;
 }
 
-// Operate the operables in current_time order (furthest-behind first — a lagging
-// producer's output must be visible to consumers later in the same quantum).
-// Every operable advances by the same quantum and catches up to the horizon, so
-// the order barely moves between cycles: maintain it in place with a stable
-// insertion sort — O(N) with zero swaps on the (synchronized) common case, and
-// work only when clock periods diverge — instead of re-deriving it with an
-// O(N log N) std::sort. Stable makes the same-current_time tie-order the
-// deterministic maintained order rather than std::sort's implementation-defined
-// reshuffle.
-//
-// Byte-identical for <16 operables (std::sort already used a stable insertion
-// sort there); multi-core (>16) reference outputs were re-baselined from here.
+static bool less_by_time(const champsim::operable& lhs, const champsim::operable& rhs)
+{
+  return lhs.current_time < rhs.current_time || (lhs.current_time == rhs.current_time && lhs.sort_order < rhs.sort_order);
+}
+
+// Operate the operables in current_time order (furthest-behind first).
+// N<=16 (single-core): in-place O(N) insertion sort; sort_order ties by
+// registration index, matching modularize's std::sort (a stable insertion sort
+// at this size). N>16 (multi-core): modularize's std::sort switches to unstable
+// introsort, so reproduce it exactly on a registration-order copy.
 long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables, champsim::chrono::clock& global_clock)
 {
-  for (std::size_t i = 1; i < std::size(operables); ++i) {
-    for (std::size_t j = i; j > 0 && operables[j].get().current_time < operables[j - 1].get().current_time; --j) {
-      std::swap(operables[j], operables[j - 1]);
+  long progress{0};
+  if (std::size(operables) <= 16) {
+    for (std::size_t i = 1; i < std::size(operables); ++i) {
+      for (std::size_t j = i; j > 0 && less_by_time(operables[j].get(), operables[j - 1].get()); --j) {
+        std::swap(operables[j], operables[j - 1]);
+      }
     }
+    for (champsim::operable& op : operables) {
+      progress += op.operate_on(global_clock);
+    }
+    return progress;
   }
 
-  long progress{0};
-  for (champsim::operable& op : operables) {
+  // Reuse a scratch buffer so the per-cycle copy keeps capacity and does not allocate.
+  static std::vector<std::reference_wrapper<champsim::operable>> sorted;
+  sorted = operables;
+  std::sort(std::begin(sorted), std::end(sorted),
+            [](const champsim::operable& lhs, const champsim::operable& rhs) { return lhs.current_time < rhs.current_time; });
+  for (champsim::operable& op : sorted) {
     progress += op.operate_on(global_clock);
   }
-
   return progress;
 }
 
@@ -126,6 +134,9 @@ void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t
 {
   // typed_view is expensive; cache once per phase and reuse across all cycles.
   auto operables = env.typed_view<champsim::operable>("operable");
+  for (std::size_t i = 0; i < std::size(operables); ++i) {
+    operables[i].get().sort_order = static_cast<long>(i);
+  }
   auto phase_modules = collect_module_phase(env);
 
   // Drive phase hooks on opted-in modules.

@@ -26,6 +26,7 @@ class operable
 public:
   champsim::chrono::picoseconds clock_period{};
   champsim::chrono::clock::time_point current_time{};
+  long sort_order{0}; // registration index; stable tie-break for the do_cycle sort
 
   operable();
   virtual ~operable() = default;
