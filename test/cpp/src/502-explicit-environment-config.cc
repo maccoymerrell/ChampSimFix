@@ -1,6 +1,9 @@
 #include <algorithm>
 #include <any>
 #include <fstream>
+#include <functional>
+#include <map>
+#include <string>
 #include <catch.hpp>
 #include <nlohmann/json.hpp>
 
@@ -46,6 +49,36 @@ champsim::modules::environment_module* make_explicit_env(const json& config) {
   auto builder = ModuleBuilder{"test_explicit_env", "ENVIRONMENT"};
   builder.add_parameter("config_json", config);
   return champsim::modules::environment_module::create_instance(builder, static_cast<champsim::modules::environment_module*>(nullptr));
+}
+
+// Variants derived in-memory from the base explicit config, rather than checked-in near-duplicates.
+json config_custom() {
+  auto config = load_config("explicit-1core.json");
+  config["block_size"] = 128;
+  config["page_size"] = 8192;
+  return config;
+}
+
+json config_altmodules() {
+  auto config = load_config("explicit-1core.json");
+  const std::map<std::string, std::string> models{{"llc_pf", "ip_stride"},  {"llc_repl", "srrip"},  {"l1d_pf", "ip_stride"}, {"l1d_repl", "srrip"},
+                                                  {"l2c_pf", "ip_stride"},  {"l2c_repl", "srrip"},  {"cpu0_bp", "hashed_perceptron"}};
+  std::function<void(json&)> apply = [&](json& node) {
+    if (node.is_object()) {
+      if (node.contains("name")) {
+        auto it = models.find(node["name"].get<std::string>());
+        if (it != models.end())
+          node["model"] = it->second;
+      }
+      for (auto& item : node.items())
+        apply(item.value());
+    } else if (node.is_array()) {
+      for (auto& elem : node)
+        apply(elem);
+    }
+  };
+  apply(config);
+  return config;
 }
 
 champsim::modules::cache_module* get_cache(champsim::modules::environment_module* env, const std::string& name) {
@@ -97,7 +130,7 @@ SCENARIO("Explicit environment constructs correct topology from 1-core config") 
 
 SCENARIO("Explicit environment respects custom block_size and page_size") {
   GIVEN("A config with block_size=128 and page_size=8192 loaded from file") {
-    auto config = load_config("explicit-1core-custom.json");
+    auto config = config_custom();
     auto* env = make_explicit_env(config);
 
     THEN("block_size is 128") {
@@ -400,7 +433,7 @@ SCENARIO("Explicit environment supports multi-core via explicit module declarati
 
 SCENARIO("Explicit environment constructs with alternative module choices") {
   GIVEN("A 1-core config with ip_stride prefetchers, srrip replacement, and hashed_perceptron BP") {
-    auto config = load_config("explicit-1core-altmodules.json");
+    auto config = config_altmodules();
     auto* env = make_explicit_env(config);
 
     THEN("num_cpus is 1") {
@@ -455,7 +488,7 @@ SCENARIO("Explicit environment constructs with alternative module choices") {
 
 SCENARIO("Explicit environment with custom config still has correct cache sizes") {
   GIVEN("A custom 1-core config with block_size=128") {
-    auto config = load_config("explicit-1core-custom.json");
+    auto config = config_custom();
     auto* env = make_explicit_env(config);
 
     THEN("L1D has num_sets=64, num_ways=12 (same as base config)") {
