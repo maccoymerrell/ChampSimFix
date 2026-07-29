@@ -87,8 +87,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 
   app.add_option("--listeners", requested_listeners, "A list of the listeners to be attached to the run");
 
-  // Parse CLI first pass to read the config file path; the second pass uses
-  // the resolved core count for trace validation.
+  // First CLI pass reads the config file path; the second pass uses the resolved core count for trace validation.
   app.allow_extras(true);
   try {
     app.parse(argc, argv);
@@ -96,14 +95,12 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     return app.exit(e);
   }
 
-  // Enable dump mode if requested
   if (knob_dump)
     fmt::print("=== Module Builder Dump ===\n");
 
   // Read JSON config from file or stdin
   nlohmann::json config_json;
   if (config_file_path == "-") {
-    // Explicit stdin request
     try {
       config_json = nlohmann::json::parse(std::cin);
     } catch (const nlohmann::json::parse_error& e) {
@@ -124,7 +121,6 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     }
   }
 
-  // Print config description if present
   if (config_json.contains("_description") && config_json["_description"].is_string()) {
     fmt::print(stderr, "\nConfig: {}\n\n", config_json["_description"].get<std::string>());
   }
@@ -132,23 +128,15 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   // Parse config for system parameters
   std::string env_model = config_json.value("environment", std::string("LEGACY_ENVIRONMENT"));
   bool is_legacy_env = (env_model == "LEGACY_ENVIRONMENT");
-  // The CLI expects one trace per workload SOURCE, not per core. The legacy
-  // environment spawns exactly one workload source per core, so its source
-  // count is num_cores by construction — that identity lives here, not in
-  // the trace check itself. Explicit environments declare sources in the
-  // config and accept any trace count. The environment owns publishing all
-  // system-wide globals (block_size, page_size, log2_*, num_consumers,
-  // num_sources) into ModuleBuilder::globals() during its construction.
+  // CLI expects one trace per workload SOURCE. The legacy env spawns one source per core,
+  // so its source count == num_cores; explicit envs declare sources in the config and accept any count.
   std::size_t legacy_num_sources = config_json.value("num_cores", 1u);
 
-  // Root-level "cycle_skip" (default true) lets idle operables skip cycles
-  // via operable::poll_cycle(). Set false to force every operable to run
-  // operate() each cycle — the A/B switch for behavior verification.
+  // "cycle_skip" (default true) lets idle operables skip cycles; false forces operate() each cycle (A/B verification switch).
   champsim::operable::set_skip_enabled(config_json.value("cycle_skip", true));
 
-  // Scan config for $varname references not covered by explicit CLI options.
-  // Each unique varname becomes a --varname option in the second pass and is
-  // substituted into module parameters via cli_args.
+  // Scan config for $varname refs not covered by explicit CLI options; each becomes a
+  // --varname option in the second pass, substituted into module params via cli_args.
   static const std::set<std::string> builtin_cli_vars = {"warmup_instructions", "simulation_instructions", "cloudsuite"};
   std::set<std::string> raw_config_vars;
   collect_config_vars(config_json, raw_config_vars);
@@ -182,8 +170,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
       app2.add_option("--json", json_file_name, "The name of the file to receive JSON output. If no name is specified, stdout will be used")->expected(0, 1);
   app2.add_option("--listeners", requested_listeners, "A list of the listeners to be attached to the run");
 
-  // Legacy env requires exactly legacy_num_sources traces; explicit envs allow any number
-  // (traces resolve via $traceN variables in the config).
+  // Legacy env requires exactly legacy_num_sources traces; explicit envs allow any (resolved via $traceN).
   auto* trace_option = app2.add_option("traces", trace_names, "The paths to the traces");
   if (is_legacy_env) {
     trace_option->required()->expected(static_cast<int>(legacy_num_sources))->check(CLI::ExistingFile);
@@ -210,8 +197,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     warmup_instructions = simulation_instructions / 5;
   }
 
-  // Construct the environment via the module system (after all CLI args are known)
-  // Build a CLI args map for $-variable substitution in explicit configs
+  // Construct the environment (after all CLI args are known); build a CLI args map for $-variable substitution.
   nlohmann::json cli_args = nlohmann::json::object();
   cli_args["warmup_instructions"] = warmup_instructions;
   cli_args["simulation_instructions"] = simulation_instructions;
@@ -246,10 +232,8 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   if (knob_dump)
     fmt::print("=== End Module Builder Dump ===\n");
 
-  // Assemble the active listener set: listener modules declared in the
-  // config, plus any models requested via --listeners. When the config
-  // declares none, a default HEARTBEAT listener is created (interval from
-  // the root "heartbeat_frequency" key) unless --hide-heartbeat suppresses it.
+  // Active listeners: config-declared listener modules plus --listeners models. If none
+  // declared, a default HEARTBEAT (interval from "heartbeat_frequency") unless --hide-heartbeat.
   std::vector<champsim::modules::listener*> active_listeners;
   for (champsim::modules::listener& l : gen_environment->typed_view<champsim::modules::listener>("listener")) {
     active_listeners.push_back(&l);
@@ -270,10 +254,8 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   }
   champsim::modules::set_active_listeners(std::move(active_listeners));
 
-  // Try to get the phase list from the phase controllers in the environment.
-  // The first controller that defines a non-empty phase list owns the run
-  // structure; a second non-empty list that disagrees is a config error.
-  // Otherwise fall back to the classic two-phase structure driven by -w/-i.
+  // Phase list from the environment's phase controllers: first non-empty list wins, a
+  // conflicting second is a config error; else fall back to the classic two-phase (-w/-i).
   std::vector<champsim::phase_info> phases;
   for (champsim::modules::phase_controller& pc : gen_environment->typed_view<champsim::modules::phase_controller>("phase_controller")) {
     auto controller_phases = pc.get_phases();

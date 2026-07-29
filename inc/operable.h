@@ -37,43 +37,12 @@ public:
   virtual void initialize() {} // LCOV_EXCL_LINE
   virtual long operate() = 0;
 
-  /**
-   * Idle-skip hook, called before each local cycle would be simulated.
-   * current_time has already been advanced to the cycle under
-   * consideration, so this hook observes the same end-of-cycle timestamp
-   * that operate() would.
-   *
-   * Return 0 to simulate this cycle (operate() runs as usual).
-   * Return n > 0 to skip n local cycles (this one plus n-1 more):
-   * current_time ends up n * clock_period past the previous cycle with no
-   * simulation, and the operable is not reconsidered until the global
-   * clock reaches its new current_time.
-   *
-   * A skipped cycle contributes no progress, exactly like an idle
-   * operate() call. Implementations must uphold two rules:
-   *  - Any submodule hook that is contractually per-cycle (e.g. a cache's
-   *    prefetcher_cycle_operate) must still be ticked here on skipped
-   *    cycles, so submodules observe an unbroken cycle stream.
-   *  - An operable that can receive work by external push (channel add_*,
-   *    returned-queue push) must not skip more than 1 cycle at a time,
-   *    or it would sleep through an arrival and change timing.
-   *
-   * Skipping is disabled globally when set_skip_enabled(false) (config
-   * root key "cycle_skip") — used for A/B behavior verification.
-   */
+  // Idle-skip hook: return 0 to simulate this cycle, n>0 to skip n cycles (no progress). Must still tick per-cycle submodule hooks on skips, and
+  // skip at most 1 cycle if work can arrive by external push. Disabled globally via set_skip_enabled(false) / config "cycle_skip".
   virtual long poll_cycle() { return 0; } // LCOV_EXCL_LINE
 
-  /**
-   * True when this operable holds self-scheduled work that will complete at
-   * a known future time WITHOUT external input — e.g. a DRAM refresh in
-   * flight, a bank busy timer. While any operable (or source consumer)
-   * reports pending work, zero global progress is treated as scheduled
-   * quiet time rather than a deadlock.
-   *
-   * Do NOT return true for work that depends on another module responding
-   * (e.g. an MSHR waiting on a lower level): that is exactly the state the
-   * deadlock detector exists to catch.
-   */
+  // True when this operable has self-scheduled work completing at a known future time WITHOUT external input (e.g. DRAM refresh, bank timer) —
+  // treated as scheduled quiet, not deadlock. Do NOT return true for work depending on another module responding; that is what the deadlock detector catches.
   virtual bool has_pending_work() const { return false; } // LCOV_EXCL_LINE
 
   virtual void print_deadlock() {} // LCOV_EXCL_LINE

@@ -26,15 +26,9 @@
 namespace champsim
 {
 /**
- * Name <-> id association for the framework-assigned identities.
- *
- * Identities never appear in configurations; this registry, populated by
- * assign_identities() at startup, is how anything user-facing (reports,
- * tools, modules that want to label output) translates between a consumer
- * or stream id and the configured instance names.
- *
- * A consumer id maps to exactly one name. A stream id maps to one or more
- * source names (sources sharing a "stream" label share one id).
+ * Name <-> id map for framework-assigned identities (populated by assign_identities()),
+ * used to translate ids to configured instance names. Consumer id -> one name; stream id
+ * -> one or more source names (sources sharing a "stream" label share one id).
  */
 class identity_registry
 {

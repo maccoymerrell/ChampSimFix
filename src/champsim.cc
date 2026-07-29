@@ -40,9 +40,7 @@ std::chrono::seconds elapsed_time() { return std::chrono::duration_cast<std::chr
 namespace champsim
 {
 
-// Discovery helpers: return the [(interface, name, instance_any)] across the
-// environment so the orchestrator can drive module_phase / module_stat hooks
-// without re-querying typed_view per cycle.
+// Discovery helpers: gather module_phase / module_stat instances across the environment so the orchestrator needn't re-query typed_view per cycle.
 struct module_phase_entry {
   champsim::module_phase* ptr;
   std::string interface_name;
@@ -59,9 +57,7 @@ struct module_stat_entry {
 static std::vector<module_phase_entry> collect_module_phase(modules::environment_module& env)
 {
   std::vector<module_phase_entry> out;
-  // Walk every operable and dynamic_cast to module_phase. This naturally
-  // covers all operables — including ones the environment exposes only via
-  // view("operable") (e.g. test mocks that aren't registered interfaces).
+  // Walk every operable and dynamic_cast to module_phase, covering even operables exposed only via view("operable") (e.g. test mocks).
   for (auto& op_ref : env.typed_view<champsim::operable>("operable")) {
     if (auto* mp = dynamic_cast<champsim::module_phase*>(&op_ref.get())) {
       out.push_back({mp, "operable", "", ""});
@@ -88,8 +84,7 @@ static std::vector<module_stat_entry> collect_module_stat(modules::environment_m
   return out;
 }
 
-// Pure cycle operation: sort and operate all operables.
-// Sort a per-cycle copy (not in place) so tie-breaks match develop's fresh-copy sort.
+// Sort a per-cycle copy (not in place) and operate all operables, so tie-breaks match develop's fresh-copy sort.
 long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables, champsim::chrono::clock& global_clock)
 {
   auto sorted = operables;
@@ -104,13 +99,8 @@ long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables
   return progress;
 }
 
-// Generic phase loop, driving any number of phase controllers.
-// Combination rules: the phase ABORTs if any controller aborts, and COMPLETEs
-// when every controller reports complete. on_source_complete fires once per
-// source id, the first time any controller reports it complete.
-// Source EOF is observed by the controllers themselves, via each consumer's
-// source_eof() — the orchestrator carries no workload knowledge.
-// Caches typed_view and module_phase results once per phase for performance.
+// Generic phase loop over any number of controllers: ABORT if any aborts, COMPLETE when all complete; on_source_complete fires once per source id.
+// Controllers observe source EOF themselves via source_eof(). typed_view/module_phase cached once per phase.
 void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t length, modules::environment_module& env,
                std::vector<std::reference_wrapper<modules::phase_controller>>& controllers, champsim::chrono::clock& global_clock,
                std::function<void(unsigned)> on_source_complete)
@@ -145,8 +135,7 @@ void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t
       any_abort |= (controller_status == modules::phase_controller::status::ABORT);
       all_complete &= (controller_status == modules::phase_controller::status::COMPLETE);
 
-      // Source completion: surface notifications so source_consumers can print
-      // their per-source messages. End-of-phase work is done once at the end.
+      // Source completion: surface notifications so source_consumers can print their per-source messages; end-of-phase work happens once at the end.
       for (unsigned source_idx : controller.newly_completed_sources()) {
         if (completed_sources.insert(source_idx).second && on_source_complete) {
           on_source_complete(source_idx);
@@ -171,15 +160,13 @@ void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t
   }
 }
 
-// Collect phase statistics generically: walk all module_stat instances and
-// publish their lines / JSON under [interface][model][name].
+// Collect phase statistics generically: publish every module_stat instance's lines / JSON under [interface][model][name].
 static phase_stats collect_phase_stats(const phase_info& phase, modules::environment_module& env)
 {
   phase_stats stats;
   stats.name = phase.name;
 
-  // Workload identity comes from the sources themselves, in creation order
-  // (for the legacy environment: one trace per core, in core order).
+  // Workload identity comes from the sources themselves, in creation order (legacy: one trace per core, in core order).
   for (modules::workload_source& src : env.typed_view<modules::workload_source>("workload_source")) {
     auto desc = src.describe();
     if (!desc.empty()) {
@@ -195,8 +182,7 @@ static phase_stats collect_phase_stats(const phase_info& phase, modules::environ
     stats.sim_lines.insert(stats.sim_lines.end(), sim_lines.begin(), sim_lines.end());
     stats.roi_lines.insert(stats.roi_lines.end(), roi_lines.begin(), roi_lines.end());
 
-    // For [interface][model][name] keying we wrap the per-instance JSON in
-    // a {model: {name: {...}}} object and let the printer merge by interface.
+    // Wrap the per-instance JSON as {model:{name:{...}}} for [interface][model][name] keying; the printer merges by interface.
     champsim::json_stat_builder sim_builder, roi_builder;
     e.ptr->json_stats(sim_builder, false);
     e.ptr->json_stats(roi_builder, true);
@@ -213,11 +199,8 @@ static phase_stats collect_phase_stats(const phase_info& phase, modules::environ
   return stats;
 }
 
-// Assign identities. Consumer ids and stream ids are framework-internal:
-// consumers enumerate densely in configuration order, and every workload
-// source gets its own stream (its own address space) unless sources share
-// a "stream" label in the configuration, in which case they share one id.
-// Configurations never contain the numbers; only origins carry them.
+// Assign framework-internal identities: consumers enumerate densely in config order; each workload source gets its own stream unless sources share a
+// "stream" label. Configs never contain the numbers; only origins carry them.
 void assign_identities(modules::environment_module& env)
 {
   identities().clear();
@@ -269,11 +252,8 @@ void assign_identities(modules::environment_module& env)
     std::exit(-1);
   }
 
-  // Warm each stream's page-table root in stream order. Roots would
-  // otherwise be allocated at each stream's first walk, making physical
-  // page assignment depend on runtime timing; allocating here keeps it a
-  // pure function of the configuration (and matches the historical
-  // construction-time allocation order).
+  // Warm each stream's page-table root in stream order, so physical page assignment is a pure function of config rather than runtime walk timing
+  // (matches historical construction-time order).
   for (auto& vm : env.typed_view<modules::vmem_module>("vmem")) {
     for (uint32_t stream = 0; stream < next_stream; ++stream) {
       (void)vm.get().get_pte_pa(champsim::origin{champsim::origin::invalid_id, stream}, champsim::page_number{}, vm.get().get_pt_levels());
@@ -296,9 +276,7 @@ std::vector<phase_stats> main(modules::environment_module& env, std::vector<phas
     op.initialize();
   }
 
-  // Gather the phase controllers.
-  // If the environment provides any (explicit config), use all of them.
-  // Otherwise, create one default controller.
+  // Gather the phase controllers: use all the environment provides, else create one default.
   auto controllers = env.typed_view<modules::phase_controller>("phase_controller");
   if (controllers.empty()) {
     auto pc_builder = modules::ModuleBuilder("phase_controller", "PHASE_CONTROLLER").add_parameter("deadlock_cycles", env.get_deadlock_cycles());
@@ -309,14 +287,12 @@ std::vector<phase_stats> main(modules::environment_module& env, std::vector<phas
   std::vector<phase_stats> results;
   for (const auto& phase : phases) {
     const auto& [phase_name, is_warmup, roi, length] = phase;
-    // A structured binding cannot be captured by a lambda in C++17 (clang rejects it);
-    // copy the name into a regular local for on_complete to capture.
+    // C++17 can't capture a structured binding in a lambda (clang rejects it); copy the name into a local for on_complete.
     const auto phase_name_captured = phase_name;
 
     modules::emit_begin_phase(is_warmup);
 
-    // Cache the source_consumer view once per phase; the source-completion
-    // hook would otherwise call typed_view every cycle.
+    // Cache the source_consumer view once per phase; the completion hook would otherwise call typed_view every cycle.
     auto consumers = env.typed_view<champsim::modules::source_consumer>("source_consumer");
 
     auto on_complete = [&](unsigned source_idx) {

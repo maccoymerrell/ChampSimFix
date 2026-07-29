@@ -29,29 +29,10 @@
 namespace
 {
 
-/*
- * The generic phase controller. Token-agnostic: it never assumes what a
- * source consumer's progress unit is. It owns only the generic mechanics:
- *
- *  - completion: a source completes when its sim_progress() delta reaches
- *    the phase length (denominated in that consumer's own tokens), or when
- *    its sources hit EOF (policy-selectable, see eof_policy).
- *  - deadlock: consecutive zero-progress cycles, vetoed while any consumer
- *    reports scheduled future work (has_pending_work).
- *  - health: every health_period cycles each consumer judges itself via
- *    check_health(); a stalled verdict aborts. The old instruction-rate
- *    "livelock" policy now lives in core_module::check_health.
- *
- * Parameters:
- *  - deadlock_cycles (int, default 500)
- *  - health_period (uint64, default 10000000; legacy alias livelock_period)
- *  - eof_policy (string, default "complete_all"): when a consumer's sources
- *    are exhausted, either every source completes ("complete_all", the
- *    classic trace-driven behavior) or only that source ("complete_source",
- *    for heterogeneous runs).
- *  - phases (json array of {name, is_warmup, length}) or
- *    warmup_length/simulation_length scalars: optional run structure.
- */
+// Generic, token-agnostic phase controller owning completion/deadlock/health
+// mechanics; per-consumer policy (e.g. livelock rate) lives in check_health.
+// Params: deadlock_cycles, health_period (alias livelock_period), eof_policy
+// (complete_all|complete_source), phases[] or warmup_length/simulation_length.
 class default_phase_controller : public champsim::modules::phase_controller
 {
   using source_health = champsim::modules::source_consumer::source_health;
@@ -66,8 +47,7 @@ class default_phase_controller : public champsim::modules::phase_controller
 
   // Per-phase caches (typed_view is expensive). Refreshed once per begin_phase().
   std::vector<std::reference_wrapper<champsim::modules::source_consumer>> source_consumers_;
-  // For the deadlock veto: operables with timer-scheduled work (e.g. DRAM
-  // refresh) also make zero global progress a scheduled quiet time.
+  // Deadlock veto: operables with timer-scheduled work (e.g. DRAM refresh).
   std::vector<std::reference_wrapper<champsim::operable>> operables_;
 
   // Per-phase state
@@ -99,8 +79,7 @@ public:
     health_period_ = builder.get_parameter<uint64_t>("health_period", true, builder.get_parameter<uint64_t>("livelock_period", true, 10000000ULL));
     complete_all_on_eof_ = builder.get_parameter<std::string>("eof_policy", true, std::string{"complete_all"}) != "complete_source";
 
-    // Build the phases list from explicit JSON phases array if provided,
-    // otherwise fall back to {warmup_length, simulation_length} scalar params.
+    // Build phases from explicit JSON array, else warmup/simulation scalars.
     if (builder.has_parameter("phases")) {
       for (auto& p : builder.get_parameter<nlohmann::json>("phases")) {
         champsim::phase_info pi;
@@ -120,9 +99,8 @@ public:
     }
     // If neither is set, phases_ stays empty — caller owns the phase list.
 
-    // Optional: the source ids this controller governs. Multiple controllers
-    // can partition the sources of a run; each controller then applies its
-    // own completion/health policy to its subset. Default: govern all.
+    // Optional source-id subset: controllers can partition a run's sources,
+    // each applying its own policy. Default: govern all.
     if (builder.has_parameter("sources")) {
       for (auto& s : builder.get_parameter<nlohmann::json>("sources")) {
         governed_.insert(s.get<int>());
@@ -140,13 +118,11 @@ public:
     newly_completed_.clear();
     source_complete_.clear();
 
-    // Refresh the per-phase view caches.
-    // typed_view is expensive: cache here and reuse across cycles.
+    // Refresh per-phase view caches (typed_view is expensive; reuse across cycles).
     source_consumers_ = env_->typed_view<champsim::modules::source_consumer>("source_consumer");
     operables_ = env_->typed_view<champsim::operable>("operable");
 
-    // Restrict the cached view to governed consumers, then discover tracked
-    // sources and re-baseline progress and health.
+    // Restrict to governed consumers, then re-baseline progress and health.
     if (!governed_.empty()) {
       source_consumers_.erase(
           std::remove_if(std::begin(source_consumers_), std::end(source_consumers_), [this](const auto& sc) { return !governs(sc.get().consumer_id()); }),
@@ -166,10 +142,8 @@ public:
   {
     newly_completed_.clear();
 
-    // Deadlock detection: consecutive zero-progress cycles are a hang unless
-    // someone knows more work is scheduled — a consumer awaiting a paced
-    // arrival, or an operable with timer-scheduled work in flight (e.g. a
-    // DRAM refresh stalling requests for a known, bounded time).
+    // Deadlock: consecutive zero-progress cycles are a hang unless a consumer
+    // or operable has scheduled work pending (e.g. a DRAM refresh in flight).
     if (progress == 0) {
       const bool pending = std::any_of(std::begin(source_consumers_), std::end(source_consumers_), [](const auto& sc) { return sc.get().has_pending_work(); })
                            || std::any_of(std::begin(operables_), std::end(operables_), [](const auto& op) { return op.get().has_pending_work(); });
@@ -244,10 +218,8 @@ public:
   std::vector<champsim::phase_info> get_phases() const override { return phases_; }
 };
 
-// Register interface and model. The historic INSTRUCTION_PHASE_CONTROLLER
-// name remains registered as an alias so existing configs keep working; the
-// controller itself is token-agnostic (livelock policy lives in the
-// consumers' check_health).
+// Register interface + model. INSTRUCTION_PHASE_CONTROLLER stays as a
+// back-compat alias; the controller itself is token-agnostic.
 static champsim::modules::phase_controller::register_interface phase_controller_iface_reg("phase_controller");
 static champsim::modules::phase_controller::register_module<default_phase_controller> default_pc_reg("PHASE_CONTROLLER");
 static champsim::modules::phase_controller::register_module<default_phase_controller> instruction_pc_reg("INSTRUCTION_PHASE_CONTROLLER");

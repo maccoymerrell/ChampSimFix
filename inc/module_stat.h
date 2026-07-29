@@ -25,48 +25,16 @@ namespace champsim
 
 class json_stat_builder;
 
-/**
- * Opt-in interface for modules that want to publish their own
- * statistics to ChampSim's plaintext and JSON output.
- *
- * Inherit from this on the module *implementation* level (e.g.
- * ``CACHE``, ``O3_CPU``, ``MEMORY_CONTROLLER``) — not the interface
- * class — and override both hooks. The framework discovers
- * implementers via the interface registry and aggregates their output:
- *
- *   - ``print_stats`` returns plaintext lines, appended verbatim to the
- *     phase summary in declaration order.
- *   - ``json_stats`` populates a ``json_stat_builder`` whose contents
- *     are wrapped under ``[interface][model][name]`` in the merged JSON
- *     output, giving a uniform structure across all module types.
- *
- * Both hooks take a ``roi`` flag selecting between region-of-interest
- * and full-simulation stats. They are pure-virtual on purpose: opting
- * in is an explicit promise to provide both implementations, so users
- * cannot silently mistype an override.
- *
- * Authors who only care about one output format may leave the other as
- * a trivial empty body.
- */
+// Opt-in interface for modules that publish plaintext + JSON stats. Inherit at
+// the implementation level (CACHE, O3_CPU, ...), not the interface; both hooks
+// are pure-virtual so an override can't be silently mistyped (empty body is OK).
 struct module_stat {
   virtual ~module_stat() = default;
 
-  /**
-   * Return the plaintext stat lines for this module.
-   *
-   * \param roi If true, use region-of-interest stats; otherwise sim-wide.
-   */
+  // Plaintext stat lines; roi selects region-of-interest vs sim-wide.
   virtual std::vector<std::string> print_stats(bool roi) const = 0;
 
-  /**
-   * Populate ``builder`` with this module's JSON stats.
-   *
-   * Use the helper methods on ``json_stat_builder`` (``add`` / ``group``
-   * / ``push_back``) so the resulting JSON matches ChampSim's expected
-   * layout without manual container construction.
-   *
-   * \param roi If true, use region-of-interest stats; otherwise sim-wide.
-   */
+  // Populate builder with JSON stats; roi selects region-of-interest vs sim-wide.
   virtual void json_stats(json_stat_builder& builder, bool roi) const = 0;
 };
 

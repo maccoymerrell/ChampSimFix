@@ -68,9 +68,8 @@ DRAM_ADDRESS_MAPPING::DRAM_ADDRESS_MAPPING(champsim::data::bytes channel_width_,
                                            std::size_t banks_, std::size_t columns_, std::size_t ranks_, std::size_t rows_)
     : address_slicer(make_slicer(channel_width_, pref_size_, channels_, bankgroups_, banks_, columns_, ranks_, rows_)), prefetch_size(pref_size_)
 {
-  // assert prefetch size is not zero
   assert(prefetch_size != 0);
-  // assert total burst size is well-formed (product of channel_width * prefetch_size is power of 2)
+  // burst size well-formed: channel_width * prefetch_size is a power of 2
   assert(champsim::is_power_of_2(channel_width_.count() * prefetch_size));
 
   // mapping sanity check
@@ -111,26 +110,21 @@ long MEMORY_CONTROLLER::operate()
 
 long MEMORY_CONTROLLER::poll_cycle()
 {
-  // Skippable only when no request is waiting on any upper channel and no
-  // DRAM channel has pending or timer-due work this cycle (bank activity,
-  // dbus activity, a due refresh, or an unsettled write mode). Skip at most
-  // 1 cycle: new work can arrive on the upper channels at any cycle.
+  // Skippable only when no upper channel has a waiting request and no DRAM channel has pending/timer-due work (bank, dbus, due refresh, unsettled
+  // write mode). Skip at most 1 cycle: work can arrive on the uppers any cycle.
   const bool uppers_idle = std::all_of(std::cbegin(queues), std::cend(queues),
                                        [](auto* ul) { return std::empty(ul->get_rq()) && std::empty(ul->get_wq()) && std::empty(ul->get_pq()); });
   if (!uppers_idle) {
     return 0;
   }
-  // Channels are parent-ticked and lag one period behind this controller's
-  // (already-advanced) current_time; probe them at the time they would reach.
+  // Channels are parent-ticked and lag one period behind this controller's current_time; probe them at the time they would reach.
   const bool channels_idle =
       std::all_of(std::cbegin(channels), std::cend(channels), [](const auto& chan) { return !chan.would_do_work_at(chan.current_time + chan.clock_period); });
   if (!channels_idle) {
     return 0;
   }
 
-  // Parent-ticked nested operables: keep the channels' clocks in lockstep
-  // across the skipped cycle, or their refresh timers and timestamps would
-  // fall permanently behind.
+  // Keep the parent-ticked channels' clocks in lockstep across the skipped cycle, or their refresh timers and timestamps fall permanently behind.
   for (auto& channel : channels) {
     channel.current_time += channel.clock_period;
   }
@@ -139,10 +133,8 @@ long MEMORY_CONTROLLER::poll_cycle()
 
 bool DRAM_CHANNEL::has_pending_work() const
 {
-  // Timer-scheduled work only: refreshes in flight (or queued behind a busy
-  // bank), banks occupied until a known ready_time, or an active data-bus
-  // transfer. Queued-but-unscheduled packets are excluded — with free banks
-  // they schedule (and count progress) on the very next operated cycle.
+  // Timer-scheduled work only: in-flight refreshes, banks busy until a known ready_time, or an active data-bus transfer. Queued-but-unscheduled
+  // packets are excluded (they schedule on the next operated cycle).
   return active_request != std::cend(bank_request) || std::any_of(std::cbegin(bank_request), std::cend(bank_request), [](const auto& b_req) {
            return b_req.valid || b_req.need_refresh || b_req.under_refresh;
          });
@@ -159,10 +151,8 @@ bool DRAM_CHANNEL::would_do_work_at(champsim::chrono::clock::time_point t) const
   if (t >= last_refresh + tREF) {
     return true;
   }
-  // An unsettled write burst: swap_write_mode() switches to read mode on the
-  // next operated cycle even with empty queues, stamping dbus_cycle_available.
-  // Run that cycle for real so the turn-around penalty lands at the same time
-  // it would without skipping.
+  // An unsettled write burst: swap_write_mode() flips to read mode next operated cycle even with empty queues, so run it for real to land the
+  // turn-around penalty on time.
   if (write_mode) {
     return true;
   }
@@ -238,9 +228,7 @@ long DRAM_CHANNEL::finish_dbus_request()
 
 void DRAM_CHANNEL::schedule_refresh()
 {
-  // check if we reached refresh cycle
   bool schedule_refresh = current_time >= last_refresh + tREF;
-  // if so, record stats
   if (schedule_refresh) {
     last_refresh = current_time;
     refresh_row += DRAM_ROWS_PER_REFRESH;
@@ -249,11 +237,8 @@ void DRAM_CHANNEL::schedule_refresh()
       refresh_row -= address_mapping.rows();
   }
 
-  // Go through each bank, and handle refreshes. Refresh is housekeeping, not
-  // workload progress: it contributes nothing to the liveness signal the
-  // deadlock detector consumes. Requests stalled behind an in-flight refresh
-  // are protected instead by has_pending_work() — the refresh completes at a
-  // known future time without external input.
+  // Handle refreshes per bank. Refresh is housekeeping, not workload progress, so it feeds no liveness signal; requests stalled behind an
+  // in-flight refresh are protected by has_pending_work() instead.
   for (auto& b_req : bank_request) {
     // refresh is now needed for this bank
     if (schedule_refresh) {
@@ -310,7 +295,6 @@ void DRAM_CHANNEL::swap_write_mode()
       dbus_cycle_available = current_time + DRAM_DBUS_TURN_AROUND_TIME;
     }
 
-    // Invert the mode
     write_mode = !write_mode;
   }
 }
@@ -324,10 +308,8 @@ long DRAM_CHANNEL::populate_dbus()
                                             [](const auto& lhs, const auto& rhs) { return !rhs.valid || (lhs.valid && lhs.ready_time < rhs.ready_time); });
   if (iter_next_process->valid && iter_next_process->ready_time <= current_time) {
     if (active_request == std::end(bank_request) && dbus_cycle_available <= current_time) {
-      // Bus is available
-      // Put this request on the data bus
+      // Bus available: put this request on the data bus
 
-      // get which bankgroup we are in
       auto op_bankgroup = bankgroup_request_index(iter_next_process->pkt->value().address);
       auto bankgroup_ready_time = bankgroup_readytime[op_bankgroup];
 
@@ -387,8 +369,7 @@ std::size_t DRAM_CHANNEL::bankgroup_request_index(champsim::address addr) const
 // Look for queued packets that have not been scheduled
 DRAM_CHANNEL::queue_type::iterator DRAM_CHANNEL::schedule_packet()
 {
-  // Look for queued packets that have not been scheduled
-  // prioritize packets that are ready to execute, bank is free
+  // prioritize packets that are ready to execute with a free bank
   auto next_schedule = [this](const auto& lhs, const auto& rhs) {
     if (!(rhs.has_value() && !rhs.value().scheduled)) {
       return true;
