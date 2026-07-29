@@ -46,8 +46,8 @@ long O3_CPU::operate()
 
   progress += fetch_instruction(); // fetch
   progress += check_dib();
-  fill_from_sources();
   initialize_instruction();
+  fill_from_sources(); // refill after the drain (matches develop's do_cycle feed)
 
   return progress;
 }

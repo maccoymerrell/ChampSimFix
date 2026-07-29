@@ -89,14 +89,15 @@ static std::vector<module_stat_entry> collect_module_stat(modules::environment_m
 }
 
 // Pure cycle operation: sort and operate all operables.
-// Operables vector is passed in to avoid re-querying the environment each cycle.
+// Sort a per-cycle copy (not in place) so tie-breaks match develop's fresh-copy sort.
 long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables, champsim::chrono::clock& global_clock)
 {
-  std::sort(std::begin(operables), std::end(operables),
+  auto sorted = operables;
+  std::sort(std::begin(sorted), std::end(sorted),
             [](const champsim::operable& lhs, const champsim::operable& rhs) { return lhs.current_time < rhs.current_time; });
 
   long progress{0};
-  for (champsim::operable& op : operables) {
+  for (champsim::operable& op : sorted) {
     progress += op.operate_on(global_clock);
   }
 
