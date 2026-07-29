@@ -1,18 +1,7 @@
-/*
- * The default heartbeat listener: prints a periodic progress line for each
- * source consumer that emits progress events.
- *
- * The listener owns the interval bookkeeping (baselines, phase resets, the
- * overshoot-preserving baseline advance); each consumer owns the wording of
- * its line via source_consumer::progress_message, since only the consumer
- * knows its token unit ("instructions" for a core).
- *
- * Parameters (from ModuleBuilder):
- *   - interval (uint64, default 10000000): tokens between printouts
- *     (main.cc maps the root config key "heartbeat_frequency" here)
- *   - output_stream (std::ostream*, optional, default std::cout):
- *     C++-side hook for tests; not expressible from JSON
- */
+// Default heartbeat listener: periodic progress line per source consumer.
+// The listener owns interval bookkeeping; each consumer owns its line wording
+// via progress_message (only it knows its token unit). Params: interval (from
+// root "heartbeat_frequency"), output_stream (test-only hook, not from JSON).
 
 #include <chrono>
 #include <iostream>
@@ -83,11 +72,8 @@ public:
         fmt::print(*out_, "{} (Simulation time: {:%H hr %M min %S sec})\n", msg, elapsed_time());
       }
 
-      // Advance the baseline by exact multiples of the interval rather than
-      // snapping to the current count. When more than one token completes in
-      // the same cycle, the total can overshoot the threshold; snapping would
-      // accumulate that overshoot every heartbeat and permanently displace
-      // when subsequent heartbeats fire.
+      // Advance the baseline by whole interval multiples, not by snapping to
+      // the current count: snapping would accumulate per-heartbeat overshoot.
       auto overshoot = total_progress - t.last_printout_progress;
       t.last_printout_progress += (overshoot / interval_) * interval_;
       t.last_printout_cycles = total_cycles;

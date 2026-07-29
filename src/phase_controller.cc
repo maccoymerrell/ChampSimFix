@@ -30,43 +30,28 @@
 namespace
 {
 
-/*
- * Generic, token-agnostic phase controller. Owns only generic mechanics:
- *  - completion: a source completes when its sim_progress() delta reaches the
- *    phase length (in that consumer's own tokens), or at source EOF (see eof_policy).
- *  - deadlock: consecutive zero-progress cycles, vetoed while any consumer
- *    reports scheduled future work (has_pending_work).
- *  - health: every health_period cycles each consumer self-judges via
- *    check_health(); a stalled verdict aborts.
- *
- * Params: deadlock_cycles (int, 500); health_period (uint64, 1e7; alias
- * livelock_period); eof_policy ("complete_all" ends the phase for all sources
- * at the first EOF, "complete_source" only that source); phases (json array of
- * {name, is_warmup, length}) or warmup_length/simulation_length scalars.
- */
+// Generic, token-agnostic phase controller. Mechanics: completion (sim_progress() delta reaches phase length, or source EOF
+// per eof_policy); deadlock (consecutive zero-progress cycles, vetoed while any consumer reports has_pending_work); health
+// (per health_period, consumers self-judge via check_health(), a stalled verdict aborts). Params: deadlock_cycles,
+// health_period (alias livelock_period), eof_policy, phases array or warmup_length/simulation_length scalars.
 class default_phase_controller : public champsim::modules::phase_controller
 {
   using source_health = champsim::modules::source_consumer::source_health;
 
-  // Configuration (from builder)
   int deadlock_cycles_ = 500;
   uint64_t health_period_ = 10000000;
   bool complete_all_on_eof_ = true;
 
-  // Parent environment, captured at construction.
   champsim::modules::environment_module* env_ = nullptr;
 
-  // Per-phase caches (typed_view is expensive). Refreshed once per begin_phase().
+  // Per-phase caches (typed_view is expensive); refreshed once per begin_phase().
   std::vector<std::reference_wrapper<champsim::modules::source_consumer>> source_consumers_;
-  // For the deadlock veto: operables with timer-scheduled work (e.g. DRAM
-  // refresh) also make zero global progress a scheduled quiet time.
+  // Deadlock veto: operables with timer-scheduled work (e.g. DRAM refresh) also make zero global progress a scheduled quiet time.
   std::vector<std::reference_wrapper<champsim::operable>> operables_;
 
-  // Per-phase state
   std::string phase_name_;
   uint64_t length_ = 0;
 
-  // Configurable phase list (set at construction from builder params)
   std::vector<champsim::phase_info> phases_;
 
   int stalled_cycles_ = 0;
@@ -76,10 +61,9 @@ class default_phase_controller : public champsim::modules::phase_controller
   // Source ids this controller governs; empty = all.
   std::set<int> governed_;
 
-  // Source tracking, flattened for the per-cycle advance() path (map lookups
-  // were a measured per-cycle overhead). Ordering is load-bearing: tracked_
-  // keeps consumer discovery order (the completion scan order); tracked_by_idx_
-  // is sorted by source id for the id-ordered complete-all-on-EOF notification.
+  // Source tracking, flattened for the per-cycle advance() path (map lookups were measured overhead). Ordering is
+  // load-bearing: tracked_ keeps consumer discovery order (the completion scan order); tracked_by_idx_ is sorted by
+  // source id for the id-ordered complete-all-on-EOF notification.
   struct tracked_source {
     champsim::modules::source_consumer* consumer;
     int idx;
@@ -101,8 +85,7 @@ public:
     health_period_ = builder.get_parameter<uint64_t>("health_period", true, builder.get_parameter<uint64_t>("livelock_period", true, 10000000ULL));
     complete_all_on_eof_ = builder.get_parameter<std::string>("eof_policy", true, std::string{"complete_all"}) != "complete_source";
 
-    // Build the phases list from explicit JSON phases array if provided,
-    // otherwise fall back to {warmup_length, simulation_length} scalar params.
+    // Explicit JSON phases array if provided, else {warmup_length, simulation_length}.
     if (builder.has_parameter("phases")) {
       for (auto& p : builder.get_parameter<nlohmann::json>("phases")) {
         champsim::phase_info pi;
@@ -122,8 +105,7 @@ public:
     }
     // If neither is set, phases_ stays empty — caller owns the phase list.
 
-    // Optional source ids this controller governs, letting multiple controllers
-    // partition a run's sources (each applies its own policy). Default: all.
+    // Optional source ids this controller governs, so multiple controllers can partition a run's sources. Default: all.
     if (builder.has_parameter("sources")) {
       for (auto& s : builder.get_parameter<nlohmann::json>("sources")) {
         governed_.insert(s.get<int>());
@@ -143,13 +125,11 @@ public:
     tracked_by_idx_.clear();
     incomplete_count_ = 0;
 
-    // Refresh the per-phase view caches.
-    // typed_view is expensive: cache here and reuse across cycles.
+    // Refresh the per-phase view caches (typed_view is expensive).
     source_consumers_ = env_->typed_view<champsim::modules::source_consumer>("source_consumer");
     operables_ = env_->typed_view<champsim::operable>("operable");
 
-    // Restrict the cached view to governed consumers, then discover tracked
-    // sources and re-baseline progress and health.
+    // Restrict to governed consumers, then discover tracked sources and re-baseline progress and health.
     if (!governed_.empty()) {
       source_consumers_.erase(
           std::remove_if(std::begin(source_consumers_), std::end(source_consumers_), [this](const auto& sc) { return !governs(sc.get().consumer_id()); }),
@@ -173,9 +153,7 @@ public:
   {
     newly_completed_.clear();
 
-    // Deadlock detection: consecutive zero-progress cycles are a hang unless
-    // more work is scheduled — a consumer awaiting a paced arrival, or an
-    // operable with timer-scheduled work in flight (e.g. a DRAM refresh).
+    // Consecutive zero-progress cycles are a hang unless work is scheduled (a paced arrival, or an operable timer in flight).
     if (progress == 0) {
       const bool pending = std::any_of(std::begin(source_consumers_), std::end(source_consumers_), [](const auto& sc) { return sc.get().has_pending_work(); })
                            || std::any_of(std::begin(operables_), std::end(operables_), [](const auto& op) { return op.get().has_pending_work(); });
@@ -211,8 +189,7 @@ public:
 
       if (tracked.consumer->source_eof()) {
         if (complete_all_on_eof_) {
-          // Classic behavior: the first exhausted source ends the phase for
-          // everyone (notified in source-id order).
+          // First exhausted source ends the phase for everyone (in source-id order).
           for (auto pos : tracked_by_idx_) {
             auto& other = tracked_[pos];
             if (!other.complete) {
@@ -251,8 +228,7 @@ public:
   std::vector<champsim::phase_info> get_phases() const override { return phases_; }
 };
 
-// Register interface and model. INSTRUCTION_PHASE_CONTROLLER stays registered
-// as an alias so existing configs keep working.
+// INSTRUCTION_PHASE_CONTROLLER stays registered as an alias for existing configs.
 static champsim::modules::phase_controller::register_interface phase_controller_iface_reg("phase_controller");
 static champsim::modules::phase_controller::register_module<default_phase_controller> default_pc_reg("PHASE_CONTROLLER");
 static champsim::modules::phase_controller::register_module<default_phase_controller> instruction_pc_reg("INSTRUCTION_PHASE_CONTROLLER");

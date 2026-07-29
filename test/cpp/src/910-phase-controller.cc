@@ -73,12 +73,10 @@ static champsim::modules::environment_module::register_module<mock_environment> 
 
 TEST_CASE("Phase controller completes when all cores reach instruction count")
 {
-  // Create mock environment with 2 cores
   auto env_builder = champsim::modules::ModuleBuilder("test_env", "MOCK_ENV_910");
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
   auto* mock_env = dynamic_cast<mock_environment*>(env);
 
-  // Create mock cores
   auto core0_builder = champsim::modules::ModuleBuilder("core0", "MOCK_CORE_910")
     .add_parameter("cpu_num", uint8_t{0});
   auto* core0 = champsim::modules::core_module::create_instance(core0_builder, env);
@@ -91,7 +89,6 @@ TEST_CASE("Phase controller completes when all cores reach instruction count")
 
   mock_env->cores_ = {mc0, mc1};
 
-  // Create phase controller
   auto pc_builder = champsim::modules::ModuleBuilder("pc", "INSTRUCTION_PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 1000);
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);

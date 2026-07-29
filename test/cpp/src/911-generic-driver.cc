@@ -47,8 +47,7 @@ struct counting_operable : public champsim::operable, public champsim::module_ph
   void end_phase() override { ended_phases.push_back(0); }
 };
 
-// Mock core for the phase controller. Its instruction count advances one per
-// operated cycle, so phases complete naturally through the run_phase loop.
+// Mock core whose instruction count advances one per operated cycle, so phases complete naturally through the run_phase loop.
 struct mock_core_911 : public champsim::modules::core_module {
   uint64_t instr_count = 0;
   uint8_t cpu_num_ = 0;
@@ -186,8 +185,7 @@ TEST_CASE("run_phase drives multiple controllers, each governing its own sources
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
   auto* mock_env = dynamic_cast<mock_env_911*>(env);
 
-  // Two cores; core 0 retires 1/cycle, core 1 retires 1/cycle too, but the
-  // controllers give them different completion lengths.
+  // Two cores that both retire 1/cycle, but the controllers give them different completion lengths.
   auto core0_builder = champsim::modules::ModuleBuilder("core_multi0", "MOCK_CORE_911")
     .add_parameter("cpu_num", uint8_t{0});
   auto* mc0 = dynamic_cast<mock_core_911*>(champsim::modules::core_module::create_instance(core0_builder, env));
@@ -214,8 +212,7 @@ TEST_CASE("run_phase drives multiple controllers, each governing its own sources
   champsim::chrono::clock clock;
   champsim::run_phase("MultiTest", false, true, 7, *env, controllers, clock, on_complete);
 
-  // Both sources complete exactly once, and the phase ends only when both
-  // controllers agree.
+  // Both sources complete exactly once, and the phase ends only when both controllers agree.
   REQUIRE(completed.size() == 2);
   REQUIRE(mc0->instr_count >= 7);
   REQUIRE(mc1->instr_count >= 7);
@@ -233,8 +230,7 @@ TEST_CASE("run_phase stops when a source reaches EOF")
   auto* mc = dynamic_cast<mock_core_911*>(core);
   mock_env->cores_ = {mc};
 
-  // The source is exhausted from the start; the controller observes it
-  // through source_eof() with no external notification.
+  // The source is exhausted from the start; the controller observes it through source_eof() with no external notification.
   mc->source_eof_ = true;
 
   auto pc_builder = champsim::modules::ModuleBuilder("pc_eof2", "INSTRUCTION_PHASE_CONTROLLER")

@@ -173,7 +173,6 @@ TEST_CASE("workload_source eof is true when no instructions remain") {
   // Add one instruction, no longer at EOF
   src->instructions_.push_back(champsim::test::instruction_with_ip(1));
   REQUIRE_FALSE(src->eof());
-  // Consume it
   src->next();
   REQUIRE(src->eof());
 }

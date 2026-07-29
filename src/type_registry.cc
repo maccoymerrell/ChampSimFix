@@ -1,12 +1,6 @@
 /*
- * Built-in type converter registrations for the JSON type registry.
- *
- * Each registration maps a JSON type-key string (used as the sole key in a
- * typed JSON object, e.g. {"frequency": "4G"}) to a function that parses the
- * JSON value and returns a correctly-typed std::any.
- *
- * Modules may register additional converters by defining their own static
- * champsim::type_registry::register_type_helper objects.
+ * Built-in JSON type-key converters (e.g. {"frequency": "4G"} -> typed std::any).
+ * Modules add more via static champsim::type_registry::register_type_helper objects.
  */
 
 #include "type_registry.h"
@@ -173,8 +167,7 @@ static champsim::type_registry::register_type_helper reg_null("null", parse_null
 static champsim::type_registry::register_type_helper reg_access_types("access_types", parse_access_types);
 
 // ====== Default kind converters ======
-// These cover the JSON value kinds that environments encounter for plain
-// scalars and arrays. Modules can override any of them via register_kind.
+// Cover plain scalars/arrays; modules can override any via register_kind.
 
 namespace
 {
@@ -191,8 +184,7 @@ std::any kind_string(const json& v) { return v.get<std::string>(); }
 // {anything}        →  raw nlohmann::json (caller may further process)
 std::any kind_object_passthrough(const json& v) { return v; }
 
-// Arrays: try a few common shapes, otherwise fall back to raw json so the
-// caller (e.g. modules expecting the underlying nlohmann::json) can handle it.
+// Arrays: try common shapes, else fall back to raw json for the caller.
 std::any kind_array(const json& v)
 {
   if (!v.empty() && v[0].is_string()) {

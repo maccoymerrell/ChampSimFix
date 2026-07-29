@@ -24,30 +24,8 @@
 namespace champsim
 {
 
-/**
- * The provenance of a unit of work: which consumer injected it into the
- * system, and which stream of work it belongs to.
- *
- * These are two distinct identities that only coincide in the classic
- * one-trace-per-core shape:
- *
- *  - The CONSUMER is the hardware context (a core, an injector, a port).
- *    Consumer ids are dense in [0, num_consumers). Schemes partitioning a
- *    hardware resource key on it: per-"core" replacement tables, prefetch
- *    attribution, cache stat keys, phase tracking.
- *  - The STREAM is the workload / address space the token belongs to.
- *    Translation keys on it: virtual memory, page-table walks, TLB tagging.
- *    This is the ASID. A stream defaults to its consumer's id, so the pair
- *    stays degenerate unless a config says otherwise (two traces into one
- *    core, a stream migrating between consumers, ...).
- *
- * Access goes through methods rather than bare fields, under both the
- * canonical names (consumer(), stream()) and the domain-familiar aliases
- * (cpu(), asid()) — the same identity either way. The methods are the seam:
- * schemes read the coordinate they mean, and future behaviors (remapping,
- * validation, virtualization layers) can be patched in here without touching
- * every access site.
- */
+// Provenance of a work unit: the CONSUMER (hardware context — core/injector/port, dense in [0,num_consumers), aliased cpu()) and the STREAM
+// (workload/address space, the ASID, aliased asid()), equal in the one-trace-per-core case. Access via methods so future remapping lands in one place.
 class origin
 {
 public:
@@ -66,8 +44,7 @@ public:
   [[nodiscard]] constexpr id_type consumer() const { return consumer_; }
   [[nodiscard]] constexpr id_type stream() const { return stream_; }
 
-  // Domain-familiar aliases: the hardware context is what "cpu" always
-  // meant in ChampSim's module hooks; the stream is the address space id.
+  // Domain-familiar aliases: cpu() is the hardware context, asid() the address space id.
   [[nodiscard]] constexpr id_type cpu() const { return consumer(); }
   [[nodiscard]] constexpr id_type asid() const { return stream(); }
 

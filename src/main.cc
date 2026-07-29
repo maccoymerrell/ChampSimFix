@@ -43,7 +43,6 @@ std::vector<phase_stats> main(modules::environment_module& env, std::vector<phas
 void assign_identities(modules::environment_module& env);
 } // namespace champsim
 
-// Collect all $varname references from a JSON document (recursive).
 static void collect_config_vars(const nlohmann::json& node, std::set<std::string>& out_vars)
 {
   if (node.is_string()) {
@@ -87,8 +86,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 
   app.add_option("--listeners", requested_listeners, "A list of the listeners to be attached to the run");
 
-  // Parse CLI first pass to read the config file path; the second pass uses
-  // the resolved core count for trace validation.
+  // First pass reads the config file path; the second uses the resolved core count for trace validation.
   app.allow_extras(true);
   try {
     app.parse(argc, argv);
@@ -96,14 +94,11 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     return app.exit(e);
   }
 
-  // Enable dump mode if requested
   if (knob_dump)
     fmt::print("=== Module Builder Dump ===\n");
 
-  // Read JSON config from file or stdin
   nlohmann::json config_json;
   if (config_file_path == "-") {
-    // Explicit stdin request
     try {
       config_json = nlohmann::json::parse(std::cin);
     } catch (const nlohmann::json::parse_error& e) {
@@ -124,27 +119,19 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     }
   }
 
-  // Print config description if present
   if (config_json.contains("_description") && config_json["_description"].is_string()) {
     fmt::print(stderr, "\nConfig: {}\n\n", config_json["_description"].get<std::string>());
   }
 
-  // Parse config for system parameters
   std::string env_model = config_json.value("environment", std::string("LEGACY_ENVIRONMENT"));
   bool is_legacy_env = (env_model == "LEGACY_ENVIRONMENT");
-  // The CLI expects one trace per workload SOURCE. The legacy environment
-  // spawns one source per core, so its source count is num_cores by
-  // construction; explicit environments declare sources and accept any count.
-  // The environment publishes all system-wide globals during construction.
+  // CLI expects one trace per workload SOURCE. Legacy env spawns one source per core (count is num_cores); explicit envs allow any count.
   std::size_t legacy_num_sources = config_json.value("num_cores", 1u);
 
-  // Root-level "cycle_skip" (default true) lets idle operables skip cycles via
-  // poll_cycle(); false forces operate() every cycle (A/B verification switch).
+  // "cycle_skip" (default true) lets idle operables skip via poll_cycle(); false forces operate() every cycle (A/B switch).
   champsim::operable::set_skip_enabled(config_json.value("cycle_skip", true));
 
-  // Scan config for $varname references not covered by explicit CLI options.
-  // Each unique varname becomes a --varname option in the second pass and is
-  // substituted into module parameters via cli_args.
+  // Each config $varname not covered by an explicit CLI option becomes a --varname option in the second pass (substituted via cli_args).
   static const std::set<std::string> builtin_cli_vars = {"warmup_instructions", "simulation_instructions", "cloudsuite"};
   std::set<std::string> raw_config_vars;
   collect_config_vars(config_json, raw_config_vars);
@@ -158,7 +145,6 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     dynamic_cli_vars[vn] = "";
   }
 
-  // Second CLI parse with full validation
   bool hide_heartbeat = false;
   CLI::App app2{"A microarchitecture simulator for research and education"};
   app2.add_option("--config", config_file_path, "Path to the JSON configuration file");
@@ -178,8 +164,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
       app2.add_option("--json", json_file_name, "The name of the file to receive JSON output. If no name is specified, stdout will be used")->expected(0, 1);
   app2.add_option("--listeners", requested_listeners, "A list of the listeners to be attached to the run");
 
-  // Legacy env requires exactly legacy_num_sources traces; explicit envs allow any number
-  // (traces resolve via $traceN variables in the config).
+  // Legacy env requires exactly legacy_num_sources traces; explicit envs allow any number (traces resolve via $traceN vars).
   auto* trace_option = app2.add_option("traces", trace_names, "The paths to the traces");
   if (is_legacy_env) {
     trace_option->required()->expected(static_cast<int>(legacy_num_sources))->check(CLI::ExistingFile);
@@ -206,8 +191,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     warmup_instructions = simulation_instructions / 5;
   }
 
-  // Construct the environment via the module system (after all CLI args are known)
-  // Build a CLI args map for $-variable substitution in explicit configs
+  // CLI args map for $-variable substitution, now that all CLI args are known.
   nlohmann::json cli_args = nlohmann::json::object();
   cli_args["warmup_instructions"] = warmup_instructions;
   cli_args["simulation_instructions"] = simulation_instructions;
@@ -242,10 +226,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   if (knob_dump)
     fmt::print("=== End Module Builder Dump ===\n");
 
-  // Assemble the active listener set: config-declared listeners plus models
-  // requested via --listeners. If the config declares none, create a default
-  // HEARTBEAT listener (interval from "heartbeat_frequency") unless
-  // --hide-heartbeat suppresses it.
+  // Active listeners = config-declared plus --listeners models; if none declared, default to a HEARTBEAT listener unless --hide-heartbeat.
   std::vector<champsim::modules::listener*> active_listeners;
   for (champsim::modules::listener& l : gen_environment->typed_view<champsim::modules::listener>("listener")) {
     active_listeners.push_back(&l);
@@ -266,9 +247,8 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   }
   champsim::modules::set_active_listeners(std::move(active_listeners));
 
-  // Phase list from the environment's phase controllers: the first non-empty
-  // list owns the run structure; a second that disagrees is a config error.
-  // Otherwise fall back to the classic warmup+sim pair driven by -w/-i.
+  // Phase list from the environment's phase controllers: the first non-empty list owns the run structure, a second that
+  // disagrees is a config error. Else fall back to the classic warmup+sim pair driven by -w/-i.
   std::vector<champsim::phase_info> phases;
   for (champsim::modules::phase_controller& pc : gen_environment->typed_view<champsim::modules::phase_controller>("phase_controller")) {
     auto controller_phases = pc.get_phases();

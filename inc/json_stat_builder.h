@@ -24,33 +24,8 @@
 namespace champsim
 {
 
-/**
- * Fluent helper for assembling JSON stat output from a module.
- *
- * Each module that inherits ``module_stat`` implements
- * ``json_stats(json_stat_builder&, bool roi)`` and uses ``add()``,
- * ``group()``, and ``push_back()`` to populate a JSON object in the
- * standardized format. The framework wraps every dump in a section
- * keyed by ``[interface][model][name]`` so the merged output across all
- * modules has a uniform shape:
- *
- *     {
- *       "core":  { "DEFAULT_CORE":  { "cpu0":      {...} } },
- *       "cache": { "DEFAULT_CACHE": { "cpu0_L1D":  {...},
- *                                     "cpu0_L1I":  {...} } }
- *     }
- *
- * Usage in a module's ``json_stats`` override:
- *
- *     void my_pref::json_stats(champsim::json_stat_builder& b, bool roi) const {
- *       const auto& s = roi ? roi_stats : sim_stats;
- *       b.add("issued", s.num_issued)
- *        .add("useful", s.num_useful);
- *       auto sub = b.group("by_type");
- *       sub.add("LOAD", s.load_pf)
- *          .add("RFO",  s.rfo_pf);
- *     }
- */
+// Fluent helper for building a module's JSON stats via add()/group()/push_back();
+// the framework wraps each dump under [interface][model][name].
 class json_stat_builder
 {
 public:
@@ -64,13 +39,7 @@ public:
       *node_ = nlohmann::json::object();
   }
 
-  /**
-   * Add a named stat to the current object.
-   *
-   * Any type accepted by ``nlohmann::json`` (numbers, strings, vectors,
-   * maps, types with ``to_json`` overloads) is supported. Returns
-   * ``*this`` for fluent chaining.
-   */
+  // Add a named stat (any nlohmann::json-compatible type); returns *this for chaining.
   template <typename T>
   json_stat_builder& add(const std::string& name, T&& value)
   {
@@ -78,12 +47,7 @@ public:
     return *this;
   }
 
-  /**
-   * Begin a nested object under ``name`` and return a builder writing into it.
-   *
-   * The returned builder borrows the parent node, so writes through it appear
-   * in the parent under the same key.
-   */
+  // Begin a nested object under name; returned builder borrows the parent node.
   json_stat_builder group(const std::string& name)
   {
     auto& sub = (*node_)[name];

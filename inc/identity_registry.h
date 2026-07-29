@@ -25,13 +25,9 @@
 
 namespace champsim
 {
-/**
- * Name <-> id association for framework-assigned identities. Identities never
- * appear in configs; this registry (populated by assign_identities() at startup)
- * lets user-facing code translate between a consumer/stream id and the configured
- * instance names. A consumer id maps to one name; a stream id maps to one or more
- * source names (sources sharing a "stream" label share one id).
- */
+// Name<->id map for framework-assigned identities (never in configs, populated
+// by assign_identities()): a consumer id maps to one name, a stream id to the
+// source names sharing its "stream" label.
 class identity_registry
 {
   std::map<int, std::string> consumer_names_;
@@ -52,7 +48,6 @@ public:
     stream_sources_[stream].push_back(std::move(name));
   }
 
-  /** The configured name of the consumer holding this id. */
   std::optional<std::string> consumer_name(int id) const
   {
     if (auto it = consumer_names_.find(id); it != std::end(consumer_names_)) {
@@ -61,7 +56,6 @@ public:
     return std::nullopt;
   }
 
-  /** The id assigned to the consumer configured under this name. */
   std::optional<int> consumer_id(const std::string& name) const
   {
     if (auto it = consumer_ids_.find(name); it != std::end(consumer_ids_)) {
@@ -70,7 +64,6 @@ public:
     return std::nullopt;
   }
 
-  /** The configured names of every source stamping this stream. */
   std::vector<std::string> stream_sources(uint32_t stream) const
   {
     if (auto it = stream_sources_.find(stream); it != std::end(stream_sources_)) {
@@ -79,7 +72,6 @@ public:
     return {};
   }
 
-  /** The stream assigned to the source configured under this name. */
   std::optional<uint32_t> stream_id(const std::string& name) const
   {
     if (auto it = stream_ids_.find(name); it != std::end(stream_ids_)) {

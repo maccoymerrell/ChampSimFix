@@ -1,9 +1,5 @@
-/*
- * Static formatters for the built-in module interfaces. The
- * implementations (CACHE, O3_CPU, MEMORY_CONTROLLER) inherit
- * ``module_stat`` and route ``print_stats`` / ``json_stats`` through
- * these helpers so the formatting logic lives next to the data.
- */
+// Static formatters for the built-in module interfaces (CACHE, O3_CPU,
+// MEMORY_CONTROLLER), keeping formatting logic next to the data.
 
 #include <algorithm>
 #include <array>
@@ -32,9 +28,7 @@ auto print_ratio(N num, D denom)
 }
 } // namespace
 
-// ============================================================================
 // core_module formatting
-// ============================================================================
 
 std::vector<std::string> champsim::modules::core_module::format_plaintext(const stats_type& stats)
 {
@@ -84,9 +78,8 @@ void champsim::modules::core_module::format_json(const stats_type& stats, champs
 // source_consumer hooks for phase messaging
 uint64_t champsim::modules::core_module::sim_progress() const { return sim_instr(); }
 
-// Health policy for instruction consumers. The rate floors are the classic
-// livelock thresholds that previously lived in the phase controller: a
-// retirement rate at or below 0.01 IPC over the check window is a stall.
+// Health policy for instruction consumers: retirement rate <= 0.01 IPC over
+// the check window is a stall (the classic livelock thresholds).
 champsim::modules::source_consumer::source_health champsim::modules::core_module::check_health(uint64_t elapsed)
 {
   const uint64_t progress = sim_progress();
@@ -128,9 +121,7 @@ std::string champsim::modules::core_module::progress_message(uint64_t total_prog
                      interval_rate, cumulative_rate);
 }
 
-// ============================================================================
 // cache_module formatting
-// ============================================================================
 
 std::vector<std::string> champsim::modules::cache_module::format_plaintext(const stats_type& stats)
 {
@@ -242,9 +233,7 @@ void champsim::modules::cache_module::format_json(const stats_type& stats, champ
   }
 }
 
-// ============================================================================
 // memory_controller_module formatting
-// ============================================================================
 
 std::vector<std::string> champsim::modules::memory_controller_module::format_plaintext(const stats_type& stats)
 {
