@@ -225,7 +225,7 @@ class wrong_path_tracereader
     [[nodiscard]] uint64_t parse_uleb()
     {
       std::vector<char> chunks;
-      while (auto byte = decompress()) {
+      while (const auto byte = decompress()) {
         chunks.emplace_back(byte.value());
         if (!(byte.value() & 0x80))
           break;
@@ -243,7 +243,7 @@ class wrong_path_tracereader
     [[nodiscard]] uint64_t parse_sleb()
     {
       std::vector<char> chunks;
-      while (auto byte = decompress()) {
+      while (const auto byte = decompress()) {
         chunks.emplace_back(byte.value());
         if (!(byte.value() & 0x80))
           break;
@@ -261,7 +261,7 @@ class wrong_path_tracereader
     [[nodiscard]] std::bitset<512> parse_sleb_wide()
     {
       std::vector<char> chunks;
-      while (auto byte = decompress()) {
+      while (const auto byte = decompress()) {
         chunks.emplace_back(byte.value());
         if (!(byte.value() & 0x80))
           break;
@@ -740,8 +740,8 @@ class wrong_path_tracereader
 
     // Persistent overlay
     struct overlay_key {
-      uint32_t template_id;
-      uint64_t ipos;
+      const uint32_t template_id;
+      const uint64_t ipos;
 
       overlay_key(const uint32_t tid, const uint64_t ip) : template_id(tid), ipos(ip) {}
       [[nodiscard]] bool operator<(const overlay_key& other) const noexcept { return std::tie(template_id, ipos) < std::tie(other.template_id, other.ipos); }
@@ -961,27 +961,6 @@ class wrong_path_tracereader
           br_type = branch_type::BRANCH_OTHER;
       }
 
-      std::vector<std::string> dst_reg_names;
-      for (const auto& reg : instruction_template.dst_regs)
-        dst_reg_names.emplace_back(header.ids.at("reg").right.at(reg));
-      std::vector<std::string> src_reg_names;
-      for (const auto& reg : instruction_template.src_regs)
-        src_reg_names.emplace_back(header.ids.at("reg").right.at(reg));
-      std::string branch_type_name = "NOT_BRANCH";
-      if (br_type == branch_type::BRANCH_DIRECT_JUMP) {
-        branch_type_name = "BRANCH_DIRECT_JUMP";
-      } else if (br_type == branch_type::BRANCH_INDIRECT) {
-        branch_type_name = "BRANCH_INDIRECT";
-      } else if (br_type == branch_type::BRANCH_DIRECT_CALL) {
-        branch_type_name = "BRANCH_DIRECT_CALL";
-      } else if (br_type == branch_type::BRANCH_INDIRECT_CALL) {
-        branch_type_name = "BRANCH_INDIRECT_CALL";
-      } else if (br_type == branch_type::BRANCH_RETURN) {
-        branch_type_name = "BRANCH_RETURN";
-      } else if (br_type == branch_type::BRANCH_OTHER) {
-        branch_type_name = "BRANCH_OTHER";
-      }
-
       // TODO: Set the next pc correctly
       next_pc = 0xdeadbeef;
 
@@ -1026,8 +1005,8 @@ class wrong_path_tracereader
       const std::size_t num_instr = instructions.size();
       std::vector<ooo_model_instr> retvec;
       retvec.reserve(num_instr);
-      auto pc = bb_template.start_pc;
-      auto next_pc = pc; // The PC for the instruction after this instruction
+      uint64_t pc = bb_template.start_pc;
+      uint64_t next_pc = pc; // The PC for the instruction after this instruction
       for (uint64_t ipos = 0; ipos < num_instr; ipos++) {
         const overlay_key key(entry.template_id, ipos);
         retvec.emplace_back(generate_instruction<false>(pc, instructions[ipos], cp_overlay[key], next_pc));
@@ -1532,7 +1511,7 @@ void wrong_path_tracereader::verify_trace_file_type() const
 
 [[nodiscard]] std::filesystem::path wrong_path_tracereader::create_extract_dir() const
 {
-  std::filesystem::path base_extract_dir(".temp_extracted_trace");
+  const std::filesystem::path base_extract_dir(".temp_extracted_trace");
   std::filesystem::path extract_dir = base_extract_dir;
   uint64_t suffix = 0;
   while (std::filesystem::is_directory(extract_dir)) {
