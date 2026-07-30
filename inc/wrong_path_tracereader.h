@@ -55,6 +55,7 @@ class wrong_path_tracereader
   std::string trace_file;
   std::filesystem::path trace_extract_dir;
   bool moved = false;
+  bool parsed_header = false; // The trace header is parsed lazily. This variable tracks whether or not the header has been parsed yet
 
   void cleanup() const { std::filesystem::remove_all(trace_extract_dir); }
 
@@ -665,7 +666,7 @@ class wrong_path_tracereader
     }
 
   public:
-    header_parser(const std::string& header_file) : compressed_header_stream(header_file) {}
+    header_parser(const std::string& header_file) noexcept : compressed_header_stream(header_file) {}
     void parse() override
     {
       parse_prolog();
@@ -743,7 +744,7 @@ class wrong_path_tracereader
       const uint32_t template_id;
       const uint64_t ipos;
 
-      overlay_key(const uint32_t tid, const uint64_t ip) : template_id(tid), ipos(ip) {}
+      overlay_key(const uint32_t tid, const uint64_t ip) noexcept : template_id(tid), ipos(ip) {}
       [[nodiscard]] bool operator<(const overlay_key& other) const noexcept { return std::tie(template_id, ipos) < std::tie(other.template_id, other.ipos); }
       std::string format() const noexcept { return fmt::format("(Template ID = {}, Instruction Position = {})", template_id, ipos); }
     };
@@ -1417,6 +1418,9 @@ class wrong_path_tracereader
 public:
   [[nodiscard]] ooo_model_instr operator()(const uint64_t next_pc = 0xdeadbeef)
   {
+    if (!parsed_header)
+      parse_trace();
+
     const ooo_model_instr& instr = body_stream->read(next_pc);
 
     fmt::print(stderr, "{:x}: branch = {}, taken = {}, dst regs = {}, src regs = {}\n", instr.ip.to<uint64_t>(), instr.is_branch, instr.branch_taken,
@@ -1425,28 +1429,28 @@ public:
     return instr;
   }
 
-  wrong_path_tracereader(const std::string& tf, const uint8_t cpu_idx) : cpu(cpu_idx), trace_file(tf)
-  {
-    try {
-      parse_trace();
-    } catch (const std::exception& e) {
-      fmt::print(stderr, fmt::format("[ERROR] Failed to initialize trace reader\n\n {}", e.what()));
-      cleanup();
-      std::exit(1);
-    }
-  }
+  wrong_path_tracereader(const std::string& tf, const uint8_t cpu_idx) noexcept : cpu(cpu_idx), trace_file(tf) {}
 
   void move_from(champsim::wrong_path_tracereader&& other)
   {
     if (other.moved)
       throw std::runtime_error("[ERROR] Moving from a moved-from object");
 
-    this->cleanup();     // Reset the state of this object
-    this->moved = false; // Reset moved-from state
+    // Reset state
+    this->cleanup();
+    this->moved = false;
+    this-> parsed_header = false;
+
+    // Move the data from other to this
     this->cpu = std::move(other.cpu);
     this->trace_file = std::move(other.trace_file);
     this->trace_extract_dir = std::move(other.trace_extract_dir);
-    this->header_stream = std::move(other.header_stream);
+    if (other.parsed_header) {
+      this->header_stream = std::move(other.header_stream);
+      this->parsed_header = true;
+    } else {
+      parse_trace();
+    }
     this->construct_body_stream(); // Create a fresh copy of the body stream
     other.moved = true;            // Prevent deleting the extracted trace directory
   }
@@ -1483,6 +1487,7 @@ void wrong_path_tracereader::parse_trace()
   extract_trace();
   construct_header_stream();
   header_stream->parse();
+  parsed_header = true;
   construct_body_stream();
 }
 
