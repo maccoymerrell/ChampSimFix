@@ -1459,6 +1459,9 @@ public:
 
   void move_from(champsim::wrong_path_tracereader&& other)
   {
+    if (other.moved)
+      throw std::runtime_error("[ERROR] Moving from a moved-from object");
+
     this->cleanup();     // Reset the state of this object
     this->moved = false; // Reset moved-from state
     this->cpu = std::move(other.cpu);
@@ -1474,7 +1477,8 @@ public:
   wrong_path_tracereader& operator=(wrong_path_tracereader& other) = default;
   wrong_path_tracereader& operator=(wrong_path_tracereader&& other)
   {
-    move_from(std::forward<champsim::wrong_path_tracereader>(other));
+    if (this != &other)
+      move_from(std::forward<champsim::wrong_path_tracereader>(other));
     return *this;
   }
 
