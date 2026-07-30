@@ -182,7 +182,6 @@
       "module": "page_table_walker",
       "model": "DEFAULT_PTW",
       "clock_period": {"time": "250p"},
-      "asid": 0,
       "mshr_size": 5,
       "latency": 0,
       "max_tag_check": {"bandwidth": 2},
