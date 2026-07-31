@@ -69,38 +69,38 @@ class wrong_path_tracereader
   void construct_body_stream();
 
   // File type verification utilities
-  static constexpr char tar_magic[5] = {'u', 's', 't', 'a', 'r'};
-  static constexpr std::size_t tar_magic_position = 257;
-  static constexpr char gzip_magic[2] = {'\x1f', '\x1b'};
-  static constexpr std::size_t gzip_magic_position = 0;
-  static constexpr char lzma_magic[6] = {'\xfd', '\x37', '\x7a', '\x58', '\x5a', '\x00'};
-  static constexpr std::size_t lzma_magic_position = 0;
-  static constexpr char bzip2_magic[2] = {'\x42', '\x5a'};
-  static constexpr std::size_t bzip2_magic_position = 0;
-  static constexpr char zstd_magic[4] = {'\x28', '\xb5', '\x2f', '\xfd'};
-  static constexpr std::size_t zstd_magic_position = 0;
-  static constexpr char lz4_magic[4] = {'\x04', '\x22', '\x4d', '\x18'};
-  static constexpr std::size_t lz4_magic_position = 0;
+  static constexpr const char tar_magic[5] = {'u', 's', 't', 'a', 'r'};
+  static constexpr const std::size_t tar_magic_position = 257;
+  static constexpr const char gzip_magic[2] = {'\x1f', '\x1b'};
+  static constexpr const std::size_t gzip_magic_position = 0;
+  static constexpr const char lzma_magic[6] = {'\xfd', '\x37', '\x7a', '\x58', '\x5a', '\x00'};
+  static constexpr const std::size_t lzma_magic_position = 0;
+  static constexpr const char bzip2_magic[2] = {'\x42', '\x5a'};
+  static constexpr const std::size_t bzip2_magic_position = 0;
+  static constexpr const char zstd_magic[4] = {'\x28', '\xb5', '\x2f', '\xfd'};
+  static constexpr const std::size_t zstd_magic_position = 0;
+  static constexpr const char lz4_magic[4] = {'\x04', '\x22', '\x4d', '\x18'};
+  static constexpr const std::size_t lz4_magic_position = 0;
 
   template <const char* magic, const std::size_t magic_length, const std::size_t position>
-  bool check_file_type(const std::string& file_name) const;
+  constexpr static bool check_file_type(const std::string& file_name);
 
-  std::function<bool(const std::string&)> is_tar = [this] [[nodiscard]] (const std::string& file_name) -> bool {
+  std::function<bool(const std::string&)> is_tar = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
     return check_file_type<tar_magic, sizeof(tar_magic), tar_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_gzip = [this] [[nodiscard]] (const std::string& file_name) -> bool {
+  std::function<bool(const std::string&)> is_gzip = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
     return (file_name.substr(std::size(file_name) - 2) == "gz") && check_file_type<gzip_magic, sizeof(gzip_magic), gzip_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_lzma = [this] [[nodiscard]] (const std::string& file_name) -> bool {
+  std::function<bool(const std::string&)> is_lzma = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
     return (file_name.substr(std::size(file_name) - 2) == "xz") && check_file_type<lzma_magic, sizeof(lzma_magic), lzma_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_bzip2 = [this] [[nodiscard]] (const std::string& file_name) -> bool {
+  std::function<bool(const std::string&)> is_bzip2 = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
     return (file_name.substr(std::size(file_name) - 3) == "bz2") && check_file_type<bzip2_magic, sizeof(bzip2_magic), bzip2_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_zstd = [this] [[nodiscard]] (const std::string& file_name) -> bool {
+  std::function<bool(const std::string&)> is_zstd = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
     return (file_name.substr(std::size(file_name) - 3) == "zst") && check_file_type<zstd_magic, sizeof(zstd_magic), zstd_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_lz4 = [this] [[nodiscard]] (const std::string& file_name) -> bool {
+  std::function<bool(const std::string&)> is_lz4 = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
     return (file_name.substr(std::size(file_name) - 3) == "lz4") && check_file_type<lz4_magic, sizeof(lz4_magic), lz4_magic_position>(file_name);
   };
 
@@ -114,7 +114,7 @@ class wrong_path_tracereader
     decltype(decompressed_buffer.end()) max_buffer_iter = decompressed_buffer.begin();
 
     // Returns the next byte from the input stream
-    [[nodiscard]] std::optional<char> decompress() noexcept
+    [[nodiscard]] constexpr std::optional<char> decompress() noexcept
     {
       // No more bytes left
       if ((buffer_iter >= max_buffer_iter) && stream.eof()) {
@@ -151,7 +151,7 @@ class wrong_path_tracereader
       return {front};
     }
 
-    [[nodiscard]] uint64_t uleb_decoder(std::vector<char>& chunks) const noexcept
+    [[nodiscard]] constexpr uint64_t uleb_decoder(std::vector<char>& chunks) const noexcept
     {
       uint64_t retval = 0;
       uint64_t chunk_id = 0;
@@ -165,7 +165,7 @@ class wrong_path_tracereader
       return retval;
     }
 
-    [[nodiscard]] int64_t sleb_decoder(std::vector<char>& chunks) const noexcept
+    [[nodiscard]] constexpr int64_t sleb_decoder(std::vector<char>& chunks) const noexcept
     {
       int64_t retval = 0;
       uint64_t chunk_id = 0;
@@ -189,7 +189,7 @@ class wrong_path_tracereader
     }
 
     // Parses a SLEB_WIDE into std::bitset
-    [[nodiscard]] std::bitset<512> sleb_wide_decoder(const std::vector<char>& chunks) const noexcept
+    [[nodiscard]] constexpr std::bitset<512> sleb_wide_decoder(const std::vector<char>& chunks) const noexcept
     {
       std::size_t bit_idx = 0;
       const bool msb = static_cast<bool>(chunks.back() & 0x40);
@@ -211,9 +211,9 @@ class wrong_path_tracereader
   public:
     uint64_t total_bytes_read = 0; // Number of bytes read from the stream so far
     bool eof = false;              // Set to true if no more bytes can be returned
-    stream_reader(const std::string& stream_name) noexcept : stream(stream_name) {}
+    constexpr stream_reader(const std::string& stream_name) noexcept : stream(stream_name) {}
 
-    [[nodiscard]] char read()
+    [[nodiscard]] constexpr char read()
     {
       const auto byte = decompress();
       if (!byte)
@@ -223,7 +223,7 @@ class wrong_path_tracereader
     }
 
     // Reads a ULEB from the stream
-    [[nodiscard]] uint64_t parse_uleb()
+    [[nodiscard]] constexpr uint64_t parse_uleb()
     {
       std::vector<char> chunks;
       while (const auto byte = decompress()) {
@@ -241,7 +241,7 @@ class wrong_path_tracereader
     }
 
     // Reads a SLEB from the stream
-    [[nodiscard]] uint64_t parse_sleb()
+    [[nodiscard]] constexpr uint64_t parse_sleb()
     {
       std::vector<char> chunks;
       while (const auto byte = decompress()) {
@@ -259,7 +259,7 @@ class wrong_path_tracereader
     }
 
     // Reads a SLEB_WIDE from the stream
-    [[nodiscard]] std::bitset<512> parse_sleb_wide()
+    [[nodiscard]] constexpr std::bitset<512> parse_sleb_wide()
     {
       std::vector<char> chunks;
       while (const auto byte = decompress()) {
@@ -277,7 +277,7 @@ class wrong_path_tracereader
     }
 
     // Reads a string from the stream
-    [[nodiscard]] std::string parse_string()
+    [[nodiscard]] constexpr std::string parse_string()
     {
       const std::size_t string_size = static_cast<std::size_t>(parse_uleb());
       std::string retval = "";
@@ -287,7 +287,7 @@ class wrong_path_tracereader
     }
 
     // Reads a chunk of bytes from the stream
-    [[nodiscard]] std::vector<char> read_bytes(const std::size_t num_bytes)
+    [[nodiscard]] constexpr std::vector<char> read_bytes(const std::size_t num_bytes)
     {
       std::vector<char> retvec;
       for (std::size_t bytes_read = 0; bytes_read != num_bytes; bytes_read++)
@@ -296,7 +296,7 @@ class wrong_path_tracereader
     }
 
     // Reads a f64 from the stream
-    [[nodiscard]] double parse_f64()
+    [[nodiscard]] constexpr double parse_f64()
     {
       double retval = 0.0f;
       const auto bytes = read_bytes(8);
@@ -404,7 +404,7 @@ class wrong_path_tracereader
   private:
     stream_reader<HeaderCompressedType> compressed_header_stream;
 
-    void parse_fixed_size_prolog()
+    constexpr void parse_fixed_size_prolog()
     {
       const std::size_t bytes_to_read = sizeof(prolog.fixed_size.magic_bytes) + sizeof(prolog.fixed_size.isa) + sizeof(prolog.fixed_size.flags);
 
@@ -418,7 +418,7 @@ class wrong_path_tracereader
         throw std::runtime_error("[ERROR] Can't verify header integrity. Magic bytes don't match");
     }
 
-    void parse_variable_size_prolog()
+    constexpr void parse_variable_size_prolog()
     {
       prolog.start_instructions = compressed_header_stream.parse_uleb();
       prolog.warmup_instructions = compressed_header_stream.parse_uleb();
@@ -431,13 +431,13 @@ class wrong_path_tracereader
                  prolog.start_instructions, prolog.warmup_instructions, prolog.total_target_instructions, prolog.simpoint_weight);
     }
 
-    void parse_prolog()
+    constexpr void parse_prolog()
     {
       parse_fixed_size_prolog();
       parse_variable_size_prolog();
     }
 
-    void parse_prolog_strings()
+    constexpr void parse_prolog_strings()
     {
       prolog.command = compressed_header_stream.parse_string();
       prolog.datetime = compressed_header_stream.parse_string();
@@ -447,7 +447,7 @@ class wrong_path_tracereader
       fmt::print(stderr, "Command = {}\nDatetime = {}\nComment = {}\nTarget Name = {}\n", prolog.command, prolog.datetime, prolog.comment, prolog.target_name);
     }
 
-    void parse_encoding_maps()
+    constexpr void parse_encoding_maps()
     {
       const uint64_t encoding_size = compressed_header_stream.parse_uleb();
       const uint64_t initial_bytes_read = compressed_header_stream.total_bytes_read;
@@ -485,7 +485,7 @@ class wrong_path_tracereader
       }
     }
 
-    [[nodiscard]] Dependency parse_dependency(const uint8_t n_dst, const uint8_t max_dep_stores, const uint8_t max_dep_loads)
+    [[nodiscard]] constexpr Dependency parse_dependency(const uint8_t n_dst, const uint8_t max_dep_stores, const uint8_t max_dep_loads)
     {
       // Ensure that the relevant encodings are available
       using namespace wrong_path_trace_constants;
@@ -524,7 +524,7 @@ class wrong_path_tracereader
       return dep;
     }
 
-    [[nodiscard]] Instruction parse_instruction()
+    [[nodiscard]] constexpr Instruction parse_instruction()
     {
       Instruction instr;
       instr.pc_delta = compressed_header_stream.parse_uleb();
@@ -569,7 +569,7 @@ class wrong_path_tracereader
       return instr;
     }
 
-    [[nodiscard]] Profile parse_profile(const uint64_t n_targets, const uint64_t num_instr)
+    [[nodiscard]] constexpr Profile parse_profile(const uint64_t n_targets, const uint64_t num_instr)
     {
       Profile pf;
       pf.exec_cp = compressed_header_stream.parse_uleb();
@@ -623,7 +623,7 @@ class wrong_path_tracereader
       return pf;
     }
 
-    void parse_one_template()
+    constexpr void parse_one_template()
     {
       const uint64_t template_size = compressed_header_stream.parse_uleb();
       const uint64_t bytes_read = compressed_header_stream.total_bytes_read;
@@ -656,7 +656,7 @@ class wrong_path_tracereader
             fmt::format("[ERROR] Malformed template detected. Expected Size = {}, Detected Size = {}. Exiting...", template_size, detected_template_size));
     }
 
-    void parse_templates()
+    constexpr void parse_templates()
     {
       const uint64_t num_templates = compressed_header_stream.parse_uleb();
       fmt::print(stderr, "Reading {} templates\n", num_templates);
@@ -666,8 +666,8 @@ class wrong_path_tracereader
     }
 
   public:
-    header_parser(const std::string& header_file) noexcept : compressed_header_stream(header_file) {}
-    void parse() override
+    constexpr header_parser(const std::string& header_file) noexcept : compressed_header_stream(header_file) {}
+    constexpr void parse() override
     {
       parse_prolog();
       parse_prolog_strings();
@@ -771,7 +771,7 @@ class wrong_path_tracereader
     std::set<uint64_t> valid_body_tags;
 
     template <std::size_t width>
-    [[nodiscard]] std::bitset<width> add_bitset(std::bitset<width> b1, std::bitset<width> b2) const noexcept
+    [[nodiscard]] constexpr std::bitset<width> add_bitset(std::bitset<width> b1, std::bitset<width> b2) const noexcept
     {
       std::bitset<width> retval(0);
       constexpr uint64_t bitmask = 0x00000000'ffffffff;
@@ -801,7 +801,7 @@ class wrong_path_tracereader
       return retval;
     }
 
-    void verify_integrity()
+    constexpr void verify_integrity()
     {
       uint32_t trace_magic_bytes;
       const auto buffer = compressed_body_stream.read_bytes(sizeof(trace_magic_bytes));
@@ -970,7 +970,7 @@ class wrong_path_tracereader
                              src_mem, instruction_template.instr_size);
     }
 
-    void apply_deltas_to_overlay(const delta_section& delta_sec, OverlayType& overlay, const uint32_t template_id, const std::size_t num_instrs)
+    constexpr void apply_deltas_to_overlay(const delta_section& delta_sec, OverlayType& overlay, const uint32_t template_id, const std::size_t num_instrs)
     {
       const auto& deltas = delta_sec.records;
       for (const auto& delta : deltas) {
@@ -987,7 +987,7 @@ class wrong_path_tracereader
     }
 
     // Generates trace inferred wrong path instructions starting from next_bb_pc
-    [[nodiscard]] std::vector<ooo_model_instr> continue_wp([[maybe_unused]] const uint64_t nexr_bb_pc)
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> continue_wp([[maybe_unused]] const uint64_t nexr_bb_pc)
     {
       // TODO: Finish this
 #warning "Wrong path not implemented yet"
@@ -995,7 +995,7 @@ class wrong_path_tracereader
       return {};
     }
 
-    [[nodiscard]] std::vector<ooo_model_instr> continue_cp(const body_entry& entry)
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> continue_cp(const body_entry& entry)
     {
       const auto& bb_template = header.templates.at(entry.template_id);
       const auto& instructions = bb_template.instructions;
@@ -1018,7 +1018,7 @@ class wrong_path_tracereader
       return retvec;
     }
 
-    [[nodiscard]] std::vector<ooo_model_instr> start_wp([[maybe_unused]] const body_entry& entry, const uint64_t next_bb_pc = 0xdeadbeef)
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> start_wp([[maybe_unused]] const body_entry& entry, const uint64_t next_bb_pc = 0xdeadbeef)
     {
       if (wp_overlay || wp_regfile)
         throw std::runtime_error(fmt::format("[ERROR] Attempting to instantiate a nested wrong path!"));
@@ -1032,7 +1032,7 @@ class wrong_path_tracereader
       return continue_wp(next_bb_pc);
     }
 
-    [[nodiscard]] std::vector<ooo_model_instr> stop_wp(const body_entry& entry)
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> stop_wp(const body_entry& entry)
     {
       if (!wp_overlay || !wp_regfile)
         throw std::runtime_error(fmt::format("[ERROR] Detected mangled transient state!"));
@@ -1043,7 +1043,7 @@ class wrong_path_tracereader
     }
 
     // Applies the deltas to the overlays and constructs a vector of ooo_model_instr from a single body entry
-    [[nodiscard]] std::vector<ooo_model_instr> construct_instructions(const body_entry& entry, const uint64_t next_bb_pc = 0xdeadbeef)
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> construct_instructions(const body_entry& entry, const uint64_t next_bb_pc = 0xdeadbeef)
     {
       if (header.templates.find(entry.template_id) == header.templates.end())
         throw std::runtime_error(fmt::format("[ERROR] Unknown template ID {} found", entry.template_id));
@@ -1063,13 +1063,13 @@ class wrong_path_tracereader
       return continue_cp(entry);
     }
 
-    void handle_thread_switch()
+    constexpr void handle_thread_switch()
     {
       const int64_t thread_id_delta = compressed_body_stream.parse_sleb();
       previous_thread_id += static_cast<uint32_t>(static_cast<int64_t>(previous_thread_id) + thread_id_delta);
     }
 
-    [[nodiscard]] std::bitset<512> cast_to_bitset(const std::vector<char>& bytes) const noexcept
+    [[nodiscard]] constexpr std::bitset<512> cast_to_bitset(const std::vector<char>& bytes) const noexcept
     {
       std::bitset<512> retval;
       for (const auto& b : bytes) {
@@ -1079,7 +1079,7 @@ class wrong_path_tracereader
       return retval;
     }
 
-    void handle_regfile()
+    constexpr void handle_regfile()
     {
       const uint64_t thread_id = compressed_body_stream.parse_uleb();
       const uint64_t n_present = compressed_body_stream.parse_uleb();
@@ -1091,7 +1091,7 @@ class wrong_path_tracereader
       }
     }
 
-    [[nodiscard]] field_delta_section read_field_delta_section(uint32_t& ipos)
+    [[nodiscard]] constexpr field_delta_section read_field_delta_section(uint32_t& ipos)
     {
       field_delta_section field_delta;
       const uint64_t ipos_delta = compressed_body_stream.parse_uleb();
@@ -1106,7 +1106,7 @@ class wrong_path_tracereader
       return field_delta;
     }
 
-    [[nodiscard]] delta_section read_cp_delta_section()
+    [[nodiscard]] constexpr delta_section read_cp_delta_section()
     {
       const uint64_t section_size = compressed_body_stream.parse_uleb();
       const uint64_t initial_bytes_read = compressed_body_stream.total_bytes_read;
@@ -1124,7 +1124,7 @@ class wrong_path_tracereader
       return cp_delta;
     }
 
-    [[nodiscard]] wp_chain_section read_wp_chain_section()
+    [[nodiscard]] constexpr wp_chain_section read_wp_chain_section()
     {
       const uint64_t section_size = compressed_body_stream.parse_uleb();
       const uint64_t initial_bytes_read = compressed_body_stream.total_bytes_read;
@@ -1143,7 +1143,7 @@ class wrong_path_tracereader
       return wp_chain;
     }
 
-    [[nodiscard]] wp_events_section read_wp_events_section()
+    [[nodiscard]] constexpr wp_events_section read_wp_events_section()
     {
       const uint64_t section_size = compressed_body_stream.parse_uleb();
       const uint64_t initial_bytes_read = compressed_body_stream.total_bytes_read;
@@ -1171,7 +1171,7 @@ class wrong_path_tracereader
       return wp_events;
     }
 
-    void validate_wp(const wp_chain_section& chain, const wp_events_section& events)
+    constexpr void validate_wp(const wp_chain_section& chain, const wp_events_section& events)
     {
       if (events.wp_index.size() == 0)
         return;
@@ -1193,7 +1193,7 @@ class wrong_path_tracereader
       throw std::runtime_error("[ERROR] Illegal wrong path section detected");
     }
 
-    [[nodiscard]] body_entry handle_entry()
+    [[nodiscard]] constexpr body_entry handle_entry()
     {
       body_entry retval;
 
@@ -1216,7 +1216,7 @@ class wrong_path_tracereader
       return retval;
     }
 
-    void validate_overlay(OverlayType& overlay, const delta_section& delta_sec) const
+    constexpr void validate_overlay(OverlayType& overlay, const delta_section& delta_sec) const
     {
       const auto& deltas = delta_sec.records;
       for (const auto& delta : deltas) {
@@ -1230,7 +1230,7 @@ class wrong_path_tracereader
       }
     }
 
-    void handle_iframe()
+    constexpr void handle_iframe()
     {
 #warning "Wrong Path validation not implemented"
       delta_section cp_delta = read_cp_delta_section();
@@ -1243,7 +1243,7 @@ class wrong_path_tracereader
       }
     }
 
-    void handle_end()
+    constexpr void handle_end()
     {
       const uint64_t num_entries = compressed_body_stream.parse_uleb();
       if (num_entries != seq_num)
@@ -1260,7 +1260,7 @@ class wrong_path_tracereader
 
     // Keeps reading the trace until we reach the next BODY_TAG_ENTRY section. Stops right before the BODY_TAG_ENTRY section, i.e. *only* reads the sections
     // preceding the next BODY_TAG_ENTRY section
-    void read_till_next_entry()
+    constexpr void read_till_next_entry()
     {
       while (true) {
         const uint8_t tag = compressed_body_stream.read();
@@ -1285,7 +1285,7 @@ class wrong_path_tracereader
     // Expects that the stream pointer points to the next BODY_TAG_ENTRY
     // Returns a vector of *all* the instructions generated from the basic block template in BODY_TAG_ENTRY
     // This function should *never* be called on correct path to generate instructions from the middle of basic block
-    [[nodiscard]] std::vector<ooo_model_instr> get_next_instrs(const uint64_t next_bb_pc = 0xdeadbeef)
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> get_next_instrs(const uint64_t next_bb_pc = 0xdeadbeef)
     {
       fmt::print(stderr, "Fetching from {} path\n", next_bb_pc == 0xdeadbeef ? "correct" : "wrong");
 
@@ -1303,7 +1303,7 @@ class wrong_path_tracereader
     }
 
     // Returns the next instruction from the instruction buffer
-    [[nodiscard]] ooo_model_instr pop_from_instr_buffer()
+    [[nodiscard]] constexpr ooo_model_instr pop_from_instr_buffer()
     {
       // TODO: Revert back to instr_buffer
       if (instr_buffer_fixed.size() == 0)
@@ -1316,7 +1316,7 @@ class wrong_path_tracereader
     }
 
   public:
-    body_parser(const uint8_t cpu_idx, const std::string& body_file, const header_wrapper& header_)
+    constexpr body_parser(const uint8_t cpu_idx, const std::string& body_file, const header_wrapper& header_)
         : compressed_body_stream(body_file), header(header_), cpu(cpu_idx)
     {
       verify_integrity();
@@ -1328,7 +1328,7 @@ class wrong_path_tracereader
       read_till_next_entry(); // Read from the stream until we reach the first BODY_TAG_ENTRY section (but don't read this section yet)
     }
 
-    [[nodiscard]] ooo_model_instr read(const uint64_t next_pc = 0xdeadbeef)
+    [[nodiscard]] constexpr ooo_model_instr read(const uint64_t next_pc = 0xdeadbeef)
     {
       // Handle trace inferred wrong path execution
       const bool exhausted_current_basic_block = (instr_buffer_fixed.size() == 0);
@@ -1390,7 +1390,7 @@ class wrong_path_tracereader
       return pop_from_instr_buffer();
     }
 
-    [[nodiscard]] bool eof() const override
+    [[nodiscard]] constexpr bool eof() const override
     {
       // TODO: Revert to instr_buffer
       const bool retval = (instr_buffer_fixed.size() == 0 && eof_);
@@ -1457,8 +1457,8 @@ public:
 
   wrong_path_tracereader(champsim::wrong_path_tracereader&& other) { move_from(std::forward<champsim::wrong_path_tracereader>(other)); }
 
-  wrong_path_tracereader& operator=(wrong_path_tracereader& other) = default;
-  wrong_path_tracereader& operator=(wrong_path_tracereader&& other)
+  constexpr wrong_path_tracereader& operator=(wrong_path_tracereader& other) = default;
+  constexpr wrong_path_tracereader& operator=(wrong_path_tracereader&& other)
   {
     if (this != &other)
       move_from(std::forward<champsim::wrong_path_tracereader>(other));
@@ -1493,7 +1493,7 @@ void wrong_path_tracereader::parse_trace()
 
 // Verifies the magic bytes of file_name. Return true if magic bytes match
 template <const char* magic, const std::size_t magic_length, const std::size_t position>
-[[nodiscard]] bool wrong_path_tracereader::check_file_type(const std::string& file_name) const
+[[nodiscard]] constexpr bool wrong_path_tracereader::check_file_type(const std::string& file_name)
 {
   std::ifstream input(file_name, std::ios::binary);
   if (!input.is_open())
@@ -1534,7 +1534,7 @@ void wrong_path_tracereader::verify_trace_file_type() const
 
 void wrong_path_tracereader::extract_trace() const
 {
-  const auto open = [] [[nodiscard]] (const char* file_name) -> TAR* {
+  const auto open = [] [[nodiscard]] (const char* file_name) constexpr -> TAR* {
     TAR* handle = nullptr;
     const int retval = tar_open(&handle, file_name, nullptr, O_RDONLY, 0, TAR_GNU);
     if (retval != 0)
@@ -1542,7 +1542,7 @@ void wrong_path_tracereader::extract_trace() const
     return handle;
   };
 
-  const auto close = [](TAR* handle) -> void {
+  const auto close = [](TAR* handle) constexpr -> void {
     const auto retval = tar_close(handle);
     if (retval != 0)
       throw std::runtime_error("[ERROR] Can't close trace. Exiting...");
