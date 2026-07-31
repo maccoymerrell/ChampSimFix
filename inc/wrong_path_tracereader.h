@@ -1436,23 +1436,28 @@ public:
     if (other.moved)
       throw std::runtime_error("[ERROR] Moving from a moved-from object");
 
-    // Reset state
-    this->cleanup();
-    this->moved = false;
-    this-> parsed_header = false;
+    if (this->trace_file == other.trace_file) { // this and other are reading from the same trace. No need to cleanup state
+      this->moved = false;
+    } else { // this and other are not related. Reset state
+      this->cleanup();
+      this->moved = false;
+      this->parsed_header = false;
+      this->trace_file = std::move(other.trace_file);
+      this->trace_extract_dir = std::move(other.trace_extract_dir);
+      other.moved = true; // Prevent deleting the extracted trace directory
+    }
 
     // Move the data from other to this
     this->cpu = std::move(other.cpu);
-    this->trace_file = std::move(other.trace_file);
-    this->trace_extract_dir = std::move(other.trace_extract_dir);
-    if (other.parsed_header) {
-      this->header_stream = std::move(other.header_stream);
-      this->parsed_header = true;
-    } else {
-      parse_trace();
+    if (not this->parsed_header) {
+      if (other.parsed_header) {
+        this->header_stream = std::move(other.header_stream);
+        this->parsed_header = true;
+      } else {
+        parse_trace();
+      }
     }
     this->construct_body_stream(); // Create a fresh copy of the body stream
-    other.moved = true;            // Prevent deleting the extracted trace directory
   }
 
   wrong_path_tracereader(champsim::wrong_path_tracereader&& other) { move_from(std::forward<champsim::wrong_path_tracereader>(other)); }
