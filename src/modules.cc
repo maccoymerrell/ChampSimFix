@@ -17,6 +17,8 @@
 #include "modules.h"
 
 #include "cache.h"
+#include "listener.h"
+#include "workload_source.h"
 
 // Static member definitions
 bool champsim::modules::ModuleBuilder::global_dump_enabled_ = false;

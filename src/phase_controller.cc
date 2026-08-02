@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include "phase_controller.h"
+
 #include <algorithm>
 #include <functional>
 #include <map>
@@ -25,6 +27,7 @@
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
 
+#include "listener.h"
 #include "modules.h"
 
 namespace

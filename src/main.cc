@@ -31,8 +31,10 @@
 #include "defaults.hpp"
 #include "environment.h"
 #include "legacy_environment.h"
+#include "listener.h"
 #include "modules.h"
 #include "ooo_cpu.h" // for O3_CPU
+#include "phase_controller.h"
 #include "phase_info.h"
 #include "stats_printer.h"
 #include "vmem.h"

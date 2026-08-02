@@ -9,6 +9,7 @@
 #include <fmt/chrono.h>
 #include <fmt/ostream.h>
 
+#include "listener.h"
 #include "modules.h"
 
 std::chrono::seconds elapsed_time();

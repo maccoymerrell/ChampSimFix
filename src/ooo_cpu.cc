@@ -34,9 +34,11 @@
 #include "deadlock.h"
 #include "instruction.h"
 #include "json_stat_builder.h"
+#include "listener.h"
 #include "stat_format.h"
 #include "util/algorithm.h"
 #include "util/span.h"
+#include "workload_source.h"
 
 long O3_CPU::operate()
 {
