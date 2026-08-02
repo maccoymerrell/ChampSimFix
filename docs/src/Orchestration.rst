@@ -49,15 +49,15 @@ Token sources
 ^^^^^^^^^^^^^^^^^^^^
 
 ``champsim::modules::token_source`` is the base contract every source satisfies: the
-token-agnostic lifecycle plus the stream (address-space) identity stamped on its tokens:
+token-agnostic lifecycle plus the source identity stamped on its tokens:
 
 .. code-block:: cpp
 
     struct token_source {
       virtual bool eof() const = 0;              // no more tokens, ever
       virtual std::string describe() const;      // e.g. the trace path, for reports
-      uint32_t stream_id() const;                // the address-space id stamped on tokens
-      const std::string& stream_label() const;   // the "stream" sharing label, if any
+      uint32_t source_id() const;                // which source produced the token
+      const std::string& source_group() const;   // the "source_group" sharing label, if any
     };
 
 The typed pull protocol lives on a template subclass:
@@ -81,8 +81,8 @@ with the execution-driven feedback hooks (``retire_instruction``, ``squash_instr
 ``INSTRUCTION_SOURCE`` model reads a trace file:
 
 * ``trace_file`` (string) — path to the trace
-* ``stream`` (optional string) — sharing label: sources with the same label share one
-  address space; unlabeled sources each get their own
+* ``source_group`` (optional string) — sharing label: sources with the same label share
+  one source id; unlabeled sources each get their own
 * ``cloudsuite``, ``repeat`` (optional booleans)
 
 Sources are declared as ``children`` of their consumer and are bound to it after

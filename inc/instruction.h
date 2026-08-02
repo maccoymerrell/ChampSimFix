@@ -210,8 +210,8 @@ private:
 public:
   ooo_model_instr(champsim::origin local_origin, input_instr instr) : ooo_model_instr(instr, local_origin) {}
   // Cloudsuite traces carry their own address-space id: the record's asid
-  // overrides the source's stream while the consumer identity is kept.
-  ooo_model_instr(champsim::origin local_origin, cloudsuite_instr instr) : ooo_model_instr(instr, local_origin.with_stream(instr.asid[0])) {}
+  // overrides the source id while the consumer identity is kept.
+  ooo_model_instr(champsim::origin local_origin, cloudsuite_instr instr) : ooo_model_instr(instr, local_origin.with_source(instr.asid[0])) {}
 
   [[nodiscard]] std::size_t num_mem_ops() const { return std::size(destination_memory) + std::size(source_memory); }
 };

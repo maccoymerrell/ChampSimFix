@@ -991,8 +991,8 @@ struct channel_module : public module_base<channel_module, environment_module> {
 struct vmem_module : public module_base<vmem_module, environment_module> {
   virtual ~vmem_module() = default;
   virtual std::size_t available_ppages() const = 0;
-  // Address spaces are keyed by the origin's stream (origin.asid()): one
-  // physical address space, many streams.
+  // Address spaces are keyed by the origin's source (origin.asid()): one
+  // physical address space, many sources.
   virtual std::pair<champsim::page_number, champsim::chrono::clock::duration> va_to_pa(champsim::origin origin, champsim::page_number vaddr) = 0;
   virtual std::pair<champsim::address, champsim::chrono::clock::duration> get_pte_pa(champsim::origin origin, champsim::page_number vaddr,
                                                                                      std::size_t level) = 0;

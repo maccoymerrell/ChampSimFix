@@ -200,17 +200,17 @@ A core attaches its branch predictor, BTB, and one or more instruction sources a
         ]
     }
 
-A core may hold more than one source. By default each source runs in its own address
-space; to place several sources in the same address space, give them a matching ``stream``
-label::
+A core may hold more than one source. By default each source gets its own
+framework-assigned id (its own address space); to place several sources under one shared
+id, give them a matching ``source_group`` label::
 
     "children": [
         {"name": "cpu0_bp",  "module": "branch_predictor", "model": "hashed_perceptron"},
         {"name": "cpu0_btb", "module": "btb", "model": "basic_btb"},
         {"name": "cpu0_t0",  "module": "instruction_source", "model": "INSTRUCTION_SOURCE",
-         "trace_file": "$trace0", "stream": "shared"},
+         "trace_file": "$trace0", "source_group": "shared"},
         {"name": "cpu0_t1",  "module": "instruction_source", "model": "INSTRUCTION_SOURCE",
-         "trace_file": "$trace1", "stream": "shared"}
+         "trace_file": "$trace1", "source_group": "shared"}
     ]
 
 ----------------------------------

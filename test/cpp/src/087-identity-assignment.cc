@@ -15,9 +15,9 @@ void assign_identities(modules::environment_module& env);
 namespace
 {
 
-// A source that accepts the optional "stream" sharing label
+// A source that accepts the optional "source_group" sharing label
 struct labeled_source_087 : public champsim::modules::instruction_source {
-  explicit labeled_source_087(champsim::modules::ModuleBuilder builder) { stream_label_ = builder.get_parameter<std::string>("stream", true, std::string{}); }
+  explicit labeled_source_087(champsim::modules::ModuleBuilder builder) { source_group_ = builder.get_parameter<std::string>("source_group", true, std::string{}); }
   const ooo_model_instr* peek() override { return nullptr; }
   void consume() override {}
   [[nodiscard]] bool eof() const override { return true; }
@@ -52,14 +52,14 @@ nlohmann::json source_json(const std::string& name, const std::string& label = {
 {
   nlohmann::json src{{"name", name}, {"module", "instruction_source"}, {"model", "LABELED_SOURCE_087"}};
   if (!label.empty()) {
-    src["stream"] = label;
+    src["source_group"] = label;
   }
   return src;
 }
 
 } // namespace
 
-TEST_CASE("Identities are assigned internally: dense consumers, per-source streams, shared labels")
+TEST_CASE("Identities are assigned internally: dense consumers, per-source ids, shared labels")
 {
   // Three consumers. c0 holds two sources sharing a label with c2's source;
   // c1's source is unlabeled.
@@ -100,25 +100,25 @@ TEST_CASE("Identities are assigned internally: dense consumers, per-source strea
     REQUIRE(c2.consumer_id() == 2);
   }
 
-  SECTION("Unlabeled sources each own a distinct stream")
+  SECTION("Unlabeled sources each own a distinct source id")
   {
-    REQUIRE(c0.sources_.at(1)->stream_id() != c0.sources_.at(0)->stream_id());
-    REQUIRE(c1.sources_.at(0)->stream_id() != c0.sources_.at(0)->stream_id());
-    REQUIRE(c1.sources_.at(0)->stream_id() != c0.sources_.at(1)->stream_id());
+    REQUIRE(c0.sources_.at(1)->source_id() != c0.sources_.at(0)->source_id());
+    REQUIRE(c1.sources_.at(0)->source_id() != c0.sources_.at(0)->source_id());
+    REQUIRE(c1.sources_.at(0)->source_id() != c0.sources_.at(1)->source_id());
   }
 
-  SECTION("Sources sharing a label share one stream, across consumers")
+  SECTION("Sources sharing a label share one source id, across consumers")
   {
-    REQUIRE(c0.sources_.at(0)->stream_id() == c2.sources_.at(0)->stream_id());
+    REQUIRE(c0.sources_.at(0)->source_id() == c2.sources_.at(0)->source_id());
   }
 
   SECTION("The identity registry translates ids to configured names and back")
   {
     REQUIRE(champsim::identities().consumer_name(1) == std::optional<std::string>{"c1"});
     REQUIRE(champsim::identities().consumer_id("c2") == std::optional<int>{2});
-    REQUIRE(champsim::identities().stream_id("c1_a") == std::optional<uint32_t>{c1.sources_.at(0)->stream_id()});
+    REQUIRE(champsim::identities().source_id("c1_a") == std::optional<uint32_t>{c1.sources_.at(0)->source_id()});
 
-    auto shared = champsim::identities().token_sources(c0.sources_.at(0)->stream_id());
+    auto shared = champsim::identities().token_sources(c0.sources_.at(0)->source_id());
     REQUIRE_THAT(shared, Catch::Matchers::UnorderedEquals(std::vector<std::string>{"c0_a", "c2_a"}));
 
     REQUIRE_FALSE(champsim::identities().consumer_name(99).has_value());

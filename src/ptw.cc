@@ -75,9 +75,9 @@ PageTableWalker::mshr_type::mshr_type(const request_type& req, std::size_t level
 auto PageTableWalker::handle_read(const request_type& handle_pkt, channel_type* ul) -> std::optional<mshr_type>
 {
   // The address space comes from the request, not the walker (shared hardware):
-  // the root (CR3) is the requesting stream's, resolved per walk.
+  // the root (CR3) is the requesting address space's, resolved per walk.
   const auto walk_root = vmem->get_pte_pa(handle_pkt.origin, champsim::page_number{}, pt_levels_).first;
-  pscl_entry walk_init = {handle_pkt.v_address, walk_root, std::size(pscl), handle_pkt.origin.stream()};
+  pscl_entry walk_init = {handle_pkt.v_address, walk_root, std::size(pscl), handle_pkt.origin.asid()};
   std::vector<std::optional<pscl_entry>> pscl_hits;
   std::transform(std::begin(pscl), std::end(pscl), std::back_inserter(pscl_hits), [walk_init](auto& x) { return x.check_hit(walk_init); });
   walk_init =
@@ -112,7 +112,7 @@ auto PageTableWalker::handle_fill(const mshr_type& fill_mshr) -> std::optional<m
   }
 
   const auto pscl_idx = std::size(pscl) - fill_mshr.translation_level;
-  pscl.at(pscl_idx).fill({fill_mshr.v_address, *fill_mshr.data, fill_mshr.translation_level, fill_mshr.origin.stream()});
+  pscl.at(pscl_idx).fill({fill_mshr.v_address, *fill_mshr.data, fill_mshr.translation_level, fill_mshr.origin.asid()});
 
   mshr_type fwd_mshr = fill_mshr;
   fwd_mshr.address = *fill_mshr.data;

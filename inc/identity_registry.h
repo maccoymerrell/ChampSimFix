@@ -26,14 +26,14 @@
 namespace champsim
 {
 // Name<->id map for framework-assigned identities (never in configs, populated
-// by assign_identities()): a consumer id maps to one name, a stream id to the
-// source names sharing its "stream" label.
+// by assign_identities()): a consumer id maps to one name, a source id to the
+// source names sharing its "source_group" label.
 class identity_registry
 {
   std::map<int, std::string> consumer_names_;
   std::map<std::string, int> consumer_ids_;
   std::map<uint32_t, std::vector<std::string>> token_sources_;
-  std::map<std::string, uint32_t> stream_ids_;
+  std::map<std::string, uint32_t> source_ids_;
 
 public:
   void register_consumer(int id, std::string name)
@@ -42,10 +42,10 @@ public:
     consumer_names_[id] = std::move(name);
   }
 
-  void register_source(uint32_t stream, std::string name)
+  void register_source(uint32_t source, std::string name)
   {
-    stream_ids_[name] = stream;
-    token_sources_[stream].push_back(std::move(name));
+    source_ids_[name] = source;
+    token_sources_[source].push_back(std::move(name));
   }
 
   std::optional<std::string> consumer_name(int id) const
@@ -64,17 +64,17 @@ public:
     return std::nullopt;
   }
 
-  std::vector<std::string> token_sources(uint32_t stream) const
+  std::vector<std::string> token_sources(uint32_t source) const
   {
-    if (auto it = token_sources_.find(stream); it != std::end(token_sources_)) {
+    if (auto it = token_sources_.find(source); it != std::end(token_sources_)) {
       return it->second;
     }
     return {};
   }
 
-  std::optional<uint32_t> stream_id(const std::string& name) const
+  std::optional<uint32_t> source_id(const std::string& name) const
   {
-    if (auto it = stream_ids_.find(name); it != std::end(stream_ids_)) {
+    if (auto it = source_ids_.find(name); it != std::end(source_ids_)) {
       return it->second;
     }
     return std::nullopt;
@@ -85,7 +85,7 @@ public:
     consumer_names_.clear();
     consumer_ids_.clear();
     token_sources_.clear();
-    stream_ids_.clear();
+    source_ids_.clear();
   }
 };
 
