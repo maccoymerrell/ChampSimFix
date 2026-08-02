@@ -300,7 +300,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
     g.add_parameter("log2_page_size", log2_page_size);
     g.add_parameter("num_consumers", num_cores_cfg);
     g.add_parameter("num_sources", num_cores_cfg);
-    g.add_parameter("num_streams", num_cores_cfg); // one unlabeled source per core: streams == sources
+    g.add_parameter("num_source_groups", num_cores_cfg); // one unlabeled source per core: source groups == sources
   }
   // Sync the cached address extents with the freshly-published globals.
   champsim::refresh_address_extents();

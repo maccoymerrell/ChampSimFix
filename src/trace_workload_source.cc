@@ -3,9 +3,9 @@
  * Wraps a champsim::tracereader to provide instruction tokens from a trace file.
  * Parameters (from ModuleBuilder):
  *   - trace_file (std::string): path to the trace file
- *   - stream (string, optional): sharing label. Sources with the same label
- *     share one framework-assigned stream (address space); unlabeled sources
- *     each get their own. Numeric ids are never configured (see origin.h).
+ *   - source_group (string, optional): sharing label. Sources with the same
+ *     label share one framework-assigned source id; unlabeled sources each get
+ *     their own. Numeric ids are never configured (see origin.h).
  *   - cloudsuite (bool, optional): use cloudsuite trace format (default: false)
  *   - repeat (bool, optional): loop the trace on EOF, replaying it so the source
  *     never signals end-of-stream and the phase runs to its length (default: true)
@@ -36,14 +36,14 @@ struct trace_workload_source : public champsim::modules::instruction_source {
       : trace_path_(builder.get_parameter<std::string>("trace_file")), cloudsuite_(builder.get_parameter<bool>("cloudsuite", true, false)),
         repeat_(builder.get_parameter<bool>("repeat", true, true))
   {
-    stream_label_ = builder.get_parameter<std::string>("stream", true, std::string{});
+    source_group_ = builder.get_parameter<std::string>("source_group", true, std::string{});
   }
 
   champsim::tracereader& reader()
   {
     if (!reader_.has_value()) {
       auto consumer_id = static_cast<champsim::origin::id_type>(consumer_ != nullptr ? consumer_->consumer_id() : -1);
-      reader_.emplace(get_tracereader(trace_path_, champsim::origin{consumer_id, stream_id()}, cloudsuite_, repeat_));
+      reader_.emplace(get_tracereader(trace_path_, champsim::origin{consumer_id, source_id()}, cloudsuite_, repeat_));
     }
     return *reader_;
   }

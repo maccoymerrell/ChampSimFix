@@ -24,8 +24,9 @@
 namespace champsim
 {
 
-// Provenance of a work unit: the CONSUMER (hardware context — core/injector/port, dense in [0,num_consumers), aliased cpu()) and the STREAM
-// (workload/address space, the ASID, aliased asid()), equal in the one-trace-per-core case. Access via methods so future remapping lands in one place.
+// Provenance of a work unit: the CONSUMER (hardware context — core/injector/port, dense in [0,num_consumers), aliased cpu()) and the SOURCE
+// (which producer the token came from, aliased asid() where that source doubles as an address space), equal in the one-source-per-core case. Access via
+// methods so future remapping lands in one place.
 class origin
 {
 public:
@@ -34,32 +35,32 @@ public:
 
 private:
   id_type consumer_ = invalid_id;
-  id_type stream_ = invalid_id;
+  id_type source_ = invalid_id;
 
 public:
   constexpr origin() = default;
-  constexpr origin(id_type consumer_id, id_type stream_id) : consumer_(consumer_id), stream_(stream_id) {}
+  constexpr origin(id_type consumer_id, id_type source_id) : consumer_(consumer_id), source_(source_id) {}
 
   // Canonical accessors
   [[nodiscard]] constexpr id_type consumer() const { return consumer_; }
-  [[nodiscard]] constexpr id_type stream() const { return stream_; }
+  [[nodiscard]] constexpr id_type source() const { return source_; }
 
-  // Domain-familiar aliases: cpu() is the hardware context, asid() the address space id.
+  // Domain-familiar aliases: cpu() is the hardware context, asid() the source viewed as an address space.
   [[nodiscard]] constexpr id_type cpu() const { return consumer(); }
-  [[nodiscard]] constexpr id_type asid() const { return stream(); }
+  [[nodiscard]] constexpr id_type asid() const { return source(); }
 
   [[nodiscard]] constexpr bool has_consumer() const { return consumer_ != invalid_id; }
-  [[nodiscard]] constexpr bool has_stream() const { return stream_ != invalid_id; }
+  [[nodiscard]] constexpr bool has_source() const { return source_ != invalid_id; }
 
   // Derivation helpers for stamping sites
-  [[nodiscard]] constexpr origin with_consumer(id_type consumer_id) const { return origin{consumer_id, stream_}; }
-  [[nodiscard]] constexpr origin with_stream(id_type stream_id) const { return origin{consumer_, stream_id}; }
+  [[nodiscard]] constexpr origin with_consumer(id_type consumer_id) const { return origin{consumer_id, source_}; }
+  [[nodiscard]] constexpr origin with_source(id_type source_id) const { return origin{consumer_, source_id}; }
 
-  friend constexpr bool operator==(const origin& lhs, const origin& rhs) { return lhs.consumer_ == rhs.consumer_ && lhs.stream_ == rhs.stream_; }
+  friend constexpr bool operator==(const origin& lhs, const origin& rhs) { return lhs.consumer_ == rhs.consumer_ && lhs.source_ == rhs.source_; }
   friend constexpr bool operator!=(const origin& lhs, const origin& rhs) { return !(lhs == rhs); }
   friend constexpr bool operator<(const origin& lhs, const origin& rhs)
   {
-    return lhs.consumer_ < rhs.consumer_ || (lhs.consumer_ == rhs.consumer_ && lhs.stream_ < rhs.stream_);
+    return lhs.consumer_ < rhs.consumer_ || (lhs.consumer_ == rhs.consumer_ && lhs.source_ < rhs.source_);
   }
 };
 
@@ -69,7 +70,7 @@ template <>
 struct fmt::formatter<champsim::origin> : fmt::formatter<std::string> {
   auto format(const champsim::origin& value, fmt::format_context& ctx) const
   {
-    return fmt::formatter<std::string>::format(fmt::format("origin{{consumer={}, stream={}}}", value.consumer(), value.stream()), ctx);
+    return fmt::formatter<std::string>::format(fmt::format("origin{{consumer={}, source={}}}", value.consumer(), value.source()), ctx);
   }
 };
 

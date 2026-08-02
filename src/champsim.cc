@@ -201,8 +201,8 @@ static phase_stats collect_phase_stats(const phase_info& phase, modules::environ
   return stats;
 }
 
-// Assign framework-internal identities: consumers enumerate densely in config order; each workload source gets its own stream unless sources share a
-// "stream" label. Configs never contain the numbers; only origins carry them.
+// Assign framework-internal identities: consumers enumerate densely in config order; each source gets its own id unless sources share a
+// "source_group" label. Configs never contain the numbers; only origins carry them.
 void assign_identities(modules::environment_module& env)
 {
   identities().clear();
@@ -225,40 +225,40 @@ void assign_identities(modules::environment_module& env)
     std::exit(-1);
   }
 
-  uint32_t next_stream = 0;
-  std::map<std::string, uint32_t> stream_labels;
+  uint32_t next_source_group = 0;
+  std::map<std::string, uint32_t> source_group_labels;
   for (auto& src : env.typed_view<modules::token_source>("token_source")) {
-    if (src.get().stream_id_pinned()) {
-      continue; // mirrors another source's stream; owns no slot
+    if (src.get().source_id_pinned()) {
+      continue; // mirrors another source's id; owns no slot
     }
-    const auto& label = src.get().stream_label();
+    const auto& label = src.get().source_group();
     if (label.empty()) {
-      src.get().set_stream_id(next_stream);
-      identities().register_source(next_stream, src.get().source_name());
-      ++next_stream;
+      src.get().set_source_id(next_source_group);
+      identities().register_source(next_source_group, src.get().source_name());
+      ++next_source_group;
     } else {
-      auto [it, fresh] = stream_labels.try_emplace(label, next_stream);
+      auto [it, fresh] = source_group_labels.try_emplace(label, next_source_group);
       if (fresh) {
-        ++next_stream;
+        ++next_source_group;
       }
-      src.get().set_stream_id(it->second);
+      src.get().set_source_id(it->second);
       identities().register_source(it->second, src.get().source_name());
     }
   }
 
-  auto num_streams = modules::ModuleBuilder::globals().get_parameter<std::size_t>("num_streams", true, std::size_t{0});
-  if (num_streams > 0 && static_cast<std::size_t>(next_stream) > num_streams) {
-    fmt::print("ERROR: {} streams found but num_streams is {} — per-stream tables would index out of bounds. "
-               "Remove or raise the root config key \"num_streams\".\n",
-               next_stream, num_streams);
+  auto num_source_groups = modules::ModuleBuilder::globals().get_parameter<std::size_t>("num_source_groups", true, std::size_t{0});
+  if (num_source_groups > 0 && static_cast<std::size_t>(next_source_group) > num_source_groups) {
+    fmt::print("ERROR: {} source groups found but num_source_groups is {} — per-source tables would index out of bounds. "
+               "Remove or raise the root config key \"num_source_groups\".\n",
+               next_source_group, num_source_groups);
     std::exit(-1);
   }
 
-  // Warm each stream's page-table root in stream order, so physical page assignment is a pure function of config rather than runtime walk timing
+  // Warm each source's page-table root in source-id order, so physical page assignment is a pure function of config rather than runtime walk timing
   // (matches historical construction-time order).
   for (auto& vm : env.typed_view<modules::vmem_module>("vmem")) {
-    for (uint32_t stream = 0; stream < next_stream; ++stream) {
-      (void)vm.get().get_pte_pa(champsim::origin{champsim::origin::invalid_id, stream}, champsim::page_number{}, vm.get().get_pt_levels());
+    for (uint32_t source = 0; source < next_source_group; ++source) {
+      (void)vm.get().get_pte_pa(champsim::origin{champsim::origin::invalid_id, source}, champsim::page_number{}, vm.get().get_pt_levels());
     }
   }
 }

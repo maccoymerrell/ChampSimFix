@@ -190,17 +190,17 @@ champsim::environment::environment(ModuleBuilder builder)
   // configs may override via a root "num_consumers" key.
   std::size_t num_consumers = 0;
   std::size_t num_sources = 0;
-  std::size_t num_streams = 0;
-  std::set<std::string> stream_labels_seen;
+  std::size_t num_source_groups = 0;
+  std::set<std::string> source_group_labels_seen;
   std::function<void(const json&)> count_identities = [&](const json& node) {
     const auto module_key = node.value("module", "");
     const auto model_key = node.value("model", "");
     if (modules::interface_registry::model_is_source(module_key, model_key)) {
       ++num_sources;
-      // Labeled sources share one id per distinct "stream" label; unlabeled get their own.
-      const auto label = node.value("stream", "");
-      if (label.empty() || stream_labels_seen.insert(label).second) {
-        ++num_streams;
+      // Labeled sources share one id per distinct "source_group" label; unlabeled get their own.
+      const auto label = node.value("source_group", "");
+      if (label.empty() || source_group_labels_seen.insert(label).second) {
+        ++num_source_groups;
       }
     }
     if (modules::interface_registry::model_is_consumer(module_key, model_key)) {
@@ -216,7 +216,7 @@ champsim::environment::environment(ModuleBuilder builder)
     count_identities(child);
   }
   num_consumers = config.value("num_consumers", num_consumers);
-  num_streams = config.value("num_streams", num_streams);
+  num_source_groups = config.value("num_source_groups", num_source_groups);
 
   // Publish system-wide globals before construction: every non-reserved top-level scalar
   // (and a root "globals" object) becomes a global visible via get_parameter fall-through.
@@ -249,7 +249,7 @@ champsim::environment::environment(ModuleBuilder builder)
     g.add_parameter("log2_page_size", static_cast<unsigned>(champsim::lg2(page_size_)));
     g.add_parameter("num_consumers", num_consumers);
     g.add_parameter("num_sources", num_sources);
-    g.add_parameter("num_streams", num_streams);
+    g.add_parameter("num_source_groups", num_source_groups);
   }
   // Sync cached address extents with the new globals so the hot path avoids a per-slice lookup.
   champsim::refresh_address_extents();

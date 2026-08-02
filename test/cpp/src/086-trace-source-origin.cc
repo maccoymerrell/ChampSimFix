@@ -42,7 +42,7 @@ std::string write_trace(const std::string& tag)
 
 } // namespace
 
-TEST_CASE("A trace source stamps tokens with its consumer's id, stream defaulting to it")
+TEST_CASE("A trace source stamps tokens with its consumer's id, source id defaulting to it")
 {
   auto path = write_trace("default");
   probe_consumer consumer{3};
@@ -55,16 +55,16 @@ TEST_CASE("A trace source stamps tokens with its consumer's id, stream defaultin
 
   const auto* instr = typed->peek();
   REQUIRE(instr != nullptr);
-  // Consumer identity comes from the bound consumer; the stream inherits it
+  // Consumer identity comes from the bound consumer; the source id inherits it
   REQUIRE(instr->origin.consumer() == 3);
-  REQUIRE(instr->origin.stream() == 3);
+  REQUIRE(instr->origin.source() == 3);
   REQUIRE(instr->origin.cpu() == 3);
   REQUIRE(instr->origin.asid() == 3);
 
   std::remove(path.c_str());
 }
 
-TEST_CASE("A framework-assigned stream overrides the default")
+TEST_CASE("A framework-assigned source id overrides the default")
 {
   auto path = write_trace("override");
   probe_consumer consumer{3};
@@ -72,15 +72,15 @@ TEST_CASE("A framework-assigned stream overrides the default")
   auto builder = champsim::modules::ModuleBuilder{"t086_src_override", "INSTRUCTION_SOURCE"}
     .add_parameter("trace_file", path);
   auto* uut = champsim::modules::instruction_source::create_instance(builder, &consumer);
-  uut->set_stream_id(7); // as the startup identity pass would
+  uut->set_source_id(7); // as the startup identity pass would
   auto* typed = dynamic_cast<champsim::modules::instruction_source*>(uut);
   REQUIRE(typed != nullptr);
 
   const auto* instr = typed->peek();
   REQUIRE(instr != nullptr);
-  // Two coordinates, independently owned: hardware context vs address space
+  // Two coordinates, independently owned: hardware context vs source id
   REQUIRE(instr->origin.consumer() == 3);
-  REQUIRE(instr->origin.stream() == 7);
+  REQUIRE(instr->origin.source() == 7);
 
   std::remove(path.c_str());
 }

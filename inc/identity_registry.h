@@ -27,15 +27,15 @@ namespace champsim
 {
 /**
  * Name <-> id map for framework-assigned identities (populated by assign_identities()),
- * used to translate ids to configured instance names. Consumer id -> one name; stream id
- * -> one or more source names (sources sharing a "stream" label share one id).
+ * used to translate ids to configured instance names. Consumer id -> one name; source id
+ * -> one or more source names (sources sharing a "source_group" label share one id).
  */
 class identity_registry
 {
   std::map<int, std::string> consumer_names_;
   std::map<std::string, int> consumer_ids_;
   std::map<uint32_t, std::vector<std::string>> token_sources_;
-  std::map<std::string, uint32_t> stream_ids_;
+  std::map<std::string, uint32_t> source_ids_;
 
 public:
   void register_consumer(int id, std::string name)
@@ -44,10 +44,10 @@ public:
     consumer_names_[id] = std::move(name);
   }
 
-  void register_source(uint32_t stream, std::string name)
+  void register_source(uint32_t source, std::string name)
   {
-    stream_ids_[name] = stream;
-    token_sources_[stream].push_back(std::move(name));
+    source_ids_[name] = source;
+    token_sources_[source].push_back(std::move(name));
   }
 
   /** The configured name of the consumer holding this id. */
@@ -68,19 +68,19 @@ public:
     return std::nullopt;
   }
 
-  /** The configured names of every source stamping this stream. */
-  std::vector<std::string> token_sources(uint32_t stream) const
+  /** The configured names of every source stamping this source id. */
+  std::vector<std::string> token_sources(uint32_t source) const
   {
-    if (auto it = token_sources_.find(stream); it != std::end(token_sources_)) {
+    if (auto it = token_sources_.find(source); it != std::end(token_sources_)) {
       return it->second;
     }
     return {};
   }
 
-  /** The stream assigned to the source configured under this name. */
-  std::optional<uint32_t> stream_id(const std::string& name) const
+  /** The source id assigned to the source configured under this name. */
+  std::optional<uint32_t> source_id(const std::string& name) const
   {
-    if (auto it = stream_ids_.find(name); it != std::end(stream_ids_)) {
+    if (auto it = source_ids_.find(name); it != std::end(source_ids_)) {
       return it->second;
     }
     return std::nullopt;
@@ -91,7 +91,7 @@ public:
     consumer_names_.clear();
     consumer_ids_.clear();
     token_sources_.clear();
-    stream_ids_.clear();
+    source_ids_.clear();
   }
 };
 
