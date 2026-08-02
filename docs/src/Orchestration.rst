@@ -78,12 +78,11 @@ plus the execution-driven feedback hooks (``retire_instruction``, ``squash_instr
 
 * ``trace_file`` (string) — path to the trace
 * ``stream`` (optional string) — sharing label: sources with the same label share one
-  framework-assigned stream (address space); unlabeled sources each get their own
-  (see :ref:`Orch_Origin`)
+  address space; unlabeled sources each get their own
 * ``cloudsuite``, ``repeat`` (optional booleans)
 
 Sources are declared as ``children`` of their consumer and are bound to it after
-construction (the protected ``consumer_`` member).
+construction.
 
 Source consumers
 ^^^^^^^^^^^^^^^^^^^^
@@ -107,78 +106,18 @@ Two contracts deserve emphasis:
 
 * **Health is the consumer's own judgment.** The consumer knows its expected progress
   rate (a core knows what a plausible IPC floor is; a packet injector knows its schedule),
-  so what was once a central "livelock detector" is now ``check_health``: the phase
-  controller calls it every ``health_period`` cycles, and a ``stalled`` verdict aborts
-  the run. ``core_module`` implements the classic instruction-rate policy.
+  so the phase controller delegates the liveness decision to ``check_health``: it is
+  called every ``health_period`` cycles, and a ``stalled`` verdict aborts the run.
+  ``core_module`` implements the instruction-rate policy.
 * **Scheduled quiet time is not a deadlock.** ``has_pending_work()`` returns true when the
   consumer knows more work arrives at a known future time (a paced source waiting out a
   gap). While any consumer — or any operable, see below — reports pending work, zero
   global progress does not advance the deadlock counter.
 
-Consumer ids are assigned at startup by enumeration in configuration order — they are
-unique and dense in ``[0, num_consumers)`` by construction and never appear in a
-configuration. Consumers that mirror another consumer's identity rather than being
-hardware contexts of their own may ``pin_consumer_id``; pinned consumers are skipped by
-the enumeration. The ``num_consumers`` global (readable by any module through the
-``ModuleBuilder`` fall-through) sizes per-consumer tables such as ``ship`` and ``drrip``
-replacement state. The explicit environment derives it by counting consumer models in the
-config (models carrying the ``source_consumer`` mixin, via
-``interface_registry::model_is_consumer``); each consumer is counted exactly once
-regardless of how many sources it holds, and the source and stream totals are published
-separately as ``num_sources`` and ``num_streams``. Override it with a root-level
-``"num_consumers"`` key (for example when a model mirrors another consumer's identity via
-``pin_consumer_id``).
-
-.. _Orch_Origin:
-
-------------------------------------------
-Provenance: ``champsim::origin``
-------------------------------------------
-
-Every token, request, and packet carries a ``champsim::origin`` (``inc/origin.h``): the
-two identities that describe where a unit of work came from.
-
-* The **consumer** — which hardware context injected it (a core, an injector, a port).
-  Schemes partitioning a hardware resource key on it: per-"core" replacement tables,
-  prefetch attribution, cache stat keys, phase tracking.
-* The **stream** — which workload / address space it belongs to. Translation keys on it:
-  virtual memory, page-table walks. This is the ASID.
-
-Access goes through methods, under both canonical and domain-familiar names — the same
-identity either way:
-
-.. code-block:: cpp
-
-    origin.consumer() == origin.cpu()    // hardware context
-    origin.stream()   == origin.asid()   // address space
-
-The methods are the patch point: schemes read the coordinate they mean, and future
-behaviors (remapping, validation, virtualization layers) can be added without touching
-every access site.
-
-**Stamping rules.** A source stamps tokens with ``{consumer, stream}``. Both ids are
-assigned by the framework at startup: consumers enumerate densely in configuration
-order, and every source receives its own stream (its own address space) unless sources
-share a ``stream`` label, in which case they share one id. In the classic
-one-trace-per-core shape the enumeration makes the two coordinates numerically equal,
-matching historic ChampSim exactly. Two traces into one core means one consumer and two
-address spaces by default; cloudsuite trace records override the stream with their own
-asid. Replacement hooks receive the full ``origin``; virtual memory is keyed by
-``origin.asid()``. Page-table walkers resolve each walk's root from the requesting
-token's stream and tag their PSCLs with it, so one walker serves any number of address
-spaces — it is hardware owned by a consumer, not by an address space.
-
-**Identity mixins.** Consumer-ness and source-ness are symmetric mixins, attachable to
-any model of any interface: ``source_consumer`` marks a hardware context that consumes
-workloads (a core; also e.g. a replay channel that drives phase completion), and
-``stream_source`` marks a holder of a stream identity (every ``workload_source``; also
-any model that synthesizes its own address-space traffic). Both are enumerated by the
-same startup pass, and both support pinning for models that mirror another holder's
-identity rather than owning a slot. The environment publishes three globals before
-construction — ``num_consumers``, ``num_sources``, and ``num_streams`` (distinct
-stream ids after label sharing) — each counted in its own space and each overridable by
-a root config key of the same name; the startup enumeration cross-checks the consumer
-and stream counts so per-identity tables can never be silently undersized.
+Consumer ids are framework-assigned by enumerating consumers in declaration order, dense
+from 0; they are never set in a configuration. The consumer count — derived automatically
+by counting the consumers in the config — sizes per-consumer tables such as ``ship`` and
+``drrip`` replacement state.
 
 ------------------------------------------
 Phase Controllers
@@ -197,8 +136,8 @@ an ordinary module (interface ``phase_controller``, parent: the environment):
       virtual std::vector<phase_info> get_phases() const;  // non-empty = owns run structure
     };
 
-The generic shipped model is ``PHASE_CONTROLLER`` (``INSTRUCTION_PHASE_CONTROLLER``
-remains as an alias). It is token-agnostic and owns only generic mechanics:
+The generic shipped model is ``PHASE_CONTROLLER`` (also registered under the name
+``INSTRUCTION_PHASE_CONTROLLER``). It is token-agnostic and owns only generic mechanics:
 
 * **Completion** — a consumer completes when its ``sim_progress()`` delta reaches the
   phase length (in its own token unit), or when one of its sources signals end-of-stream.
@@ -244,8 +183,8 @@ system. Composition rules: the phase aborts if *any* controller aborts, complete
 with a non-empty ``get_phases()`` (conflicting non-empty lists are a config error).
 
 When a configuration declares no controller, the orchestrator creates a default
-``PHASE_CONTROLLER`` and the classic ``-w``/``-i`` CLI options define the phases — this
-is the legacy environment's path.
+``PHASE_CONTROLLER`` and the ``-w``/``-i`` CLI options define the phases — this is the
+legacy environment's path.
 
 ------------------------------------------
 Listeners
@@ -265,9 +204,8 @@ Listeners observe run-wide events for reporting. They are modules (interface
 Consumers emit progress through ``champsim::modules::emit_progress`` (cores emit on
 retirement). The shipped ``HEARTBEAT`` model prints a periodic line per consumer; the
 *consumer* formats the line via ``source_consumer::progress_message`` since only it knows
-its token unit — cores produce the classic
-``Heartbeat CPU N instructions: ... cumulative IPC: ...`` string, and other consumer
-types report in their own vocabulary.
+its token unit — cores produce the ``Heartbeat CPU N instructions: ... cumulative IPC:
+...`` line, and other consumer types report in their own vocabulary.
 
 Selection:
 
@@ -307,9 +245,9 @@ two rules:
   self-contained modules with no external inputs.
 
 All shipped operables implement the hook (cache, core, memory controller, page-table
-walker). The root config key ``"cycle_skip": false`` disables skipping globally — the A/B
-switch used to verify behavior identity. Shipped implementations are verified
-byte-identical with skipping on and off, at 10–25% lower simulation wall-clock time.
+walker). Skipping is enabled by default; the root config key ``"cycle_skip": false``
+disables it globally, which is the switch used to A/B-verify that skipping does not change
+results.
 
 ``operable::has_pending_work()`` is the related liveness contract: return true only for
 **timer-scheduled** work that completes at a known future time without external input
@@ -353,8 +291,6 @@ Root Configuration Key Reference
     Enable idle cycle skipping (default ``true``).
 ``heartbeat_frequency``
     Interval, in each consumer's own progress unit, for the default heartbeat listener.
-``num_consumers``
-    Override the derived consumer count used to size per-consumer tables.
 ``block_size``, ``page_size``
     System-wide geometry, published to all modules via the builder globals.
 

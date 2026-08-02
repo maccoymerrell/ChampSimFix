@@ -87,12 +87,9 @@ Each ``O3_CPU`` instance has three submodules attached through its ``"children"`
 * A **branch predictor** (``"module": "branch_predictor"``), e.g. ``hashed_perceptron``,
   ``bimodal``, ``gshare``, ``perceptron``.
 * A **BTB** (``"module": "btb"``), e.g. ``basic_btb``.
-* A **workload source** (interface ``"workload_source"``), e.g. ``TRACE_WORKLOAD_SOURCE``.
-  This child is **required**: unlike the cache prefetcher, the core calls
-  ``get_submodules("workload_source")`` without the ``optional`` flag, so a core with no
-  workload-source child aborts at construction with ``required submodules of interface
-  workload_source not found``. The attached source must also be an ``instruction_source``
-  or the core exits.
+* A **workload source** (interface ``"workload_source"``), e.g. ``TRACE_WORKLOAD_SOURCE``,
+  which supplies the core's instruction stream. A core requires exactly this kind of
+  child and it must be an instruction source.
 
 --------------------------------------
 Pipeline Stages
