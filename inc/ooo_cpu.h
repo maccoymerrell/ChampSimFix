@@ -44,6 +44,7 @@
 #include "operable.h"
 #include "register_allocator.h"
 #include "util/to_underlying.h"
+#include "workload_source.h"
 
 class CACHE;
 class CacheBus

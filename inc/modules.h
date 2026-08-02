@@ -59,13 +59,13 @@
  * (prefetcher, replacement, branch_predictor, btb), the ModuleBuilder for
  * construction, and the register_module template for registration.
  */
+#include "source_consumer.h"
+#include "stream_source.h"
+
 namespace champsim::modules
 {
 
 struct environment_module;
-struct source_consumer;
-struct stream_source;
-struct workload_source;
 
 /**
  * Provides configuration parameters and parent access to modules during construction.
@@ -415,8 +415,6 @@ public:
 };
 
 // Forward declaration for mixin used in interface_info
-struct source_consumer;
-struct stream_source;
 
 // Registry for module interfaces: maps interface name strings to factory functions.
 // This allows runtime lookup of which module_base specialization to use for creation.
@@ -787,89 +785,6 @@ public:
       interface_registry::register_interface(interface_name, std::move(info));
     }
   };
-};
-
-// Mixin for any module that consumes workload sources.
-// Inherit from this to attach workload_source submodules.
-struct source_consumer {
-  virtual ~source_consumer() = default;
-
-  // Health as judged by the consumer itself. The consumer knows its own
-  // expected progress rate (instructions retired for a core, packets
-  // delivered for a network consumer, ...), so livelock policy lives here —
-  // not in the phase controller, which only aggregates.
-  enum class source_health { healthy, warning, critical, stalled };
-
-  // True when all attached workload sources are exhausted.
-  virtual bool source_eof() const { return true; }
-
-  // Consumer id: this consumer's hardware-context identity. Assigned by
-  // the framework at startup, by enumeration in configuration order —
-  // never written in a configuration. Ids are unique and dense in
-  // [0, num_consumers); they key per-consumer resources (replacement
-  // tables, stats, phase tracking) and default the stream of attached
-  // sources. See origin.h. Standalone instances (unit tests) keep the
-  // default of 0, matching the historical single-core default.
-  int consumer_id() const { return consumer_id_; }
-  // The instance name this consumer was configured under (set by the
-  // module factory). Use champsim::identities() for id <-> name lookups.
-  const std::string& consumer_name() const { return identity_name_; }
-  void set_identity_name(std::string name) { identity_name_ = std::move(name); }
-  void set_consumer_id(int id)
-  {
-    if (!consumer_id_pinned_) {
-      consumer_id_ = id;
-    }
-  }
-  // Consumers that mirror another consumer's identity (rather than being
-  // hardware contexts of their own — e.g. a shadow/replay channel) may pin
-  // their id; pinned consumers are skipped by the startup enumeration and
-  // do not occupy an id slot.
-  void pin_consumer_id(int id)
-  {
-    consumer_id_ = id;
-    consumer_id_pinned_ = true;
-  }
-  bool consumer_id_pinned() const { return consumer_id_pinned_; }
-
-private:
-  int consumer_id_ = 0;
-  bool consumer_id_pinned_ = false;
-  std::string identity_name_{};
-
-public:
-  // Progress metric for phase completion, in tokens (e.g. instructions
-  // retired). Return 0 to indicate no progress tracking (complete only on EOF).
-  virtual uint64_t sim_progress() const { return 0; }
-
-  // Periodic self-check, driven by the phase controller every health
-  // period. elapsed is the number of controller cycles since the last
-  // check (or reset_health). Return stalled to abort the simulation.
-  virtual source_health check_health(uint64_t /*elapsed*/) { return source_health::healthy; }
-
-  // Re-baseline health tracking; called by the controller at phase start.
-  virtual void reset_health() {}
-
-  // True when this consumer knows more work is scheduled to arrive later
-  // (e.g. a paced source waiting out a scheduled gap). While any consumer
-  // reports pending work, zero global progress is not a deadlock.
-  virtual bool has_pending_work() const { return false; }
-
-  // Called when this consumer's source finishes a phase. Return empty to suppress.
-  virtual std::string source_finish_message(const std::string& /*phase_name*/) const { return {}; }
-
-  // Called at the end of a phase for summary output. Return empty to suppress.
-  virtual std::string phase_complete_message(const std::string& /*phase_name*/) const { return {}; }
-
-  // Format a periodic progress report (driven by a heartbeat-style
-  // listener, which owns the interval bookkeeping and supplies the
-  // numbers). The consumer owns the wording because it knows its own
-  // token unit. Return empty to suppress.
-  virtual std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const
-  {
-    return fmt::format("Heartbeat source {} tokens: {} cycles: {} rate: {:.4} cumulative rate: {:.4}", consumer_id(), total_progress, total_cycles,
-                       interval_rate, cumulative_rate);
-  }
 };
 
 /**
@@ -1354,195 +1269,6 @@ struct btb : public module_base<btb, core_module> {
  * consumer records, a network consumer would take packets — all meshing
  * in one run because the orchestrator never sees the token type.
  */
-// Mixin for any module that holds a stream identity — the address-space
-// tag stamped on the tokens it produces. The exact counterpart of
-// source_consumer: any model of any interface may inherit it (the
-// workload_source interface does, but so may e.g. a channel model that
-// synthesizes requests), it is enumerated by the same startup pass, and
-// it supports the same pinning affordance for models that mirror another
-// holder's identity rather than owning a slot.
-struct stream_source {
-  virtual ~stream_source() = default;
-
-  // Stream id: the address-space identity stamped on this source's tokens.
-  // Assigned by the framework at startup: every source gets its own stream
-  // unless sources share a "stream" label in the configuration, in which
-  // case they share one id. Never written as a number in a configuration.
-  uint32_t stream_id() const
-  {
-    if (stream_id_.has_value()) {
-      return *stream_id_;
-    }
-    return default_stream();
-  }
-  void set_stream_id(uint32_t id)
-  {
-    if (!stream_id_pinned_) {
-      stream_id_ = id;
-    }
-  }
-  // Sources that mirror another holder's stream (rather than owning an
-  // address space of their own) may pin; pinned sources are skipped by the
-  // startup enumeration and do not occupy a stream slot.
-  void pin_stream_id(uint32_t id)
-  {
-    stream_id_ = id;
-    stream_id_pinned_ = true;
-  }
-  bool stream_id_pinned() const { return stream_id_pinned_; }
-  // The configuration's "stream" sharing label; empty when unlabeled.
-  const std::string& stream_label() const { return stream_label_; }
-  // The instance name this source was configured under (set by the module
-  // factory). Use champsim::identities() for id <-> name lookups.
-  const std::string& source_name() const { return identity_name_; }
-  void set_identity_name(std::string name) { identity_name_ = std::move(name); }
-
-protected:
-  // Set by concrete sources that accept the optional "stream" label.
-  std::string stream_label_{};
-  // Fallback identity for standalone instances (unit tests) when the
-  // startup enumeration has not assigned one.
-  virtual uint32_t default_stream() const { return 0; }
-
-private:
-  std::optional<uint32_t> stream_id_{};
-  bool stream_id_pinned_ = false;
-  std::string identity_name_{};
-};
-
-struct workload_source : public module_base<workload_source, source_consumer>, public stream_source {
-  virtual ~workload_source() = default;
-
-  // True when the source will never provide another token.
-  [[nodiscard]] virtual bool eof() const = 0;
-
-  // Human-readable identity for reports (e.g. the trace path). Empty to suppress.
-  virtual std::string describe() const { return {}; }
-
-protected:
-  // The consumer this source feeds. Bound by the framework after
-  // construction; sources stamp tokens with origin{consumer, stream},
-  // where the stream defaults to the consumer's id (see origin.h).
-  source_consumer* consumer_ = nullptr;
-
-  // Standalone instances (unit tests) fall back to the owning consumer's
-  // id, the historical default.
-  uint32_t default_stream() const override { return static_cast<uint32_t>(consumer_ != nullptr ? consumer_->consumer_id() : 0); }
-
-private:
-  friend struct module_base<workload_source, source_consumer>;
-  void bind(source_consumer* parent) { consumer_ = parent; }
-};
-
-/**
- * Typed pull protocol for workload sources.
- *
- * peek() materializes the next token without consuming it (so paced
- * consumers can wait until it is due), returning nullptr when no token is
- * available — the safe emptiness signal, valid to call at any time.
- * consume() discards the peeked token; next() is the one-shot form.
- *
- * \tparam Token The discrete unit of work this source provides.
- */
-template <typename Token>
-struct typed_workload_source : workload_source {
-  // The next token, or nullptr if none is available now. The pointer is
-  // valid until consume() or the next peek().
-  virtual const Token* peek() = 0;
-
-  // Discard the current peeked token. Only valid after a non-null peek().
-  virtual void consume() = 0;
-
-  // Retrieve and consume the next token, if one is available.
-  std::optional<Token> next()
-  {
-    if (const Token* token = peek(); token != nullptr) {
-      auto retval = std::optional<Token>{*token};
-      consume();
-      return retval;
-    }
-    return std::nullopt;
-  }
-};
-
-/**
- * Instruction-stream source — the token type consumed by core modules.
- *
- * The default implementation (TRACE_WORKLOAD_SOURCE) wraps a tracereader.
- * Override for execution-driven simulation or synthetic workloads.
- */
-struct instruction_source : typed_workload_source<ooo_model_instr> {
-  // Execution-driven feedback hooks (no-ops by default).
-  // Called by the core at the appropriate pipeline stage.
-  virtual void retire_instruction([[maybe_unused]] const ooo_model_instr& instr) {}
-  virtual void squash_instruction([[maybe_unused]] const ooo_model_instr& instr) {}
-  virtual void branch_mispredict([[maybe_unused]] const ooo_model_instr& instr) {}
-};
-
-/**
- * Phase controller interface — manages phase completion and health monitoring.
- *
- * The phase controller owns the per-phase loop conditions: it observes
- * cycle progress, drives deadlock detection, aggregates the health that
- * each source consumer reports about itself, and signals when each source
- * has completed its share of the phase. Source EOF is observed by polling
- * source_consumer::source_eof() directly — there is no external EOF
- * notification. If the controller exposes a non-empty phase list via
- * get_phases(), the simulator runs that list instead of the default
- * warmup+sim pair.
- */
-struct phase_controller : public module_base<phase_controller, environment_module> {
-  virtual ~phase_controller() = default;
-
-  enum class status { CONTINUE, COMPLETE, ABORT };
-
-  // Called at the start of a phase
-  virtual void begin_phase(const std::string& name, bool is_warmup, uint64_t length) = 0;
-
-  // Called each cycle after all operables have operated.
-  // progress: number of operations that made progress this cycle.
-  // Returns CONTINUE, COMPLETE, or ABORT.
-  virtual status advance(long progress) = 0;
-
-  // Get ids of sources that newly completed since last advance()
-  virtual std::vector<unsigned> newly_completed_sources() const = 0;
-
-  // Called at end of phase for cleanup
-  virtual void end_phase() = 0;
-
-  // Returns the list of phases this controller wants to run.
-  // If empty, the caller (main.cc / champsim::main) defines the phases.
-  // Implement this to take full ownership of the run structure from config.
-  virtual std::vector<champsim::phase_info> get_phases() const { return {}; }
-};
-
-/**
- * Listener interface — observes run-wide events for reporting.
- *
- * Listeners are ordinary modules: declare them as top-level children in an
- * explicit config (interface "listener"), request extra models via the
- * --listeners CLI option, or rely on the default HEARTBEAT listener that
- * main creates when a config declares none. Producers reach the active
- * listeners through the emit_* free functions below.
- */
-struct listener : public module_base<listener, environment_module> {
-  virtual ~listener() = default;
-
-  // A new phase began (fired once per phase, before module phase hooks).
-  virtual void begin_phase(bool /*is_warmup*/) {}
-
-  // A source consumer advanced. Totals are cumulative counts in the
-  // consumer's own token unit and clock domain.
-  virtual void progress(const source_consumer& /*consumer*/, uint64_t /*total_progress*/, uint64_t /*total_cycles*/) {}
-};
-
-// Active listener dispatch (single-threaded). main assembles the list once
-// at startup; producers emit through these free functions.
-void set_active_listeners(std::vector<listener*> active);
-const std::vector<listener*>& active_listeners();
-void emit_begin_phase(bool is_warmup);
-void emit_progress(const source_consumer& consumer, uint64_t total_progress, uint64_t total_cycles);
-
 /**
  * Interface for the top-level environment module.
  *

@@ -27,11 +27,14 @@
 
 #include "identity_registry.h"
 #include "json_stat_builder.h"
+#include "listener.h"
 #include "module_phase.h"
 #include "module_stat.h"
 #include "modules.h"
 #include "operable.h"
+#include "phase_controller.h"
 #include "phase_info.h"
+#include "workload_source.h"
 
 const auto start_time = std::chrono::steady_clock::now();
 

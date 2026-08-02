@@ -17,6 +17,7 @@
 #include "modules.h"
 #include "origin.h"
 #include "tracereader.h"
+#include "workload_source.h"
 
 namespace
 {
