@@ -34,6 +34,18 @@ std::pair<double, std::string> parse_number_and_suffix(const std::string& s)
   return {value, s.substr(pos)};
 }
 
+// Look up a suffix multiplier (empty suffix → 1); error-exit on an unknown suffix.
+long long lookup_multiplier(const std::string& suffix, std::initializer_list<std::pair<const char*, long long>> table, const std::string& s)
+{
+  if (suffix.empty())
+    return 1LL;
+  for (const auto& [suf, mult] : table)
+    if (suffix == suf)
+      return mult;
+  fmt::print("[TYPE_REGISTRY] ERROR: unknown suffix '{}' in '{}'\n", suffix, s);
+  std::exit(-1);
+}
+
 // ====== Individual type parsers ======
 
 // "frequency": "4G"  →  champsim::chrono::picoseconds (period)
@@ -41,21 +53,7 @@ std::any parse_frequency(const json& val)
 {
   auto s = val.get<std::string>();
   auto [value, suffix] = parse_number_and_suffix(s);
-  double multiplier = 1.0;
-  if (suffix.empty())
-    multiplier = 1.0;
-  else if (suffix == "K")
-    multiplier = 1e3;
-  else if (suffix == "M")
-    multiplier = 1e6;
-  else if (suffix == "G")
-    multiplier = 1e9;
-  else if (suffix == "T")
-    multiplier = 1e12;
-  else {
-    fmt::print("[TYPE_REGISTRY] ERROR: unknown frequency suffix '{}' in '{}'\n", suffix, s);
-    std::exit(-1);
-  }
+  auto multiplier = static_cast<double>(lookup_multiplier(suffix, {{"K", 1000LL}, {"M", 1000000LL}, {"G", 1000000000LL}, {"T", 1000000000000LL}}, s));
   auto ps = static_cast<int64_t>(std::round(1e12 / (value * multiplier)));
   return champsim::chrono::picoseconds{ps};
 }
@@ -86,26 +84,17 @@ std::any parse_bytes(const json& val)
   auto s = val.get<std::string>();
   auto [value, suffix] = parse_number_and_suffix(s);
   auto int_val = static_cast<long long>(std::round(value));
-  if (suffix.empty())
-    return champsim::data::bytes{int_val};
-  if (suffix == "Ki")
-    return champsim::data::bytes{champsim::data::kibibytes{int_val}};
-  if (suffix == "Mi")
-    return champsim::data::bytes{champsim::data::mebibytes{int_val}};
-  if (suffix == "Gi")
-    return champsim::data::bytes{champsim::data::gibibytes{int_val}};
-  if (suffix == "Ti")
-    return champsim::data::bytes{champsim::data::tebibytes{int_val}};
-  if (suffix == "K")
-    return champsim::data::bytes{int_val * 1000LL};
-  if (suffix == "M")
-    return champsim::data::bytes{int_val * 1000000LL};
-  if (suffix == "G")
-    return champsim::data::bytes{int_val * 1000000000LL};
-  if (suffix == "T")
-    return champsim::data::bytes{int_val * 1000000000000LL};
-  fmt::print("[TYPE_REGISTRY] ERROR: unknown bytes suffix '{}' in '{}'\n", suffix, s);
-  std::exit(-1);
+  auto mult = lookup_multiplier(suffix,
+                                {{"Ki", 1024LL},
+                                 {"Mi", 1048576LL},
+                                 {"Gi", 1073741824LL},
+                                 {"Ti", 1099511627776LL},
+                                 {"K", 1000LL},
+                                 {"M", 1000000LL},
+                                 {"G", 1000000000LL},
+                                 {"T", 1000000000000LL}},
+                                s);
+  return champsim::data::bytes{int_val * mult};
 }
 
 // "bits": "64"  →  champsim::data::bits
@@ -114,16 +103,8 @@ std::any parse_bits(const json& val)
   auto s = val.get<std::string>();
   auto [value, suffix] = parse_number_and_suffix(s);
   auto int_val = static_cast<unsigned long long>(std::round(value));
-  if (suffix.empty())
-    return champsim::data::bits{int_val};
-  if (suffix == "K")
-    return champsim::data::bits{int_val * 1000ULL};
-  if (suffix == "M")
-    return champsim::data::bits{int_val * 1000000ULL};
-  if (suffix == "G")
-    return champsim::data::bits{int_val * 1000000000ULL};
-  fmt::print("[TYPE_REGISTRY] ERROR: unknown bits suffix '{}' in '{}'\n", suffix, s);
-  std::exit(-1);
+  auto mult = static_cast<unsigned long long>(lookup_multiplier(suffix, {{"K", 1000LL}, {"M", 1000000LL}, {"G", 1000000000LL}}, s));
+  return champsim::data::bits{int_val * mult};
 }
 
 // "bandwidth": 2  →  champsim::bandwidth::maximum_type

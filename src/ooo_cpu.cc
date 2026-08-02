@@ -17,17 +17,24 @@
 #include "ooo_cpu.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <numeric>
+#include <ratio>
+#include <string>
+#include <vector>
 #include <fmt/chrono.h>
 #include <fmt/core.h>
 #include <fmt/ranges.h>
+#include <nlohmann/json.hpp>
 
 #include "cache.h"
 #include "champsim.h"
 #include "deadlock.h"
 #include "instruction.h"
+#include "json_stat_builder.h"
+#include "stat_format.h"
 #include "util/algorithm.h"
 #include "util/span.h"
 
@@ -1102,5 +1109,95 @@ bool CacheBus::issue_write(request_type data_packet)
 std::vector<std::string> O3_CPU::print_stats(bool roi) const { return format_plaintext(roi ? roi_stats : sim_stats); }
 
 void O3_CPU::json_stats(champsim::json_stat_builder& b, bool roi) const { format_json(roi ? roi_stats : sim_stats, b); }
+
+std::vector<std::string> champsim::modules::core_module::format_plaintext(const stats_type& stats)
+{
+  constexpr std::array types{branch_type::BRANCH_DIRECT_JUMP, branch_type::BRANCH_INDIRECT,      branch_type::BRANCH_CONDITIONAL,
+                             branch_type::BRANCH_DIRECT_CALL, branch_type::BRANCH_INDIRECT_CALL, branch_type::BRANCH_RETURN};
+  auto total_branch = std::ceil(
+      std::accumulate(std::begin(types), std::end(types), 0LL, [tbt = stats.total_branch_types](auto acc, auto next) { return acc + tbt.value_or(next, 0); }));
+  auto total_mispredictions = std::ceil(
+      std::accumulate(std::begin(types), std::end(types), 0LL, [btm = stats.branch_type_misses](auto acc, auto next) { return acc + btm.value_or(next, 0); }));
+
+  std::vector<std::string> lines{};
+  lines.push_back(fmt::format("{} cumulative IPC: {} instructions: {} cycles: {}", stats.name, champsim::print_ratio(stats.instrs(), stats.cycles()),
+                              stats.instrs(), stats.cycles()));
+
+  lines.push_back(fmt::format("{} Branch Prediction Accuracy: {}% MPKI: {} Average ROB Occupancy at Mispredict: {}", stats.name,
+                              champsim::print_ratio(100 * (total_branch - total_mispredictions), total_branch),
+                              champsim::print_ratio(std::kilo::num * total_mispredictions, stats.instrs()),
+                              champsim::print_ratio(stats.total_rob_occupancy_at_branch_mispredict, total_mispredictions)));
+
+  lines.emplace_back("Branch type MPKI");
+  for (auto idx : types) {
+    lines.push_back(fmt::format("{}: {}", branch_type_names.at(champsim::to_underlying(idx)),
+                                champsim::print_ratio(std::kilo::num * stats.branch_type_misses.value_or(idx, 0), stats.instrs())));
+  }
+
+  return lines;
+}
+
+void champsim::modules::core_module::format_json(const stats_type& stats, champsim::json_stat_builder& b)
+{
+  constexpr std::array types{branch_type::BRANCH_DIRECT_JUMP, branch_type::BRANCH_INDIRECT,      branch_type::BRANCH_CONDITIONAL,
+                             branch_type::BRANCH_DIRECT_CALL, branch_type::BRANCH_INDIRECT_CALL, branch_type::BRANCH_RETURN};
+
+  auto total_mispredictions = std::ceil(
+      std::accumulate(std::begin(types), std::end(types), 0LL, [btm = stats.branch_type_misses](auto acc, auto next) { return acc + btm.value_or(next, 0); }));
+
+  b.add("instructions", stats.instrs())
+      .add("cycles", stats.cycles())
+      .add("Avg ROB occupancy at mispredict", std::ceil(stats.total_rob_occupancy_at_branch_mispredict) / std::ceil(total_mispredictions));
+
+  auto mpki = b.group("mispredict");
+  for (auto type : types) {
+    mpki.add(std::string{branch_type_names.at(champsim::to_underlying(type))}, stats.branch_type_misses.value_or(type, 0));
+  }
+}
+
+uint64_t champsim::modules::core_module::sim_progress() const { return sim_instr(); }
+
+// Health policy for instruction consumers: retirement rate <= 0.01 IPC over
+// the check window is a stall (the classic livelock thresholds).
+champsim::modules::source_consumer::source_health champsim::modules::core_module::check_health(uint64_t elapsed)
+{
+  const uint64_t progress = sim_progress();
+  const double rate = std::ceil(static_cast<double>(progress - health_last_progress_)) / std::ceil(static_cast<double>(elapsed));
+  health_last_progress_ = progress;
+
+  if (rate <= 0.01) {
+    fmt::print("CPU {} panic: progress rate {:.5g} <= {:.5g}\n", consumer_id(), rate, 0.01);
+    return source_health::stalled;
+  }
+  if (rate <= 0.02) {
+    fmt::print("CPU {} critical: progress rate {:.5g} <= {:.5g}\n", consumer_id(), rate, 0.02);
+    return source_health::critical;
+  }
+  if (rate <= 0.05) {
+    fmt::print("CPU {} warning: progress rate {:.5g} <= {:.5g}\n", consumer_id(), rate, 0.05);
+    return source_health::warning;
+  }
+  return source_health::healthy;
+}
+
+void champsim::modules::core_module::reset_health() { health_last_progress_ = sim_progress(); }
+
+std::string champsim::modules::core_module::source_finish_message(const std::string& phase_name) const
+{
+  return fmt::format("{} finished CPU {} instructions: {} cycles: {} cumulative IPC: {:.4g}", phase_name, consumer_id(), sim_instr(), sim_cycle(),
+                     std::ceil(static_cast<double>(sim_instr())) / std::ceil(static_cast<double>(sim_cycle())));
+}
+
+std::string champsim::modules::core_module::phase_complete_message(const std::string& phase_name) const
+{
+  return fmt::format("{} complete CPU {} instructions: {} cycles: {} cumulative IPC: {:.4g}", phase_name, consumer_id(), sim_instr(), sim_cycle(),
+                     std::ceil(static_cast<double>(sim_instr())) / std::ceil(static_cast<double>(sim_cycle())));
+}
+
+std::string champsim::modules::core_module::progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const
+{
+  return fmt::format("Heartbeat CPU {} instructions: {} cycles: {} heartbeat IPC: {:.4} cumulative IPC: {:.4}", consumer_id(), total_progress, total_cycles,
+                     interval_rate, cumulative_rate);
+}
 
 champsim::modules::core_module::register_module<O3_CPU> default_cpu_module("DEFAULT_CORE");
