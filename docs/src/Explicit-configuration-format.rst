@@ -180,15 +180,9 @@ Channels connect modules together. A channel definition looks like::
 Cores and Workload Sources
 ----------------------------------
 
-A core's ``consumer_id`` (its hardware-context identity) is *not* declared in the config:
-it is assigned at startup by enumerating consumers in config-declaration order, densely
-from 0 (see ``assign_identities`` in ``src/champsim.cc``), so it never appears in a
-configuration. A core attaches one or more workload sources as children. Each source is
-likewise stamped with a ``stream`` (address-space) identity assigned by the framework at
-startup — there is no numeric stream id to set in the config either. By default every
-source gets its own distinct stream, so two traces feeding one core occupy different
-address spaces; give sibling sources the same string ``stream`` label to make them share
-one address space::
+A core attaches its branch predictor, BTB, and one or more workload sources as
+``children``. A ``TRACE_WORKLOAD_SOURCE`` reads instructions from the trace named by its
+``trace_file`` parameter::
 
     {
         "name": "cpu0",
@@ -206,11 +200,18 @@ one address space::
         ]
     }
 
-Page-table walkers are shared hardware and do not take an address-space parameter: the
-address space (CR3 root) is resolved per walk from each request's origin/stream at
-runtime, so the same walker serves every consumer that routes through it. (The ``"asid"``
-key sometimes seen in older sample PTW blocks is inert and ignored.) See
-:ref:`Orchestration` for the consumer/stream identity model.
+A core may hold more than one source. By default each source runs in its own address
+space; to place several sources in the same address space, give them a matching ``stream``
+label::
+
+    "children": [
+        {"name": "cpu0_bp",  "module": "branch_predictor", "model": "hashed_perceptron"},
+        {"name": "cpu0_btb", "module": "btb", "model": "basic_btb"},
+        {"name": "cpu0_t0",  "module": "workload_source", "model": "TRACE_WORKLOAD_SOURCE",
+         "trace_file": "$trace0", "stream": "shared"},
+        {"name": "cpu0_t1",  "module": "workload_source", "model": "TRACE_WORKLOAD_SOURCE",
+         "trace_file": "$trace1", "stream": "shared"}
+    ]
 
 ----------------------------------
 Orchestration Modules
@@ -235,9 +236,9 @@ Phase controllers and listeners are ordinary top-level children::
 
 Any number of phase controllers may be declared (each optionally governing a subset of
 consumers), a controller may define an arbitrary phase list including unmeasured
-fast-forward phases, and root-level keys ``"cycle_skip"``, ``"heartbeat_frequency"``, and
-``"num_consumers"`` tune the orchestration defaults. The full contracts, parameters, and
-composition rules are documented in :ref:`Orchestration`.
+fast-forward phases, and the root-level keys ``"cycle_skip"`` and ``"heartbeat_frequency"``
+tune the orchestration defaults. The full contracts, parameters, and composition rules are
+documented in :ref:`Orchestration`.
 
 ----------------------------------
 A Minimal Example
