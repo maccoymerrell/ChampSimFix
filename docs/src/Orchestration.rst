@@ -6,8 +6,8 @@ Simulation Orchestration
 
 ChampSim's simulation loop is itself modular. The orchestrator knows nothing about
 instructions, cores, or traces: it ticks *operables*, asks *phase controllers* when the
-run is done, and reports progress through *listeners*. Work flows from *workload sources*
-into *source consumers* as opaque **tokens** — instructions for a core, but equally
+run is done, and reports progress through *listeners*. Work flows from *token sources*
+into *token consumers* as opaque **tokens** — instructions for a core, but equally
 packets for a network consumer or records for a memory-stream consumer. With the right
 modules defined, an explicit configuration can assume any shape (an OoO CPU simulator,
 a memory-only system, a network simulator) without modifying ChampSim source.
@@ -88,7 +88,7 @@ with the execution-driven feedback hooks (``retire_instruction``, ``squash_instr
 Sources are declared as ``children`` of their consumer and are bound to it after
 construction.
 
-Source consumers
+Token consumers
 ^^^^^^^^^^^^^^^^^^^^
 
 Any module that executes tokens inherits the ``champsim::modules::token_consumer``
@@ -275,7 +275,7 @@ The environment exposes every constructed module through ``view(interface_name)`
 
 Submodule-created instances participate: when a parent constructs its children (a core
 its sources, a cache its prefetchers), each instance self-enrolls with the environment,
-appended after the top-level modules. An operable workload source nested under a consumer
+appended after the top-level modules. An operable token source nested under a consumer
 is therefore found and ticked with no additional wiring. ``get_num(name)`` always agrees
 with ``view(name).size()``.
 
