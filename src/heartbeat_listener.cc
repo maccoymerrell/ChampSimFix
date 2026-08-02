@@ -45,7 +45,7 @@ public:
     }
   }
 
-  void progress(const champsim::modules::source_consumer& consumer, uint64_t total_progress, uint64_t total_cycles) override
+  void progress(const champsim::modules::token_consumer& consumer, uint64_t total_progress, uint64_t total_cycles) override
   {
     int idx = consumer.consumer_id();
     if (idx < 0) {

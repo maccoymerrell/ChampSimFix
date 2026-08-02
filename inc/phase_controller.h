@@ -33,7 +33,7 @@ namespace champsim::modules
  * cycle progress, drives deadlock detection, aggregates the health that
  * each source consumer reports about itself, and signals when each source
  * has completed its share of the phase. Source EOF is observed by polling
- * source_consumer::source_eof() directly — there is no external EOF
+ * token_consumer::source_eof() directly — there is no external EOF
  * notification. If the controller exposes a non-empty phase list via
  * get_phases(), the simulator runs that list instead of the default
  * warmup+sim pair.

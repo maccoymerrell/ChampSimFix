@@ -4,13 +4,14 @@
 #include <string>
 
 #include "modules.h"
+#include "instruction_source.h"
 #include "origin.h"
 
 namespace
 {
 
 // The consumer whose identity the source should inherit.
-struct probe_consumer : champsim::modules::source_consumer {
+struct probe_consumer : champsim::modules::token_consumer {
   explicit probe_consumer(int id) { set_consumer_id(id); }
 };
 
@@ -46,9 +47,9 @@ TEST_CASE("A trace source stamps tokens with its consumer's id, stream defaultin
   auto path = write_trace("default");
   probe_consumer consumer{3};
 
-  auto builder = champsim::modules::ModuleBuilder{"t086_src_default", "TRACE_WORKLOAD_SOURCE"}
+  auto builder = champsim::modules::ModuleBuilder{"t086_src_default", "INSTRUCTION_SOURCE"}
     .add_parameter("trace_file", path);
-  auto* uut = champsim::modules::workload_source::create_instance(builder, &consumer);
+  auto* uut = champsim::modules::instruction_source::create_instance(builder, &consumer);
   auto* typed = dynamic_cast<champsim::modules::instruction_source*>(uut);
   REQUIRE(typed != nullptr);
 
@@ -68,9 +69,9 @@ TEST_CASE("A framework-assigned stream overrides the default")
   auto path = write_trace("override");
   probe_consumer consumer{3};
 
-  auto builder = champsim::modules::ModuleBuilder{"t086_src_override", "TRACE_WORKLOAD_SOURCE"}
+  auto builder = champsim::modules::ModuleBuilder{"t086_src_override", "INSTRUCTION_SOURCE"}
     .add_parameter("trace_file", path);
-  auto* uut = champsim::modules::workload_source::create_instance(builder, &consumer);
+  auto* uut = champsim::modules::instruction_source::create_instance(builder, &consumer);
   uut->set_stream_id(7); // as the startup identity pass would
   auto* typed = dynamic_cast<champsim::modules::instruction_source*>(uut);
   REQUIRE(typed != nullptr);
@@ -89,9 +90,9 @@ TEST_CASE("A trace source describes itself with its trace path")
   auto path = write_trace("describe");
   probe_consumer consumer{0};
 
-  auto builder = champsim::modules::ModuleBuilder{"t086_src_describe", "TRACE_WORKLOAD_SOURCE"}
+  auto builder = champsim::modules::ModuleBuilder{"t086_src_describe", "INSTRUCTION_SOURCE"}
     .add_parameter("trace_file", path);
-  auto* uut = champsim::modules::workload_source::create_instance(builder, &consumer);
+  auto* uut = champsim::modules::instruction_source::create_instance(builder, &consumer);
 
   REQUIRE(uut->describe() == path);
 

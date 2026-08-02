@@ -6,6 +6,7 @@
 
 #include "chrono.h"
 #include "modules.h"
+#include "phase_controller.h"
 #include "operable.h"
 #include "phase_info.h"
 
@@ -54,8 +55,8 @@ struct mock_env_915 : public champsim::modules::environment_module {
     if (interface_type == "operable") {
       for (auto* op : operables_) result.push_back(op);
       for (auto* c : cores_) result.push_back(static_cast<champsim::operable*>(static_cast<champsim::modules::core_module*>(c)));
-    } else if (interface_type == "source_consumer") {
-      for (auto* c : cores_) result.push_back(static_cast<champsim::modules::source_consumer*>(static_cast<champsim::modules::core_module*>(c)));
+    } else if (interface_type == "token_consumer") {
+      for (auto* c : cores_) result.push_back(static_cast<champsim::modules::token_consumer*>(static_cast<champsim::modules::core_module*>(c)));
     }
     return result;
   }

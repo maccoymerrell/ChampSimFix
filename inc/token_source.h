@@ -14,23 +14,31 @@
  * limitations under the License.
  */
 
-#ifndef STREAM_SOURCE_H
-#define STREAM_SOURCE_H
+#ifndef TOKEN_SOURCE_H
+#define TOKEN_SOURCE_H
 
 #include <cstdint>
+#include <optional>
 #include <string>
+
+#include "token_consumer.h"
 
 namespace champsim::modules
 {
-// Mixin for any module that holds a stream identity — the address-space
-// tag stamped on the tokens it produces. The exact counterpart of
-// source_consumer: any model of any interface may inherit it (the
-// workload_source interface does, but so may e.g. a channel model that
-// synthesizes requests), it is enumerated by the same startup pass, and
-// it supports the same pinning affordance for models that mirror another
-// holder's identity rather than owning a slot.
-struct stream_source {
-  virtual ~stream_source() = default;
+// Base contract for a source of work tokens. It carries the stream
+// (address-space) identity stamped on the tokens it produces and the
+// token lifecycle; concrete token types extend it via typed_token_source
+// (see instruction_source). Bound to the consumer it feeds after
+// construction; sources stamp tokens with origin{consumer, stream}, where
+// the stream defaults to the consumer's id (see origin.h).
+struct token_source {
+  virtual ~token_source() = default;
+
+  // True when the source will never provide another token.
+  [[nodiscard]] virtual bool eof() const = 0;
+
+  // Human-readable identity for reports (e.g. the trace path). Empty to suppress.
+  virtual std::string describe() const { return {}; }
 
   // Stream id: the address-space identity stamped on this source's tokens.
   // Assigned by the framework at startup: every source gets its own stream
@@ -66,16 +74,49 @@ struct stream_source {
   void set_identity_name(std::string name) { identity_name_ = std::move(name); }
 
 protected:
+  // The consumer this source feeds; bound by the framework after construction.
+  token_consumer* consumer_ = nullptr;
   // Set by concrete sources that accept the optional "stream" label.
   std::string stream_label_{};
-  // Fallback identity for standalone instances (unit tests) when the
-  // startup enumeration has not assigned one.
-  virtual uint32_t default_stream() const { return 0; }
+  // Fallback identity for standalone instances (unit tests): the owning
+  // consumer's id, the historical default.
+  uint32_t default_stream() const { return static_cast<uint32_t>(consumer_ != nullptr ? consumer_->consumer_id() : 0); }
 
 private:
   std::optional<uint32_t> stream_id_{};
   bool stream_id_pinned_ = false;
   std::string identity_name_{};
+};
+
+/**
+ * Typed pull protocol for token sources.
+ *
+ * peek() materializes the next token without consuming it (so paced
+ * consumers can wait until it is due), returning nullptr when no token is
+ * available — the safe emptiness signal, valid to call at any time.
+ * consume() discards the peeked token; next() is the one-shot form.
+ *
+ * \tparam Token The discrete unit of work this source provides.
+ */
+template <typename Token>
+struct typed_token_source : token_source {
+  // The next token, or nullptr if none is available now. The pointer is
+  // valid until consume() or the next peek().
+  virtual const Token* peek() = 0;
+
+  // Discard the current peeked token. Only valid after a non-null peek().
+  virtual void consume() = 0;
+
+  // Retrieve and consume the next token, if one is available.
+  std::optional<Token> next()
+  {
+    if (const Token* token = peek(); token != nullptr) {
+      auto retval = std::optional<Token>{*token};
+      consume();
+      return retval;
+    }
+    return std::nullopt;
+  }
 };
 } // namespace champsim::modules
 

@@ -5,6 +5,7 @@
 #include "identity_registry.h"
 #include "instr.h"
 #include "modules.h"
+#include "instruction_source.h"
 
 namespace champsim
 {
@@ -22,16 +23,16 @@ struct labeled_source_087 : public champsim::modules::instruction_source {
   [[nodiscard]] bool eof() const override { return true; }
 };
 
-static champsim::modules::workload_source::register_module<labeled_source_087> labeled_source_reg("LABELED_SOURCE_087");
+static champsim::modules::instruction_source::register_module<labeled_source_087> labeled_source_reg("LABELED_SOURCE_087");
 
 struct id_core_087 : public champsim::modules::core_module {
   std::vector<labeled_source_087*> sources_;
 
   explicit id_core_087(champsim::modules::ModuleBuilder builder) : core_module(champsim::chrono::picoseconds{250})
   {
-    for (const auto& sub : builder.get_submodules("workload_source", true)) {
+    for (const auto& sub : builder.get_submodules("instruction_source", true)) {
       sources_.push_back(
-          dynamic_cast<labeled_source_087*>(champsim::modules::workload_source::create_instance(sub, static_cast<champsim::modules::source_consumer*>(this))));
+          dynamic_cast<labeled_source_087*>(champsim::modules::instruction_source::create_instance(sub, static_cast<champsim::modules::token_consumer*>(this))));
     }
   }
 
@@ -49,7 +50,7 @@ static champsim::modules::core_module::register_module<id_core_087> id_core_reg(
 
 nlohmann::json source_json(const std::string& name, const std::string& label = {})
 {
-  nlohmann::json src{{"name", name}, {"module", "workload_source"}, {"model", "LABELED_SOURCE_087"}};
+  nlohmann::json src{{"name", name}, {"module", "instruction_source"}, {"model", "LABELED_SOURCE_087"}};
   if (!label.empty()) {
     src["stream"] = label;
   }
@@ -117,7 +118,7 @@ TEST_CASE("Identities are assigned internally: dense consumers, per-source strea
     REQUIRE(champsim::identities().consumer_id("c2") == std::optional<int>{2});
     REQUIRE(champsim::identities().stream_id("c1_a") == std::optional<uint32_t>{c1.sources_.at(0)->stream_id()});
 
-    auto shared = champsim::identities().stream_sources(c0.sources_.at(0)->stream_id());
+    auto shared = champsim::identities().token_sources(c0.sources_.at(0)->stream_id());
     REQUIRE_THAT(shared, Catch::Matchers::UnorderedEquals(std::vector<std::string>{"c0_a", "c2_a"}));
 
     REQUIRE_FALSE(champsim::identities().consumer_name(99).has_value());

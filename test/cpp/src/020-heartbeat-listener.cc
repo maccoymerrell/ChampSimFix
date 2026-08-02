@@ -4,12 +4,13 @@
 #include <vector>
 
 #include "modules.h"
+#include "listener.h"
 
 namespace
 {
 
 // A minimal consumer that reports core-style heartbeat lines.
-struct hb_consumer : champsim::modules::source_consumer {
+struct hb_consumer : champsim::modules::token_consumer {
   explicit hb_consumer(int id) { set_consumer_id(id); }
   std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const override
   {
@@ -173,7 +174,7 @@ TEST_CASE("The heartbeat baseline advances by whole intervals when retires overs
 }
 
 TEST_CASE("The default progress message is token-generic") {
-    champsim::modules::source_consumer generic{};
+    champsim::modules::token_consumer generic{};
     // Standalone consumers default to id 0 until the startup pass assigns one
     auto msg = generic.progress_message(100, 50, 2.0, 2.0);
     REQUIRE_THAT(msg, Catch::Matchers::StartsWith("Heartbeat source 0 tokens: 100 cycles: 50 "));

@@ -44,7 +44,7 @@
 #include "operable.h"
 #include "register_allocator.h"
 #include "util/to_underlying.h"
-#include "workload_source.h"
+#include "instruction_source.h"
 
 class CACHE;
 class CacheBus
@@ -200,7 +200,7 @@ public:
 
   std::vector<champsim::modules::branch_predictor*> branch_module_pimpl;
   std::vector<champsim::modules::btb*> btb_module_pimpl;
-  std::vector<champsim::modules::instruction_source*> workload_source_pimpl;
+  std::vector<champsim::modules::instruction_source*> instruction_source_pimpl;
 
   void fill_from_sources();
   bool source_eof() const final;
@@ -256,16 +256,10 @@ public:
     for (const auto& sub : builder.get_submodules("btb"))
       btb_module_pimpl.push_back(champsim::modules::btb::create_instance(sub, static_cast<champsim::modules::core_module*>(this)));
 
-    // Cores must always have at least one workload source attached, and a
-    // core consumes instruction tokens: reject sources of any other token type.
-    for (const auto& sub : builder.get_submodules("workload_source")) {
-      auto* src = champsim::modules::workload_source::create_instance(sub, static_cast<champsim::modules::source_consumer*>(this));
-      auto* instr_src = dynamic_cast<champsim::modules::instruction_source*>(src);
-      if (instr_src == nullptr) {
-        fmt::print("[{}] ERROR: workload source {} does not provide instructions (not an instruction_source)\n", builder.get_name(), sub.get_name());
-        std::exit(-1);
-      }
-      workload_source_pimpl.push_back(instr_src);
+    // The core consumes instruction tokens, so it attaches instruction_source
+    // children directly — the interface it is designed for.
+    for (const auto& sub : builder.get_submodules("instruction_source")) {
+      instruction_source_pimpl.push_back(champsim::modules::instruction_source::create_instance(sub, static_cast<champsim::modules::token_consumer*>(this)));
     }
   }
 };

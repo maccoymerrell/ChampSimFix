@@ -347,12 +347,12 @@ auto champsim::environment::view(const std::string& interface_type) const -> std
     return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_operable(iface); });
   }
 
-  if (interface_type == "source_consumer") {
-    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_source_consumer(iface); });
+  if (interface_type == "token_consumer") {
+    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_token_consumer(iface); });
   }
 
-  if (interface_type == "stream_source") {
-    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_stream_source(iface); });
+  if (interface_type == "token_source") {
+    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_token_source(iface); });
   }
 
   std::vector<std::any> result;

@@ -17,7 +17,7 @@
 #include "modules.h"
 #include "origin.h"
 #include "tracereader.h"
-#include "workload_source.h"
+#include "instruction_source.h"
 
 namespace
 {
@@ -63,6 +63,6 @@ struct trace_workload_source : public champsim::modules::instruction_source {
   std::string describe() const override { return trace_path_; }
 };
 
-static champsim::modules::workload_source::register_module<trace_workload_source> trace_ws_reg("TRACE_WORKLOAD_SOURCE");
+static champsim::modules::instruction_source::register_module<trace_workload_source> trace_ws_reg("INSTRUCTION_SOURCE");
 
 } // anonymous namespace

@@ -925,13 +925,13 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
         core_builder.add_submodule("btb", std::move(sub));
       }
     }
-    // Build the workload_source submodule. Default TRACE_WORKLOAD_SOURCE (CLI traces); trace-less
-    // test/validation runs override via the builder param workload_source_model (e.g. NULL_WORKLOAD_SOURCE).
+    // Build the workload_source submodule. Default INSTRUCTION_SOURCE (CLI traces); trace-less
+    // test/validation runs override via the builder param instruction_source_model (e.g. NULL_INSTRUCTION_SOURCE).
     auto trace_names = builder.get_parameter<std::vector<std::string>>("traces", true, std::vector<std::string>{});
-    auto ws_model = builder.get_parameter<std::string>("workload_source_model", true, std::string{"TRACE_WORKLOAD_SOURCE"});
-    auto src_builder = ModuleBuilder{cc.name + ".workload_source", ws_model};
+    auto ws_model = builder.get_parameter<std::string>("instruction_source_model", true, std::string{"INSTRUCTION_SOURCE"});
+    auto src_builder = ModuleBuilder{cc.name + ".instruction_source", ws_model};
 
-    if (ws_model == "TRACE_WORKLOAD_SOURCE") {
+    if (ws_model == "INSTRUCTION_SOURCE") {
       if (static_cast<std::size_t>(cc.index) >= trace_names.size()) {
         fmt::print(stderr, "[LEGACY_ENVIRONMENT] ERROR: no trace provided for cpu{}\n", cc.index);
         std::exit(-1);
@@ -940,7 +940,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
       src_builder.add_parameter("cloudsuite", builder.get_parameter<bool>("cloudsuite", true, false));
       src_builder.add_parameter("repeat", builder.get_parameter<bool>("repeat", true, true));
     }
-    core_builder.add_submodule("workload_source", std::move(src_builder));
+    core_builder.add_submodule("instruction_source", std::move(src_builder));
 
     core_builder.add_parameter("clock_period", champsim::chrono::picoseconds{freq_to_period(cc.frequency)});
 
@@ -1066,53 +1066,53 @@ auto champsim::legacy_environment::view(const std::string& interface_type) const
     return result;
   }
 
-  if (interface_type == "source_consumer") {
+  if (interface_type == "token_consumer") {
     std::vector<std::any> result;
     std::map<std::string, std::size_t> type_idx;
     for (auto& [name, iface] : module_order_) {
-      auto to_sc = champsim::modules::interface_registry::get_to_source_consumer(iface);
+      auto to_sc = champsim::modules::interface_registry::get_to_token_consumer(iface);
       if (!to_sc)
         continue;
       auto& vec = modules_by_type_.at(iface);
       auto idx = type_idx[iface]++;
       // Same per-instance dynamic_cast pattern as operable above: advance the index for every
-      // instance, enroll only real source_consumers (else nulls leak into the view and get dereferenced).
+      // instance, enroll only real token_consumers (else nulls leak into the view and get dereferenced).
       if (auto* sc = to_sc(vec.at(idx))) {
-        result.push_back(static_cast<champsim::modules::source_consumer*>(sc));
+        result.push_back(static_cast<champsim::modules::token_consumer*>(sc));
       }
     }
     // Nested instances follow, preserving top-level ordering.
     for (auto& [name, iface] : nested_order_) {
-      auto to_sc = champsim::modules::interface_registry::get_to_source_consumer(iface);
+      auto to_sc = champsim::modules::interface_registry::get_to_token_consumer(iface);
       if (!to_sc)
         continue;
       if (auto* sc = to_sc(nested_by_name_.at(name))) {
-        result.push_back(static_cast<champsim::modules::source_consumer*>(sc));
+        result.push_back(static_cast<champsim::modules::token_consumer*>(sc));
       }
     }
     return result;
   }
 
-  if (interface_type == "stream_source") {
-    // Mirrors the source_consumer aggregate above: per-instance dynamic_cast, null-filtered, top-level then nested.
+  if (interface_type == "token_source") {
+    // Mirrors the token_consumer aggregate above: per-instance dynamic_cast, null-filtered, top-level then nested.
     std::vector<std::any> result;
     std::map<std::string, std::size_t> type_idx;
     for (auto& [name, iface] : module_order_) {
-      auto to_ss = champsim::modules::interface_registry::get_to_stream_source(iface);
+      auto to_ss = champsim::modules::interface_registry::get_to_token_source(iface);
       if (!to_ss)
         continue;
       auto& vec = modules_by_type_.at(iface);
       auto idx = type_idx[iface]++;
       if (auto* ss = to_ss(vec.at(idx))) {
-        result.push_back(static_cast<champsim::modules::stream_source*>(ss));
+        result.push_back(static_cast<champsim::modules::token_source*>(ss));
       }
     }
     for (auto& [name, iface] : nested_order_) {
-      auto to_ss = champsim::modules::interface_registry::get_to_stream_source(iface);
+      auto to_ss = champsim::modules::interface_registry::get_to_token_source(iface);
       if (!to_ss)
         continue;
       if (auto* ss = to_ss(nested_by_name_.at(name))) {
-        result.push_back(static_cast<champsim::modules::stream_source*>(ss));
+        result.push_back(static_cast<champsim::modules::token_source*>(ss));
       }
     }
     return result;

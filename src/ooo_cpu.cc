@@ -37,7 +37,7 @@
 #include "listener.h"
 #include "stat_format.h"
 #include "util/span.h"
-#include "workload_source.h"
+#include "instruction_source.h"
 
 long O3_CPU::operate()
 {
@@ -738,7 +738,7 @@ long O3_CPU::retire_rob()
 
 void O3_CPU::fill_from_sources()
 {
-  for (auto* src : workload_source_pimpl) {
+  for (auto* src : instruction_source_pimpl) {
     for (auto space = instructions_requested(); space > 0; --space) {
       auto instr = src->next();
       if (!instr.has_value()) {
@@ -751,9 +751,9 @@ void O3_CPU::fill_from_sources()
 
 bool O3_CPU::source_eof() const
 {
-  if (workload_source_pimpl.empty())
+  if (instruction_source_pimpl.empty())
     return true;
-  return std::all_of(workload_source_pimpl.begin(), workload_source_pimpl.end(), [](const auto* src) { return src->eof(); });
+  return std::all_of(instruction_source_pimpl.begin(), instruction_source_pimpl.end(), [](const auto* src) { return src->eof(); });
 }
 
 void O3_CPU::impl_initialize_branch_predictor() const
@@ -937,7 +937,7 @@ uint64_t champsim::modules::core_module::sim_progress() const { return sim_instr
 
 // Health policy for instruction consumers: retirement rate <= 0.01 IPC over
 // the check window is a stall (the classic livelock thresholds).
-champsim::modules::source_consumer::source_health champsim::modules::core_module::check_health(uint64_t elapsed)
+champsim::modules::token_consumer::source_health champsim::modules::core_module::check_health(uint64_t elapsed)
 {
   const uint64_t progress = sim_progress();
   const double rate = std::ceil(static_cast<double>(progress - health_last_progress_)) / std::ceil(static_cast<double>(elapsed));
