@@ -32,7 +32,7 @@ class identity_registry
 {
   std::map<int, std::string> consumer_names_;
   std::map<std::string, int> consumer_ids_;
-  std::map<uint32_t, std::vector<std::string>> stream_sources_;
+  std::map<uint32_t, std::vector<std::string>> token_sources_;
   std::map<std::string, uint32_t> stream_ids_;
 
 public:
@@ -45,7 +45,7 @@ public:
   void register_source(uint32_t stream, std::string name)
   {
     stream_ids_[name] = stream;
-    stream_sources_[stream].push_back(std::move(name));
+    token_sources_[stream].push_back(std::move(name));
   }
 
   std::optional<std::string> consumer_name(int id) const
@@ -64,9 +64,9 @@ public:
     return std::nullopt;
   }
 
-  std::vector<std::string> stream_sources(uint32_t stream) const
+  std::vector<std::string> token_sources(uint32_t stream) const
   {
-    if (auto it = stream_sources_.find(stream); it != std::end(stream_sources_)) {
+    if (auto it = token_sources_.find(stream); it != std::end(token_sources_)) {
       return it->second;
     }
     return {};
@@ -84,7 +84,7 @@ public:
   {
     consumer_names_.clear();
     consumer_ids_.clear();
-    stream_sources_.clear();
+    token_sources_.clear();
     stream_ids_.clear();
   }
 };

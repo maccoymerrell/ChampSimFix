@@ -21,10 +21,10 @@ json load_config(const std::string& filename) {
   REQUIRE(ifs.is_open());
   auto config = json::parse(ifs);
 
-  // The shipped explicit configs declare a TRACE_WORKLOAD_SOURCE driven by
+  // The shipped explicit configs declare a INSTRUCTION_SOURCE driven by
   // CLI $trace variables (so the configurations.yml workflow can validate
   // them via bin/champsim). 502 doesn't run main.cc, so we replace any
-  // workload_source children on cores with a NULL_WORKLOAD_SOURCE mock —
+  // workload_source children on cores with a NULL_INSTRUCTION_SOURCE mock —
   // satisfying the now-required submodule without depending on CLI args.
   if (config.contains("children")) {
     int idx = 0;
@@ -33,12 +33,12 @@ json load_config(const std::string& filename) {
       if (!child.contains("children")) child["children"] = json::array();
       auto& kids = child["children"];
       kids.erase(std::remove_if(kids.begin(), kids.end(),
-                                [](const json& k) { return k.value("module", "") == "workload_source"; }),
+                                [](const json& k) { return k.value("module", "") == "instruction_source"; }),
                  kids.end());
       kids.push_back(json{
         {"name",   "t502_null_ws_" + std::to_string(idx++)},
-        {"module", "workload_source"},
-        {"model",  "NULL_WORKLOAD_SOURCE"}
+        {"module", "instruction_source"},
+        {"model",  "NULL_INSTRUCTION_SOURCE"}
       });
     }
   }

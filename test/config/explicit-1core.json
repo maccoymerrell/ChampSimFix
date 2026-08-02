@@ -154,7 +154,7 @@
       "children": [
         {"name": "cpu0_bp", "module": "branch_predictor", "model": "bimodal"},
         {"name": "cpu0_btb", "module": "btb", "model": "basic_btb"},
-        {"name": "cpu0_trace_source", "module": "workload_source", "model": "TRACE_WORKLOAD_SOURCE", "stream_id": 0, "trace_file": "$trace0"}
+        {"name": "cpu0_trace_source", "module": "instruction_source", "model": "INSTRUCTION_SOURCE", "trace_file": "$trace0"}
       ]
     }
   ]

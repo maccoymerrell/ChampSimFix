@@ -177,11 +177,11 @@ Channels connect modules together. A channel definition looks like::
     }
 
 ----------------------------------
-Cores and Workload Sources
+Cores and Instruction Sources
 ----------------------------------
 
-A core attaches its branch predictor, BTB, and one or more workload sources as
-``children``. A ``TRACE_WORKLOAD_SOURCE`` reads instructions from the trace named by its
+A core attaches its branch predictor, BTB, and one or more instruction sources as
+``children``. An ``INSTRUCTION_SOURCE`` reads instructions from the trace named by its
 ``trace_file`` parameter::
 
     {
@@ -195,7 +195,7 @@ A core attaches its branch predictor, BTB, and one or more workload sources as
         "children": [
             {"name": "cpu0_bp",  "module": "branch_predictor", "model": "hashed_perceptron"},
             {"name": "cpu0_btb", "module": "btb", "model": "basic_btb"},
-            {"name": "cpu0_trace", "module": "workload_source", "model": "TRACE_WORKLOAD_SOURCE",
+            {"name": "cpu0_trace", "module": "instruction_source", "model": "INSTRUCTION_SOURCE",
              "trace_file": "$trace0"}
         ]
     }
@@ -207,9 +207,9 @@ label::
     "children": [
         {"name": "cpu0_bp",  "module": "branch_predictor", "model": "hashed_perceptron"},
         {"name": "cpu0_btb", "module": "btb", "model": "basic_btb"},
-        {"name": "cpu0_t0",  "module": "workload_source", "model": "TRACE_WORKLOAD_SOURCE",
+        {"name": "cpu0_t0",  "module": "instruction_source", "model": "INSTRUCTION_SOURCE",
          "trace_file": "$trace0", "stream": "shared"},
-        {"name": "cpu0_t1",  "module": "workload_source", "model": "TRACE_WORKLOAD_SOURCE",
+        {"name": "cpu0_t1",  "module": "instruction_source", "model": "INSTRUCTION_SOURCE",
          "trace_file": "$trace1", "stream": "shared"}
     ]
 

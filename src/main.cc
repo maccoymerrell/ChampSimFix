@@ -284,7 +284,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   }
   fmt::print("\n*** ChampSim Multicore Out-of-Order Simulator ***\nWarmup Instructions: {}\nSimulation Instructions: {}\nNumber of CPUs: {}\nTrace sources: "
              "{}\nPage size: {}\n\n",
-             printed_warmup, printed_sim, gen_environment->get_num("core"), gen_environment->get_num("workload_source"), gen_environment->get_page_size());
+             printed_warmup, printed_sim, gen_environment->get_num("core"), gen_environment->get_num("token_source"), gen_environment->get_page_size());
 
   auto phase_stats = champsim::main(*gen_environment, phases);
 

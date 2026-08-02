@@ -57,8 +57,8 @@
  * user-facing interfaces (prefetcher, replacement, branch_predictor, btb),
  * ModuleBuilder, and register_module.
  */
-#include "source_consumer.h"
-#include "stream_source.h"
+#include "token_consumer.h"
+#include "token_source.h"
 
 namespace champsim::modules
 {
@@ -424,22 +424,22 @@ public:
     // Returns operable* from a typed any via a per-instance dynamic_cast, or
     // nullptr if that specific instance does not inherit operable.
     std::function<champsim::operable*(const std::any&)> to_operable;
-    // Returns source_consumer* from a typed any, or nullptr if the interface doesn't inherit source_consumer
-    std::function<source_consumer*(const std::any&)> to_source_consumer;
+    // Returns token_consumer* from a typed any, or nullptr if the interface doesn't inherit token_consumer
+    std::function<token_consumer*(const std::any&)> to_token_consumer;
     // Returns module_phase* from a typed any, or nullptr if the impl doesn't inherit module_phase
     std::function<champsim::module_phase*(const std::any&)> to_module_phase;
     // Returns module_stat* from a typed any, or nullptr if the impl doesn't inherit module_stat
     std::function<champsim::module_stat*(const std::any&)> to_module_stat;
     // Returns the registered model name and the instance NAME for an instance any.
     std::function<instance_id(const std::any&)> identify;
-    // Whether the named model's impl is a source_consumer / stream_source.
+    // Whether the named model's impl is a token_consumer / token_source.
     // Recorded at register_module time (is_base_of) so environments can count
     // consumers/sources from a config before constructing any module.
     std::function<bool(const std::string&)> model_is_consumer;
     std::function<bool(const std::string&)> model_is_source;
-    // Per-instance dynamic_cast to the stream_source mixin (matching
-    // to_source_consumer): any model of any interface may hold a stream.
-    std::function<stream_source*(const std::any&)> to_stream_source;
+    // Per-instance dynamic_cast to the token_source mixin (matching
+    // to_token_consumer): any model of any interface may hold a stream.
+    std::function<token_source*(const std::any&)> to_token_source;
     // Creates a typed null pointer wrapped in std::any
     std::function<std::any()> make_null_pointer;
   };
@@ -512,13 +512,13 @@ public:
   {
     return get_member(interface_name, &interface_info::to_operable);
   }
-  static std::function<stream_source*(const std::any&)> get_to_stream_source(const std::string& interface_name)
+  static std::function<token_source*(const std::any&)> get_to_token_source(const std::string& interface_name)
   {
-    return get_member(interface_name, &interface_info::to_stream_source);
+    return get_member(interface_name, &interface_info::to_token_source);
   }
-  static std::function<source_consumer*(const std::any&)> get_to_source_consumer(const std::string& interface_name)
+  static std::function<token_consumer*(const std::any&)> get_to_token_consumer(const std::string& interface_name)
   {
-    return get_member(interface_name, &interface_info::to_source_consumer);
+    return get_member(interface_name, &interface_info::to_token_consumer);
   }
   static std::function<champsim::module_phase*(const std::any&)> get_to_module_phase(const std::string& interface_name)
   {
@@ -618,7 +618,7 @@ public:
   void bind(C*) {}
 
   // Post-construction identity stamping and nested-instance enrollment; defined
-  // out-of-line below where source_consumer / stream_source / environment_module
+  // out-of-line below where token_consumer / token_source / environment_module
   // are complete types.
   static void finalize_created_instance(B* instance_ptr, ModuleBuilder& builder);
 
@@ -641,7 +641,7 @@ public:
       instance_ptr->NAME = builder.get_name();
       instance_ptr->MODEL = builder.get_model();
       // Stamp identities and enroll nested instances. Defined out-of-line below,
-      // after source_consumer / stream_source / environment_module are complete:
+      // after token_consumer / token_source / environment_module are complete:
       // clang rejects the member access into those still-incomplete types here
       // (which GCC accepts).
       finalize_created_instance(instance_ptr, builder);
@@ -709,8 +709,8 @@ public:
      */
     register_module(std::string model_name)
     {
-      add_module(model_name, model_record{[](ModuleBuilder builder) { return std::unique_ptr<B>(new D(builder)); }, std::is_base_of_v<source_consumer, D>,
-                                          std::is_base_of_v<stream_source, D>});
+      add_module(model_name, model_record{[](ModuleBuilder builder) { return std::unique_ptr<B>(new D(builder)); }, std::is_base_of_v<token_consumer, D>,
+                                          std::is_base_of_v<token_source, D>});
     }
   };
 
@@ -749,10 +749,10 @@ public:
         return vec;
       };
       info.to_operable = &to_mixin<champsim::operable>;
-      info.to_source_consumer = &to_mixin<source_consumer>;
+      info.to_token_consumer = &to_mixin<token_consumer>;
       info.to_module_phase = &to_mixin<champsim::module_phase>;
       info.to_module_stat = &to_mixin<champsim::module_stat>;
-      info.to_stream_source = &to_mixin<stream_source>;
+      info.to_token_source = &to_mixin<token_source>;
       info.identify = [](const std::any& a) -> interface_registry::instance_id {
         B* ptr = std::any_cast<B*>(a);
         if (!ptr)
@@ -781,7 +781,7 @@ public:
  * The default implementation is O3_CPU. Branch predictors and BTBs are
  * attached to a core_module.
  */
-struct core_module : public module_base<core_module, environment_module>, public operable, public source_consumer {
+struct core_module : public module_base<core_module, environment_module>, public operable, public token_consumer {
   /** \cond INTERNAL */
   virtual void push_instruction(ooo_model_instr instr) = 0;
   virtual std::size_t instructions_requested() = 0;
@@ -804,7 +804,7 @@ struct core_module : public module_base<core_module, environment_module>, public
   static std::vector<std::string> format_plaintext(const stats_type& stats);
   static void format_json(const stats_type& stats, champsim::json_stat_builder& b);
 
-  // source_consumer hooks: core_module provides CPU-specific messages.
+  // token_consumer hooks: core_module provides CPU-specific messages.
   uint64_t sim_progress() const override;
   std::string source_finish_message(const std::string& phase_name) const override;
   std::string phase_complete_message(const std::string& phase_name) const override;
@@ -1257,9 +1257,9 @@ struct btb : public module_base<btb, core_module> {
 
 /**
  * Workload source interface — provides discrete units of work ("tokens") to a
- * source_consumer. Attach as a submodule of a source_consumer. This base holds
+ * token_consumer. Attach as a submodule of a token_consumer. This base holds
  * only the token-agnostic lifecycle; the typed pull protocol lives on
- * typed_workload_source<Token>. Consumer and sources agree on the token type by
+ * typed_token_source<Token>. Consumer and sources agree on the token type by
  * construction, so mixed token types coexist (the orchestrator never sees it).
  */
 /**
@@ -1305,14 +1305,14 @@ struct environment_module : public module_base<environment_module, environment_m
   virtual ~environment_module() = default;
 };
 
-// Out-of-line: needs source_consumer / stream_source / environment_module complete.
+// Out-of-line: needs token_consumer / token_source / environment_module complete.
 template <typename B, typename C>
 void module_base<B, C>::finalize_created_instance(B* instance_ptr, ModuleBuilder& builder)
 {
-  if (auto* as_consumer = dynamic_cast<source_consumer*>(instance_ptr); as_consumer != nullptr) {
+  if (auto* as_consumer = dynamic_cast<token_consumer*>(instance_ptr); as_consumer != nullptr) {
     as_consumer->set_identity_name(builder.get_name());
   }
-  if (auto* as_source = dynamic_cast<stream_source*>(instance_ptr); as_source != nullptr) {
+  if (auto* as_source = dynamic_cast<token_source*>(instance_ptr); as_source != nullptr) {
     as_source->set_identity_name(builder.get_name());
   }
   instance_ptr->bind(builder.get_parent<C>());

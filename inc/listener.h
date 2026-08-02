@@ -41,7 +41,7 @@ struct listener : public module_base<listener, environment_module> {
 
   // A source consumer advanced. Totals are cumulative counts in the
   // consumer's own token unit and clock domain.
-  virtual void progress(const source_consumer& /*consumer*/, uint64_t /*total_progress*/, uint64_t /*total_cycles*/) {}
+  virtual void progress(const token_consumer& /*consumer*/, uint64_t /*total_progress*/, uint64_t /*total_cycles*/) {}
 };
 
 // Active listener dispatch (single-threaded). main assembles the list once
@@ -49,7 +49,7 @@ struct listener : public module_base<listener, environment_module> {
 void set_active_listeners(std::vector<listener*> active);
 const std::vector<listener*>& active_listeners();
 void emit_begin_phase(bool is_warmup);
-void emit_progress(const source_consumer& consumer, uint64_t total_progress, uint64_t total_cycles);
+void emit_progress(const token_consumer& consumer, uint64_t total_progress, uint64_t total_cycles);
 } // namespace champsim::modules
 
 #endif

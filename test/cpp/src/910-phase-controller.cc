@@ -6,6 +6,7 @@
 #include <functional>
 
 #include "modules.h"
+#include "phase_controller.h"
 #include "operable.h"
 
 namespace {
@@ -52,9 +53,9 @@ struct mock_environment : public champsim::modules::environment_module {
       for (auto* c : cores_) {
         result.push_back(static_cast<champsim::operable*>(static_cast<champsim::modules::core_module*>(c)));
       }
-    } else if (interface_type == "source_consumer") {
+    } else if (interface_type == "token_consumer") {
       for (auto* c : cores_) {
-        result.push_back(static_cast<champsim::modules::source_consumer*>(static_cast<champsim::modules::core_module*>(c)));
+        result.push_back(static_cast<champsim::modules::token_consumer*>(static_cast<champsim::modules::core_module*>(c)));
       }
     }
     return result;

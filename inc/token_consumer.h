@@ -14,19 +14,20 @@
  * limitations under the License.
  */
 
-#ifndef SOURCE_CONSUMER_H
-#define SOURCE_CONSUMER_H
+#ifndef TOKEN_CONSUMER_H
+#define TOKEN_CONSUMER_H
 
 #include <cstdint>
 #include <string>
+
 #include <fmt/core.h>
 
 namespace champsim::modules
 {
-// Mixin for any module that consumes workload sources.
-// Inherit from this to attach workload_source submodules.
-struct source_consumer {
-  virtual ~source_consumer() = default;
+// Mixin for any module that consumes token sources.
+// Inherit from this to attach token_source submodules.
+struct token_consumer {
+  virtual ~token_consumer() = default;
 
   // Health as judged by the consumer itself. The consumer knows its own
   // expected progress rate (instructions retired for a core, packets
@@ -34,7 +35,7 @@ struct source_consumer {
   // not in the phase controller, which only aggregates.
   enum class source_health { healthy, warning, critical, stalled };
 
-  // True when all attached workload sources are exhausted.
+  // True when all attached token sources are exhausted.
   virtual bool source_eof() const { return true; }
 
   // Consumer id: this consumer's hardware-context identity. Assigned by

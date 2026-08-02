@@ -44,7 +44,7 @@ mock_core_914* make_core(const std::string& name)
 
 TEST_CASE("A core judges its own health from its retirement rate")
 {
-  using health = champsim::modules::source_consumer::source_health;
+  using health = champsim::modules::token_consumer::source_health;
   constexpr uint64_t window = 1000000;
 
   auto* uut = make_core("t914_core");
@@ -80,7 +80,7 @@ TEST_CASE("A core judges its own health from its retirement rate")
 
 TEST_CASE("reset_health discards progress made before the phase began")
 {
-  using health = champsim::modules::source_consumer::source_health;
+  using health = champsim::modules::token_consumer::source_health;
   constexpr uint64_t window = 1000000;
 
   auto* uut = make_core("t914_core_reset");

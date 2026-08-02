@@ -34,7 +34,7 @@
 #include "operable.h"
 #include "phase_controller.h"
 #include "phase_info.h"
-#include "workload_source.h"
+#include "token_source.h"
 
 const auto start_time = std::chrono::steady_clock::now();
 
@@ -158,7 +158,7 @@ void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t
       any_abort |= (controller_status == modules::phase_controller::status::ABORT);
       all_complete &= (controller_status == modules::phase_controller::status::COMPLETE);
 
-      // Surface completion notifications so source_consumers can print per-source messages.
+      // Surface completion notifications so token_consumers can print per-source messages.
       for (unsigned source_idx : controller.newly_completed_sources()) {
         if (completed_sources.insert(source_idx).second && on_source_complete) {
           on_source_complete(source_idx);
@@ -189,7 +189,7 @@ static phase_stats collect_phase_stats(const phase_info& phase, modules::environ
   stats.name = phase.name;
 
   // Workload identity comes from the sources, in creation order (legacy env: one trace per core).
-  for (modules::workload_source& src : env.typed_view<modules::workload_source>("workload_source")) {
+  for (modules::token_source& src : env.typed_view<modules::token_source>("token_source")) {
     auto desc = src.describe();
     if (!desc.empty()) {
       stats.trace_names.push_back(desc);
@@ -228,7 +228,7 @@ void assign_identities(modules::environment_module& env)
   identities().clear();
 
   int next_consumer = 0;
-  for (auto& sc : env.typed_view<modules::source_consumer>("source_consumer")) {
+  for (auto& sc : env.typed_view<modules::token_consumer>("token_consumer")) {
     if (sc.get().consumer_id_pinned()) {
       continue; // mirrors another consumer's identity; owns no slot
     }
@@ -247,7 +247,7 @@ void assign_identities(modules::environment_module& env)
 
   uint32_t next_stream = 0;
   std::map<std::string, uint32_t> stream_labels;
-  for (auto& src : env.typed_view<modules::stream_source>("stream_source")) {
+  for (auto& src : env.typed_view<modules::token_source>("token_source")) {
     if (src.get().stream_id_pinned()) {
       continue; // mirrors another source's stream; owns no slot
     }
@@ -313,8 +313,8 @@ std::vector<phase_stats> main(modules::environment_module& env, std::vector<phas
 
     modules::emit_begin_phase(is_warmup);
 
-    // Cache the source_consumer view once per phase (the completion hook would else call typed_view every cycle).
-    auto consumers = env.typed_view<champsim::modules::source_consumer>("source_consumer");
+    // Cache the token_consumer view once per phase (the completion hook would else call typed_view every cycle).
+    auto consumers = env.typed_view<champsim::modules::token_consumer>("token_consumer");
 
     auto on_complete = [&](unsigned source_idx) {
       for (auto& sc : consumers) {

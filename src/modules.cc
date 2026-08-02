@@ -18,7 +18,7 @@
 
 #include "cache.h"
 #include "listener.h"
-#include "workload_source.h"
+#include "instruction_source.h"
 
 // Static member definitions
 bool champsim::modules::ModuleBuilder::global_dump_enabled_ = false;
@@ -64,7 +64,7 @@ void emit_begin_phase(bool is_warmup)
   }
 }
 
-void emit_progress(const source_consumer& consumer, uint64_t total_progress, uint64_t total_cycles)
+void emit_progress(const token_consumer& consumer, uint64_t total_progress, uint64_t total_cycles)
 {
   for (auto* l : listener_registry()) {
     l->progress(consumer, total_progress, total_cycles);
@@ -97,7 +97,7 @@ static champsim::modules::environment_module::register_interface env_iface_reg("
 // builds its workload sources, a cache its prefetchers), not by the
 // environment — registering them names the interface for nested-instance
 // enrollment and lets environment views cover them.
-static champsim::modules::workload_source::register_interface workload_source_iface_reg("workload_source");
+static champsim::modules::instruction_source::register_interface instruction_source_iface_reg("instruction_source");
 static champsim::modules::prefetcher::register_interface prefetcher_iface_reg("prefetcher");
 static champsim::modules::replacement::register_interface replacement_iface_reg("replacement");
 static champsim::modules::branch_predictor::register_interface branch_predictor_iface_reg("branch_predictor");

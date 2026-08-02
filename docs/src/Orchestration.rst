@@ -45,16 +45,19 @@ A **token** is one discrete unit of work. Sources produce tokens; consumers exec
 The orchestration layer never sees the token type — a consumer and its sources agree on
 it by construction.
 
-Workload sources
+Token sources
 ^^^^^^^^^^^^^^^^^^^^
 
-``champsim::modules::workload_source`` carries the token-agnostic lifecycle:
+``champsim::modules::token_source`` is the base contract every source satisfies: the
+token-agnostic lifecycle plus the stream (address-space) identity stamped on its tokens:
 
 .. code-block:: cpp
 
-    struct workload_source {
+    struct token_source {
       virtual bool eof() const = 0;              // no more tokens, ever
       virtual std::string describe() const;      // e.g. the trace path, for reports
+      uint32_t stream_id() const;                // the address-space id stamped on tokens
+      const std::string& stream_label() const;   // the "stream" sharing label, if any
     };
 
 The typed pull protocol lives on a template subclass:
@@ -62,7 +65,7 @@ The typed pull protocol lives on a template subclass:
 .. code-block:: cpp
 
     template <typename Token>
-    struct typed_workload_source : workload_source {
+    struct typed_token_source : token_source {
       virtual const Token* peek() = 0;   // next token without consuming; nullptr = none now
       virtual void consume() = 0;        // discard the peeked token
       std::optional<Token> next();       // peek + consume in one step
@@ -72,9 +75,10 @@ The typed pull protocol lives on a template subclass:
 and empty sources need no special-casing. Paced consumers can ``peek()`` a token, wait
 until it is due, and only then ``consume()`` it.
 
-``champsim::modules::instruction_source`` is ``typed_workload_source<ooo_model_instr>``
-plus the execution-driven feedback hooks (``retire_instruction``, ``squash_instruction``,
-``branch_mispredict``). The shipped ``TRACE_WORKLOAD_SOURCE`` model reads a trace file:
+``champsim::modules::instruction_source`` extends ``typed_token_source<ooo_model_instr>``
+with the execution-driven feedback hooks (``retire_instruction``, ``squash_instruction``,
+``branch_mispredict``). It is the registered interface a core attaches; the shipped
+``INSTRUCTION_SOURCE`` model reads a trace file:
 
 * ``trace_file`` (string) — path to the trace
 * ``stream`` (optional string) — sharing label: sources with the same label share one
@@ -87,12 +91,12 @@ construction.
 Source consumers
 ^^^^^^^^^^^^^^^^^^^^
 
-Any module that executes tokens inherits the ``champsim::modules::source_consumer``
+Any module that executes tokens inherits the ``champsim::modules::token_consumer``
 mixin. It is the orchestration layer's entire view of "the thing doing work":
 
 .. code-block:: cpp
 
-    struct source_consumer {
+    struct token_consumer {
       int consumer_id() const;                     // hardware-context id, framework-assigned
       virtual uint64_t sim_progress() const;       // cumulative tokens completed
       virtual bool source_eof() const;             // all attached sources exhausted
@@ -197,13 +201,13 @@ Listeners observe run-wide events for reporting. They are modules (interface
 
     struct listener {
       virtual void begin_phase(bool is_warmup);
-      virtual void progress(const source_consumer& consumer,
+      virtual void progress(const token_consumer& consumer,
                             uint64_t total_progress, uint64_t total_cycles);
     };
 
 Consumers emit progress through ``champsim::modules::emit_progress`` (cores emit on
 retirement). The shipped ``HEARTBEAT`` model prints a periodic line per consumer; the
-*consumer* formats the line via ``source_consumer::progress_message`` since only it knows
+*consumer* formats the line via ``token_consumer::progress_message`` since only it knows
 its token unit — cores produce the ``Heartbeat CPU N instructions: ... cumulative IPC:
 ...`` line, and other consumer types report in their own vocabulary.
 
@@ -267,7 +271,7 @@ The environment exposes every constructed module through ``view(interface_name)`
 * ``"operable"`` — every instance that inherits ``champsim::operable``, whether the
   *interface* or only the *model* inherits it. Anything in this view is ticked
   automatically by the orchestrator.
-* ``"source_consumer"`` — every instance that inherits ``source_consumer``.
+* ``"token_consumer"`` — every instance that inherits ``token_consumer``.
 
 Submodule-created instances participate: when a parent constructs its children (a core
 its sources, a cache its prefetchers), each instance self-enrolls with the environment,
