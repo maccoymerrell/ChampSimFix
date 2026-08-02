@@ -19,10 +19,15 @@
 #include <algorithm>
 #include <cfenv>
 #include <cmath>
+#include <string>
+#include <vector>
 #include <fmt/core.h>
+#include <nlohmann/json.hpp>
 
 #include "deadlock.h"
 #include "instruction.h"
+#include "json_stat_builder.h"
+#include "stat_format.h"
 #include "util/bits.h" // for lg2, bitmask
 #include "util/span.h"
 #include "util/units.h"
@@ -718,6 +723,34 @@ void MEMORY_CONTROLLER::json_stats(champsim::json_stat_builder& b, bool roi) con
     auto sub = b.group("channel " + std::to_string(i++));
     format_json(roi ? chan.roi_stats : chan.sim_stats, sub);
   }
+}
+
+std::vector<std::string> champsim::modules::memory_controller_module::format_plaintext(const stats_type& stats)
+{
+  std::vector<std::string> lines{};
+  lines.push_back(fmt::format("{} RQ ROW_BUFFER_HIT: {:10}", stats.name, stats.RQ_ROW_BUFFER_HIT));
+  lines.push_back(fmt::format("  ROW_BUFFER_MISS: {:10}", stats.RQ_ROW_BUFFER_MISS));
+  lines.push_back(fmt::format("  AVG DBUS CONGESTED CYCLE: {}", champsim::print_ratio(stats.dbus_cycle_congested, stats.dbus_count_congested)));
+  lines.push_back(fmt::format("{} WQ ROW_BUFFER_HIT: {:10}", stats.name, stats.WQ_ROW_BUFFER_HIT));
+  lines.push_back(fmt::format("  ROW_BUFFER_MISS: {:10}", stats.WQ_ROW_BUFFER_MISS));
+  lines.push_back(fmt::format("  FULL: {:10}", stats.WQ_FULL));
+
+  if (stats.refresh_cycles > 0)
+    lines.push_back(fmt::format("{} REFRESHES ISSUED: {:10}", stats.name, stats.refresh_cycles));
+  else
+    lines.push_back(fmt::format("{} REFRESHES ISSUED: -", stats.name));
+
+  return lines;
+}
+
+void champsim::modules::memory_controller_module::format_json(const stats_type& stats, champsim::json_stat_builder& b)
+{
+  b.add("RQ ROW_BUFFER_HIT", stats.RQ_ROW_BUFFER_HIT)
+      .add("RQ ROW_BUFFER_MISS", stats.RQ_ROW_BUFFER_MISS)
+      .add("WQ ROW_BUFFER_HIT", stats.WQ_ROW_BUFFER_HIT)
+      .add("WQ ROW_BUFFER_MISS", stats.WQ_ROW_BUFFER_MISS)
+      .add("AVG DBUS CONGESTED CYCLE", std::ceil(stats.dbus_cycle_congested) / std::ceil(stats.dbus_count_congested))
+      .add("REFRESHES ISSUED", stats.refresh_cycles);
 }
 
 champsim::modules::memory_controller_module::register_module<MEMORY_CONTROLLER> register_memory_controller_module("DEFAULT_MEMORY_CONTROLLER");

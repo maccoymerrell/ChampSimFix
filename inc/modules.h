@@ -463,6 +463,22 @@ private:
     return r;
   }
 
+  // Return a data member of the named interface's info, or a default-constructed
+  // value (empty function) if the interface is unknown.
+  template <typename T>
+  static T get_member(const std::string& interface_name, T interface_info::*member)
+  {
+    auto it = registry().find(interface_name);
+    return it == registry().end() ? T{} : it->second.*member;
+  }
+
+  // Invoke a bool(model_name) predicate member; false if the interface or member is absent.
+  static bool model_trait(const std::string& interface_name, const std::string& model_name, std::function<bool(const std::string&)> interface_info::*member)
+  {
+    auto it = registry().find(interface_name);
+    return it != registry().end() && (it->second.*member) && (it->second.*member)(model_name);
+  }
+
 public:
   static void register_interface(const std::string& name, interface_info info)
   {
@@ -475,20 +491,11 @@ public:
 
   static bool model_is_source(const std::string& interface_name, const std::string& model_name)
   {
-    auto it = registry().find(interface_name);
-    if (it == registry().end() || !it->second.model_is_source) {
-      return false;
-    }
-    return it->second.model_is_source(model_name);
+    return model_trait(interface_name, model_name, &interface_info::model_is_source);
   }
-
   static bool model_is_consumer(const std::string& interface_name, const std::string& model_name)
   {
-    auto it = registry().find(interface_name);
-    if (it == registry().end() || !it->second.model_is_consumer) {
-      return false;
-    }
-    return it->second.model_is_consumer(model_name);
+    return model_trait(interface_name, model_name, &interface_info::model_is_consumer);
   }
 
   static std::any create(const std::string& interface_name, ModuleBuilder builder, std::any parent)
@@ -513,47 +520,25 @@ public:
 
   static bool has_interface(const std::string& name) { return registry().count(name) > 0; }
 
-  // Get the to_operable converter for an interface, or nullptr if not operable
   static std::function<champsim::operable*(const std::any&)> get_to_operable(const std::string& interface_name)
   {
-    auto it = registry().find(interface_name);
-    if (it == registry().end())
-      return nullptr;
-    return it->second.to_operable;
+    return get_member(interface_name, &interface_info::to_operable);
   }
-
-  // Get the to_source_consumer converter for an interface, or nullptr if not a source_consumer
   static std::function<stream_source*(const std::any&)> get_to_stream_source(const std::string& interface_name)
   {
-    auto it = registry().find(interface_name);
-    if (it == registry().end()) {
-      return nullptr;
-    }
-    return it->second.to_stream_source;
+    return get_member(interface_name, &interface_info::to_stream_source);
   }
-
   static std::function<source_consumer*(const std::any&)> get_to_source_consumer(const std::string& interface_name)
   {
-    auto it = registry().find(interface_name);
-    if (it == registry().end())
-      return nullptr;
-    return it->second.to_source_consumer;
+    return get_member(interface_name, &interface_info::to_source_consumer);
   }
-
-  // Get the to_module_phase / to_module_stat converters for an interface
   static std::function<champsim::module_phase*(const std::any&)> get_to_module_phase(const std::string& interface_name)
   {
-    auto it = registry().find(interface_name);
-    if (it == registry().end())
-      return nullptr;
-    return it->second.to_module_phase;
+    return get_member(interface_name, &interface_info::to_module_phase);
   }
   static std::function<champsim::module_stat*(const std::any&)> get_to_module_stat(const std::string& interface_name)
   {
-    auto it = registry().find(interface_name);
-    if (it == registry().end())
-      return nullptr;
-    return it->second.to_module_stat;
+    return get_member(interface_name, &interface_info::to_module_stat);
   }
 
   // Read instance metadata (model + name) for an instance any belonging to a known interface.
@@ -743,8 +728,17 @@ public:
     }
   };
 
-  // Register this module_base specialization as a named interface in the interface_registry.
-  // This allows the explicit environment to create modules by interface name string.
+  // Per-instance dynamic_cast to a mixin (operable, module_phase, ...): works even when
+  // only the implementation, not the interface, inherits it — e.g. a channel model that
+  // is operable while other models of the same interface are not.
+  template <typename Target>
+  static Target* to_mixin(const std::any& a)
+  {
+    return dynamic_cast<Target*>(std::any_cast<B*>(a));
+  }
+
+  // Register this module_base specialization as a named interface in the interface_registry,
+  // so the explicit environment can create modules by interface-name string.
   struct register_interface {
     register_interface(std::string interface_name)
     {
@@ -768,27 +762,11 @@ public:
         }
         return vec;
       };
-      // Per-instance dynamic_cast: works even when only the implementation
-      // (not the interface) inherits operable. This lets a specific model
-      // be operable while other models of the same interface (e.g. the
-      // default channel) are not.
-      info.to_operable = [](const std::any& a) -> champsim::operable* {
-        return dynamic_cast<champsim::operable*>(std::any_cast<B*>(a));
-      };
-      // Per-instance dynamic_cast (matching to_operable / to_module_phase): a
-      // specific model can be a source_consumer even when the interface is not
-      // (e.g. a channel model that drives phase completion).
-      info.to_source_consumer = [](const std::any& a) -> source_consumer* {
-        return dynamic_cast<source_consumer*>(std::any_cast<B*>(a));
-      };
-      // Per-instance dynamic_cast: works even when only the implementation
-      // (not the interface) inherits module_phase / module_stat.
-      info.to_module_phase = [](const std::any& a) -> champsim::module_phase* {
-        return dynamic_cast<champsim::module_phase*>(std::any_cast<B*>(a));
-      };
-      info.to_module_stat = [](const std::any& a) -> champsim::module_stat* {
-        return dynamic_cast<champsim::module_stat*>(std::any_cast<B*>(a));
-      };
+      info.to_operable = &to_mixin<champsim::operable>;
+      info.to_source_consumer = &to_mixin<source_consumer>;
+      info.to_module_phase = &to_mixin<champsim::module_phase>;
+      info.to_module_stat = &to_mixin<champsim::module_stat>;
+      info.to_stream_source = &to_mixin<stream_source>;
       info.identify = [](const std::any& a) -> interface_registry::instance_id {
         B* ptr = std::any_cast<B*>(a);
         if (!ptr)
@@ -805,9 +783,6 @@ public:
       info.model_is_source = [](const std::string& model_name) -> bool {
         auto it = module_map().find(model_name);
         return it != module_map().end() && std::any_cast<const model_record&>(it->second).is_source;
-      };
-      info.to_stream_source = [](const std::any& a) -> stream_source* {
-        return dynamic_cast<stream_source*>(std::any_cast<B*>(a));
       };
       interface_registry::register_interface(interface_name, std::move(info));
     }

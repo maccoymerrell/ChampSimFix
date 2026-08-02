@@ -21,13 +21,18 @@
 #include <cmath>
 #include <iomanip>
 #include <numeric>
+#include <string_view>
+#include <vector>
 #include <fmt/core.h>
+#include <nlohmann/json.hpp>
 
 #include "bandwidth.h"
 #include "champsim.h"
 #include "chrono.h"
 #include "deadlock.h"
 #include "instruction.h"
+#include "json_stat_builder.h"
+#include "stat_format.h"
 #include "util/algorithm.h"
 #include "util/bits.h"
 #include "util/span.h"
@@ -957,5 +962,115 @@ void CACHE::print_deadlock()
 std::vector<std::string> CACHE::print_stats(bool roi) const { return format_plaintext(roi ? roi_stats : sim_stats); }
 
 void CACHE::json_stats(champsim::json_stat_builder& b, bool roi) const { format_json(roi ? roi_stats : sim_stats, b); }
+
+std::vector<std::string> champsim::modules::cache_module::format_plaintext(const stats_type& stats)
+{
+  using hits_value_type = typename decltype(stats.hits)::value_type;
+  using misses_value_type = typename decltype(stats.misses)::value_type;
+  using miss_merge_value_type = typename decltype(stats.miss_merge)::value_type;
+  using fill_value_type = typename decltype(stats.fill)::value_type;
+
+  // We need mutable copies to allocate missing keys
+  auto hits = stats.hits;
+  auto misses = stats.misses;
+  auto miss_merge = stats.miss_merge;
+  auto fill = stats.fill;
+
+  std::vector<std::size_t> cpus;
+
+  // build a vector of all existing cpus
+  auto stat_keys = {hits.get_keys(), misses.get_keys(), miss_merge.get_keys(), fill.get_keys()};
+  for (auto keys : stat_keys) {
+    std::transform(std::begin(keys), std::end(keys), std::back_inserter(cpus), [](auto val) { return val.second; });
+  }
+  std::sort(std::begin(cpus), std::end(cpus));
+  auto uniq_end = std::unique(std::begin(cpus), std::end(cpus));
+  cpus.erase(uniq_end, std::end(cpus));
+
+  for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION}) {
+    for (auto cpu : cpus) {
+      hits.allocate(std::pair{type, cpu});
+      misses.allocate(std::pair{type, cpu});
+      miss_merge.allocate(std::pair{type, cpu});
+      fill.allocate(std::pair{type, cpu});
+    }
+  }
+
+  std::vector<std::string> lines{};
+  for (auto cpu : cpus) {
+    hits_value_type total_hits = 0;
+    misses_value_type total_misses = 0;
+    miss_merge_value_type total_miss_merge = 0;
+    fill_value_type total_fill = 0;
+    for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION}) {
+      total_hits += hits.value_or(std::pair{type, cpu}, hits_value_type{});
+      total_misses += misses.value_or(std::pair{type, cpu}, misses_value_type{});
+      total_miss_merge += miss_merge.value_or(std::pair{type, cpu}, miss_merge_value_type{});
+      total_fill += fill.value_or(std::pair{type, cpu}, miss_merge_value_type{});
+    }
+
+    fmt::format_string<std::string_view, std::string_view, int, int, int> hitmiss_fmtstr{
+        "cpu{}->{} {:<12s} ACCESS: {:10d} HIT: {:10d} MISS: {:10d} MISS_MERGE: {:10d}"};
+    lines.push_back(fmt::format(hitmiss_fmtstr, cpu, stats.name, "TOTAL", total_hits + total_misses, total_hits, total_misses, total_miss_merge));
+    for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION}) {
+      lines.push_back(fmt::format(hitmiss_fmtstr, cpu, stats.name, access_type_names.at(champsim::to_underlying(type)),
+                                  hits.value_or(std::pair{type, cpu}, hits_value_type{}) + misses.value_or(std::pair{type, cpu}, misses_value_type{}),
+                                  hits.value_or(std::pair{type, cpu}, hits_value_type{}), misses.value_or(std::pair{type, cpu}, misses_value_type{}),
+                                  miss_merge.value_or(std::pair{type, cpu}, miss_merge_value_type{})));
+    }
+
+    lines.push_back(fmt::format("cpu{}->{} PREFETCH REQUESTED: {:10} ISSUED: {:10} USEFUL: {:10} USELESS: {:10}", cpu, stats.name, stats.pf_requested,
+                                stats.pf_issued, stats.pf_useful, stats.pf_useless));
+
+    uint64_t total_downstream_demands = total_fill - fill.value_or(std::pair{access_type::PREFETCH, cpu}, fill_value_type{});
+    lines.push_back(fmt::format("cpu{}->{} AVERAGE MISS LATENCY: {} cycles", cpu, stats.name,
+                                champsim::print_ratio(stats.total_miss_latency_cycles, total_downstream_demands)));
+  }
+
+  return lines;
+}
+
+void champsim::modules::cache_module::format_json(const stats_type& stats, champsim::json_stat_builder& b)
+{
+  using hits_value_type = typename decltype(stats.hits)::value_type;
+  using misses_value_type = typename decltype(stats.misses)::value_type;
+  using miss_merge_value_type = typename decltype(stats.miss_merge)::value_type;
+  using fill_value_type = typename decltype(stats.fill)::value_type;
+
+  b.add("prefetch requested", stats.pf_requested)
+      .add("prefetch issued", stats.pf_issued)
+      .add("useful prefetch", stats.pf_useful)
+      .add("useless prefetch", stats.pf_useless);
+
+  // Discover CPU indices from the data itself (mirrors format_plaintext approach)
+  std::vector<std::size_t> cpus;
+  auto stat_keys = {stats.hits.get_keys(), stats.misses.get_keys(), stats.miss_merge.get_keys(), stats.fill.get_keys()};
+  for (auto keys : stat_keys) {
+    std::transform(std::begin(keys), std::end(keys), std::back_inserter(cpus), [](auto val) { return val.second; });
+  }
+  std::sort(std::begin(cpus), std::end(cpus));
+  cpus.erase(std::unique(std::begin(cpus), std::end(cpus)), std::end(cpus));
+
+  uint64_t total_downstream_demands = stats.fill.total();
+  for (auto cpu : cpus)
+    total_downstream_demands -= stats.fill.value_or(std::pair{access_type::PREFETCH, cpu}, fill_value_type{});
+
+  b.add("miss latency", std::ceil(stats.total_miss_latency_cycles) / std::ceil(total_downstream_demands));
+
+  for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION}) {
+    std::vector<hits_value_type> hit_vec;
+    std::vector<misses_value_type> miss_vec;
+    std::vector<miss_merge_value_type> miss_merge_vec;
+
+    for (auto cpu : cpus) {
+      hit_vec.push_back(stats.hits.value_or(std::pair{type, cpu}, hits_value_type{}));
+      miss_vec.push_back(stats.misses.value_or(std::pair{type, cpu}, misses_value_type{}));
+      miss_merge_vec.push_back(stats.miss_merge.value_or(std::pair{type, cpu}, miss_merge_value_type{}));
+    }
+
+    auto sub = b.group(std::string{access_type_names.at(champsim::to_underlying(type))});
+    sub.add("hit", hit_vec).add("miss", miss_vec).add("miss_merge", miss_merge_vec);
+  }
+}
 
 champsim::modules::cache_module::register_module<CACHE> default_cache_module("DEFAULT_CACHE");
