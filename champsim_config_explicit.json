@@ -428,7 +428,7 @@
       "children": [
         {"name": "cpu0_bp", "module": "branch_predictor", "model": "hashed_perceptron"},
         {"name": "cpu0_btb", "module": "btb", "model": "basic_btb"},
-        {"_comment": "Trace-driven workload source. $trace0 is the first positional CLI trace.", "name": "cpu0_trace_source", "module": "instruction_source", "model": "INSTRUCTION_SOURCE", "trace_file": "$trace0", "cloudsuite": "$cloudsuite", "repeat": false}
+        {"_comment": "Trace-driven instruction producer. $trace0 is the first positional CLI trace.", "name": "cpu0_trace_source", "module": "instruction_producer", "model": "INSTRUCTION_PRODUCER", "trace_file": "$trace0", "cloudsuite": "$cloudsuite", "repeat": false}
       ]
     },
     {

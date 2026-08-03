@@ -62,7 +62,7 @@ public:
   std::vector<std::any> view(const std::string& interface_type) const override;
   void enroll_nested_instance(const std::string& interface_name, const std::string& name, std::any instance) override;
 
-  // Aggregate keys ("operable", "token_consumer") exist only in view();
+  // Aggregate keys ("operable", "packet_consumer") exist only in view();
   // delegate so counts and views always agree.
   size_t get_num(const std::string& interface_name) const override { return view(interface_name).size(); }
   unsigned get_block_size() const override { return block_size_; }

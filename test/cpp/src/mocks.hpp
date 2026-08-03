@@ -13,19 +13,19 @@
 #include "modules.h"
 #include "operable.h"
 
-// Test-only no-op workload source registered as "NULL_INSTRUCTION_SOURCE" (see
-// test/cpp/src/null_workload_source_mock.cc). Tests that build a core
-// (which requires a workload_source submodule) but feed instructions through
+// Test-only no-op instruction producer registered as "NULL_INSTRUCTION_PRODUCER" (see
+// test/cpp/src/null_instruction_producer_mock.cc). Tests that build a core
+// (which requires a instruction_producer submodule) but feed instructions through
 // IFETCH_BUFFER directly attach this mock under that model name.
 
 // Returns the standard default_core builder with a uniquely-named
-// NULL_INSTRUCTION_SOURCE submodule attached, satisfying the core's required
-// workload_source. Pass a per-test mock name so trace messages identify which
+// NULL_INSTRUCTION_PRODUCER submodule attached, satisfying the core's required
+// instruction_producer. Pass a per-test mock name so trace messages identify which
 // test scenario constructed the source.
 inline champsim::modules::ModuleBuilder test_core_defaults(const std::string& ws_name)
 {
   auto b = champsim::defaults::default_core();
-  b.add_submodule("instruction_source", champsim::modules::ModuleBuilder{ws_name, "NULL_INSTRUCTION_SOURCE"});
+  b.add_submodule("instruction_producer", champsim::modules::ModuleBuilder{ws_name, "NULL_INSTRUCTION_PRODUCER"});
   return b;
 }
 

@@ -44,7 +44,7 @@
 #include "operable.h"
 #include "register_allocator.h"
 #include "util/to_underlying.h"
-#include "instruction_source.h"
+#include "instruction_producer.h"
 
 class CACHE;
 class CacheBus
@@ -200,10 +200,10 @@ public:
 
   std::vector<champsim::modules::branch_predictor*> branch_module_pimpl;
   std::vector<champsim::modules::btb*> btb_module_pimpl;
-  std::vector<champsim::modules::instruction_source*> instruction_source_pimpl;
+  std::vector<champsim::modules::instruction_producer*> instruction_producer_pimpl;
 
   void fill_from_sources();
-  bool source_eof() const final;
+  bool producers_eof() const final;
 
   // NOLINTBEGIN(readability-make-member-function-const): legacy modules use non-const hooks
   void impl_initialize_branch_predictor() const;
@@ -256,10 +256,10 @@ public:
     for (const auto& sub : builder.get_submodules("btb"))
       btb_module_pimpl.push_back(champsim::modules::btb::create_instance(sub, static_cast<champsim::modules::core_module*>(this)));
 
-    // The core consumes instruction tokens, so it attaches instruction_source
+    // The core consumes instruction packets, so it attaches instruction_producer
     // children directly — the interface it is designed for.
-    for (const auto& sub : builder.get_submodules("instruction_source")) {
-      instruction_source_pimpl.push_back(champsim::modules::instruction_source::create_instance(sub, static_cast<champsim::modules::token_consumer*>(this)));
+    for (const auto& sub : builder.get_submodules("instruction_producer")) {
+      instruction_producer_pimpl.push_back(champsim::modules::instruction_producer::create_instance(sub, static_cast<champsim::modules::packet_consumer*>(this)));
     }
   }
 };

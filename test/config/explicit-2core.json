@@ -262,7 +262,7 @@
       "children": [
         {"name": "c0_bp", "module": "branch_predictor", "model": "bimodal"},
         {"name": "c0_btb", "module": "btb", "model": "basic_btb"},
-        {"name": "c0_trace_source", "module": "instruction_source", "model": "INSTRUCTION_SOURCE", "trace_file": "$trace0"}
+        {"name": "c0_trace_source", "module": "instruction_producer", "model": "INSTRUCTION_PRODUCER", "trace_file": "$trace0"}
       ]
     },
     {
@@ -283,7 +283,7 @@
       "children": [
         {"name": "c1_bp", "module": "branch_predictor", "model": "bimodal"},
         {"name": "c1_btb", "module": "btb", "model": "basic_btb"},
-        {"name": "c1_trace_source", "module": "instruction_source", "model": "INSTRUCTION_SOURCE", "trace_file": "$trace1"}
+        {"name": "c1_trace_source", "module": "instruction_producer", "model": "INSTRUCTION_PRODUCER", "trace_file": "$trace1"}
       ]
     }
   ]

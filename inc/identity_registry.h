@@ -1,5 +1,5 @@
 /*
- *    Copyright 2023 The ChampSim Contributors
+ *    Copyright 2026 The ChampSim Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,14 +28,14 @@ namespace champsim
 /**
  * Name <-> id map for framework-assigned identities (populated by assign_identities()),
  * used to translate ids to configured instance names. Consumer id -> one name; source id
- * -> one or more source names (sources sharing a "source_group" label share one id).
+ * -> one or more source names (sources sharing a "producer_group" label share one id).
  */
 class identity_registry
 {
   std::map<int, std::string> consumer_names_;
   std::map<std::string, int> consumer_ids_;
-  std::map<uint32_t, std::vector<std::string>> token_sources_;
-  std::map<std::string, uint32_t> source_ids_;
+  std::map<uint32_t, std::vector<std::string>> packet_producers_;
+  std::map<std::string, uint32_t> producer_ids_;
 
 public:
   void register_consumer(int id, std::string name)
@@ -44,10 +44,10 @@ public:
     consumer_names_[id] = std::move(name);
   }
 
-  void register_source(uint32_t source, std::string name)
+  void register_producer(uint32_t source, std::string name)
   {
-    source_ids_[name] = source;
-    token_sources_[source].push_back(std::move(name));
+    producer_ids_[name] = source;
+    packet_producers_[source].push_back(std::move(name));
   }
 
   /** The configured name of the consumer holding this id. */
@@ -69,18 +69,18 @@ public:
   }
 
   /** The configured names of every source stamping this source id. */
-  std::vector<std::string> token_sources(uint32_t source) const
+  std::vector<std::string> packet_producers(uint32_t source) const
   {
-    if (auto it = token_sources_.find(source); it != std::end(token_sources_)) {
+    if (auto it = packet_producers_.find(source); it != std::end(packet_producers_)) {
       return it->second;
     }
     return {};
   }
 
   /** The source id assigned to the source configured under this name. */
-  std::optional<uint32_t> source_id(const std::string& name) const
+  std::optional<uint32_t> producer_id(const std::string& name) const
   {
-    if (auto it = source_ids_.find(name); it != std::end(source_ids_)) {
+    if (auto it = producer_ids_.find(name); it != std::end(producer_ids_)) {
       return it->second;
     }
     return std::nullopt;
@@ -90,8 +90,8 @@ public:
   {
     consumer_names_.clear();
     consumer_ids_.clear();
-    token_sources_.clear();
-    source_ids_.clear();
+    packet_producers_.clear();
+    producer_ids_.clear();
   }
 };
 

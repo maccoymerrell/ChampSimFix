@@ -49,9 +49,9 @@ implementations ``DEFAULT_CACHE`` (``CACHE`` class) and ``DEFAULT_CORE`` (``O3_C
 implement these interfaces. See :ref:`Cache_model` and :ref:`Core_model` for details.
 
 The simulation loop itself is driven by orchestration interfaces —
-``token_source`` (token providers), ``phase_controller`` (run structure, completion,
-and health), and ``listener`` (run-wide reporting) — plus the ``token_consumer``
-mixin for anything that executes tokens. See :ref:`Orchestration` for the full
+``packet_producer`` (packet providers), ``phase_controller`` (run structure, completion,
+and health), and ``listener`` (run-wide reporting) — plus the ``packet_consumer``
+mixin for anything that executes packets. See :ref:`Orchestration` for the full
 contracts.
 
 ------------------------------------------

@@ -27,7 +27,7 @@
 #include "deadlock.h"
 #include "instruction.h"
 #include "json_stat_builder.h"
-#include "stat_format.h"
+#include "util/stat_format.h"
 #include "util/bits.h" // for lg2, bitmask
 #include "util/span.h"
 #include "util/units.h"

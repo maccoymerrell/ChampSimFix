@@ -1,5 +1,5 @@
 /*
- *    Copyright 2023 The ChampSim Contributors
+ *    Copyright 2026 The ChampSim Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef TOKEN_CONSUMER_H
-#define TOKEN_CONSUMER_H
+#ifndef PACKET_CONSUMER_H
+#define PACKET_CONSUMER_H
 
 #include <cstdint>
 #include <string>
@@ -24,10 +24,10 @@
 
 namespace champsim::modules
 {
-// Mixin for any module that consumes token sources.
-// Inherit from this to attach token_source submodules.
-struct token_consumer {
-  virtual ~token_consumer() = default;
+// Mixin for any module that consumes packet sources.
+// Inherit from this to attach packet_producer submodules.
+struct packet_consumer {
+  virtual ~packet_consumer() = default;
 
   // Health as judged by the consumer itself. The consumer knows its own
   // expected progress rate (instructions retired for a core, packets
@@ -35,8 +35,8 @@ struct token_consumer {
   // not in the phase controller, which only aggregates.
   enum class source_health { healthy, warning, critical, stalled };
 
-  // True when all attached token sources are exhausted.
-  virtual bool source_eof() const { return true; }
+  // True when all attached packet sources are exhausted.
+  virtual bool producers_eof() const { return true; }
 
   // Consumer id: this consumer's hardware-context identity. Assigned by
   // the framework at startup, by enumeration in configuration order —
@@ -73,7 +73,7 @@ private:
   std::string identity_name_{};
 
 public:
-  // Progress metric for phase completion, in tokens (e.g. instructions
+  // Progress metric for phase completion, in packets (e.g. instructions
   // retired). Return 0 to indicate no progress tracking (complete only on EOF).
   virtual uint64_t sim_progress() const { return 0; }
 
@@ -99,10 +99,10 @@ public:
   // Format a periodic progress report (driven by a heartbeat-style
   // listener, which owns the interval bookkeeping and supplies the
   // numbers). The consumer owns the wording because it knows its own
-  // token unit. Return empty to suppress.
+  // packet unit. Return empty to suppress.
   virtual std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const
   {
-    return fmt::format("Heartbeat source {} tokens: {} cycles: {} rate: {:.4} cumulative rate: {:.4}", consumer_id(), total_progress, total_cycles,
+    return fmt::format("Heartbeat source {} packets: {} cycles: {} rate: {:.4} cumulative rate: {:.4}", consumer_id(), total_progress, total_cycles,
                        interval_rate, cumulative_rate);
   }
 };

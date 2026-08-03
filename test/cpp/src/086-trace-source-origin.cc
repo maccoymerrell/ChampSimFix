@@ -4,14 +4,14 @@
 #include <string>
 
 #include "modules.h"
-#include "instruction_source.h"
+#include "instruction_producer.h"
 #include "origin.h"
 
 namespace
 {
 
 // The consumer whose identity the source should inherit.
-struct probe_consumer : champsim::modules::token_consumer {
+struct probe_consumer : champsim::modules::packet_consumer {
   explicit probe_consumer(int id) { set_consumer_id(id); }
 };
 
@@ -42,22 +42,22 @@ std::string write_trace(const std::string& tag)
 
 } // namespace
 
-TEST_CASE("A trace source stamps tokens with its consumer's id, source id defaulting to it")
+TEST_CASE("A trace source stamps packets with its consumer's id, source id defaulting to it")
 {
   auto path = write_trace("default");
   probe_consumer consumer{3};
 
-  auto builder = champsim::modules::ModuleBuilder{"t086_src_default", "INSTRUCTION_SOURCE"}
+  auto builder = champsim::modules::ModuleBuilder{"t086_src_default", "INSTRUCTION_PRODUCER"}
     .add_parameter("trace_file", path);
-  auto* uut = champsim::modules::instruction_source::create_instance(builder, &consumer);
-  auto* typed = dynamic_cast<champsim::modules::instruction_source*>(uut);
+  auto* uut = champsim::modules::instruction_producer::create_instance(builder, &consumer);
+  auto* typed = dynamic_cast<champsim::modules::instruction_producer*>(uut);
   REQUIRE(typed != nullptr);
 
   const auto* instr = typed->peek();
   REQUIRE(instr != nullptr);
   // Consumer identity comes from the bound consumer; the source id inherits it
   REQUIRE(instr->origin.consumer() == 3);
-  REQUIRE(instr->origin.source() == 3);
+  REQUIRE(instr->origin.producer() == 3);
   REQUIRE(instr->origin.cpu() == 3);
   REQUIRE(instr->origin.asid() == 3);
 
@@ -69,18 +69,18 @@ TEST_CASE("A framework-assigned source id overrides the default")
   auto path = write_trace("override");
   probe_consumer consumer{3};
 
-  auto builder = champsim::modules::ModuleBuilder{"t086_src_override", "INSTRUCTION_SOURCE"}
+  auto builder = champsim::modules::ModuleBuilder{"t086_src_override", "INSTRUCTION_PRODUCER"}
     .add_parameter("trace_file", path);
-  auto* uut = champsim::modules::instruction_source::create_instance(builder, &consumer);
-  uut->set_source_id(7); // as the startup identity pass would
-  auto* typed = dynamic_cast<champsim::modules::instruction_source*>(uut);
+  auto* uut = champsim::modules::instruction_producer::create_instance(builder, &consumer);
+  uut->set_producer_id(7); // as the startup identity pass would
+  auto* typed = dynamic_cast<champsim::modules::instruction_producer*>(uut);
   REQUIRE(typed != nullptr);
 
   const auto* instr = typed->peek();
   REQUIRE(instr != nullptr);
   // Two coordinates, independently owned: hardware context vs source id
   REQUIRE(instr->origin.consumer() == 3);
-  REQUIRE(instr->origin.source() == 7);
+  REQUIRE(instr->origin.producer() == 7);
 
   std::remove(path.c_str());
 }
@@ -90,9 +90,9 @@ TEST_CASE("A trace source describes itself with its trace path")
   auto path = write_trace("describe");
   probe_consumer consumer{0};
 
-  auto builder = champsim::modules::ModuleBuilder{"t086_src_describe", "INSTRUCTION_SOURCE"}
+  auto builder = champsim::modules::ModuleBuilder{"t086_src_describe", "INSTRUCTION_PRODUCER"}
     .add_parameter("trace_file", path);
-  auto* uut = champsim::modules::instruction_source::create_instance(builder, &consumer);
+  auto* uut = champsim::modules::instruction_producer::create_instance(builder, &consumer);
 
   REQUIRE(uut->describe() == path);
 

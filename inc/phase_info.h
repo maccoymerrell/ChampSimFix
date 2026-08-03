@@ -34,7 +34,7 @@ namespace champsim
 // independent so a run can contain unmeasured non-warmup phases (e.g. a
 // fast-forward between warmup and the measured region). Workload identity
 // (e.g. trace paths) is not part of the phase — sources describe themselves
-// via token_source::describe().
+// via packet_producer::describe().
 struct phase_info {
   std::string name;
   bool is_warmup;

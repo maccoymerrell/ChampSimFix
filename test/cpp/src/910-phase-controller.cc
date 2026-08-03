@@ -16,7 +16,7 @@ struct mock_core : public champsim::modules::core_module {
   uint64_t instr_count = 0;
   uint64_t cycle_count = 0;
   uint8_t cpu_num_ = 0;
-  bool source_eof_ = false; // a live core with attached sources is not at EOF
+  bool producers_eof_ = false; // a live core with attached sources is not at EOF
 
   explicit mock_core(champsim::modules::ModuleBuilder builder)
     : core_module(champsim::chrono::picoseconds{250}) {
@@ -31,7 +31,7 @@ struct mock_core : public champsim::modules::core_module {
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return {}; }
   cpu_stats get_roi_stats() const override { return {}; }
-  bool source_eof() const override { return source_eof_; }
+  bool producers_eof() const override { return producers_eof_; }
 };
 
 static champsim::modules::core_module::register_module<mock_core> mock_core_reg_910("MOCK_CORE_910");
@@ -53,9 +53,9 @@ struct mock_environment : public champsim::modules::environment_module {
       for (auto* c : cores_) {
         result.push_back(static_cast<champsim::operable*>(static_cast<champsim::modules::core_module*>(c)));
       }
-    } else if (interface_type == "token_consumer") {
+    } else if (interface_type == "packet_consumer") {
       for (auto* c : cores_) {
-        result.push_back(static_cast<champsim::modules::token_consumer*>(static_cast<champsim::modules::core_module*>(c)));
+        result.push_back(static_cast<champsim::modules::packet_consumer*>(static_cast<champsim::modules::core_module*>(c)));
       }
     }
     return result;
@@ -191,7 +191,7 @@ TEST_CASE("Phase controller completes all sources when one source hits EOF (comp
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
 
   // Core 0's sources reach EOF: default policy ends the phase for everyone
-  mc0->source_eof_ = true;
+  mc0->producers_eof_ = true;
   s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::COMPLETE);
   auto completed = pc->newly_completed_sources();
@@ -226,7 +226,7 @@ TEST_CASE("Phase controller completes only the exhausted source under complete_s
   pc->begin_phase("EOF Source Test", false, 100);
 
   // Core 0's sources reach EOF: only source 0 completes
-  mc0->source_eof_ = true;
+  mc0->producers_eof_ = true;
   auto s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
   auto completed = pc->newly_completed_sources();

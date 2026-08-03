@@ -42,7 +42,7 @@ struct mock_core_915 : public champsim::modules::core_module {
   long operate() override { ++instr_count; return 1; }
   cpu_stats get_sim_stats() const override { return {}; }
   cpu_stats get_roi_stats() const override { return {}; }
-  bool source_eof() const override { return false; }
+  bool producers_eof() const override { return false; }
 };
 static champsim::modules::core_module::register_module<mock_core_915> core_reg_915("MOCK_CORE_915");
 
@@ -55,8 +55,8 @@ struct mock_env_915 : public champsim::modules::environment_module {
     if (interface_type == "operable") {
       for (auto* op : operables_) result.push_back(op);
       for (auto* c : cores_) result.push_back(static_cast<champsim::operable*>(static_cast<champsim::modules::core_module*>(c)));
-    } else if (interface_type == "token_consumer") {
-      for (auto* c : cores_) result.push_back(static_cast<champsim::modules::token_consumer*>(static_cast<champsim::modules::core_module*>(c)));
+    } else if (interface_type == "packet_consumer") {
+      for (auto* c : cores_) result.push_back(static_cast<champsim::modules::packet_consumer*>(static_cast<champsim::modules::core_module*>(c)));
     }
     return result;
   }
