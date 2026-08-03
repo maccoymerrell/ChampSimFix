@@ -89,19 +89,19 @@ class wrong_path_tracereader
     return check_file_type<tar_magic, sizeof(tar_magic), tar_magic_position>(file_name);
   };
   std::function<bool(const std::string&)> is_gzip = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
-    return (file_name.substr(std::size(file_name) - 2) == "gz") && check_file_type<gzip_magic, sizeof(gzip_magic), gzip_magic_position>(file_name);
+    return (file_name.substr(std::size(file_name) - 2) == "gz") and check_file_type<gzip_magic, sizeof(gzip_magic), gzip_magic_position>(file_name);
   };
   std::function<bool(const std::string&)> is_lzma = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
-    return (file_name.substr(std::size(file_name) - 2) == "xz") && check_file_type<lzma_magic, sizeof(lzma_magic), lzma_magic_position>(file_name);
+    return (file_name.substr(std::size(file_name) - 2) == "xz") and check_file_type<lzma_magic, sizeof(lzma_magic), lzma_magic_position>(file_name);
   };
   std::function<bool(const std::string&)> is_bzip2 = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
-    return (file_name.substr(std::size(file_name) - 3) == "bz2") && check_file_type<bzip2_magic, sizeof(bzip2_magic), bzip2_magic_position>(file_name);
+    return (file_name.substr(std::size(file_name) - 3) == "bz2") and check_file_type<bzip2_magic, sizeof(bzip2_magic), bzip2_magic_position>(file_name);
   };
   std::function<bool(const std::string&)> is_zstd = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
-    return (file_name.substr(std::size(file_name) - 3) == "zst") && check_file_type<zstd_magic, sizeof(zstd_magic), zstd_magic_position>(file_name);
+    return (file_name.substr(std::size(file_name) - 3) == "zst") and check_file_type<zstd_magic, sizeof(zstd_magic), zstd_magic_position>(file_name);
   };
   std::function<bool(const std::string&)> is_lz4 = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
-    return (file_name.substr(std::size(file_name) - 3) == "lz4") && check_file_type<lz4_magic, sizeof(lz4_magic), lz4_magic_position>(file_name);
+    return (file_name.substr(std::size(file_name) - 3) == "lz4") and check_file_type<lz4_magic, sizeof(lz4_magic), lz4_magic_position>(file_name);
   };
 
   // This class is responsible for decompressing the compressed streams and returning the decompressed data
@@ -117,7 +117,7 @@ class wrong_path_tracereader
     [[nodiscard]] constexpr std::optional<char> decompress() noexcept
     {
       // No more bytes left
-      if ((buffer_iter >= max_buffer_iter) && stream.eof()) {
+      if ((buffer_iter >= max_buffer_iter) and stream.eof()) {
         eof = true;
         return {};
       }
@@ -696,6 +696,8 @@ class wrong_path_tracereader
   class body_parser : public body_wrapper
   {
   private:
+    bool initialized = false; // Used for lazy initialization
+
     struct field_delta_section {
       uint64_t ipos;
       uint64_t fid;
@@ -732,7 +734,6 @@ class wrong_path_tracereader
     const header_wrapper& header;
     bool eof_ = false; // Set to true when the compressed_body_stream runs out
     const uint8_t cpu;
-    uint32_t last_template_id; // Used for IFRAME validate. Set by handle_entry consumed by handle_iframe
 
     // Note: The trace contains register file values but ChampSim doesn't care about them. We maintain this regfile for posterity's sake only
     using RegFileType = std::map<uint64_t, std::map<uint64_t, std::bitset<512>>>;
@@ -986,11 +987,12 @@ class wrong_path_tracereader
       }
     }
 
+    // This function is only called when there are no more wrong path instructions left to be generated but a re-steer hasn't been observed yet
     // Generates trace inferred wrong path instructions starting from next_bb_pc
-    [[nodiscard]] constexpr std::vector<ooo_model_instr> continue_wp([[maybe_unused]] const uint64_t nexr_bb_pc)
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> continue_wp([[maybe_unused]] const uint64_t next_bb_pc)
     {
-      // TODO: Finish this
-#warning "Wrong path not implemented yet"
+      // TODO: Implement trace inferred wrong path here
+#warning "Trace inferred wrong path not implemented yet"
 
       return {};
     }
@@ -1018,9 +1020,9 @@ class wrong_path_tracereader
       return retvec;
     }
 
-    [[nodiscard]] constexpr std::vector<ooo_model_instr> start_wp([[maybe_unused]] const body_entry& entry, const uint64_t next_bb_pc = 0xdeadbeef)
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> start_wp([[maybe_unused]] const body_entry& entry)
     {
-      if (wp_overlay || wp_regfile)
+      if (wp_overlay or wp_regfile)
         throw std::runtime_error(fmt::format("[ERROR] Attempting to instantiate a nested wrong path!"));
 
       wp_overlay.emplace(cp_overlay); // Fork off a copy of the current overlay
@@ -1029,12 +1031,12 @@ class wrong_path_tracereader
       // TODO: Generate wrong path instructions here from entry
 #warning "Wrong path not implemented"
 
-      return continue_wp(next_bb_pc);
+      return {};
     }
 
     [[nodiscard]] constexpr std::vector<ooo_model_instr> stop_wp(const body_entry& entry)
     {
-      if (!wp_overlay || !wp_regfile)
+      if (!wp_overlay or !wp_regfile)
         throw std::runtime_error(fmt::format("[ERROR] Detected mangled transient state!"));
 
       wp_overlay.reset(); // Discard transient WP state
@@ -1054,12 +1056,12 @@ class wrong_path_tracereader
       const bool previously_on_wp = wp_overlay.has_value();
       const bool now_on_wp = next_bb_pc != next_cp_bb_pc and false; // TODO: Fix this
 
-      if (previously_on_wp && now_on_wp)
+      if (previously_on_wp and now_on_wp) // Exhausted WP instructions from body entry. Use trace inferred wrong path
         return continue_wp(next_bb_pc);
-      else if (previously_on_wp && !now_on_wp)
+      else if (previously_on_wp and !now_on_wp)
         return stop_wp(entry);
-      else if (!previously_on_wp && now_on_wp)
-        return start_wp(entry, next_bb_pc);
+      else if (!previously_on_wp and now_on_wp)
+        return start_wp(entry);
       return continue_cp(entry);
     }
 
@@ -1186,10 +1188,9 @@ class wrong_path_tracereader
       const bool no_wp_bbs = (chain.num_wp == 0);
       const bool single_event = (events.num_events == 1);
       const bool translation_failure = (events.ev_flags == header.ids.at("wp_event_flag").left.at("CST_WP_EVENT_TRANSLATION_UNAVAIL"));
-      if (no_wp_bbs && single_event && translation_failure)
+      if (no_wp_bbs and single_event and translation_failure)
         return;
 
-      // We should never reach this point
       throw std::runtime_error("[ERROR] Illegal wrong path section detected");
     }
 
@@ -1212,34 +1213,53 @@ class wrong_path_tracereader
         validate_wp(retval.wp_chain, retval.wp_events);
       }
 
-      last_template_id = retval.template_id; // Record the most recent template ID. Used for IFRAME validation
       return retval;
     }
 
-    constexpr void validate_overlay(OverlayType& overlay, const delta_section& delta_sec) const
+    constexpr void validate_overlay(const OverlayType& overlay, const delta_section& delta_sec, const uint32_t template_id) const
     {
+      if (header.templates.find(template_id) == header.templates.end())
+        throw std::runtime_error(fmt::format("[ERROR] Template #{} does not exist in the header. Validate failed!", template_id));
+
       const auto& deltas = delta_sec.records;
       for (const auto& delta : deltas) {
-        const overlay_key key(last_template_id, delta.ipos);
-        if (overlay.find(key) == cp_overlay.end())
+        const overlay_key key(template_id, delta.ipos);
+        if (overlay.find(key) == cp_overlay.end() or overlay.at(key).find(delta.fid) == overlay.at(key).end())
           throw std::runtime_error(fmt::format("[ERROR] IFRAME validation failed! Overlay key {} not found in the overlay map", key.format()));
-        if (overlay[key][delta.fid] != delta.delta)
+        if (overlay.at(key).at(delta.fid) != delta.delta)
           throw std::runtime_error(
               fmt::format("[ERROR] IFRAME validation failed! Delta value mismatch for key {} and FID {}\n\tExpected Value = {}\n\tStored Value = {}",
-                          key.format(), delta.fid, delta.delta.to_string(), overlay[key][delta.fid].to_string()));
+                          key.format(), delta.fid, delta.delta.to_string(), overlay.at(key).at(delta.fid).to_string()));
       }
     }
 
     constexpr void handle_iframe()
     {
-#warning "Wrong Path validation not implemented"
       delta_section cp_delta = read_cp_delta_section();
-      validate_overlay(cp_overlay, cp_delta);
+      validate_overlay(cp_overlay, cp_delta, previous_template_id);
 
       if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
         wp_chain_section wp_chain = read_wp_chain_section();
         wp_events_section wp_events = read_wp_events_section();
-        // TODO: Validate wrong path overlay
+
+        if (wp_overlay.has_value() != wp_regfile.has_value())
+          throw std::runtime_error("[ERROR] Mangled transient state detected. Exiting");
+
+        if (wp_overlay) // Verify WP only when executing WP
+        {
+          std::set<uint32_t> processed_templates; // Tracks the template IDs for the templates that have been verified
+          const int64_t num_entries = static_cast<int64_t>(wp_chain.template_id_deltas.size());
+          uint32_t current_template_id = previous_template_id;
+          for (int64_t i = num_entries - 1; i >= 0; i--) // Iterate in reverse
+          {
+            current_template_id = static_cast<uint32_t>(static_cast<int64_t>(current_template_id) + wp_chain.template_id_deltas.at(i));
+            if (processed_templates.find(current_template_id) != processed_templates.end())
+              continue; // Only validate the last instance of each template
+
+            validate_overlay(wp_overlay.value(), wp_chain.wp_deltas.at(i), current_template_id);
+            processed_templates.insert(current_template_id); // Mark this template as done
+          }
+        }
       }
     }
 
@@ -1315,10 +1335,14 @@ class wrong_path_tracereader
       return retval;
     }
 
-  public:
-    constexpr body_parser(const uint8_t cpu_idx, const std::string& body_file, const header_wrapper& header_)
-        : compressed_body_stream(body_file), header(header_), cpu(cpu_idx)
+    constexpr void initialize()
     {
+      if (initialized)
+        throw std::runtime_error("[ERROR] Trying to initialize an already initialized body stream");
+
+      if (eof_)
+        throw std::runtime_error("[ERROR] Body trace is empty");
+
       verify_integrity();
 
       using namespace wrong_path_trace_constants;
@@ -1326,18 +1350,21 @@ class wrong_path_tracereader
         valid_body_tags.emplace(std::move(value));
 
       read_till_next_entry(); // Read from the stream until we reach the first BODY_TAG_ENTRY section (but don't read this section yet)
+
+      initialized = true;
+    }
+
+  public:
+    constexpr body_parser(const uint8_t cpu_idx, const std::string& body_file, const header_wrapper& header_)
+        : compressed_body_stream(body_file), header(header_), cpu(cpu_idx)
+    {
     }
 
     [[nodiscard]] constexpr ooo_model_instr read(const uint64_t next_pc = 0xdeadbeef)
     {
-      // Handle trace inferred wrong path execution
-      const bool exhausted_current_basic_block = (instr_buffer_fixed.size() == 0);
-      if (!exhausted_current_basic_block) {
-        const bool divert_to_wrong_path = (next_pc != instr_buffer_fixed.front().ip.to<uint64_t>());
-        if (divert_to_wrong_path) {
-          // TODO: Generate trace inferred wrong path instructions
-        }
-      }
+      // Lazy initialization
+      if (!initialized)
+        initialize();
 
       // No more instruction left in the stream
       if (eof_) {
@@ -1350,8 +1377,19 @@ class wrong_path_tracereader
         throw std::runtime_error("[ERROR] No more instructions left to read. Exiting...");
       }
 
+      // Handle trace inferred wrong path execution
+      const bool exhausted_current_basic_block = (instr_buffer_fixed.size() == 0);
+      if (!exhausted_current_basic_block) {
+        const bool diverged = (next_pc != instr_buffer_fixed.front().ip.to<uint64_t>());
+        if (diverged and false) { // Drop the instructions in the buffer TODO: Fix this
+          instr_buffer.clear();
+          instr_buffer_fixed.clear(); // TODO: Revert back to instr_buffer
+        }
+      }
+
       // Time to re-fill the buffer
-      // Note: Buffer is refilled *only* at basic block boundaries
+      // Note: Buffer is refilled *only* (i) at basic block boundaries or (ii) at the start of a wrong path chain or (iii) when trace inferred wrong path
+      // instructions are needed
       // TODO: Revert back to instr_buffer
       if ((instr_buffer_fixed.size() == 0)) {
         if (instr_buffer.size() <= 1) { // Populate the instr_buffer if its empty. It might have one branch instruction left over since last time
@@ -1393,7 +1431,7 @@ class wrong_path_tracereader
     [[nodiscard]] constexpr bool eof() const override
     {
       // TODO: Revert to instr_buffer
-      const bool retval = (instr_buffer_fixed.size() == 0 && eof_);
+      const bool retval = (instr_buffer_fixed.size() == 0 and eof_);
 
       // Each instruction in the source application can potentially result in multiple trace instructions. For example, one `rep` in X86 can result in tens of
       // trace instructions. Moreover, the writer collects the trace till cp_instruction_num instructions are reached *and* the last executing basic block is
@@ -1401,7 +1439,7 @@ class wrong_path_tracereader
       const bool comsumed_expected_num_cp_instructions = header.prolog.total_target_instructions <= cp_instruction_num;
       const bool unbounded_trace = header.prolog.total_target_instructions == 0; // The trace was collected until the application exited
 
-      if (retval && !unbounded_trace && !comsumed_expected_num_cp_instructions)
+      if (retval and !unbounded_trace and !comsumed_expected_num_cp_instructions)
         throw std::runtime_error(fmt::format(
             "[ERROR] Trace has {} correct path instructions, but only {} were parsed",
             header.prolog.total_target_instructions != 0 ? fmt::format("{}", header.prolog.total_target_instructions) : "unbounded", cp_instruction_num));
