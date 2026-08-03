@@ -4,7 +4,7 @@
 
 #include "environment.h"
 #include "instr.h"
-#include "instruction_source.h"
+#include "instruction_producer.h"
 #include "modules.h"
 
 namespace champsim
@@ -15,20 +15,20 @@ void assign_identities(modules::environment_module& env);
 namespace
 {
 
-struct probe_source_505 : public champsim::modules::instruction_source {
-  explicit probe_source_505(champsim::modules::ModuleBuilder builder) { source_group_ = builder.get_parameter<std::string>("source_group", true, std::string{}); }
+struct probe_source_505 : public champsim::modules::instruction_producer {
+  explicit probe_source_505(champsim::modules::ModuleBuilder builder) { producer_group_ = builder.get_parameter<std::string>("producer_group", true, std::string{}); }
   const ooo_model_instr* peek() override { return nullptr; }
   void consume() override {}
   [[nodiscard]] bool eof() const override { return true; }
 };
 
-static champsim::modules::instruction_source::register_module<probe_source_505> probe_source_reg("PROBE_SOURCE_505");
+static champsim::modules::instruction_producer::register_module<probe_source_505> probe_source_reg("PROBE_SOURCE_505");
 
 struct probe_core_505 : public champsim::modules::core_module {
   explicit probe_core_505(champsim::modules::ModuleBuilder builder) : core_module(champsim::chrono::picoseconds{250})
   {
-    for (const auto& sub : builder.get_submodules("instruction_source", true)) {
-      champsim::modules::instruction_source::create_instance(sub, static_cast<champsim::modules::token_consumer*>(this));
+    for (const auto& sub : builder.get_submodules("instruction_producer", true)) {
+      champsim::modules::instruction_producer::create_instance(sub, static_cast<champsim::modules::packet_consumer*>(this));
     }
   }
 
@@ -39,17 +39,17 @@ struct probe_core_505 : public champsim::modules::core_module {
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return {}; }
   cpu_stats get_roi_stats() const override { return {}; }
-  bool source_eof() const override { return true; }
+  bool producers_eof() const override { return true; }
 };
 
 static champsim::modules::core_module::register_module<probe_core_505> probe_core_reg("PROBE_CORE_505");
 
 } // namespace
 
-TEST_CASE("num_consumers, num_sources, and num_source_groups are each counted in their own space")
+TEST_CASE("num_consumers, num_producers, and num_producer_groups are each counted in their own space")
 {
   // Two consumers (cores). Four sources: c0 holds three (two sharing a
-  // source_group label, one on its own), c1 holds one. Three source groups: the
+  // producer_group label, one on its own), c1 holds one. Three source groups: the
   // shared label collapses c0's pair onto one id. Every count differs (2, 4, 3),
   // so any conflation fails loudly.
   nlohmann::json config = {
@@ -61,9 +61,9 @@ TEST_CASE("num_consumers, num_sources, and num_source_groups are each counted in
                {"model", "PROBE_CORE_505"},
                {"children",
                 nlohmann::json::array({
-                    nlohmann::json{{"name", "t505_c0_srcA"}, {"module", "instruction_source"}, {"model", "PROBE_SOURCE_505"}, {"source_group", "t505_shared"}},
-                    nlohmann::json{{"name", "t505_c0_srcB"}, {"module", "instruction_source"}, {"model", "PROBE_SOURCE_505"}, {"source_group", "t505_shared"}},
-                    nlohmann::json{{"name", "t505_c0_srcC"}, {"module", "instruction_source"}, {"model", "PROBE_SOURCE_505"}},
+                    nlohmann::json{{"name", "t505_c0_srcA"}, {"module", "instruction_producer"}, {"model", "PROBE_SOURCE_505"}, {"producer_group", "t505_shared"}},
+                    nlohmann::json{{"name", "t505_c0_srcB"}, {"module", "instruction_producer"}, {"model", "PROBE_SOURCE_505"}, {"producer_group", "t505_shared"}},
+                    nlohmann::json{{"name", "t505_c0_srcC"}, {"module", "instruction_producer"}, {"model", "PROBE_SOURCE_505"}},
                 })},
            },
            nlohmann::json{
@@ -71,7 +71,7 @@ TEST_CASE("num_consumers, num_sources, and num_source_groups are each counted in
                {"module", "core"},
                {"model", "PROBE_CORE_505"},
                {"children", nlohmann::json::array({
-                                nlohmann::json{{"name", "t505_c1_src"}, {"module", "instruction_source"}, {"model", "PROBE_SOURCE_505"}},
+                                nlohmann::json{{"name", "t505_c1_src"}, {"module", "instruction_producer"}, {"model", "PROBE_SOURCE_505"}},
                             })},
            },
        })},
@@ -84,18 +84,18 @@ TEST_CASE("num_consumers, num_sources, and num_source_groups are each counted in
 
   auto& globals = champsim::modules::ModuleBuilder::globals();
   CHECK(globals.get_parameter<std::size_t>("num_consumers") == 2);
-  CHECK(globals.get_parameter<std::size_t>("num_sources") == 4);
-  CHECK(globals.get_parameter<std::size_t>("num_source_groups") == 3);
+  CHECK(globals.get_parameter<std::size_t>("num_producers") == 4);
+  CHECK(globals.get_parameter<std::size_t>("num_producer_groups") == 3);
 
   // c0's labeled pair share one source id; c0's third source and c1's source
   // each get their own. (View order is top-level modules before nested ones, so
   // assertions key on names, not positions.)
   champsim::assign_identities(*env);
-  auto sources = env->typed_view<champsim::modules::token_source>("token_source");
+  auto sources = env->typed_view<champsim::modules::packet_producer>("packet_producer");
   REQUIRE(std::size(sources) == 4);
   std::map<std::string, uint32_t> source_of;
   for (auto& src : sources) {
-    source_of[src.get().source_name()] = src.get().source_id();
+    source_of[src.get().producer_name()] = src.get().producer_id();
   }
   REQUIRE(std::size(source_of) == 4);
   CHECK(source_of.at("t505_c0_srcA") == source_of.at("t505_c0_srcB")); // shared label, one source id

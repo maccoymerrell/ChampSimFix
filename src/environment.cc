@@ -179,18 +179,18 @@ champsim::environment::environment(ModuleBuilder builder)
   // tables read num_consumers via get_parameter fall-through, so it must exactly match the space assign_identities later
   // enumerates. Consumer-/source-ness is a per-model trait; configs may override via a root "num_consumers" key.
   std::size_t num_consumers = 0;
-  std::size_t num_sources = 0;
-  std::size_t num_source_groups = 0;
-  std::set<std::string> source_group_labels_seen;
+  std::size_t num_producers = 0;
+  std::size_t num_producer_groups = 0;
+  std::set<std::string> producer_group_labels_seen;
   std::function<void(const json&)> count_identities = [&](const json& node) {
     const auto module_key = node.value("module", "");
     const auto model_key = node.value("model", "");
     if (modules::interface_registry::model_is_source(module_key, model_key)) {
-      ++num_sources;
-      // Labeled sources share one id per distinct "source_group" label; unlabeled get their own.
-      const auto label = node.value("source_group", "");
-      if (label.empty() || source_group_labels_seen.insert(label).second) {
-        ++num_source_groups;
+      ++num_producers;
+      // Labeled sources share one id per distinct "producer_group" label; unlabeled get their own.
+      const auto label = node.value("producer_group", "");
+      if (label.empty() || producer_group_labels_seen.insert(label).second) {
+        ++num_producer_groups;
       }
     }
     if (modules::interface_registry::model_is_consumer(module_key, model_key)) {
@@ -206,7 +206,7 @@ champsim::environment::environment(ModuleBuilder builder)
     count_identities(child);
   }
   num_consumers = config.value("num_consumers", num_consumers);
-  num_source_groups = config.value("num_source_groups", num_source_groups);
+  num_producer_groups = config.value("num_producer_groups", num_producer_groups);
 
   // Publish system-wide params to the globals before construction: every non-reserved top-level scalar becomes a global
   // (a root "globals" object works too); reserved names are the config's structural/orchestration keys.
@@ -237,8 +237,8 @@ champsim::environment::environment(ModuleBuilder builder)
     g.add_parameter("log2_block_size", static_cast<unsigned>(champsim::lg2(block_size_)));
     g.add_parameter("log2_page_size", static_cast<unsigned>(champsim::lg2(page_size_)));
     g.add_parameter("num_consumers", num_consumers);
-    g.add_parameter("num_sources", num_sources);
-    g.add_parameter("num_source_groups", num_source_groups);
+    g.add_parameter("num_producers", num_producers);
+    g.add_parameter("num_producer_groups", num_producer_groups);
   }
   // Sync cached address extents with the published globals so the hot path avoids a lookup per address-slice construction.
   champsim::refresh_address_extents();
@@ -332,12 +332,12 @@ auto champsim::environment::view(const std::string& interface_type) const -> std
     return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_operable(iface); });
   }
 
-  if (interface_type == "token_consumer") {
-    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_token_consumer(iface); });
+  if (interface_type == "packet_consumer") {
+    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_packet_consumer(iface); });
   }
 
-  if (interface_type == "token_source") {
-    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_token_source(iface); });
+  if (interface_type == "packet_producer") {
+    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_packet_producer(iface); });
   }
 
   std::vector<std::any> result;

@@ -5,7 +5,7 @@
 #include "identity_registry.h"
 #include "instr.h"
 #include "modules.h"
-#include "instruction_source.h"
+#include "instruction_producer.h"
 
 namespace champsim
 {
@@ -15,24 +15,24 @@ void assign_identities(modules::environment_module& env);
 namespace
 {
 
-// A source that accepts the optional "source_group" sharing label
-struct labeled_source_087 : public champsim::modules::instruction_source {
-  explicit labeled_source_087(champsim::modules::ModuleBuilder builder) { source_group_ = builder.get_parameter<std::string>("source_group", true, std::string{}); }
+// A source that accepts the optional "producer_group" sharing label
+struct labeled_source_087 : public champsim::modules::instruction_producer {
+  explicit labeled_source_087(champsim::modules::ModuleBuilder builder) { producer_group_ = builder.get_parameter<std::string>("producer_group", true, std::string{}); }
   const ooo_model_instr* peek() override { return nullptr; }
   void consume() override {}
   [[nodiscard]] bool eof() const override { return true; }
 };
 
-static champsim::modules::instruction_source::register_module<labeled_source_087> labeled_source_reg("LABELED_SOURCE_087");
+static champsim::modules::instruction_producer::register_module<labeled_source_087> labeled_source_reg("LABELED_SOURCE_087");
 
 struct id_core_087 : public champsim::modules::core_module {
   std::vector<labeled_source_087*> sources_;
 
   explicit id_core_087(champsim::modules::ModuleBuilder builder) : core_module(champsim::chrono::picoseconds{250})
   {
-    for (const auto& sub : builder.get_submodules("instruction_source", true)) {
+    for (const auto& sub : builder.get_submodules("instruction_producer", true)) {
       sources_.push_back(
-          dynamic_cast<labeled_source_087*>(champsim::modules::instruction_source::create_instance(sub, static_cast<champsim::modules::token_consumer*>(this))));
+          dynamic_cast<labeled_source_087*>(champsim::modules::instruction_producer::create_instance(sub, static_cast<champsim::modules::packet_consumer*>(this))));
     }
   }
 
@@ -43,16 +43,16 @@ struct id_core_087 : public champsim::modules::core_module {
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return {}; }
   cpu_stats get_roi_stats() const override { return {}; }
-  bool source_eof() const override { return true; }
+  bool producers_eof() const override { return true; }
 };
 
 static champsim::modules::core_module::register_module<id_core_087> id_core_reg("ID_CORE_087");
 
 nlohmann::json source_json(const std::string& name, const std::string& label = {})
 {
-  nlohmann::json src{{"name", name}, {"module", "instruction_source"}, {"model", "LABELED_SOURCE_087"}};
+  nlohmann::json src{{"name", name}, {"module", "instruction_producer"}, {"model", "LABELED_SOURCE_087"}};
   if (!label.empty()) {
-    src["source_group"] = label;
+    src["producer_group"] = label;
   }
   return src;
 }
@@ -102,23 +102,23 @@ TEST_CASE("Identities are assigned internally: dense consumers, per-source ids, 
 
   SECTION("Unlabeled sources each own a distinct source id")
   {
-    REQUIRE(c0.sources_.at(1)->source_id() != c0.sources_.at(0)->source_id());
-    REQUIRE(c1.sources_.at(0)->source_id() != c0.sources_.at(0)->source_id());
-    REQUIRE(c1.sources_.at(0)->source_id() != c0.sources_.at(1)->source_id());
+    REQUIRE(c0.sources_.at(1)->producer_id() != c0.sources_.at(0)->producer_id());
+    REQUIRE(c1.sources_.at(0)->producer_id() != c0.sources_.at(0)->producer_id());
+    REQUIRE(c1.sources_.at(0)->producer_id() != c0.sources_.at(1)->producer_id());
   }
 
   SECTION("Sources sharing a label share one source id, across consumers")
   {
-    REQUIRE(c0.sources_.at(0)->source_id() == c2.sources_.at(0)->source_id());
+    REQUIRE(c0.sources_.at(0)->producer_id() == c2.sources_.at(0)->producer_id());
   }
 
   SECTION("The identity registry translates ids to configured names and back")
   {
     REQUIRE(champsim::identities().consumer_name(1) == std::optional<std::string>{"c1"});
     REQUIRE(champsim::identities().consumer_id("c2") == std::optional<int>{2});
-    REQUIRE(champsim::identities().source_id("c1_a") == std::optional<uint32_t>{c1.sources_.at(0)->source_id()});
+    REQUIRE(champsim::identities().producer_id("c1_a") == std::optional<uint32_t>{c1.sources_.at(0)->producer_id()});
 
-    auto shared = champsim::identities().token_sources(c0.sources_.at(0)->source_id());
+    auto shared = champsim::identities().packet_producers(c0.sources_.at(0)->producer_id());
     REQUIRE_THAT(shared, Catch::Matchers::UnorderedEquals(std::vector<std::string>{"c0_a", "c2_a"}));
 
     REQUIRE_FALSE(champsim::identities().consumer_name(99).has_value());

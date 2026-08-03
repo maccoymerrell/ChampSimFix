@@ -291,7 +291,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
   std::size_t num_cores_cfg = config.value("num_cores", 1u);
 
   // Pre-construction: publish system-wide globals (readable via get_parameter fall-through).
-  // Legacy env = one core + one workload_source per num_cores, so consumers == sources == num_cores.
+  // Legacy env = one core + one instruction_producer per num_cores, so consumers == sources == num_cores.
   {
     auto& g = ModuleBuilder::globals();
     g.add_parameter("block_size", block_size_);
@@ -299,8 +299,8 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
     g.add_parameter("log2_block_size", log2_block_size);
     g.add_parameter("log2_page_size", log2_page_size);
     g.add_parameter("num_consumers", num_cores_cfg);
-    g.add_parameter("num_sources", num_cores_cfg);
-    g.add_parameter("num_source_groups", num_cores_cfg); // one unlabeled source per core: source groups == sources
+    g.add_parameter("num_producers", num_cores_cfg);
+    g.add_parameter("num_producer_groups", num_cores_cfg); // one unlabeled source per core: source groups == sources
   }
   // Sync the cached address extents with the freshly-published globals.
   champsim::refresh_address_extents();
@@ -925,13 +925,13 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
         core_builder.add_submodule("btb", std::move(sub));
       }
     }
-    // Build the workload_source submodule. Default INSTRUCTION_SOURCE (CLI traces); trace-less
-    // test/validation runs override via the builder param instruction_source_model (e.g. NULL_INSTRUCTION_SOURCE).
+    // Build the instruction_producer submodule. Default INSTRUCTION_PRODUCER (CLI traces); trace-less
+    // test/validation runs override via the builder param instruction_producer_model (e.g. NULL_INSTRUCTION_PRODUCER).
     auto trace_names = builder.get_parameter<std::vector<std::string>>("traces", true, std::vector<std::string>{});
-    auto ws_model = builder.get_parameter<std::string>("instruction_source_model", true, std::string{"INSTRUCTION_SOURCE"});
-    auto src_builder = ModuleBuilder{cc.name + ".instruction_source", ws_model};
+    auto ws_model = builder.get_parameter<std::string>("instruction_producer_model", true, std::string{"INSTRUCTION_PRODUCER"});
+    auto src_builder = ModuleBuilder{cc.name + ".instruction_producer", ws_model};
 
-    if (ws_model == "INSTRUCTION_SOURCE") {
+    if (ws_model == "INSTRUCTION_PRODUCER") {
       if (static_cast<std::size_t>(cc.index) >= trace_names.size()) {
         fmt::print(stderr, "[LEGACY_ENVIRONMENT] ERROR: no trace provided for cpu{}\n", cc.index);
         std::exit(-1);
@@ -940,7 +940,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
       src_builder.add_parameter("cloudsuite", builder.get_parameter<bool>("cloudsuite", true, false));
       src_builder.add_parameter("repeat", builder.get_parameter<bool>("repeat", true, true));
     }
-    core_builder.add_submodule("instruction_source", std::move(src_builder));
+    core_builder.add_submodule("instruction_producer", std::move(src_builder));
 
     core_builder.add_parameter("clock_period", champsim::chrono::picoseconds{freq_to_period(cc.frequency)});
 
@@ -964,7 +964,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
     json_bandwidth_or_wrapped(core_builder, cc.config, "dib_inorder_width", "dib_inorder_width");
 
     builder_params_[cc.name] = core_builder;
-    // Submodules (branch predictors, BTBs, workload sources) self-enroll so views cover them.
+    // Submodules (branch predictors, BTBs, instruction producers) self-enroll so views cover them.
     core_builder.set_owner_of_submodules(this);
     cores.push_back(module_base<core_module, environment_module>::create_instance(core_builder, this));
   }
@@ -1066,53 +1066,53 @@ auto champsim::legacy_environment::view(const std::string& interface_type) const
     return result;
   }
 
-  if (interface_type == "token_consumer") {
+  if (interface_type == "packet_consumer") {
     std::vector<std::any> result;
     std::map<std::string, std::size_t> type_idx;
     for (auto& [name, iface] : module_order_) {
-      auto to_sc = champsim::modules::interface_registry::get_to_token_consumer(iface);
+      auto to_sc = champsim::modules::interface_registry::get_to_packet_consumer(iface);
       if (!to_sc)
         continue;
       auto& vec = modules_by_type_.at(iface);
       auto idx = type_idx[iface]++;
       // Same per-instance dynamic_cast pattern as operable above: advance the index for every
-      // instance, enroll only real token_consumers (else nulls leak into the view and get dereferenced).
+      // instance, enroll only real packet_consumers (else nulls leak into the view and get dereferenced).
       if (auto* sc = to_sc(vec.at(idx))) {
-        result.push_back(static_cast<champsim::modules::token_consumer*>(sc));
+        result.push_back(static_cast<champsim::modules::packet_consumer*>(sc));
       }
     }
     // Nested instances follow, preserving top-level ordering.
     for (auto& [name, iface] : nested_order_) {
-      auto to_sc = champsim::modules::interface_registry::get_to_token_consumer(iface);
+      auto to_sc = champsim::modules::interface_registry::get_to_packet_consumer(iface);
       if (!to_sc)
         continue;
       if (auto* sc = to_sc(nested_by_name_.at(name))) {
-        result.push_back(static_cast<champsim::modules::token_consumer*>(sc));
+        result.push_back(static_cast<champsim::modules::packet_consumer*>(sc));
       }
     }
     return result;
   }
 
-  if (interface_type == "token_source") {
-    // Mirrors the token_consumer aggregate above: per-instance dynamic_cast, null-filtered, top-level then nested.
+  if (interface_type == "packet_producer") {
+    // Mirrors the packet_consumer aggregate above: per-instance dynamic_cast, null-filtered, top-level then nested.
     std::vector<std::any> result;
     std::map<std::string, std::size_t> type_idx;
     for (auto& [name, iface] : module_order_) {
-      auto to_ss = champsim::modules::interface_registry::get_to_token_source(iface);
+      auto to_ss = champsim::modules::interface_registry::get_to_packet_producer(iface);
       if (!to_ss)
         continue;
       auto& vec = modules_by_type_.at(iface);
       auto idx = type_idx[iface]++;
       if (auto* ss = to_ss(vec.at(idx))) {
-        result.push_back(static_cast<champsim::modules::token_source*>(ss));
+        result.push_back(static_cast<champsim::modules::packet_producer*>(ss));
       }
     }
     for (auto& [name, iface] : nested_order_) {
-      auto to_ss = champsim::modules::interface_registry::get_to_token_source(iface);
+      auto to_ss = champsim::modules::interface_registry::get_to_packet_producer(iface);
       if (!to_ss)
         continue;
       if (auto* ss = to_ss(nested_by_name_.at(name))) {
-        result.push_back(static_cast<champsim::modules::token_source*>(ss));
+        result.push_back(static_cast<champsim::modules::packet_producer*>(ss));
       }
     }
     return result;

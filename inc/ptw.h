@@ -38,19 +38,19 @@ class PageTableWalker : public champsim::modules::page_table_walker_module, publ
     champsim::address ptw_addr;
     std::size_t level;
     // Address space of this cached walk step. The walker is shared hardware,
-    // so entries are stream-tagged to keep concurrent streams from hitting
+    // so entries are asid-tagged to keep concurrent address spaces from hitting
     // each other's steps.
-    champsim::origin::id_type stream = 0;
+    champsim::origin::id_type asid = 0;
   };
 
   struct pscl_indexer {
     champsim::data::bits shamt;
-    auto operator()(const pscl_entry& entry) const { return entry.vaddr.to<uint64_t>() >> champsim::to_underlying(shamt); }
+    auto operator()(const pscl_entry& entry) const { return entry.vaddr.slice_upper(shamt); }
   };
 
   struct pscl_tagger {
     champsim::data::bits shamt;
-    auto operator()(const pscl_entry& entry) const { return std::pair{entry.vaddr.to<uint64_t>() >> champsim::to_underlying(shamt), entry.stream}; }
+    auto operator()(const pscl_entry& entry) const { return std::pair{entry.vaddr.slice_upper(shamt), entry.asid}; }
   };
 
   using pscl_type = champsim::msl::lru_table<pscl_entry, pscl_indexer, pscl_tagger>;

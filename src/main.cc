@@ -128,7 +128,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   std::string env_model = config_json.value("environment", std::string("LEGACY_ENVIRONMENT"));
   bool is_legacy_env = (env_model == "LEGACY_ENVIRONMENT");
   // CLI expects one trace per workload SOURCE. Legacy env spawns one source per core (count is num_cores); explicit envs allow any count.
-  std::size_t legacy_num_sources = config_json.value("num_cores", 1u);
+  std::size_t legacy_num_producers = config_json.value("num_cores", 1u);
 
   // "cycle_skip" (default true) lets idle operables skip via poll_cycle(); false forces operate() every cycle (A/B switch).
   champsim::operable::set_skip_enabled(config_json.value("cycle_skip", true));
@@ -166,10 +166,10 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
       app2.add_option("--json", json_file_name, "The name of the file to receive JSON output. If no name is specified, stdout will be used")->expected(0, 1);
   app2.add_option("--listeners", requested_listeners, "A list of the listeners to be attached to the run");
 
-  // Legacy env requires exactly legacy_num_sources traces; explicit envs allow any number (traces resolve via $traceN vars).
+  // Legacy env requires exactly legacy_num_producers traces; explicit envs allow any number (traces resolve via $traceN vars).
   auto* trace_option = app2.add_option("traces", trace_names, "The paths to the traces");
   if (is_legacy_env) {
-    trace_option->required()->expected(static_cast<int>(legacy_num_sources))->check(CLI::ExistingFile);
+    trace_option->required()->expected(static_cast<int>(legacy_num_producers))->check(CLI::ExistingFile);
   } else {
     trace_option->check(CLI::ExistingFile);
   }
@@ -284,7 +284,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   }
   fmt::print("\n*** ChampSim Multicore Out-of-Order Simulator ***\nWarmup Instructions: {}\nSimulation Instructions: {}\nNumber of CPUs: {}\nTrace sources: "
              "{}\nPage size: {}\n\n",
-             printed_warmup, printed_sim, gen_environment->get_num("core"), gen_environment->get_num("token_source"), gen_environment->get_page_size());
+             printed_warmup, printed_sim, gen_environment->get_num("core"), gen_environment->get_num("packet_producer"), gen_environment->get_page_size());
 
   auto phase_stats = champsim::main(*gen_environment, phases);
 

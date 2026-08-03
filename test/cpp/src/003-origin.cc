@@ -9,17 +9,17 @@ TEST_CASE("An origin exposes the same identities under canonical and domain name
   // The aliases are the same identity: cpu() IS the consumer, asid() IS the source
   REQUIRE(uut.consumer() == 3);
   REQUIRE(uut.cpu() == uut.consumer());
-  REQUIRE(uut.source() == 7);
-  REQUIRE(uut.asid() == uut.source());
+  REQUIRE(uut.producer() == 7);
+  REQUIRE(uut.asid() == uut.producer());
 }
 
 TEST_CASE("A default origin is invalid in both coordinates")
 {
   champsim::origin uut{};
   REQUIRE_FALSE(uut.has_consumer());
-  REQUIRE_FALSE(uut.has_source());
+  REQUIRE_FALSE(uut.has_producer());
   REQUIRE(uut.consumer() == champsim::origin::invalid_id);
-  REQUIRE(uut.source() == champsim::origin::invalid_id);
+  REQUIRE(uut.producer() == champsim::origin::invalid_id);
 }
 
 TEST_CASE("Origin derivation helpers replace one coordinate and keep the other")
@@ -28,11 +28,11 @@ TEST_CASE("Origin derivation helpers replace one coordinate and keep the other")
 
   auto moved = base.with_consumer(9); // e.g. a source migrating between consumers
   REQUIRE(moved.consumer() == 9);
-  REQUIRE(moved.source() == 2);
+  REQUIRE(moved.producer() == 2);
 
-  auto respaced = base.with_source(5); // e.g. a trace record overriding the source id
+  auto respaced = base.with_producer(5); // e.g. a trace record overriding the source id
   REQUIRE(respaced.consumer() == 1);
-  REQUIRE(respaced.source() == 5);
+  REQUIRE(respaced.producer() == 5);
 }
 
 TEST_CASE("Origins compare by both coordinates")

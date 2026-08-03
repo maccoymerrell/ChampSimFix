@@ -33,13 +33,13 @@
 namespace
 {
 
-// Generic, token-agnostic phase controller. Mechanics: completion (sim_progress() delta reaches phase length, or source EOF
+// Generic, packet-agnostic phase controller. Mechanics: completion (sim_progress() delta reaches phase length, or source EOF
 // per eof_policy); deadlock (consecutive zero-progress cycles, vetoed while any consumer reports has_pending_work); health
 // (per health_period, consumers self-judge via check_health(), a stalled verdict aborts). Params: deadlock_cycles,
 // health_period (alias livelock_period), eof_policy, phases array or warmup_length/simulation_length scalars.
 class default_phase_controller : public champsim::modules::phase_controller
 {
-  using source_health = champsim::modules::token_consumer::source_health;
+  using source_health = champsim::modules::packet_consumer::source_health;
 
   int deadlock_cycles_ = 500;
   uint64_t health_period_ = 10000000;
@@ -48,7 +48,7 @@ class default_phase_controller : public champsim::modules::phase_controller
   champsim::modules::environment_module* env_ = nullptr;
 
   // Per-phase caches (typed_view is expensive); refreshed once per begin_phase().
-  std::vector<std::reference_wrapper<champsim::modules::token_consumer>> token_consumers_;
+  std::vector<std::reference_wrapper<champsim::modules::packet_consumer>> packet_consumers_;
   // Deadlock veto: operables with timer-scheduled work (e.g. DRAM refresh) also make zero global progress a scheduled quiet time.
   std::vector<std::reference_wrapper<champsim::operable>> operables_;
 
@@ -68,7 +68,7 @@ class default_phase_controller : public champsim::modules::phase_controller
   // load-bearing: tracked_ keeps consumer discovery order (the completion scan order); tracked_by_idx_ is sorted by
   // source id for the id-ordered complete-all-on-EOF notification.
   struct tracked_source {
-    champsim::modules::token_consumer* consumer;
+    champsim::modules::packet_consumer* consumer;
     int idx;
     uint64_t baseline;
     bool complete;
@@ -129,16 +129,16 @@ public:
     incomplete_count_ = 0;
 
     // Refresh the per-phase view caches (typed_view is expensive).
-    token_consumers_ = env_->typed_view<champsim::modules::token_consumer>("token_consumer");
+    packet_consumers_ = env_->typed_view<champsim::modules::packet_consumer>("packet_consumer");
     operables_ = env_->typed_view<champsim::operable>("operable");
 
     // Restrict to governed consumers, then discover tracked sources and re-baseline progress and health.
     if (!governed_.empty()) {
-      token_consumers_.erase(
-          std::remove_if(std::begin(token_consumers_), std::end(token_consumers_), [this](const auto& sc) { return !governs(sc.get().consumer_id()); }),
-          std::end(token_consumers_));
+      packet_consumers_.erase(
+          std::remove_if(std::begin(packet_consumers_), std::end(packet_consumers_), [this](const auto& sc) { return !governs(sc.get().consumer_id()); }),
+          std::end(packet_consumers_));
     }
-    for (auto& sc : token_consumers_) {
+    for (auto& sc : packet_consumers_) {
       int idx = sc.get().consumer_id();
       if (idx >= 0) {
         tracked_.push_back({&sc.get(), idx, sc.get().sim_progress(), false});
@@ -158,7 +158,7 @@ public:
 
     // Consecutive zero-progress cycles are a hang unless work is scheduled (a paced arrival, or an operable timer in flight).
     if (progress == 0) {
-      const bool pending = std::any_of(std::begin(token_consumers_), std::end(token_consumers_), [](const auto& sc) { return sc.get().has_pending_work(); })
+      const bool pending = std::any_of(std::begin(packet_consumers_), std::end(packet_consumers_), [](const auto& sc) { return sc.get().has_pending_work(); })
                            || std::any_of(std::begin(operables_), std::end(operables_), [](const auto& op) { return op.get().has_pending_work(); });
       stalled_cycles_ = pending ? 0 : stalled_cycles_ + 1;
     } else {
@@ -167,7 +167,7 @@ public:
 
     // Health aggregation: each consumer judges itself over the window.
     if (++health_timer_ >= health_period_) {
-      for (auto& sc : token_consumers_) {
+      for (auto& sc : packet_consumers_) {
         if (sc.get().consumer_id() < 0) {
           continue;
         }
@@ -190,7 +190,7 @@ public:
         continue;
       }
 
-      if (tracked.consumer->source_eof()) {
+      if (tracked.consumer->producers_eof()) {
         if (complete_all_on_eof_) {
           // First exhausted source ends the phase for everyone (in source-id order).
           for (auto pos : tracked_by_idx_) {
@@ -224,7 +224,7 @@ public:
 
   void end_phase() override
   {
-    token_consumers_.clear();
+    packet_consumers_.clear();
     operables_.clear();
   }
 

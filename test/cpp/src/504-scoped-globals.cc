@@ -4,13 +4,13 @@
 #include "environment.h"
 #include "instr.h"
 #include "modules.h"
-#include "instruction_source.h"
+#include "instruction_producer.h"
 
 namespace
 {
 
 // Probe source: records what its constructor resolves for a set of knobs
-struct probe_source_504 : public champsim::modules::instruction_source {
+struct probe_source_504 : public champsim::modules::instruction_producer {
   long seen_shared, seen_inner, seen_parent_local;
 
   explicit probe_source_504(champsim::modules::ModuleBuilder builder)
@@ -23,7 +23,7 @@ struct probe_source_504 : public champsim::modules::instruction_source {
   [[nodiscard]] bool eof() const override { return true; }
 };
 
-static champsim::modules::instruction_source::register_module<probe_source_504> probe_source_reg("PROBE_SOURCE_504");
+static champsim::modules::instruction_producer::register_module<probe_source_504> probe_source_reg("PROBE_SOURCE_504");
 
 // Probe core: records its own resolutions and constructs its source children
 struct probe_core_504 : public champsim::modules::core_module {
@@ -34,9 +34,9 @@ struct probe_core_504 : public champsim::modules::core_module {
       : core_module(champsim::chrono::picoseconds{250}), seen_shared(builder.get_parameter<long>("t504_shared_knob", true, -1)),
         seen_explicit(builder.get_parameter<long>("t504_explicit_knob", true, -1))
   {
-    for (const auto& sub : builder.get_submodules("instruction_source", true)) {
+    for (const auto& sub : builder.get_submodules("instruction_producer", true)) {
       sources_.push_back(dynamic_cast<probe_source_504*>(
-          champsim::modules::instruction_source::create_instance(sub, static_cast<champsim::modules::token_consumer*>(this))));
+          champsim::modules::instruction_producer::create_instance(sub, static_cast<champsim::modules::packet_consumer*>(this))));
     }
   }
 
@@ -47,7 +47,7 @@ struct probe_core_504 : public champsim::modules::core_module {
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return {}; }
   cpu_stats get_roi_stats() const override { return {}; }
-  bool source_eof() const override { return true; }
+  bool producers_eof() const override { return true; }
 };
 
 static champsim::modules::core_module::register_module<probe_core_504> probe_core_reg("PROBE_CORE_504");
@@ -73,9 +73,9 @@ TEST_CASE("Top-level config scalars are globals and 'globals' blocks scope lexic
                {"t504_parent_local", 5},
                {"children",
                 nlohmann::json::array({
-                    nlohmann::json{{"name", "c0_src"}, {"module", "instruction_source"}, {"model", "PROBE_SOURCE_504"}},
+                    nlohmann::json{{"name", "c0_src"}, {"module", "instruction_producer"}, {"model", "PROBE_SOURCE_504"}},
                     nlohmann::json{{"name", "c0_src_shadow"},
-                                   {"module", "instruction_source"},
+                                   {"module", "instruction_producer"},
                                    {"model", "PROBE_SOURCE_504"},
                                    {"t504_shared_knob", 1}},
                 })},

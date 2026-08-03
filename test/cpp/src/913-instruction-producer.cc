@@ -4,12 +4,12 @@
 
 #include "instr.h"
 #include "modules.h"
-#include "instruction_source.h"
+#include "instruction_producer.h"
 
 namespace {
 
-// A controllable workload source for testing
-struct mock_source_913 : public champsim::modules::instruction_source {
+// A controllable instruction producer for testing
+struct mock_source_913 : public champsim::modules::instruction_producer {
   std::deque<ooo_model_instr> instructions_;
   bool retire_called_ = false;
   bool squash_called_ = false;
@@ -30,11 +30,11 @@ struct mock_source_913 : public champsim::modules::instruction_source {
   void branch_mispredict(const ooo_model_instr&) override { branch_mispredict_called_ = true; }
 };
 
-static champsim::modules::instruction_source::register_module<mock_source_913>
+static champsim::modules::instruction_producer::register_module<mock_source_913>
     mock_source_reg("MOCK_SOURCE_913");
 
 // A minimal no-op source to test default hook behavior
-struct noop_source_913 : public champsim::modules::instruction_source {
+struct noop_source_913 : public champsim::modules::instruction_producer {
   explicit noop_source_913(champsim::modules::ModuleBuilder) {}
   const ooo_model_instr* peek() override { return nullptr; }
   void consume() override {}
@@ -42,20 +42,20 @@ struct noop_source_913 : public champsim::modules::instruction_source {
   // No override of hooks — uses defaults
 };
 
-static champsim::modules::instruction_source::register_module<noop_source_913>
+static champsim::modules::instruction_producer::register_module<noop_source_913>
     noop_source_reg("NOOP_SOURCE_913");
 
-// Mock core that delegates source_eof to attached workload sources
+// Mock core that delegates producers_eof to attached instruction producers
 struct mock_core_913 : public champsim::modules::core_module {
-  std::vector<champsim::modules::instruction_source*> sources_;
+  std::vector<champsim::modules::instruction_producer*> sources_;
   std::vector<ooo_model_instr> received_;
 
   explicit mock_core_913(champsim::modules::ModuleBuilder builder)
     : core_module(champsim::chrono::picoseconds{250})
   {
-    for (const auto& sub : builder.get_submodules("instruction_source", true))
-      sources_.push_back(dynamic_cast<champsim::modules::instruction_source*>(
-          champsim::modules::instruction_source::create_instance(sub, static_cast<champsim::modules::token_consumer*>(this))));
+    for (const auto& sub : builder.get_submodules("instruction_producer", true))
+      sources_.push_back(dynamic_cast<champsim::modules::instruction_producer*>(
+          champsim::modules::instruction_producer::create_instance(sub, static_cast<champsim::modules::packet_consumer*>(this))));
   }
 
   void push_instruction(ooo_model_instr instr) override { received_.push_back(instr); }
@@ -66,7 +66,7 @@ struct mock_core_913 : public champsim::modules::core_module {
   cpu_stats get_sim_stats() const override { return {}; }
   cpu_stats get_roi_stats() const override { return {}; }
 
-  bool source_eof() const override {
+  bool producers_eof() const override {
     return std::all_of(sources_.begin(), sources_.end(),
                        [](const auto* s) { return s->eof(); });
   }
@@ -100,13 +100,13 @@ static champsim::modules::environment_module::register_module<mock_env_913>
 
 } // anonymous namespace
 
-TEST_CASE("workload_source next() returns queued instructions") {
+TEST_CASE("instruction_producer next() returns queued instructions") {
   auto env_b = champsim::modules::ModuleBuilder("env_ws", "MOCK_ENV_913");
   auto* env = champsim::modules::environment_module::create_instance(env_b, static_cast<champsim::modules::environment_module*>(nullptr));
 
   auto core_b = champsim::modules::ModuleBuilder("core_ws", "MOCK_CORE_913");
   auto src_b = champsim::modules::ModuleBuilder("source_ws", "MOCK_SOURCE_913");
-  core_b.add_submodule("instruction_source", std::move(src_b));
+  core_b.add_submodule("instruction_producer", std::move(src_b));
   auto* core = champsim::modules::core_module::create_instance(core_b, env);
   auto* mc = dynamic_cast<mock_core_913*>(core);
   REQUIRE(mc != nullptr);
@@ -131,20 +131,20 @@ TEST_CASE("workload_source next() returns queued instructions") {
   REQUIRE_FALSE(src->next().has_value());
 }
 
-TEST_CASE("workload_source peek does not consume") {
+TEST_CASE("instruction_producer peek does not consume") {
   auto env_b = champsim::modules::ModuleBuilder("env_peek", "MOCK_ENV_913");
   auto* env = champsim::modules::environment_module::create_instance(env_b, static_cast<champsim::modules::environment_module*>(nullptr));
 
   auto core_b = champsim::modules::ModuleBuilder("core_peek", "MOCK_CORE_913");
   auto src_b = champsim::modules::ModuleBuilder("source_peek", "MOCK_SOURCE_913");
-  core_b.add_submodule("instruction_source", std::move(src_b));
+  core_b.add_submodule("instruction_producer", std::move(src_b));
   auto* core = champsim::modules::core_module::create_instance(core_b, env);
   auto* mc = dynamic_cast<mock_core_913*>(core);
   auto* src = dynamic_cast<mock_source_913*>(mc->sources_.front());
 
   src->instructions_.push_back(champsim::test::instruction_with_ip(0xAB));
 
-  // Repeated peeks see the same token without consuming it
+  // Repeated peeks see the same packet without consuming it
   const auto* p1 = src->peek();
   REQUIRE(p1 != nullptr);
   CHECK(p1->ip == champsim::address{0xAB});
@@ -152,19 +152,19 @@ TEST_CASE("workload_source peek does not consume") {
   REQUIRE(p2 == p1);
   REQUIRE_FALSE(src->eof());
 
-  // consume() discards the peeked token
+  // consume() discards the peeked packet
   src->consume();
   REQUIRE(src->eof());
   REQUIRE(src->peek() == nullptr);
 }
 
-TEST_CASE("workload_source eof is true when no instructions remain") {
+TEST_CASE("instruction_producer eof is true when no instructions remain") {
   auto env_b = champsim::modules::ModuleBuilder("env_eof", "MOCK_ENV_913");
   auto* env = champsim::modules::environment_module::create_instance(env_b, static_cast<champsim::modules::environment_module*>(nullptr));
 
   auto core_b = champsim::modules::ModuleBuilder("core_eof", "MOCK_CORE_913");
-  auto src_b = champsim::modules::ModuleBuilder("source_eof", "MOCK_SOURCE_913");
-  core_b.add_submodule("instruction_source", std::move(src_b));
+  auto src_b = champsim::modules::ModuleBuilder("producers_eof", "MOCK_SOURCE_913");
+  core_b.add_submodule("instruction_producer", std::move(src_b));
   auto* core = champsim::modules::core_module::create_instance(core_b, env);
   auto* mc = dynamic_cast<mock_core_913*>(core);
   auto* src = dynamic_cast<mock_source_913*>(mc->sources_.front());
@@ -184,7 +184,7 @@ TEST_CASE("core fill_from_sources pulls instructions into core") {
 
   auto core_b = champsim::modules::ModuleBuilder("core_fill", "MOCK_CORE_913");
   auto src_b = champsim::modules::ModuleBuilder("source_fill", "MOCK_SOURCE_913");
-  core_b.add_submodule("instruction_source", std::move(src_b));
+  core_b.add_submodule("instruction_producer", std::move(src_b));
   auto* core = champsim::modules::core_module::create_instance(core_b, env);
   auto* mc = dynamic_cast<mock_core_913*>(core);
   auto* src = dynamic_cast<mock_source_913*>(mc->sources_.front());
@@ -202,40 +202,40 @@ TEST_CASE("core fill_from_sources pulls instructions into core") {
   REQUIRE(src->eof());
 }
 
-TEST_CASE("core source_eof reflects source state") {
+TEST_CASE("core producers_eof reflects source state") {
   auto env_b = champsim::modules::ModuleBuilder("env_seof", "MOCK_ENV_913");
   auto* env = champsim::modules::environment_module::create_instance(env_b, static_cast<champsim::modules::environment_module*>(nullptr));
 
   auto core_b = champsim::modules::ModuleBuilder("core_seof", "MOCK_CORE_913");
   auto src_b = champsim::modules::ModuleBuilder("source_seof", "MOCK_SOURCE_913");
-  core_b.add_submodule("instruction_source", std::move(src_b));
+  core_b.add_submodule("instruction_producer", std::move(src_b));
   auto* core = champsim::modules::core_module::create_instance(core_b, env);
   auto* mc = dynamic_cast<mock_core_913*>(core);
   auto* src = dynamic_cast<mock_source_913*>(mc->sources_.front());
 
-  // Empty → source_eof true
-  REQUIRE(mc->source_eof());
+  // Empty → producers_eof true
+  REQUIRE(mc->producers_eof());
 
-  // Add instruction → source_eof false
+  // Add instruction → producers_eof false
   src->instructions_.push_back(champsim::test::instruction_with_ip(1));
-  REQUIRE_FALSE(mc->source_eof());
+  REQUIRE_FALSE(mc->producers_eof());
 
-  // Consume → source_eof true again
+  // Consume → producers_eof true again
   src->next();
-  REQUIRE(mc->source_eof());
+  REQUIRE(mc->producers_eof());
 }
 
-TEST_CASE("core with no workload sources has source_eof true") {
+TEST_CASE("core with no instruction producers has producers_eof true") {
   auto env_b = champsim::modules::ModuleBuilder("env_nosrc", "MOCK_ENV_913");
   auto* env = champsim::modules::environment_module::create_instance(env_b, static_cast<champsim::modules::environment_module*>(nullptr));
 
   auto core_b = champsim::modules::ModuleBuilder("core_nosrc", "MOCK_CORE_913");
-  // No workload_source submodule added
+  // No instruction_producer submodule added
   auto* core = champsim::modules::core_module::create_instance(core_b, env);
   auto* mc = dynamic_cast<mock_core_913*>(core);
 
   REQUIRE(mc->sources_.empty());
-  REQUIRE(mc->source_eof());
+  REQUIRE(mc->producers_eof());
 }
 
 TEST_CASE("execution-driven hooks are callable without crash") {
@@ -244,7 +244,7 @@ TEST_CASE("execution-driven hooks are callable without crash") {
 
   auto core_b = champsim::modules::ModuleBuilder("core_hooks", "MOCK_CORE_913");
   auto src_b = champsim::modules::ModuleBuilder("source_hooks", "MOCK_SOURCE_913");
-  core_b.add_submodule("instruction_source", std::move(src_b));
+  core_b.add_submodule("instruction_producer", std::move(src_b));
   auto* core = champsim::modules::core_module::create_instance(core_b, env);
   auto* mc = dynamic_cast<mock_core_913*>(core);
   auto* src = dynamic_cast<mock_source_913*>(mc->sources_.front());
@@ -270,7 +270,7 @@ TEST_CASE("default execution-driven hooks are no-ops") {
 
   auto core_b = champsim::modules::ModuleBuilder("core_noop", "MOCK_CORE_913");
   auto src_b = champsim::modules::ModuleBuilder("source_noop", "NOOP_SOURCE_913");
-  core_b.add_submodule("instruction_source", std::move(src_b));
+  core_b.add_submodule("instruction_producer", std::move(src_b));
   auto* core = champsim::modules::core_module::create_instance(core_b, env);
   auto* mc = dynamic_cast<mock_core_913*>(core);
   auto* src = mc->sources_.front();
@@ -290,7 +290,7 @@ TEST_CASE("fill_from_sources respects bandwidth limit") {
 
   auto core_b = champsim::modules::ModuleBuilder("core_bw", "MOCK_CORE_913");
   auto src_b = champsim::modules::ModuleBuilder("source_bw", "MOCK_SOURCE_913");
-  core_b.add_submodule("instruction_source", std::move(src_b));
+  core_b.add_submodule("instruction_producer", std::move(src_b));
   auto* core = champsim::modules::core_module::create_instance(core_b, env);
   auto* mc = dynamic_cast<mock_core_913*>(core);
   auto* src = dynamic_cast<mock_source_913*>(mc->sources_.front());

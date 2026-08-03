@@ -1,6 +1,6 @@
 // Default heartbeat listener: periodic progress line per source consumer.
 // The listener owns interval bookkeeping; each consumer owns its line wording
-// via progress_message (only it knows its token unit). Params: interval (from
+// via progress_message (only it knows its packet unit). Params: interval (from
 // root "heartbeat_frequency"), output_stream (test-only hook, not from JSON).
 
 #include <chrono>
@@ -22,7 +22,7 @@ class heartbeat_listener : public champsim::modules::listener
   uint64_t interval_ = 10000000;
   std::ostream* out_ = &std::cout;
 
-  // Per-source bookkeeping, indexed by source_id (grown on demand).
+  // Per-source bookkeeping, indexed by producer_id (grown on demand).
   struct tracking {
     uint64_t last_printout_progress = 0;
     uint64_t last_printout_cycles = 0;
@@ -45,7 +45,7 @@ public:
     }
   }
 
-  void progress(const champsim::modules::token_consumer& consumer, uint64_t total_progress, uint64_t total_cycles) override
+  void progress(const champsim::modules::packet_consumer& consumer, uint64_t total_progress, uint64_t total_cycles) override
   {
     int idx = consumer.consumer_id();
     if (idx < 0) {

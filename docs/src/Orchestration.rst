@@ -6,8 +6,8 @@ Simulation Orchestration
 
 ChampSim's simulation loop is itself modular. The orchestrator knows nothing about
 instructions, cores, or traces: it ticks *operables*, asks *phase controllers* when the
-run is done, and reports progress through *listeners*. Work flows from *token sources*
-into *token consumers* as opaque **tokens** — instructions for a core, but equally
+run is done, and reports progress through *listeners*. Work flows from *packet producers*
+into *packet consumers* as opaque **packets** — instructions for a core, but equally
 packets for a network consumer or records for a memory-stream consumer. With the right
 modules defined, an explicit configuration can assume any shape (an OoO CPU simulator,
 a memory-only system, a network simulator) without modifying ChampSim source.
@@ -38,68 +38,68 @@ allows unmeasured non-warmup phases (e.g. a fast-forward region between warmup a
 measured region). Statistics are collected only for ROI phases.
 
 ------------------------------------------
-Tokens: Sources and Consumers
+Packets: Producers and Consumers
 ------------------------------------------
 
-A **token** is one discrete unit of work. Sources produce tokens; consumers execute them.
-The orchestration layer never sees the token type — a consumer and its sources agree on
+A **packet** is one discrete unit of work. Producers produce packets; consumers execute them.
+The orchestration layer never sees the packet type — a consumer and its producers agree on
 it by construction.
 
-Token sources
+Packet producers
 ^^^^^^^^^^^^^^^^^^^^
 
-``champsim::modules::token_source`` is the base contract every source satisfies: the
-token-agnostic lifecycle plus the source identity stamped on its tokens:
+``champsim::modules::packet_producer`` is the base contract every producer satisfies: the
+packet-agnostic lifecycle plus the producer identity stamped on its packets:
 
 .. code-block:: cpp
 
-    struct token_source {
-      virtual bool eof() const = 0;              // no more tokens, ever
+    struct packet_producer {
+      virtual bool eof() const = 0;              // no more packets, ever
       virtual std::string describe() const;      // e.g. the trace path, for reports
-      uint32_t source_id() const;                // which source produced the token
-      const std::string& source_group() const;   // the "source_group" sharing label, if any
+      uint32_t producer_id() const;                // which producer produced the packet
+      const std::string& producer_group() const;   // the "producer_group" sharing label, if any
     };
 
 The typed pull protocol lives on a template subclass:
 
 .. code-block:: cpp
 
-    template <typename Token>
-    struct typed_token_source : token_source {
-      virtual const Token* peek() = 0;   // next token without consuming; nullptr = none now
-      virtual void consume() = 0;        // discard the peeked token
-      std::optional<Token> next();       // peek + consume in one step
+    template <typename Packet>
+    struct typed_packet_producer : packet_producer {
+      virtual const Packet* peek() = 0;   // next packet without consuming; nullptr = none now
+      virtual void consume() = 0;        // discard the peeked packet
+      std::optional<Packet> next();       // peek + consume in one step
     };
 
 ``peek()`` is always safe to call — a null return is the emptiness signal, so exhausted
-and empty sources need no special-casing. Paced consumers can ``peek()`` a token, wait
+and empty producers need no special-casing. Paced consumers can ``peek()`` a packet, wait
 until it is due, and only then ``consume()`` it.
 
-``champsim::modules::instruction_source`` extends ``typed_token_source<ooo_model_instr>``
+``champsim::modules::instruction_producer`` extends ``typed_packet_producer<ooo_model_instr>``
 with the execution-driven feedback hooks (``retire_instruction``, ``squash_instruction``,
 ``branch_mispredict``). It is the registered interface a core attaches; the shipped
-``INSTRUCTION_SOURCE`` model reads a trace file:
+``INSTRUCTION_PRODUCER`` model reads a trace file:
 
 * ``trace_file`` (string) — path to the trace
-* ``source_group`` (optional string) — sharing label: sources with the same label share
-  one source id; unlabeled sources each get their own
+* ``producer_group`` (optional string) — sharing label: producers with the same label share
+  one producer id; unlabeled producers each get their own
 * ``cloudsuite``, ``repeat`` (optional booleans)
 
-Sources are declared as ``children`` of their consumer and are bound to it after
+Producers are declared as ``children`` of their consumer and are bound to it after
 construction.
 
-Token consumers
+Packet consumers
 ^^^^^^^^^^^^^^^^^^^^
 
-Any module that executes tokens inherits the ``champsim::modules::token_consumer``
+Any module that executes packets inherits the ``champsim::modules::packet_consumer``
 mixin. It is the orchestration layer's entire view of "the thing doing work":
 
 .. code-block:: cpp
 
-    struct token_consumer {
+    struct packet_consumer {
       int consumer_id() const;                     // hardware-context id, framework-assigned
-      virtual uint64_t sim_progress() const;       // cumulative tokens completed
-      virtual bool source_eof() const;             // all attached sources exhausted
+      virtual uint64_t sim_progress() const;       // cumulative packets completed
+      virtual bool producers_eof() const;             // all attached producers exhausted
       virtual source_health check_health(uint64_t elapsed);  // periodic self-check
       virtual void reset_health();                 // re-baseline at phase start
       virtual bool has_pending_work() const;       // scheduled future work (paced gaps)
@@ -114,7 +114,7 @@ Two contracts deserve emphasis:
   called every ``health_period`` cycles, and a ``stalled`` verdict aborts the run.
   ``core_module`` implements the instruction-rate policy.
 * **Scheduled quiet time is not a deadlock.** ``has_pending_work()`` returns true when the
-  consumer knows more work arrives at a known future time (a paced source waiting out a
+  consumer knows more work arrives at a known future time (a paced producer waiting out a
   gap). While any consumer — or any operable, see below — reports pending work, zero
   global progress does not advance the deadlock counter.
 
@@ -141,10 +141,10 @@ an ordinary module (interface ``phase_controller``, parent: the environment):
     };
 
 The generic shipped model is ``PHASE_CONTROLLER`` (also registered under the name
-``INSTRUCTION_PHASE_CONTROLLER``). It is token-agnostic and owns only generic mechanics:
+``INSTRUCTION_PHASE_CONTROLLER``). It is packet-agnostic and owns only generic mechanics:
 
 * **Completion** — a consumer completes when its ``sim_progress()`` delta reaches the
-  phase length (in its own token unit), or when one of its sources signals end-of-stream.
+  phase length (in its own packet unit), or when one of its producers signals end-of-stream.
 * **Deadlock** — ``deadlock_cycles`` consecutive zero-progress cycles abort the run,
   unless a consumer or operable reports ``has_pending_work()``.
 * **Health** — every ``health_period`` cycles each governed consumer's ``check_health``
@@ -161,12 +161,12 @@ Parameters::
         "simulation_length": "$simulation_instructions"
     }
 
-By default a trace source replays (``repeat: true``): it reopens the trace at the end and
+By default a trace producer replays (``repeat: true``): it reopens the trace at the end and
 never signals end-of-stream, so it feeds instructions until the consumer reaches the phase
-length. ``eof_policy`` matters only for a *finite* source that does signal end-of-stream (a
+length. ``eof_policy`` matters only for a *finite* producer that does signal end-of-stream (a
 non-repeating trace, or a bounded generator): ``"complete_all"`` (default) ends the phase
 for every consumer at that first signal; ``"complete_source"`` retires only the consumer
-whose source ended and lets the others run on to their own phase lengths (heterogeneous
+whose producer ended and lets the others run on to their own phase lengths (heterogeneous
 mixes). Any value other than the exact string ``"complete_source"`` is treated as
 ``"complete_all"``.
 
@@ -201,14 +201,14 @@ Listeners observe run-wide events for reporting. They are modules (interface
 
     struct listener {
       virtual void begin_phase(bool is_warmup);
-      virtual void progress(const token_consumer& consumer,
+      virtual void progress(const packet_consumer& consumer,
                             uint64_t total_progress, uint64_t total_cycles);
     };
 
 Consumers emit progress through ``champsim::modules::emit_progress`` (cores emit on
 retirement). The shipped ``HEARTBEAT`` model prints a periodic line per consumer; the
-*consumer* formats the line via ``token_consumer::progress_message`` since only it knows
-its token unit — cores produce the ``Heartbeat CPU N instructions: ... cumulative IPC:
+*consumer* formats the line via ``packet_consumer::progress_message`` since only it knows
+its packet unit — cores produce the ``Heartbeat CPU N instructions: ... cumulative IPC:
 ...`` line, and other consumer types report in their own vocabulary.
 
 Selection:
@@ -271,11 +271,11 @@ The environment exposes every constructed module through ``view(interface_name)`
 * ``"operable"`` — every instance that inherits ``champsim::operable``, whether the
   *interface* or only the *model* inherits it. Anything in this view is ticked
   automatically by the orchestrator.
-* ``"token_consumer"`` — every instance that inherits ``token_consumer``.
+* ``"packet_consumer"`` — every instance that inherits ``packet_consumer``.
 
 Submodule-created instances participate: when a parent constructs its children (a core
-its sources, a cache its prefetchers), each instance self-enrolls with the environment,
-appended after the top-level modules. An operable token source nested under a consumer
+its producers, a cache its prefetchers), each instance self-enrolls with the environment,
+appended after the top-level modules. An operable packet producer nested under a consumer
 is therefore found and ticked with no additional wiring. ``get_num(name)`` always agrees
 with ``view(name).size()``.
 

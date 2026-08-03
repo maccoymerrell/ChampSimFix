@@ -34,7 +34,7 @@
 #include "operable.h"
 #include "phase_controller.h"
 #include "phase_info.h"
-#include "token_source.h"
+#include "packet_producer.h"
 
 const auto start_time = std::chrono::steady_clock::now();
 
@@ -121,7 +121,7 @@ long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables
 }
 
 // Generic phase loop over any number of phase controllers: ABORT if any aborts, COMPLETE when all do.
-// on_source_complete fires once per source id; controllers observe EOF via source_eof() (orchestrator is workload-agnostic).
+// on_source_complete fires once per source id; controllers observe EOF via producers_eof() (orchestrator is workload-agnostic).
 void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t length, modules::environment_module& env,
                std::vector<std::reference_wrapper<modules::phase_controller>>& controllers, champsim::chrono::clock& global_clock,
                std::function<void(unsigned)> on_source_complete)
@@ -158,7 +158,7 @@ void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t
       any_abort |= (controller_status == modules::phase_controller::status::ABORT);
       all_complete &= (controller_status == modules::phase_controller::status::COMPLETE);
 
-      // Surface completion notifications so token_consumers can print per-source messages.
+      // Surface completion notifications so packet_consumers can print per-source messages.
       for (unsigned source_idx : controller.newly_completed_sources()) {
         if (completed_sources.insert(source_idx).second && on_source_complete) {
           on_source_complete(source_idx);
@@ -189,7 +189,7 @@ static phase_stats collect_phase_stats(const phase_info& phase, modules::environ
   stats.name = phase.name;
 
   // Workload identity comes from the sources, in creation order (legacy env: one trace per core).
-  for (modules::token_source& src : env.typed_view<modules::token_source>("token_source")) {
+  for (modules::packet_producer& src : env.typed_view<modules::packet_producer>("packet_producer")) {
     auto desc = src.describe();
     if (!desc.empty()) {
       stats.trace_names.push_back(desc);
@@ -222,13 +222,13 @@ static phase_stats collect_phase_stats(const phase_info& phase, modules::environ
 }
 
 // Assign framework-internal identities: consumers enumerate densely in config order; each source
-// gets its own id unless sources share a "source_group" label. Configs never contain the numbers.
+// gets its own id unless sources share a "producer_group" label. Configs never contain the numbers.
 void assign_identities(modules::environment_module& env)
 {
   identities().clear();
 
   int next_consumer = 0;
-  for (auto& sc : env.typed_view<modules::token_consumer>("token_consumer")) {
+  for (auto& sc : env.typed_view<modules::packet_consumer>("packet_consumer")) {
     if (sc.get().consumer_id_pinned()) {
       continue; // mirrors another consumer's identity; owns no slot
     }
@@ -245,39 +245,39 @@ void assign_identities(modules::environment_module& env)
     std::exit(-1);
   }
 
-  uint32_t next_source_group = 0;
-  std::map<std::string, uint32_t> source_group_labels;
-  for (auto& src : env.typed_view<modules::token_source>("token_source")) {
-    if (src.get().source_id_pinned()) {
+  uint32_t next_producer_group = 0;
+  std::map<std::string, uint32_t> producer_group_labels;
+  for (auto& src : env.typed_view<modules::packet_producer>("packet_producer")) {
+    if (src.get().producer_id_pinned()) {
       continue; // mirrors another source's id; owns no slot
     }
-    const auto& label = src.get().source_group();
+    const auto& label = src.get().producer_group();
     if (label.empty()) {
-      src.get().set_source_id(next_source_group);
-      identities().register_source(next_source_group, src.get().source_name());
-      ++next_source_group;
+      src.get().set_producer_id(next_producer_group);
+      identities().register_producer(next_producer_group, src.get().producer_name());
+      ++next_producer_group;
     } else {
-      auto [it, fresh] = source_group_labels.try_emplace(label, next_source_group);
+      auto [it, fresh] = producer_group_labels.try_emplace(label, next_producer_group);
       if (fresh) {
-        ++next_source_group;
+        ++next_producer_group;
       }
-      src.get().set_source_id(it->second);
-      identities().register_source(it->second, src.get().source_name());
+      src.get().set_producer_id(it->second);
+      identities().register_producer(it->second, src.get().producer_name());
     }
   }
 
-  auto num_source_groups = modules::ModuleBuilder::globals().get_parameter<std::size_t>("num_source_groups", true, std::size_t{0});
-  if (num_source_groups > 0 && static_cast<std::size_t>(next_source_group) > num_source_groups) {
-    fmt::print("ERROR: {} source groups found but num_source_groups is {} — per-source tables would index out of bounds. "
-               "Remove or raise the root config key \"num_source_groups\".\n",
-               next_source_group, num_source_groups);
+  auto num_producer_groups = modules::ModuleBuilder::globals().get_parameter<std::size_t>("num_producer_groups", true, std::size_t{0});
+  if (num_producer_groups > 0 && static_cast<std::size_t>(next_producer_group) > num_producer_groups) {
+    fmt::print("ERROR: {} source groups found but num_producer_groups is {} — per-source tables would index out of bounds. "
+               "Remove or raise the root config key \"num_producer_groups\".\n",
+               next_producer_group, num_producer_groups);
     std::exit(-1);
   }
 
   // Warm each source's page-table root in source-id order: otherwise roots allocate at first walk,
   // making physical page assignment timing-dependent instead of a pure function of the configuration.
   for (auto& vm : env.typed_view<modules::vmem_module>("vmem")) {
-    for (uint32_t source = 0; source < next_source_group; ++source) {
+    for (uint32_t source = 0; source < next_producer_group; ++source) {
       (void)vm.get().get_pte_pa(champsim::origin{champsim::origin::invalid_id, source}, champsim::page_number{}, vm.get().get_pt_levels());
     }
   }
@@ -313,8 +313,8 @@ std::vector<phase_stats> main(modules::environment_module& env, std::vector<phas
 
     modules::emit_begin_phase(is_warmup);
 
-    // Cache the token_consumer view once per phase (the completion hook would else call typed_view every cycle).
-    auto consumers = env.typed_view<champsim::modules::token_consumer>("token_consumer");
+    // Cache the packet_consumer view once per phase (the completion hook would else call typed_view every cycle).
+    auto consumers = env.typed_view<champsim::modules::packet_consumer>("packet_consumer");
 
     auto on_complete = [&](unsigned source_idx) {
       for (auto& sc : consumers) {

@@ -10,7 +10,7 @@ namespace
 {
 
 // A minimal consumer that reports core-style heartbeat lines.
-struct hb_consumer : champsim::modules::token_consumer {
+struct hb_consumer : champsim::modules::packet_consumer {
   explicit hb_consumer(int id) { set_consumer_id(id); }
   std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const override
   {
@@ -149,7 +149,7 @@ TEST_CASE("The heartbeat baseline advances by whole intervals when retires overs
 
     uut->begin_phase(false);
 
-    // Batches of 4 against a 9-token interval: the baseline advances by
+    // Batches of 4 against a 9-packet interval: the baseline advances by
     // whole intervals (9, 18, 27, 36, 45, 54, ...) rather than snapping to
     // the printed total, so prints land at the first batch crossing each
     // grid line: totals 12, 20, 28, 36, 48, 56.
@@ -173,9 +173,9 @@ TEST_CASE("The heartbeat baseline advances by whole intervals when retires overs
     REQUIRE_THAT(lines[5], Catch::Matchers::StartsWith("Heartbeat CPU 0 instructions: 56 "));
 }
 
-TEST_CASE("The default progress message is token-generic") {
-    champsim::modules::token_consumer generic{};
+TEST_CASE("The default progress message is packet-generic") {
+    champsim::modules::packet_consumer generic{};
     // Standalone consumers default to id 0 until the startup pass assigns one
     auto msg = generic.progress_message(100, 50, 2.0, 2.0);
-    REQUIRE_THAT(msg, Catch::Matchers::StartsWith("Heartbeat source 0 tokens: 100 cycles: 50 "));
+    REQUIRE_THAT(msg, Catch::Matchers::StartsWith("Heartbeat source 0 packets: 100 cycles: 50 "));
 }

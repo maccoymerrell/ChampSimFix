@@ -20,7 +20,7 @@ struct mock_core_914 : public champsim::modules::core_module {
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return {}; }
   cpu_stats get_roi_stats() const override { return {}; }
-  bool source_eof() const override { return false; }
+  bool producers_eof() const override { return false; }
 };
 
 static champsim::modules::core_module::register_module<mock_core_914> mock_core_reg_914("MOCK_CORE_914");
@@ -44,7 +44,7 @@ mock_core_914* make_core(const std::string& name)
 
 TEST_CASE("A core judges its own health from its retirement rate")
 {
-  using health = champsim::modules::token_consumer::source_health;
+  using health = champsim::modules::packet_consumer::source_health;
   constexpr uint64_t window = 1000000;
 
   auto* uut = make_core("t914_core");
@@ -80,7 +80,7 @@ TEST_CASE("A core judges its own health from its retirement rate")
 
 TEST_CASE("reset_health discards progress made before the phase began")
 {
-  using health = champsim::modules::token_consumer::source_health;
+  using health = champsim::modules::packet_consumer::source_health;
   constexpr uint64_t window = 1000000;
 
   auto* uut = make_core("t914_core_reset");

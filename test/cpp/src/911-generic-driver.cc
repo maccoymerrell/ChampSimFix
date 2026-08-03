@@ -52,7 +52,7 @@ struct counting_operable : public champsim::operable, public champsim::module_ph
 struct mock_core_911 : public champsim::modules::core_module {
   uint64_t instr_count = 0;
   uint8_t cpu_num_ = 0;
-  bool source_eof_ = false; // a live core with attached sources is not at EOF
+  bool producers_eof_ = false; // a live core with attached sources is not at EOF
 
   explicit mock_core_911(champsim::modules::ModuleBuilder builder)
     : core_module(champsim::chrono::picoseconds{250}) {
@@ -67,7 +67,7 @@ struct mock_core_911 : public champsim::modules::core_module {
   long operate() override { ++instr_count; return 1; }
   cpu_stats get_sim_stats() const override { return {}; }
   cpu_stats get_roi_stats() const override { return {}; }
-  bool source_eof() const override { return source_eof_; }
+  bool producers_eof() const override { return producers_eof_; }
 };
 
 static champsim::modules::core_module::register_module<mock_core_911> mock_core_reg_911("MOCK_CORE_911");
@@ -86,8 +86,8 @@ struct mock_env_911 : public champsim::modules::environment_module {
       for (auto* c : cores_) result.push_back(static_cast<champsim::operable*>(static_cast<champsim::modules::core_module*>(c)));
     } else if (interface_type == "core") {
       for (auto* c : cores_) result.push_back(static_cast<champsim::modules::core_module*>(c));
-    } else if (interface_type == "token_consumer") {
-      for (auto* c : cores_) result.push_back(static_cast<champsim::modules::token_consumer*>(static_cast<champsim::modules::core_module*>(c)));
+    } else if (interface_type == "packet_consumer") {
+      for (auto* c : cores_) result.push_back(static_cast<champsim::modules::packet_consumer*>(static_cast<champsim::modules::core_module*>(c)));
     }
     return result;
   }
@@ -231,8 +231,8 @@ TEST_CASE("run_phase stops when a source reaches EOF")
   auto* mc = dynamic_cast<mock_core_911*>(core);
   mock_env->cores_ = {mc};
 
-  // The source is exhausted from the start; the controller observes it through source_eof() with no external notification.
-  mc->source_eof_ = true;
+  // The source is exhausted from the start; the controller observes it through producers_eof() with no external notification.
+  mc->producers_eof_ = true;
 
   auto pc_builder = champsim::modules::ModuleBuilder("pc_eof2", "INSTRUCTION_PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 1000);
