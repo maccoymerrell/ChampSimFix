@@ -712,7 +712,7 @@ class wrong_path_tracereader
 
     struct wp_chain_section {
       uint64_t num_wp;
-      std::vector<int64_t> template_id_deltas;
+      std::vector<uint32_t> template_ids;
       std::vector<delta_section> wp_deltas;
     };
 
@@ -874,7 +874,7 @@ class wrong_path_tracereader
           if (reg_index >= instruction_template.dst_regs.size())
             throw std::runtime_error(
                 fmt::format("[ERROR] Observed data for register #{} for an instruction with {} registers", reg_index, instruction_template.dst_regs.size()));
-          const uint64_t reg_id = instruction_template.dst_regs.at(reg_index);
+          const uint64_t reg_id = instruction_template.dst_regs[reg_index];
           if constexpr (wrong_path)
             wp_regfile.value()[previous_thread_id][reg_id] = delta;
           else
@@ -1012,7 +1012,7 @@ class wrong_path_tracereader
       uint64_t next_pc = pc; // The PC for the instruction after this instruction
       for (uint64_t ipos = 0; ipos < num_instr; ipos++) {
         const overlay_key key(entry.template_id, ipos);
-        retvec.emplace_back(generate_instruction<false>(pc, instructions[ipos], cp_overlay[key], next_pc));
+        retvec.emplace_back(generate_instruction(pc, instructions[ipos], cp_overlay[key], next_pc));
       }
 
       next_cp_bb_pc = next_pc;
@@ -1020,7 +1020,7 @@ class wrong_path_tracereader
       return retvec;
     }
 
-    [[nodiscard]] constexpr std::vector<ooo_model_instr> start_wp([[maybe_unused]] const body_entry& entry)
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> start_wp(const body_entry& entry, [[maybe_unused]] const uint64_t next_bb_pc)
     {
       if (wp_overlay or wp_regfile)
         throw std::runtime_error(fmt::format("[ERROR] Attempting to instantiate a nested wrong path!"));
@@ -1028,10 +1028,54 @@ class wrong_path_tracereader
       wp_overlay.emplace(cp_overlay); // Fork off a copy of the current overlay
       wp_regfile.emplace(cp_regfile); // Fork off a copy of the current regfile
 
-      // TODO: Generate wrong path instructions here from entry
-#warning "Wrong path not implemented"
+      const wp_chain_section& wp_chain = entry.wp_chain;
+      const wp_events_section& wp_events = entry.wp_events;
 
-      return {};
+      // Wrong path isn't available. Fall back to trace inferred wrong path
+      if (wp_chain.num_wp == 0)
+        return continue_wp(next_bb_pc);
+
+      const uint32_t next_wp_template_id = wp_chain.template_ids[0];
+      const uint64_t next_wp_bb_pc = header.templates.at(next_wp_template_id).start_pc;
+
+      // Wrong path isn't available. Fall back to trace inferred wrong path
+      if (next_wp_bb_pc != next_bb_pc)
+        return continue_wp(next_bb_pc);
+
+      // Create a map of faulting instructions
+      std::map<uint64_t, std::set<uint64_t>> faulting_instructions;
+      for (std::size_t i = 0; i < wp_events.wp_index.size(); i++)
+        if (wp_events.fault_instr_index[i])
+          faulting_instructions[wp_events.wp_index[i]].insert(wp_events.fault_instr_index[i].value());
+
+      // Generate wrong path instructions from wp_chain and set the event flags appropriately
+      std::vector<ooo_model_instr> retvec;
+      for (std::size_t i = 0; i < wp_chain.num_wp; i++) {
+        const uint32_t template_id = wp_chain.template_ids[i];
+        const auto& deltas = wp_chain.wp_deltas[i];
+        const auto& bb_template = header.templates.at(template_id);
+        const auto& instructions = bb_template.instructions;
+
+        apply_deltas_to_overlay(deltas, wp_overlay.value(), template_id, instructions.size());
+
+        const std::size_t num_instr = instructions.size();
+        retvec.reserve(retvec.size() + instructions.size());
+        uint64_t pc = bb_template.start_pc;
+        uint64_t _;
+        for (uint64_t ipos = 0; ipos < num_instr; ipos++) {
+          const overlay_key key(template_id, ipos);
+          retvec.emplace_back(generate_instruction<true>(pc, instructions[ipos], (*wp_overlay)[key], _));
+          retvec.back().set_wp_event_flags(); // Mark as wrong path non-faulting instruction
+
+          if (faulting_instructions.find(i) != faulting_instructions.end()) {
+            const auto& faulting_ipos_set = faulting_instructions[i];
+            const bool is_faulting = faulting_ipos_set.find(ipos) != faulting_ipos_set.end();
+            retvec.back().set_wp_event_flags(is_faulting); // Mark as wrong path faulting instruction
+          }
+        }
+      }
+
+      return retvec;
     }
 
     [[nodiscard]] constexpr std::vector<ooo_model_instr> stop_wp(const body_entry& entry)
@@ -1061,7 +1105,7 @@ class wrong_path_tracereader
       else if (previously_on_wp and !now_on_wp)
         return stop_wp(entry);
       else if (!previously_on_wp and now_on_wp)
-        return start_wp(entry);
+        return start_wp(entry, next_bb_pc);
       return continue_cp(entry);
     }
 
@@ -1126,7 +1170,7 @@ class wrong_path_tracereader
       return cp_delta;
     }
 
-    [[nodiscard]] constexpr wp_chain_section read_wp_chain_section()
+    [[nodiscard]] constexpr wp_chain_section read_wp_chain_section(const uint32_t last_template_id)
     {
       const uint64_t section_size = compressed_body_stream.parse_uleb();
       const uint64_t initial_bytes_read = compressed_body_stream.total_bytes_read;
@@ -1134,7 +1178,9 @@ class wrong_path_tracereader
       wp_chain_section wp_chain;
       wp_chain.num_wp = compressed_body_stream.parse_uleb();
       for (uint64_t i = 0; i < wp_chain.num_wp; i++) {
-        wp_chain.template_id_deltas.emplace_back(compressed_body_stream.parse_sleb());
+        const int64_t template_id_delta = compressed_body_stream.parse_sleb();
+        const uint32_t template_id = static_cast<uint32_t>(static_cast<int64_t>(last_template_id) + template_id_delta);
+        wp_chain.template_ids.emplace_back(template_id);
         wp_chain.wp_deltas.emplace_back(read_cp_delta_section());
       }
 
@@ -1208,7 +1254,7 @@ class wrong_path_tracereader
       retval.template_id = current_template_id;
       retval.cp_delta = read_cp_delta_section();
       if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
-        retval.wp_chain = read_wp_chain_section();
+        retval.wp_chain = read_wp_chain_section(current_template_id);
         retval.wp_events = read_wp_events_section();
         validate_wp(retval.wp_chain, retval.wp_events);
       }
@@ -1239,7 +1285,7 @@ class wrong_path_tracereader
       validate_overlay(cp_overlay, cp_delta, previous_template_id);
 
       if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
-        wp_chain_section wp_chain = read_wp_chain_section();
+        wp_chain_section wp_chain = read_wp_chain_section(previous_template_id);
         wp_events_section wp_events = read_wp_events_section();
 
         if (wp_overlay.has_value() != wp_regfile.has_value())
@@ -1248,15 +1294,15 @@ class wrong_path_tracereader
         if (wp_overlay) // Verify WP only when executing WP
         {
           std::set<uint32_t> processed_templates; // Tracks the template IDs for the templates that have been verified
-          const int64_t num_entries = static_cast<int64_t>(wp_chain.template_id_deltas.size());
+          const int64_t num_entries = static_cast<int64_t>(wp_chain.num_wp);
           uint32_t current_template_id = previous_template_id;
           for (int64_t i = num_entries - 1; i >= 0; i--) // Iterate in reverse
           {
-            current_template_id = static_cast<uint32_t>(static_cast<int64_t>(current_template_id) + wp_chain.template_id_deltas.at(i));
+            current_template_id = wp_chain.template_ids[i];
             if (processed_templates.find(current_template_id) != processed_templates.end())
               continue; // Only validate the last instance of each template
 
-            validate_overlay(wp_overlay.value(), wp_chain.wp_deltas.at(i), current_template_id);
+            validate_overlay(wp_overlay.value(), wp_chain.wp_deltas[i], current_template_id);
             processed_templates.insert(current_template_id); // Mark this template as done
           }
         }

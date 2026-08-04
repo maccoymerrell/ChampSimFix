@@ -111,6 +111,8 @@ struct ooo_model_instr : champsim::program_ordered<ooo_model_instr> {
   bool branch_taken = false;
   bool branch_prediction = false;
   bool branch_mispredicted = false; // A branch can be mispredicted even if the direction prediction is correct when the predicted target is not correct
+  bool is_wp = false;               // Set to true when this instruction is a wrong path instructions
+  bool is_wp_fault = false;         // Set to true when this instruction is faulting instruction on the wrong path
 
   std::array<uint8_t, 2> asid = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
 
@@ -216,6 +218,14 @@ public:
   }
 
   [[nodiscard]] std::size_t num_mem_ops() const { return std::size(destination_memory) + std::size(source_memory); }
+
+  // This function is *only* called for instructions on the wrong path. The `is_flag` parameter is set to true if the instruction is marked as a faulting
+  // instructions
+  void set_wp_event_flags(const bool is_fault = false)
+  {
+    is_wp = true;
+    is_wp_fault = is_fault;
+  }
 };
 
 #endif
