@@ -507,8 +507,8 @@ long CACHE::operate()
 
     for (auto* ul : upper_levels) {
       for (auto q : {std::ref(ul->get_wq()), std::ref(ul->get_rq()), std::ref(ul->get_pq())}) {
-        // Recompute inside the loop: when bandwidth doesn't divide evenly across
-        // upstreams, this prevents consuming more than expected.
+        // this needs to be in this loop, we need to ensure that for cases where bandwidth doesn't divide nicely across upstreams,
+        // we don't accidentally consume more bandwidth than expected
         champsim::bandwidth per_upper_tag_bw{std::min(per_upper_bandwidth, champsim::bandwidth::maximum_type{initiate_tag_bw.amount_remaining()})};
         auto bandwidth_consumed = champsim::transform_while_n(q.get(), router, per_upper_tag_bw, can_admit, initiate_tag_check<true>(ul));
         if constexpr (champsim::debug_print) {
