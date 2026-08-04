@@ -16,16 +16,16 @@ void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t
                modules::environment_module& env,
                std::vector<std::reference_wrapper<modules::phase_controller>>& controllers,
                champsim::chrono::clock& global_clock,
-               std::function<void(unsigned)> on_source_complete);
+               std::function<void(unsigned)> on_consumer_complete);
 
 // Convenience for tests: drive a single controller through the multi-controller loop
 inline void run_phase(const std::string& phase_name, bool is_warmup, uint64_t length,
                       modules::environment_module& env, modules::phase_controller& controller,
                       champsim::chrono::clock& global_clock,
-                      std::function<void(unsigned)> on_source_complete)
+                      std::function<void(unsigned)> on_consumer_complete)
 {
   std::vector<std::reference_wrapper<modules::phase_controller>> controllers{std::ref(controller)};
-  run_phase(phase_name, is_warmup, !is_warmup, length, env, controllers, global_clock, std::move(on_source_complete));
+  run_phase(phase_name, is_warmup, !is_warmup, length, env, controllers, global_clock, std::move(on_consumer_complete));
 }
 }
 
@@ -198,11 +198,11 @@ TEST_CASE("run_phase drives multiple controllers, each governing its own sources
   // Controller A governs source 0 only; controller B governs source 1 only.
   auto pcA_builder = champsim::modules::ModuleBuilder("pc_multiA", "PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 1000)
-    .add_parameter("sources", nlohmann::json::array({0}));
+    .add_parameter("consumers", nlohmann::json::array({0}));
   auto* pcA = champsim::modules::phase_controller::create_instance(pcA_builder, env);
   auto pcB_builder = champsim::modules::ModuleBuilder("pc_multiB", "PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 1000)
-    .add_parameter("sources", nlohmann::json::array({1}));
+    .add_parameter("consumers", nlohmann::json::array({1}));
   auto* pcB = champsim::modules::phase_controller::create_instance(pcB_builder, env);
 
   std::vector<std::reference_wrapper<champsim::modules::phase_controller>> controllers{std::ref(*pcA), std::ref(*pcB)};

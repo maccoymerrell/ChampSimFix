@@ -100,10 +100,10 @@ mixin. It is the orchestration layer's entire view of "the thing doing work":
       int consumer_id() const;                     // hardware-context id, framework-assigned
       virtual uint64_t sim_progress() const;       // cumulative packets completed
       virtual bool producers_eof() const;             // all attached producers exhausted
-      virtual source_health check_health(uint64_t elapsed);  // periodic self-check
+      virtual consumer_health check_health(uint64_t elapsed);  // periodic self-check
       virtual void reset_health();                 // re-baseline at phase start
       virtual bool has_pending_work() const;       // scheduled future work (paced gaps)
-      // report formatting: source_finish_message, phase_complete_message, progress_message
+      // report formatting: producer_finish_message, phase_complete_message, progress_message
     };
 
 Two contracts deserve emphasis:
@@ -135,7 +135,7 @@ an ordinary module (interface ``phase_controller``, parent: the environment):
     struct phase_controller {
       virtual void begin_phase(const std::string& name, bool is_warmup, uint64_t length) = 0;
       virtual status advance(long progress) = 0;   // CONTINUE, COMPLETE, or ABORT
-      virtual std::vector<unsigned> newly_completed_sources() const = 0;
+      virtual std::vector<unsigned> newly_completed_consumers() const = 0;
       virtual void end_phase() = 0;
       virtual std::vector<phase_info> get_phases() const;  // non-empty = owns run structure
     };
@@ -165,9 +165,9 @@ By default a trace producer replays (``repeat: true``): it reopens the trace at 
 never signals end-of-stream, so it feeds instructions until the consumer reaches the phase
 length. ``eof_policy`` matters only for a *finite* producer that does signal end-of-stream (a
 non-repeating trace, or a bounded generator): ``"complete_all"`` (default) ends the phase
-for every consumer at that first signal; ``"complete_source"`` retires only the consumer
+for every consumer at that first signal; ``"complete_consumer"`` retires only the consumer
 whose producer ended and lets the others run on to their own phase lengths (heterogeneous
-mixes). Any value other than the exact string ``"complete_source"`` is treated as
+mixes). Any value other than the exact string ``"complete_consumer"`` is treated as
 ``"complete_all"``.
 
 Instead of ``warmup_length``/``simulation_length``, a controller may declare an
@@ -180,7 +180,7 @@ arbitrary phase list::
     ]
 
 **Multiple controllers.** A configuration may declare any number of phase controllers.
-Each may name the consumer ids it governs (``"sources": [0, 1]``; default: all), so
+Each may name the consumer ids it governs (``"consumers": [0, 1]``; default: all), so
 different completion and health policies can apply to different parts of a heterogeneous
 system. Composition rules: the phase aborts if *any* controller aborts, completes when
 *all* controllers report complete, and the phase list is taken from the first controller

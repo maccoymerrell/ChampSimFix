@@ -52,7 +52,7 @@ struct phase_controller : public module_base<phase_controller, environment_modul
   virtual status advance(long progress) = 0;
 
   // Get ids of sources that newly completed since last advance()
-  virtual std::vector<unsigned> newly_completed_sources() const = 0;
+  virtual std::vector<unsigned> newly_completed_consumers() const = 0;
 
   // Called at end of phase for cleanup
   virtual void end_phase() = 0;

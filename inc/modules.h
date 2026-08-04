@@ -818,7 +818,7 @@ struct core_module : public module_base<core_module, environment_module>, public
 
   // packet_consumer hooks: core_module provides CPU-specific messages.
   uint64_t sim_progress() const override;
-  std::string source_finish_message(const std::string& phase_name) const override;
+  std::string producer_finish_message(const std::string& phase_name) const override;
   std::string phase_complete_message(const std::string& phase_name) const override;
   std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const override;
 
@@ -826,7 +826,7 @@ struct core_module : public module_base<core_module, environment_module>, public
   // per cycle) over the check window against retirement-rate floors.
   // These are the former phase-controller livelock thresholds, now owned
   // by the consumer that knows its own progress unit.
-  source_health check_health(uint64_t elapsed) override;
+  consumer_health check_health(uint64_t elapsed) override;
   void reset_health() override;
 
 private:

@@ -59,7 +59,7 @@ nlohmann::json source_json(const std::string& name, const std::string& label = {
 
 } // namespace
 
-TEST_CASE("Identities are assigned internally: dense consumers, per-source ids, shared labels")
+TEST_CASE("Identities are assigned internally: dense consumers, per-producer ids, shared labels")
 {
   // Three consumers. c0 holds two sources sharing a label with c2's source;
   // c1's source is unlabeled.

@@ -33,7 +33,7 @@ struct packet_consumer {
   // expected progress rate (instructions retired for a core, packets
   // delivered for a network consumer, ...), so livelock policy lives here —
   // not in the phase controller, which only aggregates.
-  enum class source_health { healthy, warning, critical, stalled };
+  enum class consumer_health { healthy, warning, critical, stalled };
 
   // True when all attached packet sources are exhausted.
   virtual bool producers_eof() const { return true; }
@@ -80,7 +80,7 @@ public:
   // Periodic self-check, driven by the phase controller every health
   // period. elapsed is the number of controller cycles since the last
   // check (or reset_health). Return stalled to abort the simulation.
-  virtual source_health check_health(uint64_t /*elapsed*/) { return source_health::healthy; }
+  virtual consumer_health check_health(uint64_t /*elapsed*/) { return consumer_health::healthy; }
 
   // Re-baseline health tracking; called by the controller at phase start.
   virtual void reset_health() {}
@@ -90,8 +90,8 @@ public:
   // reports pending work, zero global progress is not a deadlock.
   virtual bool has_pending_work() const { return false; }
 
-  // Called when this consumer's source finishes a phase. Return empty to suppress.
-  virtual std::string source_finish_message(const std::string& /*phase_name*/) const { return {}; }
+  // Called when this consumer's producer finishes a phase. Return empty to suppress.
+  virtual std::string producer_finish_message(const std::string& /*phase_name*/) const { return {}; }
 
   // Called at the end of a phase for summary output. Return empty to suppress.
   virtual std::string phase_complete_message(const std::string& /*phase_name*/) const { return {}; }

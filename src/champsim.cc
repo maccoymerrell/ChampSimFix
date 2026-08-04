@@ -101,11 +101,11 @@ long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables
   return progress;
 }
 
-// Generic phase loop over any number of controllers: ABORT if any aborts, COMPLETE when all complete; on_source_complete fires once per source id.
-// Controllers observe source EOF themselves via producers_eof(). typed_view/module_phase cached once per phase.
+// Generic phase loop over any number of controllers: ABORT if any aborts, COMPLETE when all complete; on_consumer_complete fires once per consumer id.
+// Controllers observe producer EOF themselves via producers_eof(). typed_view/module_phase cached once per phase.
 void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t length, modules::environment_module& env,
                std::vector<std::reference_wrapper<modules::phase_controller>>& controllers, champsim::chrono::clock& global_clock,
-               std::function<void(unsigned)> on_source_complete)
+               std::function<void(unsigned)> on_consumer_complete)
 {
   // typed_view is expensive; cache once per phase and reuse across all cycles.
   auto operables = env.typed_view<champsim::operable>("operable");
@@ -123,7 +123,7 @@ void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t
     controller.begin_phase(phase_name, is_warmup, length);
   }
 
-  std::set<unsigned> completed_sources;
+  std::set<unsigned> completed_consumers;
   modules::phase_controller::status phase_status{modules::phase_controller::status::CONTINUE};
   while (phase_status == modules::phase_controller::status::CONTINUE) {
     global_clock.tick(time_quantum);
@@ -137,10 +137,10 @@ void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t
       any_abort |= (controller_status == modules::phase_controller::status::ABORT);
       all_complete &= (controller_status == modules::phase_controller::status::COMPLETE);
 
-      // Source completion: surface notifications so packet_consumers can print their per-source messages; end-of-phase work happens once at the end.
-      for (unsigned source_idx : controller.newly_completed_sources()) {
-        if (completed_sources.insert(source_idx).second && on_source_complete) {
-          on_source_complete(source_idx);
+      // Consumer completion: surface notifications so packet_consumers can print their per-consumer messages; end-of-phase work happens once at the end.
+      for (unsigned consumer_idx : controller.newly_completed_consumers()) {
+        if (completed_consumers.insert(consumer_idx).second && on_consumer_complete) {
+          on_consumer_complete(consumer_idx);
         }
       }
     }
@@ -248,7 +248,7 @@ void assign_identities(modules::environment_module& env)
 
   auto num_producer_groups = modules::ModuleBuilder::globals().get_parameter<std::size_t>("num_producer_groups", true, std::size_t{0});
   if (num_producer_groups > 0 && static_cast<std::size_t>(next_producer_group) > num_producer_groups) {
-    fmt::print("ERROR: {} source groups found but num_producer_groups is {} — per-source tables would index out of bounds. "
+    fmt::print("ERROR: {} producer groups found but num_producer_groups is {} — per-producer tables would index out of bounds. "
                "Remove or raise the root config key \"num_producer_groups\".\n",
                next_producer_group, num_producer_groups);
     std::exit(-1);
@@ -297,10 +297,10 @@ std::vector<phase_stats> main(modules::environment_module& env, std::vector<phas
     // Cache the packet_consumer view once per phase; the completion hook would otherwise call typed_view every cycle.
     auto consumers = env.typed_view<champsim::modules::packet_consumer>("packet_consumer");
 
-    auto on_complete = [&](unsigned source_idx) {
+    auto on_complete = [&](unsigned consumer_idx) {
       for (auto& sc : consumers) {
-        if (sc.get().consumer_id() == static_cast<int>(source_idx)) {
-          auto msg = sc.get().source_finish_message(phase_name_captured);
+        if (sc.get().consumer_id() == static_cast<int>(consumer_idx)) {
+          auto msg = sc.get().producer_finish_message(phase_name_captured);
           if (!msg.empty())
             fmt::print("{} (Simulation time: {:%H hr %M min %S sec})\n", msg, elapsed_time());
         }

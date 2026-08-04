@@ -35,10 +35,10 @@ namespace
 // Generic, packet-agnostic phase controller owning completion/deadlock/health
 // mechanics; per-consumer policy (e.g. livelock rate) lives in check_health.
 // Params: deadlock_cycles, health_period (alias livelock_period), eof_policy
-// (complete_all|complete_source), phases[] or warmup_length/simulation_length.
+// (complete_all|complete_consumer), phases[] or warmup_length/simulation_length.
 class default_phase_controller : public champsim::modules::phase_controller
 {
-  using source_health = champsim::modules::packet_consumer::source_health;
+  using consumer_health = champsim::modules::packet_consumer::consumer_health;
 
   // Configuration (from builder)
   int deadlock_cycles_ = 500;
@@ -68,7 +68,7 @@ class default_phase_controller : public champsim::modules::phase_controller
   std::set<int> governed_;
 
   // Source tracking: keyed by producer_id from packet_consumer
-  std::map<int, bool> source_complete_;
+  std::map<int, bool> consumer_complete_;
   std::map<int, uint64_t> progress_baseline_;
   std::vector<unsigned> newly_completed_;
 
@@ -80,7 +80,7 @@ public:
     env_ = builder.get_parent<champsim::modules::environment_module>();
     deadlock_cycles_ = builder.get_parameter<int>("deadlock_cycles", true, 500);
     health_period_ = builder.get_parameter<uint64_t>("health_period", true, builder.get_parameter<uint64_t>("livelock_period", true, 10000000ULL));
-    complete_all_on_eof_ = builder.get_parameter<std::string>("eof_policy", true, std::string{"complete_all"}) != "complete_source";
+    complete_all_on_eof_ = builder.get_parameter<std::string>("eof_policy", true, std::string{"complete_all"}) != "complete_consumer";
 
     // Build phases from explicit JSON array, else warmup/simulation scalars.
     if (builder.has_parameter("phases")) {
@@ -104,8 +104,8 @@ public:
 
     // Optional source-id subset: controllers can partition a run's sources,
     // each applying its own policy. Default: govern all.
-    if (builder.has_parameter("sources")) {
-      for (auto& s : builder.get_parameter<nlohmann::json>("sources")) {
+    if (builder.has_parameter("consumers")) {
+      for (auto& s : builder.get_parameter<nlohmann::json>("consumers")) {
         governed_.insert(s.get<int>());
       }
     }
@@ -119,7 +119,7 @@ public:
     health_timer_ = 0;
     health_abort_ = false;
     newly_completed_.clear();
-    source_complete_.clear();
+    consumer_complete_.clear();
 
     // Refresh per-phase view caches (typed_view is expensive; reuse across cycles).
     packet_consumers_ = env_->typed_view<champsim::modules::packet_consumer>("packet_consumer");
@@ -134,7 +134,7 @@ public:
     for (auto& sc : packet_consumers_) {
       int idx = sc.get().consumer_id();
       if (idx >= 0) {
-        source_complete_[idx] = false;
+        consumer_complete_[idx] = false;
         progress_baseline_[idx] = sc.get().sim_progress();
       }
       sc.get().reset_health();
@@ -162,7 +162,7 @@ public:
           continue;
         }
         auto health = sc.get().check_health(health_period_);
-        if (health == source_health::stalled) {
+        if (health == consumer_health::stalled) {
           fmt::print("{} source {} reported stalled\n", phase_name_, sc.get().consumer_id());
           health_abort_ = true;
         }
@@ -174,20 +174,20 @@ public:
       return status::ABORT;
     }
 
-    // Completion: per-source EOF (policy-dependent) and progress thresholds.
+    // Completion: per-producer EOF (policy-dependent) and progress thresholds.
     for (auto& sc : packet_consumers_) {
       int idx = sc.get().consumer_id();
       if (idx < 0) {
         continue;
       }
-      if (source_complete_[idx]) {
+      if (consumer_complete_[idx]) {
         continue;
       }
 
       if (sc.get().producers_eof()) {
         if (complete_all_on_eof_) {
           // Classic behavior: the first exhausted source ends the phase for everyone.
-          for (auto& [other_idx, complete] : source_complete_) {
+          for (auto& [other_idx, complete] : consumer_complete_) {
             if (!complete) {
               complete = true;
               newly_completed_.push_back(static_cast<unsigned>(other_idx));
@@ -195,22 +195,22 @@ public:
           }
           break;
         }
-        source_complete_[idx] = true;
+        consumer_complete_[idx] = true;
         newly_completed_.push_back(static_cast<unsigned>(idx));
         continue;
       }
 
       if ((sc.get().sim_progress() - progress_baseline_[idx]) >= length_) {
-        source_complete_[idx] = true;
+        consumer_complete_[idx] = true;
         newly_completed_.push_back(static_cast<unsigned>(idx));
       }
     }
 
-    bool all_complete = !source_complete_.empty() && std::all_of(source_complete_.begin(), source_complete_.end(), [](const auto& p) { return p.second; });
+    bool all_complete = !consumer_complete_.empty() && std::all_of(consumer_complete_.begin(), consumer_complete_.end(), [](const auto& p) { return p.second; });
     return all_complete ? status::COMPLETE : status::CONTINUE;
   }
 
-  std::vector<unsigned> newly_completed_sources() const override { return newly_completed_; }
+  std::vector<unsigned> newly_completed_consumers() const override { return newly_completed_; }
 
   void end_phase() override
   {
