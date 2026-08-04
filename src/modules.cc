@@ -17,7 +17,6 @@
 #include "modules.h"
 
 #include "cache.h"
-#include "listener.h"
 #include "instruction_producer.h"
 
 // Static member definitions
@@ -44,32 +43,6 @@ static globals_default_initializer _globals_default_init;
 
 namespace champsim::modules
 {
-
-namespace
-{
-std::vector<listener*>& listener_registry()
-{
-  static std::vector<listener*> registry;
-  return registry;
-}
-} // anonymous namespace
-
-void set_active_listeners(std::vector<listener*> active) { listener_registry() = std::move(active); }
-const std::vector<listener*>& active_listeners() { return listener_registry(); }
-
-void emit_begin_phase(bool is_warmup)
-{
-  for (auto* l : listener_registry()) {
-    l->begin_phase(is_warmup);
-  }
-}
-
-void emit_progress(const packet_consumer& consumer, uint64_t total_progress, uint64_t total_cycles)
-{
-  for (auto* l : listener_registry()) {
-    l->progress(consumer, total_progress, total_cycles);
-  }
-}
 
 bool prefetcher::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t prefetch_metadata) const
 {
@@ -102,4 +75,3 @@ static champsim::modules::prefetcher::register_interface prefetcher_iface_reg("p
 static champsim::modules::replacement::register_interface replacement_iface_reg("replacement");
 static champsim::modules::branch_predictor::register_interface branch_predictor_iface_reg("branch_predictor");
 static champsim::modules::btb::register_interface btb_iface_reg("btb");
-static champsim::modules::listener::register_interface listener_iface_reg("listener");

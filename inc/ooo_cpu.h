@@ -498,6 +498,9 @@ public:
   stats_type get_sim_stats() const final { return sim_stats; }
   stats_type get_roi_stats() const final { return roi_stats; }
 
+  bool show_heartbeat = true;
+  void quiet(bool enable) final { show_heartbeat = !enable; }
+
   void print_deadlock() final;
 
   std::vector<champsim::modules::branch_predictor*> branch_module_pimpl;

@@ -95,16 +95,6 @@ public:
 
   // Called at the end of a phase for summary output. Return empty to suppress.
   virtual std::string phase_complete_message(const std::string& /*phase_name*/) const { return {}; }
-
-  // Format a periodic progress report (driven by a heartbeat-style
-  // listener, which owns the interval bookkeeping and supplies the
-  // numbers). The consumer owns the wording because it knows its own
-  // packet unit. Return empty to suppress.
-  virtual std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const
-  {
-    return fmt::format("Heartbeat source {} packets: {} cycles: {} rate: {:.4} cumulative rate: {:.4}", consumer_id(), total_progress, total_cycles,
-                       interval_rate, cumulative_rate);
-  }
 };
 } // namespace champsim::modules
 

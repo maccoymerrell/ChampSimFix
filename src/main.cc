@@ -31,7 +31,7 @@
 #include "defaults.hpp"
 #include "environment.h"
 #include "legacy_environment.h"
-#include "listener.h"
+#include "event_listeners.h"
 #include "modules.h"
 #include "ooo_cpu.h" // for O3_CPU
 #include "phase_controller.h"
@@ -228,26 +228,18 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   if (knob_dump)
     fmt::print("=== End Module Builder Dump ===\n");
 
-  // Active listeners = config-declared plus --listeners models; if none declared, default to a HEARTBEAT listener unless --hide-heartbeat.
-  std::vector<champsim::modules::listener*> active_listeners;
-  for (champsim::modules::listener& l : gen_environment->typed_view<champsim::modules::listener>("listener")) {
-    active_listeners.push_back(&l);
+  // Event listeners are compile-time (inc/event_listeners.h): the always-on Heartbeat plus
+  // any activated by --listeners. Apply the root "heartbeat_frequency" to the global Heartbeat;
+  // --hide-heartbeat quiets every core so it stops emitting RETIRE events.
+  if (config_json.contains("heartbeat_frequency")) {
+    std::get<Heartbeat>(listeners).cycles_between_printouts = config_json.value("heartbeat_frequency", uint64_t{10000000});
   }
-  const bool config_declared_listeners = !active_listeners.empty();
-  for (const auto& model_name : requested_listeners) {
-    if (!champsim::modules::listener::has_model(model_name)) {
-      fmt::print("WARNING: Listener \"{}\" not found\n", model_name);
-      continue;
+  init_event_listeners(requested_listeners);
+  if (hide_heartbeat) {
+    for (champsim::modules::core_module& cpu : gen_environment->typed_view<champsim::modules::core_module>("core")) {
+      cpu.quiet(true);
     }
-    auto listener_builder = champsim::modules::ModuleBuilder(model_name, model_name);
-    active_listeners.push_back(champsim::modules::listener::create_instance(listener_builder, gen_environment));
   }
-  if (!config_declared_listeners && !hide_heartbeat) {
-    auto heartbeat_builder =
-        champsim::modules::ModuleBuilder("heartbeat", "HEARTBEAT").add_parameter("interval", config_json.value("heartbeat_frequency", uint64_t{10000000}));
-    active_listeners.push_back(champsim::modules::listener::create_instance(heartbeat_builder, gen_environment));
-  }
-  champsim::modules::set_active_listeners(std::move(active_listeners));
 
   // Phase list from the environment's phase controllers: the first non-empty list owns the run structure, a second that
   // disagrees is a config error. Else fall back to the classic warmup+sim pair driven by -w/-i.

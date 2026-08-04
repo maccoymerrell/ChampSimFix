@@ -34,7 +34,7 @@
 #include "deadlock.h"
 #include "instruction.h"
 #include "json_stat_builder.h"
-#include "listener.h"
+#include "event_listeners.h"
 #include "util/stat_format.h"
 #include "util/algorithm.h"
 #include "util/span.h"
@@ -958,9 +958,10 @@ long O3_CPU::retire_rob()
   // against externally injected ROB state (unit tests).
   num_scheduled_ = std::max(num_scheduled_ - retire_count, long{0});
   num_retired += retire_count;
-  if (retire_count > 0) {
+  if (retire_count > 0 && show_heartbeat) {
+    uint32_t cpu = static_cast<uint32_t>(consumer_id());
     uint64_t cycles = static_cast<uint64_t>(current_time.time_since_epoch() / clock_period);
-    champsim::modules::emit_progress(*this, static_cast<uint64_t>(num_retired), cycles);
+    handle_event<Event::RETIRE>(cpu, retire_begin, retire_end, cycles);
   }
   ROB.erase(retire_begin, retire_end);
 
@@ -1194,12 +1195,6 @@ std::string champsim::modules::core_module::phase_complete_message(const std::st
 {
   return fmt::format("{} complete CPU {} instructions: {} cycles: {} cumulative IPC: {:.4g}", phase_name, consumer_id(), sim_instr(), sim_cycle(),
                      std::ceil(static_cast<double>(sim_instr())) / std::ceil(static_cast<double>(sim_cycle())));
-}
-
-std::string champsim::modules::core_module::progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const
-{
-  return fmt::format("Heartbeat CPU {} instructions: {} cycles: {} heartbeat IPC: {:.4} cumulative IPC: {:.4}", consumer_id(), total_progress, total_cycles,
-                     interval_rate, cumulative_rate);
 }
 
 champsim::modules::core_module::register_module<O3_CPU> default_cpu_module("DEFAULT_CORE");

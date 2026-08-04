@@ -226,19 +226,14 @@ Phase controllers and listeners are ordinary top-level children::
         "deadlock_cycles": 500,
         "warmup_length": "$warmup_instructions",
         "simulation_length": "$simulation_instructions"
-    },
-    {
-        "name": "hb",
-        "module": "listener",
-        "model": "HEARTBEAT",
-        "interval": 10000000
     }
 
 Any number of phase controllers may be declared (each optionally governing a subset of
 consumers), a controller may define an arbitrary phase list including unmeasured
 fast-forward phases, and the root-level keys ``"cycle_skip"`` and ``"heartbeat_frequency"``
-tune the orchestration defaults. The full contracts, parameters, and composition rules are
-documented in :ref:`Orchestration`.
+tune the orchestration defaults. (Event listeners such as the heartbeat are compile-time
+instrumentation, not config modules — see :ref:`Orchestration`.) The full contracts,
+parameters, and composition rules are documented in :ref:`Orchestration`.
 
 ----------------------------------
 A Minimal Example

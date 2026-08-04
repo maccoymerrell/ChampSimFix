@@ -27,7 +27,7 @@
 
 #include "identity_registry.h"
 #include "json_stat_builder.h"
-#include "listener.h"
+#include "event_listeners.h"
 #include "module_phase.h"
 #include "module_stat.h"
 #include "modules.h"
@@ -311,7 +311,7 @@ std::vector<phase_stats> main(modules::environment_module& env, std::vector<phas
     // A structured binding can't be lambda-captured in C++17 (clang rejects it); copy it.
     const auto phase_name_captured = phase_name;
 
-    modules::emit_begin_phase(is_warmup);
+    handle_event<Event::BEGIN_PHASE>(is_warmup);
 
     // Cache the packet_consumer view once per phase (the completion hook would else call typed_view every cycle).
     auto consumers = env.typed_view<champsim::modules::packet_consumer>("packet_consumer");

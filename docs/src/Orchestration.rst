@@ -103,7 +103,7 @@ mixin. It is the orchestration layer's entire view of "the thing doing work":
       virtual consumer_health check_health(uint64_t elapsed);  // periodic self-check
       virtual void reset_health();                 // re-baseline at phase start
       virtual bool has_pending_work() const;       // scheduled future work (paced gaps)
-      // report formatting: producer_finish_message, phase_complete_message, progress_message
+      // report formatting: producer_finish_message, phase_complete_message
     };
 
 Two contracts deserve emphasis:
@@ -194,30 +194,25 @@ legacy environment's path.
 Listeners
 ------------------------------------------
 
-Listeners observe run-wide events for reporting. They are modules (interface
-``listener``):
+Listeners are compile-time instrumentation, not modules. They live in
+``inc/listeners/`` and observe typed **events** emitted at hook points throughout the
+simulator (``inc/events.h`` — ``BEGIN_PHASE`` from the run loop, ``RETIRE`` from a core).
+The set of listeners is a ``std::tuple`` in ``inc/event_listeners.h``; a hook site fires an
+event with ``handle_event<Event::X>(args...)``, which dispatches to every activated
+listener's ``handle_event<Event::X>`` specialization. Adding an event means extending the
+enum and placing a hook; adding a listener means dropping a struct into ``inc/listeners/``
+and adding it to the tuple. Users are not expected to author listeners in the common course
+of using ChampSim, so they are not configured as modules.
 
-.. code-block:: cpp
-
-    struct listener {
-      virtual void begin_phase(bool is_warmup);
-      virtual void progress(const packet_consumer& consumer,
-                            uint64_t total_progress, uint64_t total_cycles);
-    };
-
-Consumers emit progress through ``champsim::modules::emit_progress`` (cores emit on
-retirement). The shipped ``HEARTBEAT`` model prints a periodic line per consumer; the
-*consumer* formats the line via ``packet_consumer::progress_message`` since only it knows
-its packet unit — cores produce the ``Heartbeat CPU N instructions: ... cumulative IPC:
-...`` line, and other consumer types report in their own vocabulary.
+The always-on ``Heartbeat`` (``inc/listeners/heartbeat.h``) consumes ``RETIRE`` to print the
+periodic ``Heartbeat CPU N instructions: ... cumulative IPC: ...`` line.
 
 Selection:
 
-* Declare listener children in an explicit config
-  (``{"name": "hb", "module": "listener", "model": "HEARTBEAT", "interval": 10000000}``).
-* Request extra models on the command line: ``--listeners MODEL_NAME``.
-* When a config declares none, a default ``HEARTBEAT`` is created with its interval taken
-  from the root-level ``"heartbeat_frequency"`` key; ``--hide-heartbeat`` suppresses it.
+* Activate a compiled-in listener on the command line: ``--listeners Heartbeat``. The
+  heartbeat is index 0 and always active.
+* The heartbeat interval comes from the root-level ``"heartbeat_frequency"`` key;
+  ``--hide-heartbeat`` quiets every core so it stops emitting ``RETIRE`` events.
 
 ------------------------------------------
 Idle Cycle Skipping
