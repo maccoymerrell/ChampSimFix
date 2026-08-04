@@ -26,7 +26,6 @@
 #include <fmt/core.h>
 #include <nlohmann/json.hpp>
 
-#include "listener.h"
 #include "modules.h"
 
 namespace
