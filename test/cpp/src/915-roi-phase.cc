@@ -1,6 +1,7 @@
 #include <catch.hpp>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 #include <nlohmann/json.hpp>
 
@@ -9,15 +10,6 @@
 #include "phase_controller.h"
 #include "operable.h"
 #include "phase_info.h"
-
-// The multi-controller phase loop from champsim.cc
-namespace champsim {
-void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t length,
-               modules::environment_module& env,
-               std::vector<std::reference_wrapper<modules::phase_controller>>& controllers,
-               champsim::chrono::clock& global_clock,
-               std::function<void(unsigned)> on_consumer_complete);
-}
 
 namespace
 {
@@ -70,8 +62,15 @@ static champsim::modules::environment_module::register_module<mock_env_915> env_
 
 TEST_CASE("A phase controller's config can declare non-warmup phases outside the ROI")
 {
+  using status = champsim::modules::phase_controller::status;
+
   auto env_builder = champsim::modules::ModuleBuilder("env_roi_cfg", "MOCK_ENV_915");
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
+  auto* mock_env = dynamic_cast<mock_env_915*>(env);
+
+  auto core_builder = champsim::modules::ModuleBuilder("core_roi_cfg", "MOCK_CORE_915");
+  auto* core = dynamic_cast<mock_core_915*>(champsim::modules::core_module::create_instance(core_builder, env));
+  mock_env->cores_ = {core};
 
   auto phases_json = nlohmann::json::array({
       nlohmann::json{{"name", "Warmup"}, {"is_warmup", true}, {"length", 10}},
@@ -79,24 +78,37 @@ TEST_CASE("A phase controller's config can declare non-warmup phases outside the
       nlohmann::json{{"name", "Measured"}, {"is_warmup", false}, {"length", 30}},
   });
   auto pc_builder = champsim::modules::ModuleBuilder("pc_roi_cfg", "PHASE_CONTROLLER")
+    .add_parameter("deadlock_cycles", 1000)
     .add_parameter("phases", phases_json);
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
-  auto phases = pc->get_phases();
-  REQUIRE(phases.size() == 3);
-  // Warmup: roi defaults to !is_warmup
-  REQUIRE(phases[0].is_warmup);
-  REQUIRE_FALSE(phases[0].roi);
-  // Fast-forward: non-warmup, explicitly unmeasured
-  REQUIRE_FALSE(phases[1].is_warmup);
-  REQUIRE_FALSE(phases[1].roi);
-  // Measured: roi defaults on
-  REQUIRE_FALSE(phases[2].is_warmup);
-  REQUIRE(phases[2].roi);
+  // The controller owns its phases; stepping through them exposes each phase's parsed roi flag.
+  pc->begin_phase();
+  REQUIRE(pc->phase().name == "Warmup");
+  REQUIRE(pc->phase().is_warmup); // roi defaults to !is_warmup
+  REQUIRE_FALSE(pc->phase().roi);
+  core->instr_count = 10;
+  REQUIRE(pc->advance(1) == status::PHASE_COMPLETE);
+
+  pc->begin_phase();
+  REQUIRE(pc->phase().name == "FastForward");
+  REQUIRE_FALSE(pc->phase().is_warmup); // non-warmup, explicitly unmeasured
+  REQUIRE_FALSE(pc->phase().roi);
+  core->instr_count = 30;
+  REQUIRE(pc->advance(1) == status::PHASE_COMPLETE);
+
+  pc->begin_phase();
+  REQUIRE(pc->phase().name == "Measured");
+  REQUIRE_FALSE(pc->phase().is_warmup); // roi defaults on
+  REQUIRE(pc->phase().roi);
+  core->instr_count = 60;
+  REQUIRE(pc->advance(1) == status::DONE);
 }
 
-TEST_CASE("run_phase forwards the roi flag to module phase hooks")
+TEST_CASE("The roi flag is forwarded to module phase begin hooks")
 {
+  using status = champsim::modules::phase_controller::status;
+
   auto env_builder = champsim::modules::ModuleBuilder("env_roi_run", "MOCK_ENV_915");
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
   auto* mock_env = dynamic_cast<mock_env_915*>(env);
@@ -108,14 +120,23 @@ TEST_CASE("run_phase forwards the roi flag to module phase hooks")
   phase_probe_915 probe;
   mock_env->operables_ = {&probe};
 
+  // Two non-warmup phases, one unmeasured and one measured, owned by the controller.
+  auto phases_json = nlohmann::json::array({
+      nlohmann::json{{"name", "FastForward"}, {"is_warmup", false}, {"roi", false}, {"length", 5}},
+      nlohmann::json{{"name", "Measured"}, {"is_warmup", false}, {"roi", true}, {"length", 5}},
+  });
   auto pc_builder = champsim::modules::ModuleBuilder("pc_roi_run", "PHASE_CONTROLLER")
-    .add_parameter("deadlock_cycles", 1000);
+    .add_parameter("deadlock_cycles", 1000)
+    .add_parameter("phases", phases_json);
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
-  std::vector<std::reference_wrapper<champsim::modules::phase_controller>> controllers{std::ref(*pc)};
 
-  champsim::chrono::clock clock;
-  champsim::run_phase("FastForward", false, false, 5, *env, controllers, clock, {});
-  champsim::run_phase("Measured", false, true, 5, *env, controllers, clock, {});
+  pc->begin_phase(); // FastForward: begin_phase(false, false) on the probe
+  core->instr_count = 5;
+  REQUIRE(pc->advance(1) == status::PHASE_COMPLETE);
+
+  pc->begin_phase(); // Measured: begin_phase(false, true) on the probe
+  core->instr_count = 10;
+  REQUIRE(pc->advance(1) == status::DONE);
 
   REQUIRE(probe.begins.size() == 2);
   // An unmeasured non-warmup phase: neither warmup nor roi

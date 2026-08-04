@@ -829,6 +829,7 @@ struct core_module : public module_base<core_module, environment_module>, public
   std::string producer_finish_message(const std::string& phase_name) const override;
   std::string phase_complete_message(const std::string& phase_name) const override;
   std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const override;
+  std::string progress_unit() const override;
 
   // Heartbeat suppression (--hide-heartbeat): a core stops emitting PROGRESS events.
   virtual void quiet(bool /*enable*/) {}

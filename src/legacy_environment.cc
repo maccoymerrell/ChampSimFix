@@ -22,6 +22,7 @@
 #include "champsim.h"
 #include "chrono.h"
 #include "defaults.hpp"
+#include "phase_controller.h"
 #include "util/bits.h"
 
 using json = nlohmann::json;
@@ -993,6 +994,18 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
       min_freq = 1;
     int64_t ratio = std::max(int64_t{1}, static_cast<int64_t>(max_freq) / min_freq);
     deadlock_cycles_ = static_cast<int>(std::min(ratio * 500000, int64_t{std::numeric_limits<int>::max()}));
+  }
+
+  // Legacy env owns the classic Warmup + Simulation phases, built from -w/-i (via cli_args).
+  {
+    auto cli_args = builder.get_parameter<json>("cli_args", true, json::object());
+    auto pc_builder = ModuleBuilder{"phase_controller", "PHASE_CONTROLLER"};
+    pc_builder.add_parameter("warmup_length", static_cast<uint64_t>(cli_args.value("warmup_instructions", int64_t{0})))
+        .add_parameter("simulation_length", static_cast<uint64_t>(cli_args.value("simulation_instructions", int64_t{0})));
+    builder_params_["phase_controller"] = pc_builder;
+    auto* phase_ctrl = module_base<phase_controller, environment_module>::create_instance(pc_builder, this);
+    modules_by_type_["phase_controller"].push_back(phase_ctrl);
+    module_order_.emplace_back("phase_controller", "phase_controller");
   }
 
   // Populate generic storage; order must match CT: cores -> caches -> PTWs -> DRAM (channels/vmem non-operable).

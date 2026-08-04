@@ -42,31 +42,13 @@ std::chrono::seconds elapsed_time() { return std::chrono::duration_cast<std::chr
 namespace champsim
 {
 
-// Discovery helpers: gather module_phase / module_stat instances across the environment so the orchestrator needn't re-query typed_view per cycle.
-struct module_phase_entry {
-  champsim::module_phase* ptr;
-  std::string interface_name;
-  std::string model;
-  std::string name;
-};
+// Discovery helper: gather module_stat instances across the environment so stat collection needn't re-query typed_view.
 struct module_stat_entry {
   champsim::module_stat* ptr;
   std::string interface_name;
   std::string model;
   std::string name;
 };
-
-static std::vector<module_phase_entry> collect_module_phase(modules::environment_module& env)
-{
-  std::vector<module_phase_entry> out;
-  // Walk every operable and dynamic_cast to module_phase, covering even operables exposed only via view("operable") (e.g. test mocks).
-  for (auto& op_ref : env.typed_view<champsim::operable>("operable")) {
-    if (auto* mp = dynamic_cast<champsim::module_phase*>(&op_ref.get())) {
-      out.push_back({mp, "operable", "", ""});
-    }
-  }
-  return out;
-}
 
 static std::vector<module_stat_entry> collect_module_stat(modules::environment_module& env)
 {
@@ -101,66 +83,6 @@ long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables
   return progress;
 }
 
-// Generic phase loop over any number of controllers: ABORT if any aborts, COMPLETE when all complete; on_consumer_complete fires once per consumer id.
-// Controllers observe producer EOF themselves via producers_eof(). typed_view/module_phase cached once per phase.
-void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t length, modules::environment_module& env,
-               std::vector<std::reference_wrapper<modules::phase_controller>>& controllers, champsim::chrono::clock& global_clock,
-               std::function<void(unsigned)> on_consumer_complete)
-{
-  // typed_view is expensive; cache once per phase and reuse across all cycles.
-  auto operables = env.typed_view<champsim::operable>("operable");
-  auto phase_modules = collect_module_phase(env);
-
-  // Drive phase hooks on opted-in modules.
-  for (auto& e : phase_modules) {
-    e.ptr->begin_phase(is_warmup, roi);
-  }
-
-  const auto time_quantum = std::accumulate(std::cbegin(operables), std::cend(operables), champsim::chrono::clock::duration::max(),
-                                            [](const auto acc, const operable& y) { return std::min(acc, y.clock_period); });
-
-  for (modules::phase_controller& controller : controllers) {
-    controller.begin_phase(phase_name, is_warmup, length);
-  }
-
-  std::set<unsigned> completed_consumers;
-  modules::phase_controller::status phase_status{modules::phase_controller::status::CONTINUE};
-  while (phase_status == modules::phase_controller::status::CONTINUE) {
-    global_clock.tick(time_quantum);
-
-    auto progress = do_cycle(operables, global_clock);
-
-    bool any_abort = false;
-    bool all_complete = true;
-    for (modules::phase_controller& controller : controllers) {
-      auto controller_status = controller.advance(progress);
-      any_abort |= (controller_status == modules::phase_controller::status::ABORT);
-      all_complete &= (controller_status == modules::phase_controller::status::COMPLETE);
-
-      // Consumer completion: surface notifications so packet_consumers can print their per-consumer messages; end-of-phase work happens once at the end.
-      for (unsigned consumer_idx : controller.newly_completed_consumers()) {
-        if (completed_consumers.insert(consumer_idx).second && on_consumer_complete) {
-          on_consumer_complete(consumer_idx);
-        }
-      }
-    }
-
-    if (any_abort) {
-      std::for_each(std::begin(operables), std::end(operables), [](champsim::operable& c) { c.print_deadlock(); });
-      abort();
-    }
-    phase_status = all_complete ? modules::phase_controller::status::COMPLETE : modules::phase_controller::status::CONTINUE;
-  }
-
-  // End-of-phase hooks for module_phase participants.
-  for (auto& e : phase_modules) {
-    e.ptr->end_phase();
-  }
-
-  for (modules::phase_controller& controller : controllers) {
-    controller.end_phase();
-  }
-}
 
 // Collect phase statistics generically: publish every module_stat instance's lines / JSON under [interface][model][name].
 static phase_stats collect_phase_stats(const phase_info& phase, modules::environment_module& env)
@@ -270,7 +192,7 @@ identity_registry& identities()
 }
 
 // simulation entry point
-std::vector<phase_stats> main(modules::environment_module& env, std::vector<phase_info>& phases)
+std::vector<phase_stats> main(modules::environment_module& env)
 {
   assign_identities(env);
 
@@ -278,46 +200,86 @@ std::vector<phase_stats> main(modules::environment_module& env, std::vector<phas
     op.initialize();
   }
 
-  // Gather the phase controllers: use all the environment provides, else create one default.
   auto controllers = env.typed_view<modules::phase_controller>("phase_controller");
   if (controllers.empty()) {
-    auto pc_builder = modules::ModuleBuilder("phase_controller", "PHASE_CONTROLLER").add_parameter("deadlock_cycles", env.get_deadlock_cycles());
-    controllers.push_back(*modules::phase_controller::create_instance(pc_builder, &env));
+    fmt::print("ERROR: no phase controller declared\n");
+    return {};
   }
+  auto operables = env.typed_view<champsim::operable>("operable");
+  const auto time_quantum = std::accumulate(std::cbegin(operables), std::cend(operables), champsim::chrono::clock::duration::max(),
+                                            [](const auto acc, const operable& y) { return std::min(acc, y.clock_period); });
+  auto consumers = env.typed_view<champsim::modules::packet_consumer>("packet_consumer");
 
   champsim::chrono::clock global_clock;
   std::vector<phase_stats> results;
-  for (const auto& phase : phases) {
-    const auto& [phase_name, is_warmup, roi, length] = phase;
-    // C++17 can't capture a structured binding in a lambda (clang rejects it); copy the name into a local for on_complete.
-    const auto phase_name_captured = phase_name;
 
-    handle_event<Event::BEGIN_PHASE>(is_warmup);
+  // Each controller owns its own phases and informs the operables of them. main ticks the
+  // operables each cycle, collects a phase's stats when a controller ends it (before the next
+  // begin_phase resets the modules' ROI stats), ends the run once every controller is DONE, and
+  // aborts if any controller aborts.
+  std::vector<bool> finished(controllers.size(), false);
+  std::vector<std::set<unsigned>> completed(controllers.size());
+  std::size_t finished_count = 0;
 
-    // Cache the packet_consumer view once per phase; the completion hook would otherwise call typed_view every cycle.
-    auto consumers = env.typed_view<champsim::modules::packet_consumer>("packet_consumer");
+  for (modules::phase_controller& controller : controllers) {
+    controller.begin_phase();
+    handle_event<Event::BEGIN_PHASE>(controller.phase().is_warmup);
+  }
 
-    auto on_complete = [&](unsigned consumer_idx) {
-      for (auto& sc : consumers) {
-        if (sc.get().consumer_id() == static_cast<int>(consumer_idx)) {
-          auto msg = sc.get().producer_finish_message(phase_name_captured);
+  while (finished_count < controllers.size()) {
+    global_clock.tick(time_quantum);
+    auto progress = do_cycle(operables, global_clock);
+
+    bool any_abort = false;
+    std::size_t idx = 0;
+    for (modules::phase_controller& controller : controllers) {
+      if (finished[idx]) {
+        ++idx;
+        continue;
+      }
+      auto phase_status = controller.advance(progress);
+
+      // Producer-finish messages, once per consumer id.
+      for (unsigned consumer_idx : controller.newly_completed_consumers()) {
+        if (completed[idx].insert(consumer_idx).second) {
+          for (auto& sc : consumers) {
+            if (sc.get().consumer_id() == static_cast<int>(consumer_idx)) {
+              auto msg = sc.get().producer_finish_message(controller.phase().name);
+              if (!msg.empty())
+                fmt::print("{} (Simulation time: {:%H hr %M min %S sec})\n", msg, elapsed_time());
+            }
+          }
+        }
+      }
+
+      if (phase_status == modules::phase_controller::status::ABORT) {
+        any_abort = true;
+      } else if (phase_status != modules::phase_controller::status::CONTINUE) {
+        // Phase ended: completion summaries + stats, before the next begin_phase resets ROI stats.
+        for (auto& sc : consumers) {
+          auto msg = sc.get().phase_complete_message(controller.phase().name);
           if (!msg.empty())
             fmt::print("{} (Simulation time: {:%H hr %M min %S sec})\n", msg, elapsed_time());
         }
+        if (controller.phase().roi) {
+          results.push_back(collect_phase_stats(controller.phase(), env));
+        }
+
+        if (phase_status == modules::phase_controller::status::DONE) {
+          finished[idx] = true;
+          ++finished_count;
+        } else { // PHASE_COMPLETE: start this controller's next phase
+          controller.begin_phase();
+          handle_event<Event::BEGIN_PHASE>(controller.phase().is_warmup);
+          completed[idx].clear();
+        }
       }
-    };
-
-    run_phase(phase_name, is_warmup, roi, length, env, controllers, global_clock, on_complete);
-
-    // Print phase completion summary via packet_consumer hooks
-    for (auto& sc : consumers) {
-      auto msg = sc.get().phase_complete_message(phase_name);
-      if (!msg.empty())
-        fmt::print("{} (Simulation time: {:%H hr %M min %S sec})\n", msg, elapsed_time());
+      ++idx;
     }
 
-    if (roi) {
-      results.push_back(collect_phase_stats(phase, env));
+    if (any_abort) {
+      std::for_each(std::begin(operables), std::end(operables), [](champsim::operable& c) { c.print_deadlock(); });
+      abort();
     }
   }
 

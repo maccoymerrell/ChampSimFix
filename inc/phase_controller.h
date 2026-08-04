@@ -17,8 +17,6 @@
 #ifndef PHASE_CONTROLLER_H
 #define PHASE_CONTROLLER_H
 
-#include <cstdint>
-#include <string>
 #include <vector>
 
 #include "modules.h"
@@ -27,40 +25,36 @@
 namespace champsim::modules
 {
 /**
- * Phase controller interface — manages phase completion and health monitoring.
+ * Phase controller interface — owns and sequences the run's phases.
  *
- * The phase controller owns the per-phase loop conditions: it observes
- * cycle progress, drives deadlock detection, aggregates the health that
- * each consumer reports about itself, and signals when each consumer
- * has completed its share of the phase. Producer EOF is observed by polling
- * packet_consumer::producers_eof() directly — there is no external EOF
- * notification. If the controller exposes a non-empty phase list via
- * get_phases(), the simulator runs that list instead of the default
- * warmup+sim pair.
+ * The controller holds its own phase list (never exposed). begin_phase() steps it to the next
+ * phase and informs the operables of it (module_phase begin_phase); advance() consumes each
+ * cycle's progress and, when the current phase completes, ends it on the operables and reports
+ * PHASE_COMPLETE, or DONE after the last phase (ABORT on deadlock/stall). The orchestrator only
+ * ticks the operables, collects stats on PHASE_COMPLETE/DONE, and ends the run on DONE.
  */
 struct phase_controller : public module_base<phase_controller, environment_module> {
   virtual ~phase_controller() = default;
 
-  enum class status { CONTINUE, COMPLETE, ABORT };
+  enum class status { CONTINUE, PHASE_COMPLETE, ABORT, DONE };
 
-  // Called at the start of a phase
-  virtual void begin_phase(const std::string& name, bool is_warmup, uint64_t length) = 0;
+  // Step to the next phase and inform the operables of it (module_phase begin_phase). Called
+  // by the orchestrator to start the run and again after each completed phase's stats.
+  virtual void begin_phase() = 0;
 
-  // Called each cycle after all operables have operated.
-  // progress: number of operations that made progress this cycle.
-  // Returns CONTINUE, COMPLETE, or ABORT.
+  // Consume the cycle's summed progress. On completing the current phase, end it on the
+  // operables (module_phase end_phase) and return PHASE_COMPLETE, or DONE after the last phase;
+  // ABORT on deadlock/stall; otherwise CONTINUE.
   virtual status advance(long progress) = 0;
 
-  // Get ids of consumers that newly completed since last advance()
+  // The current phase; its name/roi drive the orchestrator's stat collection.
+  virtual const champsim::phase_info& phase() const = 0;
+
+  // Ids of consumers that newly completed since the last advance().
   virtual std::vector<unsigned> newly_completed_consumers() const = 0;
 
-  // Called at end of phase for cleanup
-  virtual void end_phase() = 0;
-
-  // Returns the list of phases this controller wants to run.
-  // If empty, the caller (main.cc / champsim::main) defines the phases.
-  // Implement this to take full ownership of the run structure from config.
-  virtual std::vector<champsim::phase_info> get_phases() const { return {}; }
+  // Print this controller's phase plan at startup (labelled by the unit its consumers report).
+  virtual void print_phase_plan() const {}
 };
 } // namespace champsim::modules
 
