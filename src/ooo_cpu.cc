@@ -32,13 +32,13 @@
 #include "cache.h"
 #include "champsim.h"
 #include "deadlock.h"
-#include "instruction.h"
-#include "json_stat_builder.h"
 #include "event_listeners.h"
-#include "util/stat_format.h"
+#include "instruction.h"
+#include "instruction_producer.h"
+#include "json_stat_builder.h"
 #include "util/algorithm.h"
 #include "util/span.h"
-#include "instruction_producer.h"
+#include "util/stat_format.h"
 
 long O3_CPU::operate()
 {

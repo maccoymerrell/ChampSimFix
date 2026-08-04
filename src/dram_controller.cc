@@ -27,9 +27,9 @@
 #include "deadlock.h"
 #include "instruction.h"
 #include "json_stat_builder.h"
-#include "util/stat_format.h"
 #include "util/bits.h" // for lg2, bitmask
 #include "util/span.h"
+#include "util/stat_format.h"
 #include "util/units.h"
 
 MEMORY_CONTROLLER::MEMORY_CONTROLLER(champsim::modules::ModuleBuilder builder)

@@ -25,9 +25,9 @@
 #include <fmt/chrono.h>
 #include <fmt/core.h>
 
+#include "event_listeners.h"
 #include "identity_registry.h"
 #include "json_stat_builder.h"
-#include "event_listeners.h"
 #include "module_phase.h"
 #include "module_stat.h"
 #include "modules.h"

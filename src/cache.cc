@@ -32,10 +32,10 @@
 #include "deadlock.h"
 #include "instruction.h"
 #include "json_stat_builder.h"
-#include "util/stat_format.h"
 #include "util/algorithm.h"
 #include "util/bits.h"
 #include "util/span.h"
+#include "util/stat_format.h"
 
 CACHE::CACHE(CACHE&& /*other*/) : champsim::modules::cache_module(champsim::chrono::picoseconds{})
 {

@@ -19,7 +19,6 @@
 
 #include <cstdint>
 #include <string>
-
 #include <fmt/core.h>
 
 namespace champsim::modules

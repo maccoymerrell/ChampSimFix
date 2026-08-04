@@ -30,8 +30,8 @@
 #include "champsim.h"
 #include "defaults.hpp"
 #include "environment.h"
-#include "legacy_environment.h"
 #include "event_listeners.h"
+#include "legacy_environment.h"
 #include "modules.h"
 #include "ooo_cpu.h" // for O3_CPU
 #include "phase_controller.h"
