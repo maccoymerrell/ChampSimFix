@@ -28,12 +28,12 @@ namespace champsim
 {
 
 // A phase of the run: a name, a warmup flag, an ROI flag, and a length
-// denominated in each source consumer's own progress unit (instructions for
+// denominated in each consumer's own progress unit (instructions for
 // cores, packets for a network consumer, ...). roi selects whether the phase
 // contributes to region-of-interest statistics — typically !is_warmup, but
 // independent so a run can contain unmeasured non-warmup phases (e.g. a
 // fast-forward between warmup and the measured region). Workload identity
-// (e.g. trace paths) is not part of the phase — sources describe themselves
+// (e.g. trace paths) is not part of the phase — producers describe themselves
 // via packet_producer::describe().
 struct phase_info {
   std::string name;

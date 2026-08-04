@@ -33,7 +33,7 @@ namespace
 
 // Generic, packet-agnostic phase controller owning completion/deadlock/health
 // mechanics; per-consumer policy (e.g. livelock rate) lives in check_health.
-// Params: deadlock_cycles, health_period (alias livelock_period), eof_policy
+// Params: deadlock_cycles, health_period, eof_policy
 // (complete_all|complete_consumer), phases[] or warmup_length/simulation_length.
 class default_phase_controller : public champsim::modules::phase_controller
 {
@@ -63,10 +63,10 @@ class default_phase_controller : public champsim::modules::phase_controller
   uint64_t health_timer_ = 0;
   bool health_abort_ = false;
 
-  // Source ids this controller governs; empty = all.
+  // Consumer ids this controller governs; empty = all.
   std::set<int> governed_;
 
-  // Source tracking: keyed by producer_id from packet_consumer
+  // Consumer tracking: keyed by consumer_id from packet_consumer
   std::map<int, bool> consumer_complete_;
   std::map<int, uint64_t> progress_baseline_;
   std::vector<unsigned> newly_completed_;
@@ -78,7 +78,7 @@ public:
   {
     env_ = builder.get_parent<champsim::modules::environment_module>();
     deadlock_cycles_ = builder.get_parameter<int>("deadlock_cycles", true, 500);
-    health_period_ = builder.get_parameter<uint64_t>("health_period", true, builder.get_parameter<uint64_t>("livelock_period", true, 10000000ULL));
+    health_period_ = builder.get_parameter<uint64_t>("health_period", true, 10000000ULL);
     complete_all_on_eof_ = builder.get_parameter<std::string>("eof_policy", true, std::string{"complete_all"}) != "complete_consumer";
 
     // Build phases from explicit JSON array, else warmup/simulation scalars.
@@ -101,7 +101,7 @@ public:
     }
     // If neither is set, phases_ stays empty — caller owns the phase list.
 
-    // Optional source-id subset: controllers can partition a run's sources,
+    // Optional consumer-id subset: controllers can partition a run's consumers,
     // each applying its own policy. Default: govern all.
     if (builder.has_parameter("consumers")) {
       for (auto& s : builder.get_parameter<nlohmann::json>("consumers")) {
@@ -162,7 +162,7 @@ public:
         }
         auto health = sc.get().check_health(health_period_);
         if (health == consumer_health::stalled) {
-          fmt::print("{} source {} reported stalled\n", phase_name_, sc.get().consumer_id());
+          fmt::print("{} consumer {} reported stalled\n", phase_name_, sc.get().consumer_id());
           health_abort_ = true;
         }
       }
@@ -185,7 +185,7 @@ public:
 
       if (sc.get().producers_eof()) {
         if (complete_all_on_eof_) {
-          // Classic behavior: the first exhausted source ends the phase for everyone.
+          // Classic behavior: the first exhausted producer ends the phase for everyone.
           for (auto& [other_idx, complete] : consumer_complete_) {
             if (!complete) {
               complete = true;
@@ -220,10 +220,7 @@ public:
   std::vector<champsim::phase_info> get_phases() const override { return phases_; }
 };
 
-// Register interface + model. INSTRUCTION_PHASE_CONTROLLER stays as a
-// back-compat alias; the controller itself is packet-agnostic.
 static champsim::modules::phase_controller::register_interface phase_controller_iface_reg("phase_controller");
 static champsim::modules::phase_controller::register_module<default_phase_controller> default_pc_reg("PHASE_CONTROLLER");
-static champsim::modules::phase_controller::register_module<default_phase_controller> instruction_pc_reg("INSTRUCTION_PHASE_CONTROLLER");
 
 } // anonymous namespace

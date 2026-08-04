@@ -168,7 +168,7 @@ static phase_stats collect_phase_stats(const phase_info& phase, modules::environ
   phase_stats stats;
   stats.name = phase.name;
 
-  // Workload identity comes from the sources themselves, in creation order (legacy: one trace per core, in core order).
+  // Workload identity comes from the producers themselves, in creation order (legacy: one trace per core, in core order).
   for (modules::packet_producer& src : env.typed_view<modules::packet_producer>("packet_producer")) {
     auto desc = src.describe();
     if (!desc.empty()) {
@@ -201,7 +201,7 @@ static phase_stats collect_phase_stats(const phase_info& phase, modules::environ
   return stats;
 }
 
-// Assign framework-internal identities: consumers enumerate densely in config order; each source gets its own id unless sources share a
+// Assign framework-internal identities: consumers enumerate densely in config order; each producer gets its own id unless producers share a
 // "producer_group" label. Configs never contain the numbers; only origins carry them.
 void assign_identities(modules::environment_module& env)
 {
@@ -229,7 +229,7 @@ void assign_identities(modules::environment_module& env)
   std::map<std::string, uint32_t> producer_group_labels;
   for (auto& src : env.typed_view<modules::packet_producer>("packet_producer")) {
     if (src.get().producer_id_pinned()) {
-      continue; // mirrors another source's id; owns no slot
+      continue; // mirrors another producer's id; owns no slot
     }
     const auto& label = src.get().producer_group();
     if (label.empty()) {
@@ -254,11 +254,11 @@ void assign_identities(modules::environment_module& env)
     std::exit(-1);
   }
 
-  // Warm each source's page-table root in source-id order, so physical page assignment is a pure function of config rather than runtime walk timing
+  // Warm each producer's page-table root in producer-id order, so physical page assignment is a pure function of config rather than runtime walk timing
   // (matches historical construction-time order).
   for (auto& vm : env.typed_view<modules::vmem_module>("vmem")) {
-    for (uint32_t source = 0; source < next_producer_group; ++source) {
-      (void)vm.get().get_pte_pa(champsim::origin{champsim::origin::invalid_id, source}, champsim::page_number{}, vm.get().get_pt_levels());
+    for (uint32_t producer = 0; producer < next_producer_group; ++producer) {
+      (void)vm.get().get_pte_pa(champsim::origin{champsim::origin::invalid_id, producer}, champsim::page_number{}, vm.get().get_pt_levels());
     }
   }
 }

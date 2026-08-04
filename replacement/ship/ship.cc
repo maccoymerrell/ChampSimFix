@@ -8,7 +8,7 @@
 champsim::modules::replacement::register_module<ship> ship_register("ship");
 
 // initialize replacement state. num_consumers is the number of consumers whose
-// sources in the system — published to the globals builder by the env
+// producers in the system — published to the globals builder by the env
 // before module construction. Falls back to 1 for tests that build a
 // CACHE / ship pair directly without an env.
 ship::ship(champsim::modules::ModuleBuilder builder)

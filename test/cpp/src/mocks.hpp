@@ -21,7 +21,7 @@
 // Returns the standard default_core builder with a uniquely-named
 // NULL_INSTRUCTION_PRODUCER submodule attached, satisfying the core's required
 // instruction_producer. Pass a per-test mock name so trace messages identify which
-// test scenario constructed the source.
+// test scenario constructed the producer.
 inline champsim::modules::ModuleBuilder test_core_defaults(const std::string& ws_name)
 {
   auto b = champsim::defaults::default_core();

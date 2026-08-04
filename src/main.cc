@@ -130,8 +130,8 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   // Parse config for system parameters
   std::string env_model = config_json.value("environment", std::string("LEGACY_ENVIRONMENT"));
   bool is_legacy_env = (env_model == "LEGACY_ENVIRONMENT");
-  // CLI expects one trace per workload SOURCE. The legacy env spawns one source per core,
-  // so its source count == num_cores; explicit envs declare sources in the config and accept any count.
+  // CLI expects one trace per packet producer. The legacy env spawns one producer per core,
+  // so its producer count == num_cores; explicit envs declare producers in the config and accept any count.
   std::size_t legacy_num_producers = config_json.value("num_cores", 1u);
 
   // "cycle_skip" (default true) lets idle operables skip cycles; false forces operate() each cycle (A/B verification switch).
@@ -280,7 +280,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     else
       printed_sim = p.length;
   }
-  fmt::print("\n*** ChampSim Multicore Out-of-Order Simulator ***\nWarmup Instructions: {}\nSimulation Instructions: {}\nNumber of CPUs: {}\nTrace sources: "
+  fmt::print("\n*** ChampSim Multicore Out-of-Order Simulator ***\nWarmup Instructions: {}\nSimulation Instructions: {}\nNumber of CPUs: {}\nTrace producers: "
              "{}\nPage size: {}\n\n",
              printed_warmup, printed_sim, gen_environment->get_num("core"), gen_environment->get_num("packet_producer"), gen_environment->get_page_size());
 

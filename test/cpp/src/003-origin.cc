@@ -6,7 +6,7 @@ TEST_CASE("An origin exposes the same identities under canonical and domain name
 {
   champsim::origin uut{3, 7};
 
-  // The aliases are the same identity: cpu() IS the consumer, asid() IS the source
+  // The aliases are the same identity: cpu() IS the consumer, asid() IS the producer
   REQUIRE(uut.consumer() == 3);
   REQUIRE(uut.cpu() == uut.consumer());
   REQUIRE(uut.producer() == 7);
@@ -26,11 +26,11 @@ TEST_CASE("Origin derivation helpers replace one coordinate and keep the other")
 {
   champsim::origin base{1, 2};
 
-  auto moved = base.with_consumer(9); // e.g. a source migrating between consumers
+  auto moved = base.with_consumer(9); // e.g. a producer migrating between consumers
   REQUIRE(moved.consumer() == 9);
   REQUIRE(moved.producer() == 2);
 
-  auto respaced = base.with_producer(5); // e.g. a trace record overriding the source id
+  auto respaced = base.with_producer(5); // e.g. a trace record overriding the producer id
   REQUIRE(respaced.consumer() == 1);
   REQUIRE(respaced.producer() == 5);
 }

@@ -87,7 +87,7 @@ Each ``O3_CPU`` instance has three submodules attached through its ``"children"`
 * A **branch predictor** (``"module": "branch_predictor"``), e.g. ``hashed_perceptron``,
   ``bimodal``, ``gshare``, ``perceptron``.
 * A **BTB** (``"module": "btb"``), e.g. ``basic_btb``.
-* An **instruction source** (interface ``"instruction_producer"``), e.g. ``INSTRUCTION_PRODUCER``,
+* An **instruction producer** (interface ``"instruction_producer"``), e.g. ``INSTRUCTION_PRODUCER``,
   which supplies the core's instruction stream. A core requires exactly one.
 
 --------------------------------------

@@ -16,7 +16,7 @@ struct mock_core : public champsim::modules::core_module {
   uint64_t instr_count = 0;
   uint64_t cycle_count = 0;
   uint8_t cpu_num_ = 0;
-  bool producers_eof_ = false; // a live core with attached sources is not at EOF
+  bool producers_eof_ = false; // a live core with attached producers is not at EOF
 
   explicit mock_core(champsim::modules::ModuleBuilder builder)
     : core_module(champsim::chrono::picoseconds{250}) {
@@ -90,7 +90,7 @@ TEST_CASE("Phase controller completes when all cores reach instruction count")
 
   mock_env->cores_ = {mc0, mc1};
 
-  auto pc_builder = champsim::modules::ModuleBuilder("pc", "INSTRUCTION_PHASE_CONTROLLER")
+  auto pc_builder = champsim::modules::ModuleBuilder("pc", "PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 1000);
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
@@ -138,7 +138,7 @@ TEST_CASE("Phase controller detects deadlock on stalled cycles")
   mock_env->cores_ = {mc0};
 
   // Use a small deadlock cycle limit for testing
-  auto pc_builder = champsim::modules::ModuleBuilder("pc_dl", "INSTRUCTION_PHASE_CONTROLLER")
+  auto pc_builder = champsim::modules::ModuleBuilder("pc_dl", "PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 5);
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
@@ -163,7 +163,7 @@ TEST_CASE("Phase controller detects deadlock on stalled cycles")
   pc->end_phase();
 }
 
-TEST_CASE("Phase controller completes all sources when one source hits EOF (complete_all)")
+TEST_CASE("Phase controller completes all consumers when one producer hits EOF (complete_all)")
 {
   auto env_builder = champsim::modules::ModuleBuilder("test_env_eof", "MOCK_ENV_910");
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
@@ -181,7 +181,7 @@ TEST_CASE("Phase controller completes all sources when one source hits EOF (comp
 
   mock_env->cores_ = {mc0, mc1};
 
-  auto pc_builder = champsim::modules::ModuleBuilder("pc_eof", "INSTRUCTION_PHASE_CONTROLLER")
+  auto pc_builder = champsim::modules::ModuleBuilder("pc_eof", "PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 1000);
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
@@ -190,7 +190,7 @@ TEST_CASE("Phase controller completes all sources when one source hits EOF (comp
   auto s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
 
-  // Core 0's sources reach EOF: default policy ends the phase for everyone
+  // Core 0's producers reach EOF: default policy ends the phase for everyone
   mc0->producers_eof_ = true;
   s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::COMPLETE);
@@ -218,14 +218,14 @@ TEST_CASE("Phase controller completes only the exhausted consumer under complete
 
   mock_env->cores_ = {mc0, mc1};
 
-  auto pc_builder = champsim::modules::ModuleBuilder("pc_eofs", "INSTRUCTION_PHASE_CONTROLLER")
+  auto pc_builder = champsim::modules::ModuleBuilder("pc_eofs", "PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 1000)
     .add_parameter("eof_policy", std::string{"complete_consumer"});
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
-  pc->begin_phase("EOF Source Test", false, 100);
+  pc->begin_phase("EOF Producer Test", false, 100);
 
-  // Core 0's sources reach EOF: only source 0 completes
+  // Core 0's producers reach EOF: only consumer 0 completes
   mc0->producers_eof_ = true;
   auto s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
@@ -246,7 +246,7 @@ TEST_CASE("Phase controller completes only the exhausted consumer under complete
 
 TEST_CASE("Phase controller defers deadlock while a consumer reports pending work")
 {
-  // A consumer that reports scheduled future work (like a paced source's gap)
+  // A consumer that reports scheduled future work (like a paced producer's gap)
   struct pending_core : mock_core {
     using mock_core::mock_core;
     bool pending_ = false;
@@ -300,7 +300,7 @@ TEST_CASE("Phase controller resets state between phases")
   auto* mc0 = dynamic_cast<mock_core*>(core0);
   mock_env->cores_ = {mc0};
 
-  auto pc_builder = champsim::modules::ModuleBuilder("pc_reset", "INSTRUCTION_PHASE_CONTROLLER")
+  auto pc_builder = champsim::modules::ModuleBuilder("pc_reset", "PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 1000);
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 

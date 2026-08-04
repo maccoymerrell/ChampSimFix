@@ -5,7 +5,7 @@
 #include "modules.h"
 
 // Uses MOCK_CORE_913 (a registered core model that accepts optional
-// instruction_producer children) and NULL_INSTRUCTION_PRODUCER (test-only source).
+// instruction_producer children) and NULL_INSTRUCTION_PRODUCER (test-only producer).
 
 TEST_CASE("Nested submodule instances enroll with the explicit environment's views")
 {
@@ -32,13 +32,13 @@ TEST_CASE("Nested submodule instances enroll with the explicit environment's vie
     REQUIRE(env->get_num("instruction_producer") == 1);
   }
 
-  SECTION("Aggregate views and counts agree (the 'Trace sources: 0' bug)") {
+  SECTION("Aggregate views and counts agree (the 'Trace producers: 0' bug)") {
     REQUIRE(env->get_num("packet_consumer") == env->view("packet_consumer").size());
     REQUIRE(env->get_num("packet_consumer") == 1);
     REQUIRE(env->get_num("operable") == env->view("operable").size());
   }
 
-  SECTION("The core is discovered as both operable and source consumer") {
+  SECTION("The core is discovered as both operable and consumer") {
     REQUIRE(env->typed_view<champsim::operable>("operable").size() == 1);
     REQUIRE(env->typed_view<champsim::modules::packet_consumer>("packet_consumer").size() == 1);
   }

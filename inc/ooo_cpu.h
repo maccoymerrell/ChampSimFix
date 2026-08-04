@@ -205,7 +205,7 @@ public:
   std::vector<champsim::modules::btb*> btb_module_pimpl;
   std::vector<champsim::modules::instruction_producer*> instruction_producer_pimpl;
 
-  void fill_from_sources();
+  void fill_from_producers();
   bool producers_eof() const final;
 
   // NOLINTBEGIN(readability-make-member-function-const): legacy modules use non-const hooks

@@ -23,7 +23,7 @@
 namespace champsim::modules
 {
 /**
- * Instruction-stream interface — the packet source a core attaches.
+ * Instruction-stream interface — the packet producer a core attaches.
  *
  * Extends packet_producer with the instruction packet type and the
  * execution-driven feedback hooks. This is the registered interface

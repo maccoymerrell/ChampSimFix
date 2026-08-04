@@ -24,7 +24,7 @@
 
 namespace champsim::modules
 {
-// Mixin for any module that consumes packet sources.
+// Mixin for any module that consumes packet producers.
 // Inherit from this to attach packet_producer submodules.
 struct packet_consumer {
   virtual ~packet_consumer() = default;
@@ -35,15 +35,15 @@ struct packet_consumer {
   // not in the phase controller, which only aggregates.
   enum class consumer_health { healthy, warning, critical, stalled };
 
-  // True when all attached packet sources are exhausted.
+  // True when all attached packet producers are exhausted.
   virtual bool producers_eof() const { return true; }
 
   // Consumer id: this consumer's hardware-context identity. Assigned by
   // the framework at startup, by enumeration in configuration order —
   // never written in a configuration. Ids are unique and dense in
   // [0, num_consumers); they key per-consumer resources (replacement
-  // tables, stats, phase tracking) and default the stream of attached
-  // sources. See origin.h. Standalone instances (unit tests) keep the
+  // tables, stats, phase tracking) and default the producer id of attached
+  // producers. See origin.h. Standalone instances (unit tests) keep the
   // default of 0, matching the historical single-core default.
   int consumer_id() const { return consumer_id_; }
   // The instance name this consumer was configured under (set by the
@@ -86,7 +86,7 @@ public:
   virtual void reset_health() {}
 
   // True when this consumer knows more work is scheduled to arrive later
-  // (e.g. a paced source waiting out a scheduled gap). While any consumer
+  // (e.g. a paced producer waiting out a scheduled gap). While any consumer
   // reports pending work, zero global progress is not a deadlock.
   virtual bool has_pending_work() const { return false; }
 
@@ -95,6 +95,16 @@ public:
 
   // Called at the end of a phase for summary output. Return empty to suppress.
   virtual std::string phase_complete_message(const std::string& /*phase_name*/) const { return {}; }
+
+  // Format one periodic heartbeat line. The heartbeat listener owns the interval
+  // bookkeeping and supplies the numbers; the consumer owns the wording because only it
+  // knows its own progress unit (a core reports instructions; other consumers their own).
+  // Return empty to suppress.
+  virtual std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const
+  {
+    return fmt::format("Heartbeat consumer {} progress: {} cycles: {} rate: {:.4} cumulative rate: {:.4}", consumer_id(), total_progress, total_cycles,
+                       interval_rate, cumulative_rate);
+  }
 };
 } // namespace champsim::modules
 

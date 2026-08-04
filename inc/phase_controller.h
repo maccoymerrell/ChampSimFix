@@ -31,8 +31,8 @@ namespace champsim::modules
  *
  * The phase controller owns the per-phase loop conditions: it observes
  * cycle progress, drives deadlock detection, aggregates the health that
- * each source consumer reports about itself, and signals when each source
- * has completed its share of the phase. Source EOF is observed by polling
+ * each consumer reports about itself, and signals when each consumer
+ * has completed its share of the phase. Producer EOF is observed by polling
  * packet_consumer::producers_eof() directly — there is no external EOF
  * notification. If the controller exposes a non-empty phase list via
  * get_phases(), the simulator runs that list instead of the default
@@ -51,7 +51,7 @@ struct phase_controller : public module_base<phase_controller, environment_modul
   // Returns CONTINUE, COMPLETE, or ABORT.
   virtual status advance(long progress) = 0;
 
-  // Get ids of sources that newly completed since last advance()
+  // Get ids of consumers that newly completed since last advance()
   virtual std::vector<unsigned> newly_completed_consumers() const = 0;
 
   // Called at end of phase for cleanup

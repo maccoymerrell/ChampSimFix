@@ -154,7 +154,7 @@
       "children": [
         {"name": "cpu0_bp", "module": "branch_predictor", "model": "bimodal"},
         {"name": "cpu0_btb", "module": "btb", "model": "basic_btb"},
-        {"name": "cpu0_trace_source", "module": "instruction_producer", "model": "INSTRUCTION_PRODUCER", "trace_file": "$trace0"}
+        {"name": "cpu0_trace_producer", "module": "instruction_producer", "model": "INSTRUCTION_PRODUCER", "trace_file": "$trace0"}
       ]
     }
   ]

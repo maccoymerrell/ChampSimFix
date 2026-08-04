@@ -27,8 +27,8 @@ namespace champsim
 {
 /**
  * Name <-> id map for framework-assigned identities (populated by assign_identities()),
- * used to translate ids to configured instance names. Consumer id -> one name; source id
- * -> one or more source names (sources sharing a "producer_group" label share one id).
+ * used to translate ids to configured instance names. Consumer id -> one name; producer id
+ * -> one or more producer names (producers sharing a "producer_group" label share one id).
  */
 class identity_registry
 {
@@ -44,10 +44,10 @@ public:
     consumer_names_[id] = std::move(name);
   }
 
-  void register_producer(uint32_t source, std::string name)
+  void register_producer(uint32_t producer, std::string name)
   {
-    producer_ids_[name] = source;
-    packet_producers_[source].push_back(std::move(name));
+    producer_ids_[name] = producer;
+    packet_producers_[producer].push_back(std::move(name));
   }
 
   /** The configured name of the consumer holding this id. */
@@ -68,16 +68,16 @@ public:
     return std::nullopt;
   }
 
-  /** The configured names of every source stamping this source id. */
-  std::vector<std::string> packet_producers(uint32_t source) const
+  /** The configured names of every producer stamping this producer id. */
+  std::vector<std::string> packet_producers(uint32_t producer) const
   {
-    if (auto it = packet_producers_.find(source); it != std::end(packet_producers_)) {
+    if (auto it = packet_producers_.find(producer); it != std::end(packet_producers_)) {
       return it->second;
     }
     return {};
   }
 
-  /** The source id assigned to the source configured under this name. */
+  /** The producer id assigned to the producer configured under this name. */
   std::optional<uint32_t> producer_id(const std::string& name) const
   {
     if (auto it = producer_ids_.find(name); it != std::end(producer_ids_)) {

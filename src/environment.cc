@@ -184,7 +184,7 @@ champsim::environment::environment(ModuleBuilder builder)
 
   auto& children = config["children"];
 
-  // Pre-construction: count consumers/sources to publish as globals before any module
+  // Pre-construction: count consumers/producers to publish as globals before any module
   // builds — per-consumer tables (ship/drrip) size off num_consumers, so it must be exact
   // (same space assign_identities enumerates). Consumer-ness is a per-(module,model) trait;
   // configs may override via a root "num_consumers" key.
@@ -195,9 +195,9 @@ champsim::environment::environment(ModuleBuilder builder)
   std::function<void(const json&)> count_identities = [&](const json& node) {
     const auto module_key = node.value("module", "");
     const auto model_key = node.value("model", "");
-    if (modules::interface_registry::model_is_source(module_key, model_key)) {
+    if (modules::interface_registry::model_is_producer(module_key, model_key)) {
       ++num_producers;
-      // Labeled sources share one id per distinct "producer_group" label; unlabeled get their own.
+      // Labeled producers share one id per distinct "producer_group" label; unlabeled get their own.
       const auto label = node.value("producer_group", "");
       if (label.empty() || producer_group_labels_seen.insert(label).second) {
         ++num_producer_groups;

@@ -443,10 +443,10 @@ public:
     std::function<instance_id(const std::any&)> identify;
     // True when the named model's implementation class is a packet_consumer
     // / packet_producer. Recorded at register_module time (statically, via
-    // is_base_of), so environments can count consumers and sources from a
+    // is_base_of), so environments can count consumers and producers from a
     // config before constructing any module.
     std::function<bool(const std::string&)> model_is_consumer;
-    std::function<bool(const std::string&)> model_is_source;
+    std::function<bool(const std::string&)> model_is_producer;
     // Per-instance dynamic_cast to the packet_producer mixin (matching
     // to_packet_consumer): any model of any interface may hold a stream.
     std::function<packet_producer*(const std::any&)> to_packet_producer;
@@ -487,9 +487,9 @@ public:
     registry()[name] = std::move(info);
   }
 
-  static bool model_is_source(const std::string& interface_name, const std::string& model_name)
+  static bool model_is_producer(const std::string& interface_name, const std::string& model_name)
   {
-    return model_trait(interface_name, model_name, &interface_info::model_is_source);
+    return model_trait(interface_name, model_name, &interface_info::model_is_producer);
   }
   static bool model_is_consumer(const std::string& interface_name, const std::string& model_name)
   {
@@ -613,7 +613,7 @@ private:
   struct model_record {
     std::function<std::unique_ptr<B>(ModuleBuilder builder)> create;
     bool is_consumer = false;
-    bool is_source = false;
+    bool is_producer = false;
   };
 
   static void add_module(std::string name, model_record record)
@@ -778,9 +778,9 @@ public:
         auto it = module_map().find(model_name);
         return it != module_map().end() && std::any_cast<const model_record&>(it->second).is_consumer;
       };
-      info.model_is_source = [](const std::string& model_name) -> bool {
+      info.model_is_producer = [](const std::string& model_name) -> bool {
         auto it = module_map().find(model_name);
-        return it != module_map().end() && std::any_cast<const model_record&>(it->second).is_source;
+        return it != module_map().end() && std::any_cast<const model_record&>(it->second).is_producer;
       };
       interface_registry::register_interface(interface_name, std::move(info));
     }
@@ -820,8 +820,9 @@ struct core_module : public module_base<core_module, environment_module>, public
   uint64_t sim_progress() const override;
   std::string producer_finish_message(const std::string& phase_name) const override;
   std::string phase_complete_message(const std::string& phase_name) const override;
+  std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const override;
 
-  // Heartbeat suppression (--hide-heartbeat): a core stops emitting RETIRE events.
+  // Heartbeat suppression (--hide-heartbeat): a core stops emitting PROGRESS events.
   virtual void quiet(bool /*enable*/) {}
 
   // Health policy for instruction consumers: progress rate (instructions
@@ -995,8 +996,8 @@ struct channel_module : public module_base<channel_module, environment_module> {
 struct vmem_module : public module_base<vmem_module, environment_module> {
   virtual ~vmem_module() = default;
   virtual std::size_t available_ppages() const = 0;
-  // Address spaces are keyed by the origin's source (origin.asid()): one
-  // physical address space, many sources.
+  // Address spaces are keyed by the origin's producer (origin.asid()): one
+  // physical address space, many producers.
   virtual std::pair<champsim::page_number, champsim::chrono::clock::duration> va_to_pa(champsim::origin origin, champsim::page_number vaddr) = 0;
   virtual std::pair<champsim::address, champsim::chrono::clock::duration> get_pte_pa(champsim::origin origin, champsim::page_number vaddr,
                                                                                      std::size_t level) = 0;
@@ -1265,9 +1266,9 @@ struct btb : public module_base<btb, core_module> {
  * Attach as a submodule of any module that inherits packet_consumer.
  * This base carries only the packet-agnostic lifecycle that the
  * orchestration layer needs; the typed pull protocol lives on
- * typed_packet_producer<Packet>. A consumer and its sources agree on the
+ * typed_packet_producer<Packet>. A consumer and its producers agree on the
  * packet type by construction: a core consumes instruction_producer
- * (Packet = ooo_model_instr), a memory-stream source feeds a cache-side
+ * (Packet = ooo_model_instr), a memory-stream producer feeds a cache-side
  * consumer records, a network consumer would take packets — all meshing
  * in one run because the orchestrator never sees the packet type.
  */
@@ -1322,8 +1323,8 @@ void module_base<B, C>::finalize_created_instance(B* instance_ptr, ModuleBuilder
   if (auto* as_consumer = dynamic_cast<packet_consumer*>(instance_ptr); as_consumer != nullptr) {
     as_consumer->set_identity_name(builder.get_name());
   }
-  if (auto* as_source = dynamic_cast<packet_producer*>(instance_ptr); as_source != nullptr) {
-    as_source->set_identity_name(builder.get_name());
+  if (auto* as_producer = dynamic_cast<packet_producer*>(instance_ptr); as_producer != nullptr) {
+    as_producer->set_identity_name(builder.get_name());
   }
   instance_ptr->bind(builder.get_parent<C>());
   // Nested-instance enrollment: submodule builders carry the owning environment;

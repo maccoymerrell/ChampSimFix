@@ -9,11 +9,11 @@
 namespace
 {
 
-// Probe source: records what its constructor resolves for a set of knobs
-struct probe_source_504 : public champsim::modules::instruction_producer {
+// Probe producer: records what its constructor resolves for a set of knobs
+struct probe_producer_504 : public champsim::modules::instruction_producer {
   long seen_shared, seen_inner, seen_parent_local;
 
-  explicit probe_source_504(champsim::modules::ModuleBuilder builder)
+  explicit probe_producer_504(champsim::modules::ModuleBuilder builder)
       : seen_shared(builder.get_parameter<long>("t504_shared_knob", true, -1)), seen_inner(builder.get_parameter<long>("t504_inner_knob", true, -1)),
         seen_parent_local(builder.get_parameter<long>("t504_parent_local", true, -1))
   {
@@ -23,19 +23,19 @@ struct probe_source_504 : public champsim::modules::instruction_producer {
   [[nodiscard]] bool eof() const override { return true; }
 };
 
-static champsim::modules::instruction_producer::register_module<probe_source_504> probe_source_reg("PROBE_SOURCE_504");
+static champsim::modules::instruction_producer::register_module<probe_producer_504> probe_producer_reg("PROBE_PRODUCER_504");
 
-// Probe core: records its own resolutions and constructs its source children
+// Probe core: records its own resolutions and constructs its producer children
 struct probe_core_504 : public champsim::modules::core_module {
   long seen_shared, seen_explicit;
-  std::vector<probe_source_504*> sources_;
+  std::vector<probe_producer_504*> producers_;
 
   explicit probe_core_504(champsim::modules::ModuleBuilder builder)
       : core_module(champsim::chrono::picoseconds{250}), seen_shared(builder.get_parameter<long>("t504_shared_knob", true, -1)),
         seen_explicit(builder.get_parameter<long>("t504_explicit_knob", true, -1))
   {
     for (const auto& sub : builder.get_submodules("instruction_producer", true)) {
-      sources_.push_back(dynamic_cast<probe_source_504*>(
+      producers_.push_back(dynamic_cast<probe_producer_504*>(
           champsim::modules::instruction_producer::create_instance(sub, static_cast<champsim::modules::packet_consumer*>(this))));
     }
   }
@@ -73,10 +73,10 @@ TEST_CASE("Top-level config scalars are globals and 'globals' blocks scope lexic
                {"t504_parent_local", 5},
                {"children",
                 nlohmann::json::array({
-                    nlohmann::json{{"name", "c0_src"}, {"module", "instruction_producer"}, {"model", "PROBE_SOURCE_504"}},
+                    nlohmann::json{{"name", "c0_src"}, {"module", "instruction_producer"}, {"model", "PROBE_PRODUCER_504"}},
                     nlohmann::json{{"name", "c0_src_shadow"},
                                    {"module", "instruction_producer"},
-                                   {"model", "PROBE_SOURCE_504"},
+                                   {"model", "PROBE_PRODUCER_504"},
                                    {"t504_shared_knob", 1}},
                 })},
            },
@@ -94,7 +94,7 @@ TEST_CASE("Top-level config scalars are globals and 'globals' blocks scope lexic
   REQUIRE(cores.size() == 2);
   auto& c0 = dynamic_cast<probe_core_504&>(cores.at(0).get());
   auto& c1 = dynamic_cast<probe_core_504&>(cores.at(1).get());
-  REQUIRE(c0.sources_.size() == 2);
+  REQUIRE(c0.producers_.size() == 2);
 
   SECTION("A bare top-level scalar is visible as a global")
   {
@@ -110,18 +110,18 @@ TEST_CASE("Top-level config scalars are globals and 'globals' blocks scope lexic
   SECTION("A module's 'globals' block shadows the root for itself and its subtree")
   {
     REQUIRE(c0.seen_shared == 9);
-    REQUIRE(c0.sources_.at(0)->seen_shared == 9);
-    REQUIRE(c0.sources_.at(0)->seen_inner == 3);
+    REQUIRE(c0.producers_.at(0)->seen_shared == 9);
+    REQUIRE(c0.producers_.at(0)->seen_inner == 3);
   }
 
   SECTION("A local parameter shadows every enclosing scope")
   {
-    REQUIRE(c0.sources_.at(1)->seen_shared == 1);
+    REQUIRE(c0.producers_.at(1)->seen_shared == 1);
   }
 
   SECTION("Ordinary module parameters stay module-local")
   {
-    REQUIRE(c0.sources_.at(0)->seen_parent_local == -1);
+    REQUIRE(c0.producers_.at(0)->seen_parent_local == -1);
   }
 
   SECTION("Scopes do not leak to siblings")
