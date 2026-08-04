@@ -57,7 +57,7 @@ long O3_CPU::operate()
   progress += fetch_instruction(); // fetch
   progress += check_dib();
   initialize_instruction();
-  fill_from_sources(); // refill after the drain (matches develop's do_cycle feed)
+  fill_from_producers(); // refill after the drain (matches develop's do_cycle feed)
 
   return progress;
 }
@@ -959,16 +959,19 @@ long O3_CPU::retire_rob()
   num_scheduled_ = std::max(num_scheduled_ - retire_count, long{0});
   num_retired += retire_count;
   if (retire_count > 0 && show_heartbeat) {
-    uint32_t cpu = static_cast<uint32_t>(consumer_id());
+    // Generic PROGRESS event: pass ourselves as a packet_consumer (upcast, so the handler's
+    // const packet_consumer& specialization is selected) plus our progress in instructions.
+    const auto& self = static_cast<const champsim::modules::packet_consumer&>(*this);
+    uint64_t progress = static_cast<uint64_t>(num_retired);
     uint64_t cycles = static_cast<uint64_t>(current_time.time_since_epoch() / clock_period);
-    handle_event<Event::RETIRE>(cpu, retire_begin, retire_end, cycles);
+    handle_event<Event::PROGRESS>(self, progress, cycles);
   }
   ROB.erase(retire_begin, retire_end);
 
   return retire_count;
 }
 
-void O3_CPU::fill_from_sources()
+void O3_CPU::fill_from_producers()
 {
   for (auto* src : instruction_producer_pimpl) {
     for (auto space = instructions_requested(); space > 0; --space) {
@@ -1195,6 +1198,12 @@ std::string champsim::modules::core_module::phase_complete_message(const std::st
 {
   return fmt::format("{} complete CPU {} instructions: {} cycles: {} cumulative IPC: {:.4g}", phase_name, consumer_id(), sim_instr(), sim_cycle(),
                      std::ceil(static_cast<double>(sim_instr())) / std::ceil(static_cast<double>(sim_cycle())));
+}
+
+std::string champsim::modules::core_module::progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const
+{
+  return fmt::format("Heartbeat CPU {} instructions: {} cycles: {} heartbeat IPC: {:.4} cumulative IPC: {:.4}", consumer_id(), total_progress, total_cycles,
+                     interval_rate, cumulative_rate);
 }
 
 champsim::modules::core_module::register_module<O3_CPU> default_cpu_module("DEFAULT_CORE");

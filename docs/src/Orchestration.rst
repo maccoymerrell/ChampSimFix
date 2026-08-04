@@ -140,8 +140,8 @@ an ordinary module (interface ``phase_controller``, parent: the environment):
       virtual std::vector<phase_info> get_phases() const;  // non-empty = owns run structure
     };
 
-The generic shipped model is ``PHASE_CONTROLLER`` (also registered under the name
-``INSTRUCTION_PHASE_CONTROLLER``). It is packet-agnostic and owns only generic mechanics:
+The generic shipped model is ``PHASE_CONTROLLER``. It is packet-agnostic and owns only
+generic mechanics:
 
 * **Completion** — a consumer completes when its ``sim_progress()`` delta reaches the
   phase length (in its own packet unit), or when one of its producers signals end-of-stream.

@@ -15,14 +15,14 @@ void assign_identities(modules::environment_module& env);
 namespace
 {
 
-struct probe_source_505 : public champsim::modules::instruction_producer {
-  explicit probe_source_505(champsim::modules::ModuleBuilder builder) { producer_group_ = builder.get_parameter<std::string>("producer_group", true, std::string{}); }
+struct probe_producer_505 : public champsim::modules::instruction_producer {
+  explicit probe_producer_505(champsim::modules::ModuleBuilder builder) { producer_group_ = builder.get_parameter<std::string>("producer_group", true, std::string{}); }
   const ooo_model_instr* peek() override { return nullptr; }
   void consume() override {}
   [[nodiscard]] bool eof() const override { return true; }
 };
 
-static champsim::modules::instruction_producer::register_module<probe_source_505> probe_source_reg("PROBE_SOURCE_505");
+static champsim::modules::instruction_producer::register_module<probe_producer_505> probe_producer_reg("PROBE_PRODUCER_505");
 
 struct probe_core_505 : public champsim::modules::core_module {
   explicit probe_core_505(champsim::modules::ModuleBuilder builder) : core_module(champsim::chrono::picoseconds{250})
@@ -61,9 +61,9 @@ TEST_CASE("num_consumers, num_producers, and num_producer_groups are each counte
                {"model", "PROBE_CORE_505"},
                {"children",
                 nlohmann::json::array({
-                    nlohmann::json{{"name", "t505_c0_srcA"}, {"module", "instruction_producer"}, {"model", "PROBE_SOURCE_505"}, {"producer_group", "t505_shared"}},
-                    nlohmann::json{{"name", "t505_c0_srcB"}, {"module", "instruction_producer"}, {"model", "PROBE_SOURCE_505"}, {"producer_group", "t505_shared"}},
-                    nlohmann::json{{"name", "t505_c0_srcC"}, {"module", "instruction_producer"}, {"model", "PROBE_SOURCE_505"}},
+                    nlohmann::json{{"name", "t505_c0_srcA"}, {"module", "instruction_producer"}, {"model", "PROBE_PRODUCER_505"}, {"producer_group", "t505_shared"}},
+                    nlohmann::json{{"name", "t505_c0_srcB"}, {"module", "instruction_producer"}, {"model", "PROBE_PRODUCER_505"}, {"producer_group", "t505_shared"}},
+                    nlohmann::json{{"name", "t505_c0_srcC"}, {"module", "instruction_producer"}, {"model", "PROBE_PRODUCER_505"}},
                 })},
            },
            nlohmann::json{
@@ -71,7 +71,7 @@ TEST_CASE("num_consumers, num_producers, and num_producer_groups are each counte
                {"module", "core"},
                {"model", "PROBE_CORE_505"},
                {"children", nlohmann::json::array({
-                                nlohmann::json{{"name", "t505_c1_src"}, {"module", "instruction_producer"}, {"model", "PROBE_SOURCE_505"}},
+                                nlohmann::json{{"name", "t505_c1_src"}, {"module", "instruction_producer"}, {"model", "PROBE_PRODUCER_505"}},
                             })},
            },
        })},
@@ -93,13 +93,13 @@ TEST_CASE("num_consumers, num_producers, and num_producer_groups are each counte
   champsim::assign_identities(*env);
   auto sources = env->typed_view<champsim::modules::packet_producer>("packet_producer");
   REQUIRE(std::size(sources) == 4);
-  std::map<std::string, uint32_t> source_of;
+  std::map<std::string, uint32_t> producer_of;
   for (auto& src : sources) {
-    source_of[src.get().producer_name()] = src.get().producer_id();
+    producer_of[src.get().producer_name()] = src.get().producer_id();
   }
-  REQUIRE(std::size(source_of) == 4);
-  CHECK(source_of.at("t505_c0_srcA") == source_of.at("t505_c0_srcB")); // shared label, one source id
-  CHECK(source_of.at("t505_c0_srcC") != source_of.at("t505_c0_srcA"));
-  CHECK(source_of.at("t505_c1_src") != source_of.at("t505_c0_srcA"));
-  CHECK(source_of.at("t505_c1_src") != source_of.at("t505_c0_srcC"));
+  REQUIRE(std::size(producer_of) == 4);
+  CHECK(producer_of.at("t505_c0_srcA") == producer_of.at("t505_c0_srcB")); // shared label, one source id
+  CHECK(producer_of.at("t505_c0_srcC") != producer_of.at("t505_c0_srcA"));
+  CHECK(producer_of.at("t505_c1_src") != producer_of.at("t505_c0_srcA"));
+  CHECK(producer_of.at("t505_c1_src") != producer_of.at("t505_c0_srcC"));
 }

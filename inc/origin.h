@@ -25,7 +25,7 @@ namespace champsim
 {
 
 // Provenance of a work unit: the CONSUMER (hardware context — core/injector/port, dense in [0,num_consumers), aliased cpu()) and the SOURCE
-// (which producer the packet came from, aliased asid() where that source doubles as an address space), equal in the one-source-per-core case. Access via
+// (which producer the packet came from, aliased asid() where that producer doubles as an address space), equal in the one-producer-per-core case. Access via
 // methods so future remapping lands in one place.
 class origin
 {
@@ -45,7 +45,7 @@ public:
   [[nodiscard]] constexpr id_type consumer() const { return consumer_; }
   [[nodiscard]] constexpr id_type producer() const { return producer_; }
 
-  // Domain-familiar aliases: cpu() is the hardware context, asid() the source viewed as an address space.
+  // Domain-familiar aliases: cpu() is the hardware context, asid() the producer viewed as an address space.
   [[nodiscard]] constexpr id_type cpu() const { return consumer(); }
   [[nodiscard]] constexpr id_type asid() const { return producer(); }
 

@@ -291,7 +291,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
   std::size_t num_cores_cfg = config.value("num_cores", 1u);
 
   // Pre-construction: publish system-wide globals (readable via get_parameter fall-through).
-  // Legacy env = one core + one instruction_producer per num_cores, so consumers == sources == num_cores.
+  // Legacy env = one core + one instruction_producer per num_cores, so consumers == producers == num_cores.
   {
     auto& g = ModuleBuilder::globals();
     g.add_parameter("block_size", block_size_);
@@ -300,7 +300,7 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
     g.add_parameter("log2_page_size", log2_page_size);
     g.add_parameter("num_consumers", num_cores_cfg);
     g.add_parameter("num_producers", num_cores_cfg);
-    g.add_parameter("num_producer_groups", num_cores_cfg); // one unlabeled source per core: source groups == sources
+    g.add_parameter("num_producer_groups", num_cores_cfg); // one unlabeled producer per core: producer groups == producers
   }
   // Sync the cached address extents with the freshly-published globals.
   champsim::refresh_address_extents();

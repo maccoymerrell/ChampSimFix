@@ -25,23 +25,23 @@
 
 namespace champsim::modules
 {
-// Base contract for a source of work packets. It carries the source identity
+// Base contract for a producer of work packets. It carries the producer identity
 // stamped on the packets it produces and the packet lifecycle; concrete packet
 // types extend it via typed_packet_producer (see instruction_producer). Bound to
-// the consumer it feeds after construction; sources stamp packets with
-// origin{consumer, source}, where the source id defaults to the consumer's id
+// the consumer it feeds after construction; producers stamp packets with
+// origin{consumer, producer}, where the producer id defaults to the consumer's id
 // (see origin.h).
 struct packet_producer {
   virtual ~packet_producer() = default;
 
-  // True when the source will never provide another packet.
+  // True when the producer will never provide another packet.
   [[nodiscard]] virtual bool eof() const = 0;
 
   // Human-readable identity for reports (e.g. the trace path). Empty to suppress.
   virtual std::string describe() const { return {}; }
 
-  // Source id: identifies which source produced this packet. Assigned by the
-  // framework at startup: every source gets its own id unless sources share a
+  // Producer id: identifies which producer produced this packet. Assigned by the
+  // framework at startup: every producer gets its own id unless producers share a
   // "producer_group" label in the configuration, in which case they share one.
   // Each context reads it through the packet's origin (e.g. asid() in the
   // instruction/address-space context). Never written as a number in a configuration.
@@ -58,8 +58,8 @@ struct packet_producer {
       producer_id_ = id;
     }
   }
-  // Sources that mirror another holder's source id (rather than owning one of
-  // their own) may pin; pinned sources are skipped by the startup enumeration
+  // Producers that mirror another holder's producer id (rather than owning one of
+  // their own) may pin; pinned producers are skipped by the startup enumeration
   // and do not occupy an id slot.
   void pin_producer_id(uint32_t id)
   {
@@ -69,15 +69,15 @@ struct packet_producer {
   bool producer_id_pinned() const { return producer_id_pinned_; }
   // The configuration's "producer_group" sharing label; empty when unlabeled.
   const std::string& producer_group() const { return producer_group_; }
-  // The instance name this source was configured under (set by the module
+  // The instance name this producer was configured under (set by the module
   // factory). Use champsim::identities() for id <-> name lookups.
   const std::string& producer_name() const { return identity_name_; }
   void set_identity_name(std::string name) { identity_name_ = std::move(name); }
 
 protected:
-  // The consumer this source feeds; bound by the framework after construction.
+  // The consumer this producer feeds; bound by the framework after construction.
   packet_consumer* consumer_ = nullptr;
-  // Set by concrete sources that accept the optional "producer_group" label.
+  // Set by concrete producers that accept the optional "producer_group" label.
   std::string producer_group_{};
   // Fallback identity for standalone instances (unit tests): the owning
   // consumer's id, the historical default.
@@ -90,14 +90,14 @@ private:
 };
 
 /**
- * Typed pull protocol for packet sources.
+ * Typed pull protocol for packet producers.
  *
  * peek() materializes the next packet without consuming it (so paced
  * consumers can wait until it is due), returning nullptr when no packet is
  * available — the safe emptiness signal, valid to call at any time.
  * consume() discards the peeked packet; next() is the one-shot form.
  *
- * \tparam Packet The discrete unit of work this source provides.
+ * \tparam Packet The discrete unit of work this producer provides.
  */
 template <typename Packet>
 struct typed_packet_producer : packet_producer {

@@ -177,10 +177,10 @@ Channels connect modules together. A channel definition looks like::
     }
 
 ----------------------------------
-Cores and Instruction Sources
+Cores and Instruction Producers
 ----------------------------------
 
-A core attaches its branch predictor, BTB, and one or more instruction sources as
+A core attaches its branch predictor, BTB, and one or more instruction producers as
 ``children``. An ``INSTRUCTION_PRODUCER`` reads instructions from the trace named by its
 ``trace_file`` parameter::
 
@@ -200,8 +200,8 @@ A core attaches its branch predictor, BTB, and one or more instruction sources a
         ]
     }
 
-A core may hold more than one source. By default each source gets its own
-framework-assigned id (its own address space); to place several sources under one shared
+A core may hold more than one producer. By default each producer gets its own
+framework-assigned id (its own address space); to place several producers under one shared
 id, give them a matching ``producer_group`` label::
 
     "children": [

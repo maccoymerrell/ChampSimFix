@@ -10,7 +10,7 @@
 namespace
 {
 
-// The consumer whose identity the source should inherit.
+// The consumer whose identity the producer should inherit.
 struct probe_consumer : champsim::modules::packet_consumer {
   explicit probe_consumer(int id) { set_consumer_id(id); }
 };
@@ -20,7 +20,7 @@ const std::string one_instr{{
     '\x3a', '\x13', '\x00', '\x4c', '\x00', '\x00', '\x00', '\x00', // ip
     '\x00', '\x00',                                                 // is branch, taken
     '\x00', '\x3b',                                                 // destination registers
-    '\x00', '\x00', '\x00', '\x00',                                 // source registers
+    '\x00', '\x00', '\x00', '\x00',                                 // producer registers
     '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', // dmem0
     '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', // dmem1
     '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', '\x00', // smem0
@@ -42,7 +42,7 @@ std::string write_trace(const std::string& tag)
 
 } // namespace
 
-TEST_CASE("A trace source stamps packets with its consumer's id, source id defaulting to it")
+TEST_CASE("A trace producer stamps packets with its consumer's id, producer id defaulting to it")
 {
   auto path = write_trace("default");
   probe_consumer consumer{3};
@@ -55,7 +55,7 @@ TEST_CASE("A trace source stamps packets with its consumer's id, source id defau
 
   const auto* instr = typed->peek();
   REQUIRE(instr != nullptr);
-  // Consumer identity comes from the bound consumer; the source id inherits it
+  // Consumer identity comes from the bound consumer; the producer id inherits it
   REQUIRE(instr->origin.consumer() == 3);
   REQUIRE(instr->origin.producer() == 3);
   REQUIRE(instr->origin.cpu() == 3);
@@ -64,7 +64,7 @@ TEST_CASE("A trace source stamps packets with its consumer's id, source id defau
   std::remove(path.c_str());
 }
 
-TEST_CASE("A framework-assigned source id overrides the default")
+TEST_CASE("A framework-assigned producer id overrides the default")
 {
   auto path = write_trace("override");
   probe_consumer consumer{3};
@@ -78,14 +78,14 @@ TEST_CASE("A framework-assigned source id overrides the default")
 
   const auto* instr = typed->peek();
   REQUIRE(instr != nullptr);
-  // Two coordinates, independently owned: hardware context vs source id
+  // Two coordinates, independently owned: hardware context vs producer id
   REQUIRE(instr->origin.consumer() == 3);
   REQUIRE(instr->origin.producer() == 7);
 
   std::remove(path.c_str());
 }
 
-TEST_CASE("A trace source describes itself with its trace path")
+TEST_CASE("A trace producer describes itself with its trace path")
 {
   auto path = write_trace("describe");
   probe_consumer consumer{0};

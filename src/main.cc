@@ -127,7 +127,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 
   std::string env_model = config_json.value("environment", std::string("LEGACY_ENVIRONMENT"));
   bool is_legacy_env = (env_model == "LEGACY_ENVIRONMENT");
-  // CLI expects one trace per workload SOURCE. Legacy env spawns one source per core (count is num_cores); explicit envs allow any count.
+  // CLI expects one trace per packet producer. Legacy env spawns one producer per core (count is num_cores); explicit envs allow any count.
   std::size_t legacy_num_producers = config_json.value("num_cores", 1u);
 
   // "cycle_skip" (default true) lets idle operables skip via poll_cycle(); false forces operate() every cycle (A/B switch).

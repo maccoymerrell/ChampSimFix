@@ -3,11 +3,11 @@
  * Wraps a champsim::tracereader to provide instruction packets from a trace file.
  * Parameters (from ModuleBuilder):
  *   - trace_file (std::string): path to the trace file
- *   - producer_group (string, optional): sharing label. Sources with the same
- *     label share one framework-assigned source id; unlabeled sources each get
+ *   - producer_group (string, optional): sharing label. Producers with the same
+ *     label share one framework-assigned producer id; unlabeled producers each get
  *     their own. Numeric ids are never configured (see origin.h).
  *   - cloudsuite (bool, optional): use cloudsuite trace format (default: false)
- *   - repeat (bool, optional): loop the trace on EOF, replaying it so the source
+ *   - repeat (bool, optional): loop the trace on EOF, replaying it so the producer
  *     never signals end-of-stream and the phase runs to its length (default: true)
  */
 

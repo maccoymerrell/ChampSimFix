@@ -35,7 +35,7 @@ namespace
 // Generic, packet-agnostic phase controller. Mechanics: completion (sim_progress() delta reaches phase length, or source EOF
 // per eof_policy); deadlock (consecutive zero-progress cycles, vetoed while any consumer reports has_pending_work); health
 // (per health_period, consumers self-judge via check_health(), a stalled verdict aborts). Params: deadlock_cycles,
-// health_period (alias livelock_period), eof_policy, phases array or warmup_length/simulation_length scalars.
+// health_period, eof_policy, phases array or warmup_length/simulation_length scalars.
 class default_phase_controller : public champsim::modules::phase_controller
 {
   using consumer_health = champsim::modules::packet_consumer::consumer_health;
@@ -60,10 +60,10 @@ class default_phase_controller : public champsim::modules::phase_controller
   uint64_t health_timer_ = 0;
   bool health_abort_ = false;
 
-  // Source ids this controller governs; empty = all.
+  // Consumer ids this controller governs; empty = all.
   std::set<int> governed_;
 
-  // Source tracking, flattened for the per-cycle advance() path (map lookups were measured overhead). Ordering is
+  // Consumer tracking, flattened for the per-cycle advance() path (map lookups were measured overhead). Ordering is
   // load-bearing: tracked_ keeps consumer discovery order (the completion scan order); tracked_by_idx_ is sorted by
   // source id for the id-ordered complete-all-on-EOF notification.
   struct tracked_consumer {
@@ -84,7 +84,7 @@ public:
   {
     env_ = builder.get_parent<champsim::modules::environment_module>();
     deadlock_cycles_ = builder.get_parameter<int>("deadlock_cycles", true, 500);
-    health_period_ = builder.get_parameter<uint64_t>("health_period", true, builder.get_parameter<uint64_t>("livelock_period", true, 10000000ULL));
+    health_period_ = builder.get_parameter<uint64_t>("health_period", true, 10000000ULL);
     complete_all_on_eof_ = builder.get_parameter<std::string>("eof_policy", true, std::string{"complete_all"}) != "complete_consumer";
 
     // Explicit JSON phases array if provided, else {warmup_length, simulation_length}.
@@ -230,9 +230,8 @@ public:
   std::vector<champsim::phase_info> get_phases() const override { return phases_; }
 };
 
-// INSTRUCTION_PHASE_CONTROLLER stays registered as an alias for existing configs.
+// PHASE_CONTROLLER stays registered as an alias for existing configs.
 static champsim::modules::phase_controller::register_interface phase_controller_iface_reg("phase_controller");
 static champsim::modules::phase_controller::register_module<default_phase_controller> default_pc_reg("PHASE_CONTROLLER");
-static champsim::modules::phase_controller::register_module<default_phase_controller> instruction_pc_reg("INSTRUCTION_PHASE_CONTROLLER");
 
 } // anonymous namespace

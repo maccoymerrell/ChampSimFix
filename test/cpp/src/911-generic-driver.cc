@@ -52,7 +52,7 @@ struct counting_operable : public champsim::operable, public champsim::module_ph
 struct mock_core_911 : public champsim::modules::core_module {
   uint64_t instr_count = 0;
   uint8_t cpu_num_ = 0;
-  bool producers_eof_ = false; // a live core with attached sources is not at EOF
+  bool producers_eof_ = false; // a live core with attached producers is not at EOF
 
   explicit mock_core_911(champsim::modules::ModuleBuilder builder)
     : core_module(champsim::chrono::picoseconds{250}) {
@@ -123,7 +123,7 @@ TEST_CASE("do_cycle operates all operables and returns progress")
   REQUIRE(op2.op_count == 1);
 }
 
-TEST_CASE("run_phase completes when the source reaches the phase length")
+TEST_CASE("run_phase completes when the consumer reaches the phase length")
 {
   auto env_builder = champsim::modules::ModuleBuilder("env_hook", "MOCK_ENV_911");
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
@@ -170,7 +170,7 @@ TEST_CASE("run_phase works with nullptr callbacks")
   auto* mc = dynamic_cast<mock_core_911*>(core);
   mock_env->cores_ = {mc};
 
-  auto pc_builder = champsim::modules::ModuleBuilder("pc_null", "INSTRUCTION_PHASE_CONTROLLER")
+  auto pc_builder = champsim::modules::ModuleBuilder("pc_null", "PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 1000);
   auto* controller = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
@@ -180,7 +180,7 @@ TEST_CASE("run_phase works with nullptr callbacks")
   REQUIRE_NOTHROW(champsim::run_phase("NullTest", false, 0, *env, *controller, clock, {}));
 }
 
-TEST_CASE("run_phase drives multiple controllers, each governing its own sources")
+TEST_CASE("run_phase drives multiple controllers, each governing its own consumers")
 {
   auto env_builder = champsim::modules::ModuleBuilder("env_multi", "MOCK_ENV_911");
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
@@ -195,7 +195,7 @@ TEST_CASE("run_phase drives multiple controllers, each governing its own sources
   auto* mc1 = dynamic_cast<mock_core_911*>(champsim::modules::core_module::create_instance(core1_builder, env));
   mock_env->cores_ = {mc0, mc1};
 
-  // Controller A governs source 0 only; controller B governs source 1 only.
+  // Controller A governs consumer 0 only; controller B governs consumer 1 only.
   auto pcA_builder = champsim::modules::ModuleBuilder("pc_multiA", "PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 1000)
     .add_parameter("consumers", nlohmann::json::array({0}));
@@ -213,13 +213,13 @@ TEST_CASE("run_phase drives multiple controllers, each governing its own sources
   champsim::chrono::clock clock;
   champsim::run_phase("MultiTest", false, true, 7, *env, controllers, clock, on_complete);
 
-  // Both sources complete exactly once, and the phase ends only when both controllers agree.
+  // Both consumers complete exactly once, and the phase ends only when both controllers agree.
   REQUIRE(completed.size() == 2);
   REQUIRE(mc0->instr_count >= 7);
   REQUIRE(mc1->instr_count >= 7);
 }
 
-TEST_CASE("run_phase stops when a source reaches EOF")
+TEST_CASE("run_phase stops when a producer reaches EOF")
 {
   auto env_builder = champsim::modules::ModuleBuilder("env_eof2", "MOCK_ENV_911");
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
@@ -231,10 +231,10 @@ TEST_CASE("run_phase stops when a source reaches EOF")
   auto* mc = dynamic_cast<mock_core_911*>(core);
   mock_env->cores_ = {mc};
 
-  // The source is exhausted from the start; the controller observes it through producers_eof() with no external notification.
+  // The producer is exhausted from the start; the controller observes it through producers_eof() with no external notification.
   mc->producers_eof_ = true;
 
-  auto pc_builder = champsim::modules::ModuleBuilder("pc_eof2", "INSTRUCTION_PHASE_CONTROLLER")
+  auto pc_builder = champsim::modules::ModuleBuilder("pc_eof2", "PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 1000);
   auto* controller = champsim::modules::phase_controller::create_instance(pc_builder, env);
 

@@ -175,7 +175,7 @@ champsim::environment::environment(ModuleBuilder builder)
 
   auto& children = config["children"];
 
-  // Pre-construction: count consumers/sources for the globals before any module is built. Modules sizing per-consumer
+  // Pre-construction: count consumers/producers for the globals before any module is built. Modules sizing per-consumer
   // tables read num_consumers via get_parameter fall-through, so it must exactly match the space assign_identities later
   // enumerates. Consumer-/source-ness is a per-model trait; configs may override via a root "num_consumers" key.
   std::size_t num_consumers = 0;
@@ -185,7 +185,7 @@ champsim::environment::environment(ModuleBuilder builder)
   std::function<void(const json&)> count_identities = [&](const json& node) {
     const auto module_key = node.value("module", "");
     const auto model_key = node.value("model", "");
-    if (modules::interface_registry::model_is_source(module_key, model_key)) {
+    if (modules::interface_registry::model_is_producer(module_key, model_key)) {
       ++num_producers;
       // Labeled sources share one id per distinct "producer_group" label; unlabeled get their own.
       const auto label = node.value("producer_group", "");
