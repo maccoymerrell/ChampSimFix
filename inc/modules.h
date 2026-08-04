@@ -574,10 +574,7 @@ public:
   }
 
   // The interface's human-readable display name (see interface_info::display_name), or empty.
-  static std::string interface_display_name(const std::string& interface_name)
-  {
-    return get_member(interface_name, &interface_info::display_name);
-  }
+  static std::string interface_display_name(const std::string& interface_name) { return get_member(interface_name, &interface_info::display_name); }
 };
 
 /**

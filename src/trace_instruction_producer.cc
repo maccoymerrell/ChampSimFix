@@ -14,10 +14,10 @@
 #include <optional>
 #include <string>
 
+#include "instruction_producer.h"
 #include "modules.h"
 #include "origin.h"
 #include "tracereader.h"
-#include "instruction_producer.h"
 
 namespace
 {

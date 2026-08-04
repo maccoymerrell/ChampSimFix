@@ -205,7 +205,8 @@ public:
       }
     }
 
-    bool all_complete = !consumer_complete_.empty() && std::all_of(consumer_complete_.begin(), consumer_complete_.end(), [](const auto& p) { return p.second; });
+    bool all_complete =
+        !consumer_complete_.empty() && std::all_of(consumer_complete_.begin(), consumer_complete_.end(), [](const auto& p) { return p.second; });
     return all_complete ? status::COMPLETE : status::CONTINUE;
   }
 

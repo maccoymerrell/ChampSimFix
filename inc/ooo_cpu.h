@@ -39,12 +39,12 @@
 #include "channel.h"
 #include "core_stats.h"
 #include "instruction.h"
+#include "instruction_producer.h"
 #include "modules.h"
 #include "msl/lru_table.h"
 #include "operable.h"
 #include "register_allocator.h"
 #include "util/to_underlying.h"
-#include "instruction_producer.h"
 
 class CACHE;
 class CacheBus
@@ -262,7 +262,8 @@ public:
     // The core consumes instruction packets, so it attaches instruction_producer
     // children directly — the interface it is designed for.
     for (const auto& sub : builder.get_submodules("instruction_producer")) {
-      instruction_producer_pimpl.push_back(champsim::modules::instruction_producer::create_instance(sub, static_cast<champsim::modules::packet_consumer*>(this)));
+      instruction_producer_pimpl.push_back(
+          champsim::modules::instruction_producer::create_instance(sub, static_cast<champsim::modules::packet_consumer*>(this)));
     }
   }
 };
