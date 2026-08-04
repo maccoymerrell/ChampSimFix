@@ -99,26 +99,26 @@ TEST_CASE("Phase controller completes when all cores reach instruction count")
   // Neither core has completed
   auto s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
-  REQUIRE(pc->newly_completed_sources().empty());
+  REQUIRE(pc->newly_completed_consumers().empty());
 
   // Core 0 reaches target
   mc0->instr_count = 100;
   s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
-  auto completed = pc->newly_completed_sources();
+  auto completed = pc->newly_completed_consumers();
   REQUIRE(completed.size() == 1);
   REQUIRE(completed[0] == 0);
 
   // Core 0 should not re-fire
   s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
-  REQUIRE(pc->newly_completed_sources().empty());
+  REQUIRE(pc->newly_completed_consumers().empty());
 
   // Core 1 reaches target -> phase complete
   mc1->instr_count = 100;
   s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::COMPLETE);
-  completed = pc->newly_completed_sources();
+  completed = pc->newly_completed_consumers();
   REQUIRE(completed.size() == 1);
   REQUIRE(completed[0] == 1);
 
@@ -194,13 +194,13 @@ TEST_CASE("Phase controller completes all sources when one source hits EOF (comp
   mc0->producers_eof_ = true;
   s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::COMPLETE);
-  auto completed = pc->newly_completed_sources();
+  auto completed = pc->newly_completed_consumers();
   REQUIRE(completed.size() == 2);
 
   pc->end_phase();
 }
 
-TEST_CASE("Phase controller completes only the exhausted source under complete_source policy")
+TEST_CASE("Phase controller completes only the exhausted consumer under complete_consumer policy")
 {
   auto env_builder = champsim::modules::ModuleBuilder("test_env_eofs", "MOCK_ENV_910");
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
@@ -220,7 +220,7 @@ TEST_CASE("Phase controller completes only the exhausted source under complete_s
 
   auto pc_builder = champsim::modules::ModuleBuilder("pc_eofs", "INSTRUCTION_PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 1000)
-    .add_parameter("eof_policy", std::string{"complete_source"});
+    .add_parameter("eof_policy", std::string{"complete_consumer"});
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
   pc->begin_phase("EOF Source Test", false, 100);
@@ -229,7 +229,7 @@ TEST_CASE("Phase controller completes only the exhausted source under complete_s
   mc0->producers_eof_ = true;
   auto s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
-  auto completed = pc->newly_completed_sources();
+  auto completed = pc->newly_completed_consumers();
   REQUIRE(completed.size() == 1);
   REQUIRE(completed[0] == 0);
 
@@ -237,7 +237,7 @@ TEST_CASE("Phase controller completes only the exhausted source under complete_s
   mc1->instr_count = 100;
   s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::COMPLETE);
-  completed = pc->newly_completed_sources();
+  completed = pc->newly_completed_consumers();
   REQUIRE(completed.size() == 1);
   REQUIRE(completed[0] == 1);
 

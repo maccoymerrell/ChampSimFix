@@ -39,7 +39,7 @@ namespace
 // health_period (alias livelock_period), eof_policy, phases array or warmup_length/simulation_length scalars.
 class default_phase_controller : public champsim::modules::phase_controller
 {
-  using source_health = champsim::modules::packet_consumer::source_health;
+  using consumer_health = champsim::modules::packet_consumer::consumer_health;
 
   int deadlock_cycles_ = 500;
   uint64_t health_period_ = 10000000;
@@ -67,13 +67,13 @@ class default_phase_controller : public champsim::modules::phase_controller
   // Source tracking, flattened for the per-cycle advance() path (map lookups were measured overhead). Ordering is
   // load-bearing: tracked_ keeps consumer discovery order (the completion scan order); tracked_by_idx_ is sorted by
   // source id for the id-ordered complete-all-on-EOF notification.
-  struct tracked_source {
+  struct tracked_consumer {
     champsim::modules::packet_consumer* consumer;
     int idx;
     uint64_t baseline;
     bool complete;
   };
-  std::vector<tracked_source> tracked_;
+  std::vector<tracked_consumer> tracked_;
   std::vector<std::size_t> tracked_by_idx_;
   std::size_t incomplete_count_ = 0;
   std::vector<unsigned> newly_completed_;
@@ -86,7 +86,7 @@ public:
     env_ = builder.get_parent<champsim::modules::environment_module>();
     deadlock_cycles_ = builder.get_parameter<int>("deadlock_cycles", true, 500);
     health_period_ = builder.get_parameter<uint64_t>("health_period", true, builder.get_parameter<uint64_t>("livelock_period", true, 10000000ULL));
-    complete_all_on_eof_ = builder.get_parameter<std::string>("eof_policy", true, std::string{"complete_all"}) != "complete_source";
+    complete_all_on_eof_ = builder.get_parameter<std::string>("eof_policy", true, std::string{"complete_all"}) != "complete_consumer";
 
     // Explicit JSON phases array if provided, else {warmup_length, simulation_length}.
     if (builder.has_parameter("phases")) {
@@ -109,8 +109,8 @@ public:
     // If neither is set, phases_ stays empty — caller owns the phase list.
 
     // Optional source ids this controller governs, so multiple controllers can partition a run's sources. Default: all.
-    if (builder.has_parameter("sources")) {
-      for (auto& s : builder.get_parameter<nlohmann::json>("sources")) {
+    if (builder.has_parameter("consumers")) {
+      for (auto& s : builder.get_parameter<nlohmann::json>("consumers")) {
         governed_.insert(s.get<int>());
       }
     }
@@ -172,7 +172,7 @@ public:
           continue;
         }
         auto health = sc.get().check_health(health_period_);
-        if (health == source_health::stalled) {
+        if (health == consumer_health::stalled) {
           fmt::print("{} source {} reported stalled\n", phase_name_, sc.get().consumer_id());
           health_abort_ = true;
         }
@@ -184,7 +184,7 @@ public:
       return status::ABORT;
     }
 
-    // Completion: per-source EOF (policy-dependent) and progress thresholds.
+    // Completion: per-producer EOF (policy-dependent) and progress thresholds.
     for (auto& tracked : tracked_) {
       if (tracked.complete) {
         continue;
@@ -220,7 +220,7 @@ public:
     return all_complete ? status::COMPLETE : status::CONTINUE;
   }
 
-  std::vector<unsigned> newly_completed_sources() const override { return newly_completed_; }
+  std::vector<unsigned> newly_completed_consumers() const override { return newly_completed_; }
 
   void end_phase() override
   {

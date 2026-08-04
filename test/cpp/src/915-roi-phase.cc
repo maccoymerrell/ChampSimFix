@@ -16,7 +16,7 @@ void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t
                modules::environment_module& env,
                std::vector<std::reference_wrapper<modules::phase_controller>>& controllers,
                champsim::chrono::clock& global_clock,
-               std::function<void(unsigned)> on_source_complete);
+               std::function<void(unsigned)> on_consumer_complete);
 }
 
 namespace
