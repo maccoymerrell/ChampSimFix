@@ -266,17 +266,21 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     };
   }
 
-  // Print header: find warmup/sim lengths by is_warmup flag
-  uint64_t printed_warmup = 0, printed_sim = 0;
-  for (auto& p : phases) {
-    if (p.is_warmup)
-      printed_warmup = p.length;
-    else
-      printed_sim = p.length;
+  fmt::print("\n*** ChampSim Multicore Out-of-Order Simulator ***\n");
+  // Phase intervals come from the resolved phase list the controllers own, so the labels
+  // follow the phase names rather than being hardcoded to warmup/simulation.
+  for (const auto& p : phases) {
+    fmt::print("{} Instructions: {}\n", p.name, p.length);
   }
-  fmt::print("\n*** ChampSim Multicore Out-of-Order Simulator ***\nWarmup Instructions: {}\nSimulation Instructions: {}\nNumber of CPUs: {}\nTrace sources: "
-             "{}\nPage size: {}\n\n",
-             printed_warmup, printed_sim, gen_environment->get_num("core"), gen_environment->get_num("packet_producer"), gen_environment->get_page_size());
+  // Module counts: each interface reports its own plural label (see register_interface in
+  // src/modules.cc), so the listing is generated rather than hardcoding cores/producers.
+  for (const auto& iface : champsim::modules::interface_registry::get_interface_names()) {
+    const auto label = champsim::modules::interface_registry::interface_display_name(iface);
+    if (!label.empty()) {
+      fmt::print("{}: {}\n", label, gen_environment->get_num(iface));
+    }
+  }
+  fmt::print("Page size: {}\n\n", gen_environment->get_page_size());
 
   auto phase_stats = champsim::main(*gen_environment, phases);
 

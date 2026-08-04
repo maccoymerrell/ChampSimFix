@@ -442,6 +442,9 @@ public:
     std::function<packet_producer*(const std::any&)> to_packet_producer;
     // Creates a typed null pointer wrapped in std::any
     std::function<std::any()> make_null_pointer;
+    // Human-readable plural label for the startup summary (e.g. "cores", "caches").
+    // Empty for interfaces that should not appear in the count listing.
+    std::string display_name;
   };
 
 private:
@@ -557,6 +560,12 @@ public:
       names.push_back(name);
     }
     return names;
+  }
+
+  // The plural label an interface reports itself under in the startup summary, or empty.
+  static std::string interface_display_name(const std::string& interface_name)
+  {
+    return get_member(interface_name, &interface_info::display_name);
   }
 };
 
@@ -726,10 +735,11 @@ public:
   // Register this module_base specialization as a named interface in the interface_registry,
   // so the explicit environment can create modules by interface-name string.
   struct register_interface {
-    register_interface(std::string interface_name)
+    register_interface(std::string interface_name, std::string display_name = "")
     {
       registered_interface_name() = interface_name;
       interface_registry::interface_info info;
+      info.display_name = std::move(display_name);
       info.create = [interface_name](ModuleBuilder builder, std::any parent) -> std::any {
         auto module_name = builder.get_name();
         try {
