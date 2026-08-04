@@ -57,20 +57,22 @@ bool champsim::modules::prefetcher::prefetch_line(uint64_t pf_addr, bool fill_th
 
 } // namespace champsim::modules
 
-// Interface registrations: map interface name strings to module_base specializations
+// Interface registrations: map interface name strings to module_base specializations.
+// The second argument is the plural label the interface reports itself under in the
+// startup summary (empty = not shown in the count listing).
 static champsim::modules::channel_module::register_interface channel_iface_reg("channel");
-static champsim::modules::cache_module::register_interface cache_iface_reg("cache");
-static champsim::modules::memory_controller_module::register_interface memory_controller_iface_reg("memory_controller");
+static champsim::modules::cache_module::register_interface cache_iface_reg("cache", "caches");
+static champsim::modules::memory_controller_module::register_interface memory_controller_iface_reg("memory_controller", "memory controllers");
 static champsim::modules::vmem_module::register_interface vmem_iface_reg("vmem");
 static champsim::modules::page_table_walker_module::register_interface ptw_iface_reg("page_table_walker");
-static champsim::modules::core_module::register_interface core_iface_reg("core");
+static champsim::modules::core_module::register_interface core_iface_reg("core", "cores");
 static champsim::modules::environment_module::register_interface env_iface_reg("environment");
 
 // Submodule interfaces. These are created by their parent modules (a core
 // builds its instruction producers, a cache its prefetchers), not by the
 // environment — registering them names the interface for nested-instance
 // enrollment and lets environment views cover them.
-static champsim::modules::instruction_producer::register_interface instruction_producer_iface_reg("instruction_producer");
+static champsim::modules::instruction_producer::register_interface instruction_producer_iface_reg("instruction_producer", "producers");
 static champsim::modules::prefetcher::register_interface prefetcher_iface_reg("prefetcher");
 static champsim::modules::replacement::register_interface replacement_iface_reg("replacement");
 static champsim::modules::branch_predictor::register_interface branch_predictor_iface_reg("branch_predictor");
