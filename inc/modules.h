@@ -452,8 +452,9 @@ public:
     std::function<packet_producer*(const std::any&)> to_packet_producer;
     // Creates a typed null pointer wrapped in std::any
     std::function<std::any()> make_null_pointer;
-    // Human-readable plural label for the startup summary (e.g. "cores", "caches").
-    // Empty for interfaces that should not appear in the count listing.
+    // Human-readable display name for the interface (e.g. "cores", "caches") -- a general
+    // label for logging, summaries, and diagnostics. Empty means callers fall back to the
+    // interface name.
     std::string display_name;
   };
 
@@ -572,7 +573,7 @@ public:
     return names;
   }
 
-  // The plural label an interface reports itself under in the startup summary, or empty.
+  // The interface's human-readable display name (see interface_info::display_name), or empty.
   static std::string interface_display_name(const std::string& interface_name)
   {
     return get_member(interface_name, &interface_info::display_name);
@@ -1102,14 +1103,15 @@ struct prefetcher : public module_base<prefetcher, cache_module> {
   /** \overload */
   bool prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata) const;
 
-protected:
-  // The parent cache. Bound by the framework after construction. Exposed to
-  // subclasses (protected) so prefetchers ported from upstream ChampSim,
-  // which query dynamic cache state (MSHR occupancy, queue sizes, current
-  // cycle) via intern_, work unchanged.
-  cache_module* intern_ = nullptr;
-
 private:
+  // The parent cache, for the framework's own prefetch_line delegation
+  // only. Modules that need parent access should capture it themselves at
+  // construction — the parent is set on the builder before the
+  // constructor runs — and store it locally:
+  //
+  //     my_pref(ModuleBuilder builder)
+  //       : cache_(builder.get_parent<champsim::modules::cache_module>()) {}
+  cache_module* intern_ = nullptr;
   friend struct module_base<prefetcher, cache_module>;
   void bind(cache_module* parent) { intern_ = parent; }
 };

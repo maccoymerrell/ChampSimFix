@@ -220,7 +220,7 @@ public:
   std::vector<champsim::phase_info> get_phases() const override { return phases_; }
 };
 
-static champsim::modules::phase_controller::register_interface phase_controller_iface_reg("phase_controller");
+static champsim::modules::phase_controller::register_interface phase_controller_iface_reg("phase_controller", "phase controllers");
 static champsim::modules::phase_controller::register_module<default_phase_controller> default_pc_reg("PHASE_CONTROLLER");
 
 } // anonymous namespace

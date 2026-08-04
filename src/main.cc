@@ -278,13 +278,16 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   for (const auto& p : phases) {
     fmt::print("{} Instructions: {}\n", p.name, p.length);
   }
-  // Module counts: each interface reports its own plural label (see register_interface in
-  // src/modules.cc), so the listing is generated rather than hardcoding cores/producers.
+  // Module counts: every registered interface with instances is listed, labelled by the plural
+  // it reports at registration (falling back to its interface name), so nothing here is
+  // hardcoded and a new interface appears automatically.
   for (const auto& iface : champsim::modules::interface_registry::get_interface_names()) {
-    const auto label = champsim::modules::interface_registry::interface_display_name(iface);
-    if (!label.empty()) {
-      fmt::print("{}: {}\n", label, gen_environment->get_num(iface));
+    const auto count = gen_environment->get_num(iface);
+    if (count == 0) {
+      continue;
     }
+    const auto label = champsim::modules::interface_registry::interface_display_name(iface);
+    fmt::print("{}: {}\n", label.empty() ? iface : label, count);
   }
   fmt::print("Page size: {}\n\n", gen_environment->get_page_size());
 
