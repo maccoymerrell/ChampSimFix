@@ -419,9 +419,10 @@ void CACHE::admit_tag_check(tag_lookup_type&& entry)
 
 long CACHE::poll_cycle()
 {
-  // Skip a cycle only when nothing is pending anywhere. MSHR-only-pending state
-  // is skippable — its wake event is an arrival on lower_level->get_returned(),
-  // re-checked here every cycle.
+  // Skip a cycle only when nothing is pending anywhere: no responses to
+  // finish, no inflight work, and no requests waiting on any upper channel.
+  // MSHR-only-pending state is skippable — the wake event is an arrival on
+  // lower_level->get_returned(), which is re-checked here every cycle.
   const bool idle = std::empty(lower_level->get_returned()) && (lower_translate == nullptr || std::empty(lower_translate->get_returned()))
                     && std::empty(inflight_fills) && std::empty(inflight_tag_check) && std::empty(untranslated_tag_check) && std::empty(internal_PQ)
                     && std::all_of(std::cbegin(upper_levels), std::cend(upper_levels),
@@ -430,10 +431,13 @@ long CACHE::poll_cycle()
     return 0;
   }
 
-  // Bookkeeping operate() would do must still happen on skipped cycles to keep
-  // the observable cycle stream unchanged: the upper-level round-robin keeps its
-  // arbitration alignment, and prefetchers keep their once-per-cycle hook (a
-  // prefetch issued here lands in internal_PQ, so the next poll returns 0).
+  // Per-cycle bookkeeping that operate() would have done must still happen on
+  // skipped cycles so the observable cycle stream is unchanged:
+  //  - the upper-level round-robin keeps its arbitration alignment, and
+  //  - prefetchers keep their contractual once-per-cycle hook (internal
+  //    clocks, lookahead machines). A prefetch issued here lands in
+  //    internal_PQ, so the next poll returns 0 — the same first
+  //    tag-check cycle it would get without skipping.
   if (std::size(upper_levels) > 1) {
     std::rotate(upper_levels.begin(), upper_levels.begin() + 1, upper_levels.end());
   }
@@ -676,15 +680,14 @@ void CACHE::finish_translation(const response_type& packet)
   auto matches_vpage = [page_num = champsim::page_number{packet.v_address}](const auto& entry) {
     return (champsim::page_number{entry.v_address} == page_num) && !entry.is_translated;
   };
-  // The tag check can begin only now that translation produced the physical
-  // set index, so stamp it additively: (translation-complete) + HIT_LATENCY. A
-  // physically-indexed cache cannot overlap the tag check with translation.
+  // A physically-indexed tag check cannot begin until translation resolves the
+  // physical set index, so time it from translation completion, not admission.
   const auto tag_check_ready = current_time + (is_warmup() ? champsim::chrono::clock::duration{} : HIT_LATENCY);
   auto complete_translation = [p_page = champsim::page_number{packet.data}, tag_check_ready, this](auto& entry) {
     [[maybe_unused]] auto old_address = entry.address;
     entry.address = champsim::address{champsim::splice(p_page, champsim::page_offset{entry.v_address})}; // translated address
     entry.is_translated = true;                                                                          // This entry is now translated
-    entry.event_cycle = tag_check_ready;                                                                 // additive: tag check starts after translation
+    entry.event_cycle = tag_check_ready;                                                                 // serialize: tag check waits for translation
     if (!entry.translate_issued) {
       --untranslated_pending_issue_; // translation piggybacked before this entry issued its own
     }

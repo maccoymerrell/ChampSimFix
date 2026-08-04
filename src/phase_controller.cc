@@ -32,28 +32,32 @@
 namespace
 {
 
-// Generic, packet-agnostic phase controller. Mechanics: completion (sim_progress() delta reaches phase length, or source EOF
-// per eof_policy); deadlock (consecutive zero-progress cycles, vetoed while any consumer reports has_pending_work); health
-// (per health_period, consumers self-judge via check_health(), a stalled verdict aborts). Params: deadlock_cycles,
-// health_period, eof_policy, phases array or warmup_length/simulation_length scalars.
+// Generic, packet-agnostic phase controller owning completion/deadlock/health
+// mechanics; per-consumer policy (e.g. livelock rate) lives in check_health.
+// Params: deadlock_cycles, health_period, eof_policy
+// (complete_all|complete_consumer), phases[] or warmup_length/simulation_length.
 class default_phase_controller : public champsim::modules::phase_controller
 {
   using consumer_health = champsim::modules::packet_consumer::consumer_health;
 
+  // Configuration (from builder)
   int deadlock_cycles_ = 500;
   uint64_t health_period_ = 10000000;
   bool complete_all_on_eof_ = true;
 
+  // Parent environment, captured at construction.
   champsim::modules::environment_module* env_ = nullptr;
 
-  // Per-phase caches (typed_view is expensive); refreshed once per begin_phase().
+  // Per-phase caches (typed_view is expensive). Refreshed once per begin_phase().
   std::vector<std::reference_wrapper<champsim::modules::packet_consumer>> packet_consumers_;
-  // Deadlock veto: operables with timer-scheduled work (e.g. DRAM refresh) also make zero global progress a scheduled quiet time.
+  // Deadlock veto: operables with timer-scheduled work (e.g. DRAM refresh).
   std::vector<std::reference_wrapper<champsim::operable>> operables_;
 
+  // Per-phase state
   std::string phase_name_;
   uint64_t length_ = 0;
 
+  // Configurable phase list (set at construction from builder params)
   std::vector<champsim::phase_info> phases_;
 
   int stalled_cycles_ = 0;
@@ -65,7 +69,7 @@ class default_phase_controller : public champsim::modules::phase_controller
 
   // Consumer tracking, flattened for the per-cycle advance() path (map lookups were measured overhead). Ordering is
   // load-bearing: tracked_ keeps consumer discovery order (the completion scan order); tracked_by_idx_ is sorted by
-  // source id for the id-ordered complete-all-on-EOF notification.
+  // consumer id for the id-ordered complete-all-on-EOF notification.
   struct tracked_consumer {
     champsim::modules::packet_consumer* consumer;
     int idx;
@@ -87,7 +91,7 @@ public:
     health_period_ = builder.get_parameter<uint64_t>("health_period", true, 10000000ULL);
     complete_all_on_eof_ = builder.get_parameter<std::string>("eof_policy", true, std::string{"complete_all"}) != "complete_consumer";
 
-    // Explicit JSON phases array if provided, else {warmup_length, simulation_length}.
+    // Build phases from explicit JSON array, else warmup/simulation scalars.
     if (builder.has_parameter("phases")) {
       for (auto& p : builder.get_parameter<nlohmann::json>("phases")) {
         champsim::phase_info pi;
@@ -107,7 +111,8 @@ public:
     }
     // If neither is set, phases_ stays empty — caller owns the phase list.
 
-    // Optional source ids this controller governs, so multiple controllers can partition a run's sources. Default: all.
+    // Optional consumer-id subset: controllers can partition a run's consumers,
+    // each applying its own policy. Default: govern all.
     if (builder.has_parameter("consumers")) {
       for (auto& s : builder.get_parameter<nlohmann::json>("consumers")) {
         governed_.insert(s.get<int>());
@@ -127,11 +132,11 @@ public:
     tracked_by_idx_.clear();
     incomplete_count_ = 0;
 
-    // Refresh the per-phase view caches (typed_view is expensive).
+    // Refresh per-phase view caches (typed_view is expensive; reuse across cycles).
     packet_consumers_ = env_->typed_view<champsim::modules::packet_consumer>("packet_consumer");
     operables_ = env_->typed_view<champsim::operable>("operable");
 
-    // Restrict to governed consumers, then discover tracked sources and re-baseline progress and health.
+    // Restrict to governed consumers, then re-baseline progress and health.
     if (!governed_.empty()) {
       packet_consumers_.erase(
           std::remove_if(std::begin(packet_consumers_), std::end(packet_consumers_), [this](const auto& sc) { return !governs(sc.get().consumer_id()); }),
@@ -155,7 +160,8 @@ public:
   {
     newly_completed_.clear();
 
-    // Consecutive zero-progress cycles are a hang unless work is scheduled (a paced arrival, or an operable timer in flight).
+    // Deadlock: consecutive zero-progress cycles are a hang unless a consumer
+    // or operable has scheduled work pending (e.g. a DRAM refresh in flight).
     if (progress == 0) {
       const bool pending = std::any_of(std::begin(packet_consumers_), std::end(packet_consumers_), [](const auto& sc) { return sc.get().has_pending_work(); })
                            || std::any_of(std::begin(operables_), std::end(operables_), [](const auto& op) { return op.get().has_pending_work(); });
@@ -172,7 +178,7 @@ public:
         }
         auto health = sc.get().check_health(health_period_);
         if (health == consumer_health::stalled) {
-          fmt::print("{} source {} reported stalled\n", phase_name_, sc.get().consumer_id());
+          fmt::print("{} consumer {} reported stalled\n", phase_name_, sc.get().consumer_id());
           health_abort_ = true;
         }
       }
@@ -191,7 +197,7 @@ public:
 
       if (tracked.consumer->producers_eof()) {
         if (complete_all_on_eof_) {
-          // First exhausted source ends the phase for everyone (in source-id order).
+          // Classic behavior: the first exhausted producer ends the phase for everyone.
           for (auto pos : tracked_by_idx_) {
             auto& other = tracked_[pos];
             if (!other.complete) {
@@ -230,8 +236,7 @@ public:
   std::vector<champsim::phase_info> get_phases() const override { return phases_; }
 };
 
-// PHASE_CONTROLLER stays registered as an alias for existing configs.
-static champsim::modules::phase_controller::register_interface phase_controller_iface_reg("phase_controller");
+static champsim::modules::phase_controller::register_interface phase_controller_iface_reg("phase_controller", "phase controllers");
 static champsim::modules::phase_controller::register_module<default_phase_controller> default_pc_reg("PHASE_CONTROLLER");
 
 } // anonymous namespace

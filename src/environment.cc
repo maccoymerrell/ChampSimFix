@@ -1,5 +1,7 @@
-// Explicit environment: reads a hierarchical JSON config (each module has name, interface "module", and "model";
-// "@name" references resolve in declaration order). Fully generic — any registered interface/model works, none hardcoded.
+/*
+ * Explicit environment: builds the module hierarchy from hierarchical JSON; "@name"
+ * refs resolve in declaration order. Fully generic — no interface/model names hardcoded.
+ */
 
 #include "environment.h"
 
@@ -26,6 +28,7 @@ using namespace champsim::modules;
 namespace
 {
 
+// Try to parse an @-reference string, returning the referenced name if valid.
 std::optional<std::string> try_parse_ref(const std::string& s)
 {
   if (!s.empty() && s[0] == '@')
@@ -33,9 +36,11 @@ std::optional<std::string> try_parse_ref(const std::string& s)
   return std::nullopt;
 }
 
+// Check if a string is a $-variable (CLI arg reference)
 bool is_var(const std::string& s) { return !s.empty() && s[0] == '$'; }
 std::string var_name(const std::string& s) { return s.substr(1); }
 
+// Check if a JSON array is entirely @-references
 bool is_ref_array(const json& arr)
 {
   if (!arr.is_array() || arr.empty())
@@ -51,7 +56,7 @@ bool is_ref_array(const json& arr)
 void add_param(ModuleBuilder& builder, const std::string& key, const json& val, const std::string& mod_name,
                const std::map<std::string, std::any>& modules_by_name, const std::map<std::string, std::string>& module_interfaces, const json& cli_args);
 
-// Resolve a $-variable by re-entering add_param with the resolved value, so every dispatched type works for variables too.
+// Resolve a $-variable by re-entering add_param with its CLI value, so all types work for variables too.
 void resolve_var(const std::string& val_str, const std::string& key, const std::string& mod_name, const std::map<std::string, std::any>& modules_by_name,
                  const std::map<std::string, std::string>& module_interfaces, const json& cli_args, ModuleBuilder& builder)
 {
@@ -63,8 +68,8 @@ void resolve_var(const std::string& val_str, const std::string& key, const std::
   add_param(builder, key, cli_args[vn], mod_name, modules_by_name, module_interfaces, cli_args);
 }
 
-// Add a single (key, val) JSON parameter. The environment owns only structural concerns (null skipping, $-variable and
-// @-reference resolution); everything else flows through type_registry::try_convert, so a new type is a registration.
+// Add one JSON parameter. Env handles only structural cases (null skip, $-var, @-ref);
+// everything else flows through type_registry::try_convert, so new types are registry-only.
 void add_param(ModuleBuilder& builder, const std::string& key, const json& val, const std::string& mod_name,
                const std::map<std::string, std::any>& modules_by_name, const std::map<std::string, std::string>& module_interfaces, const json& cli_args)
 {
@@ -109,20 +114,22 @@ void add_param(ModuleBuilder& builder, const std::string& key, const json& val, 
     return;
   }
 
-  // Typed objects (e.g. {"frequency": "4G"}) convert via named-type registrations; bare scalars/arrays via kind defaults.
+  // Everything else: typed objects via named-type registrations, bare scalars/arrays via kind defaults.
   std::any converted;
   if (champsim::type_registry::try_convert(val, converted)) {
     builder.add_raw_parameter(key, std::move(converted));
   }
 }
 
-// Populate a ModuleBuilder from a JSON node (full type support, recursive children). cli_args: flat JSON for $-var substitution.
+// Populate a ModuleBuilder from a JSON node (full type support + recursive children).
+// cli_args: CLI arguments for $-variable substitution.
 void populate_builder(const json& node, ModuleBuilder& builder, const std::map<std::string, std::any>& modules_by_name,
                       const std::map<std::string, std::string>& module_interfaces, const json& cli_args, std::vector<ModuleBuilder::scope_frame_type> frames)
 {
   const std::string& name = builder.get_name();
 
-  // A "globals" object opens a lexical scope visible to this module and below (unless shadowed); other params stay module-local.
+  // A "globals" object opens a lexical scope inherited by this module and everything
+  // beneath it (shadowable by more local defs); ordinary params stay module-local.
   if (auto it = node.find("globals"); it != node.end() && it->is_object()) {
     ModuleBuilder frame_builder{name + ".globals", "<scope>"};
     for (auto& [key, val] : it->items()) {
@@ -132,12 +139,14 @@ void populate_builder(const json& node, ModuleBuilder& builder, const std::map<s
   }
   builder.inherit_scope(frames);
 
+  // Process all JSON parameters (skip reserved keys)
   for (auto& [key, val] : node.items()) {
     if (key == "name" || key == "module" || key == "model" || key == "children" || key == "_comment" || key == "globals")
       continue;
     add_param(builder, key, val, name, modules_by_name, module_interfaces, cli_args);
   }
 
+  // Recursively handle nested children as submodules
   if (node.contains("children")) {
     for (auto& sub : node["children"]) {
       if (!sub.contains("name") || !sub.contains("module") || !sub.contains("model")) {
@@ -175,9 +184,10 @@ champsim::environment::environment(ModuleBuilder builder)
 
   auto& children = config["children"];
 
-  // Pre-construction: count consumers/producers for the globals before any module is built. Modules sizing per-consumer
-  // tables read num_consumers via get_parameter fall-through, so it must exactly match the space assign_identities later
-  // enumerates. Consumer-/source-ness is a per-model trait; configs may override via a root "num_consumers" key.
+  // Pre-construction: count consumers/producers to publish as globals before any module
+  // builds — per-consumer tables (ship/drrip) size off num_consumers, so it must be exact
+  // (same space assign_identities enumerates). Consumer-ness is a per-(module,model) trait;
+  // configs may override via a root "num_consumers" key.
   std::size_t num_consumers = 0;
   std::size_t num_producers = 0;
   std::size_t num_producer_groups = 0;
@@ -187,7 +197,7 @@ champsim::environment::environment(ModuleBuilder builder)
     const auto model_key = node.value("model", "");
     if (modules::interface_registry::model_is_producer(module_key, model_key)) {
       ++num_producers;
-      // Labeled sources share one id per distinct "producer_group" label; unlabeled get their own.
+      // Labeled producers share one id per distinct "producer_group" label; unlabeled get their own.
       const auto label = node.value("producer_group", "");
       if (label.empty() || producer_group_labels_seen.insert(label).second) {
         ++num_producer_groups;
@@ -208,8 +218,8 @@ champsim::environment::environment(ModuleBuilder builder)
   num_consumers = config.value("num_consumers", num_consumers);
   num_producer_groups = config.value("num_producer_groups", num_producer_groups);
 
-  // Publish system-wide params to the globals before construction: every non-reserved top-level scalar becomes a global
-  // (a root "globals" object works too); reserved names are the config's structural/orchestration keys.
+  // Publish system-wide globals before construction: every non-reserved top-level scalar
+  // (and a root "globals" object) becomes a global visible via get_parameter fall-through.
   {
     auto& g = ModuleBuilder::globals();
 
@@ -232,6 +242,7 @@ champsim::environment::environment(ModuleBuilder builder)
       g.add_raw_parameter(key, val);
     }
 
+    // Canonical system-wide values (derived where not configured)
     g.add_parameter("block_size", block_size_);
     g.add_parameter("page_size", page_size_);
     g.add_parameter("log2_block_size", static_cast<unsigned>(champsim::lg2(block_size_)));
@@ -240,7 +251,7 @@ champsim::environment::environment(ModuleBuilder builder)
     g.add_parameter("num_producers", num_producers);
     g.add_parameter("num_producer_groups", num_producer_groups);
   }
-  // Sync cached address extents with the published globals so the hot path avoids a lookup per address-slice construction.
+  // Sync cached address extents with the new globals so the hot path avoids a per-slice lookup.
   champsim::refresh_address_extents();
 
   for (auto& child : children) {
@@ -257,7 +268,8 @@ champsim::environment::environment(ModuleBuilder builder)
 
     populate_builder(child, mod_builder, modules_by_name_, module_interfaces_, cli_args, {});
 
-    // Submodule builders self-enroll (enroll_nested_instance) so nested modules join the views; the top-level module is registered below.
+    // Submodule builders self-enroll (enroll_nested_instance) so nested modules join the
+    // views; top-level module registered below, preserving declaration order.
     mod_builder.set_owner_of_submodules(this);
 
     std::any typed_ptr = interface_registry::create(iface, mod_builder, static_cast<environment_module*>(this));
@@ -269,7 +281,8 @@ champsim::environment::environment(ModuleBuilder builder)
     module_order_.emplace_back(name, iface);
   }
 
-  // Deadlock threshold from parameter types alone: over picoseconds params, sum/min is worst-case cycles (floored at 500).
+  // Deadlock threshold from parameter types: sum of all picosecond latencies / min
+  // (the time quantum) = worst-case cycles, floored at 500.
   {
     using ps_rep = champsim::chrono::picoseconds::rep;
     ps_rep min_ps = std::numeric_limits<ps_rep>::max();
@@ -310,7 +323,8 @@ void champsim::environment::enroll_nested_instance(const std::string& interface_
 
 auto champsim::environment::view(const std::string& interface_type) const -> std::vector<std::any>
 {
-  // Aggregate view: converter-filtered walk of top-level modules (declaration order) then nested instances (creation order).
+  // Aggregate view: converter-filtered walk of top-level modules (declaration order),
+  // then nested instances (creation order).
   auto collect_aggregate = [this](auto&& get_converter) {
     std::vector<std::any> result;
     for (const auto* order : {&module_order_, &nested_order_}) {
@@ -318,7 +332,8 @@ auto champsim::environment::view(const std::string& interface_type) const -> std
         auto converter = get_converter(iface);
         if (converter) {
           auto& typed_ptr = modules_by_name_.at(name);
-          // Converters are per-instance dynamic_casts, returning nullptr for models lacking the aggregate mixin (e.g. default channel).
+          // Per-instance dynamic_casts: nullptr for models not inheriting the mixin
+          // (e.g. default channel), so only genuine matches enroll.
           if (auto* match = converter(typed_ptr)) {
             result.push_back(match);
           }

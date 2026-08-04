@@ -52,10 +52,13 @@
 // class CACHE;
 // class O3_CPU;
 /**
- * The ChampSim runtime module system: module interfaces plus the infrastructure
- * to construct, register, and instantiate them at runtime. Authors use the
- * user-facing interfaces (prefetcher, replacement, branch_predictor, btb),
- * ModuleBuilder, and register_module.
+ * The ChampSim runtime module system.
+ *
+ * This namespace contains all module interfaces and the infrastructure for
+ * constructing, registering, and instantiating modules at runtime. Module
+ * authors interact primarily with the four user-facing interfaces
+ * (prefetcher, replacement, branch_predictor, btb), the ModuleBuilder for
+ * construction, and the register_module template for registration.
  */
 #include "packet_consumer.h"
 #include "packet_producer.h"
@@ -76,8 +79,9 @@ struct environment_module;
 struct ModuleBuilder {
 public:
   /**
-   * One lexical scope frame: an immutable map of named values visible to a
-   * module and everything beneath it. Shared+immutable keeps copies cheap.
+   * One level of lexical scope: a frozen map of named values visible to a
+   * module and everything constructed beneath it in the config tree.
+   * Shared, immutable frames make builder copies cheap and lifetime-safe.
    */
   using scope_frame_type = std::shared_ptr<const std::map<std::string, std::any>>;
 
@@ -91,8 +95,9 @@ private:
   std::string module_name = "";
   std::string model = "";
   std::any parent = nullptr;
-  // Environment to notify on instance creation (nested-instance enrollment).
-  // Set only on submodule builders; top-level children the environment registers.
+  // The environment that should be told about this instance when it is
+  // created (nested-instance enrollment). Set only on submodule builders —
+  // top-level children are registered by the environment itself.
   environment_module* owner_ = nullptr;
 
   template <typename T>
@@ -187,9 +192,11 @@ public:
    * \return The parameter value, or default_value if absent and optional.
    */
   /**
-   * Process-wide fall-through builder: a get_parameter miss on the local
-   * builder consults this before failing. Holds system-wide settings
-   * (block_size, page_size, num_consumers, ...) every module can read.
+   * Process-wide fall-through builder. Any ``get_parameter`` call that
+   * misses the local builder consults this one before failing/returning
+   * the default. Use it for system-wide settings (block_size, page_size,
+   * num_consumers, etc.) that every module should be able to read without
+   * requiring the environment to inject them everywhere.
    */
   static ModuleBuilder& globals()
   {
@@ -200,8 +207,8 @@ public:
   template <typename T>
   T get_parameter(std::string name, bool optional = false, T default_value = T{}) const
   {
-    // Globals lookups (direct or fall-through) are suppressed in dump output
-    // to avoid per-module spam of system params.
+    // Globals lookups (either direct or via fall-through) are completely
+    // suppressed in dump output to avoid per-module spam of system params.
     const bool suppress_dump = (this == &globals());
     auto found = lookup_parameter<T>(name);
     if (found.value.has_value()) {
@@ -370,9 +377,12 @@ public:
 
   // ---- Nested-instance enrollment ----
 
-  // Recursively mark every submodule builder (not this one) as owned by env.
-  // Instances from owned builders self-announce via enroll_nested_instance,
-  // joining the environment's views (and operable ticking).
+  // Recursively mark every submodule builder (but not this builder) as owned
+  // by the given environment. Instances created from owned builders announce
+  // themselves via environment_module::enroll_nested_instance, which is how
+  // submodule-created modules (instruction producers, prefetchers, ...) become
+  // visible to the environment's views — and, when operable, get ticked
+  // automatically by the orchestrator.
   ModuleBuilder& set_owner_of_submodules(environment_module* env)
   {
     for (auto& [iface, subs] : submodules_) {
@@ -432,9 +442,10 @@ public:
     std::function<champsim::module_stat*(const std::any&)> to_module_stat;
     // Returns the registered model name and the instance NAME for an instance any.
     std::function<instance_id(const std::any&)> identify;
-    // Whether the named model's impl is a packet_consumer / packet_producer.
-    // Recorded at register_module time (is_base_of) so environments can count
-    // consumers/sources from a config before constructing any module.
+    // True when the named model's implementation class is a packet_consumer
+    // / packet_producer. Recorded at register_module time (statically, via
+    // is_base_of), so environments can count consumers and producers from a
+    // config before constructing any module.
     std::function<bool(const std::string&)> model_is_consumer;
     std::function<bool(const std::string&)> model_is_producer;
     // Per-instance dynamic_cast to the packet_producer mixin (matching
@@ -442,8 +453,9 @@ public:
     std::function<packet_producer*(const std::any&)> to_packet_producer;
     // Creates a typed null pointer wrapped in std::any
     std::function<std::any()> make_null_pointer;
-    // Human-readable plural label for the startup summary (e.g. "cores", "caches").
-    // Empty for interfaces that should not appear in the count listing.
+    // Human-readable display name for the interface (e.g. "cores", "caches") -- a general
+    // label for logging, summaries, and diagnostics. Empty means callers fall back to the
+    // interface name.
     std::string display_name;
   };
 
@@ -562,7 +574,7 @@ public:
     return names;
   }
 
-  // The plural label an interface reports itself under in the startup summary, or empty.
+  // The interface's human-readable display name (see interface_info::display_name), or empty.
   static std::string interface_display_name(const std::string& interface_name)
   {
     return get_member(interface_name, &interface_info::display_name);
@@ -604,9 +616,11 @@ private:
     return name;
   }
 
-  // A registered model's factory plus traits that must be queryable before
-  // any instance exists (pre-construction counts can't dynamic_cast, so
-  // inheritance is recorded here where the concrete type is known statically).
+  // Everything known about a registered model: its factory, plus the
+  // traits that must be queryable before any instance exists (a
+  // pre-construction consumer count cannot dynamic_cast what has not been
+  // constructed, so inheritance is recorded here, where the concrete type
+  // is known statically).
   struct model_record {
     std::function<std::unique_ptr<B>(ModuleBuilder builder)> create;
     bool is_consumer = false;
@@ -823,8 +837,10 @@ struct core_module : public module_base<core_module, environment_module>, public
   // Heartbeat suppression (--hide-heartbeat): a core stops emitting PROGRESS events.
   virtual void quiet(bool /*enable*/) {}
 
-  // Health policy for instruction consumers: IPC over the check window vs
-  // retirement-rate floors (the former phase-controller livelock thresholds).
+  // Health policy for instruction consumers: progress rate (instructions
+  // per cycle) over the check window against retirement-rate floors.
+  // These are the former phase-controller livelock thresholds, now owned
+  // by the consumer that knows its own progress unit.
   consumer_health check_health(uint64_t elapsed) override;
   void reset_health() override;
 
@@ -1004,8 +1020,8 @@ struct channel_module : public module_base<channel_module, environment_module> {
 struct vmem_module : public module_base<vmem_module, environment_module> {
   virtual ~vmem_module() = default;
   virtual std::size_t available_ppages() const = 0;
-  // Address spaces are keyed by the origin's source (origin.asid()): one
-  // physical address space, many sources.
+  // Address spaces are keyed by the origin's producer (origin.asid()): one
+  // physical address space, many producers.
   virtual std::pair<champsim::page_number, champsim::chrono::clock::duration> va_to_pa(champsim::origin origin, champsim::page_number vaddr) = 0;
   virtual std::pair<champsim::address, champsim::chrono::clock::duration> get_pte_pa(champsim::origin origin, champsim::page_number vaddr,
                                                                                      std::size_t level) = 0;
@@ -1269,11 +1285,17 @@ struct btb : public module_base<btb, core_module> {
 };
 
 /**
- * Workload source interface — provides discrete units of work ("packets") to a
- * packet_consumer. Attach as a submodule of a packet_consumer. This base holds
- * only the packet-agnostic lifecycle; the typed pull protocol lives on
- * typed_packet_producer<Packet>. Consumer and sources agree on the packet type by
- * construction, so mixed packet types coexist (the orchestrator never sees it).
+ * Packet producer interface — provides discrete units of work ("packets")
+ * to a packet_consumer.
+ *
+ * Attach as a submodule of any module that inherits packet_consumer.
+ * This base carries only the packet-agnostic lifecycle that the
+ * orchestration layer needs; the typed pull protocol lives on
+ * typed_packet_producer<Packet>. A consumer and its producers agree on the
+ * packet type by construction: a core consumes instruction_producer
+ * (Packet = ooo_model_instr), a memory-stream producer feeds a cache-side
+ * consumer records, a network consumer would take packets — all meshing
+ * in one run because the orchestrator never sees the packet type.
  */
 /**
  * Interface for the top-level environment module.
@@ -1286,10 +1308,11 @@ struct environment_module : public module_base<environment_module, environment_m
   // Special interface_type "operable" returns all operable modules across all interfaces.
   virtual std::vector<std::any> view(const std::string& interface_type) const = 0;
 
-  // Called by create_instance for instances whose builder was marked via
-  // set_owner_of_submodules (modules built inside a parent, not by the env).
-  // Implementations append these to their views after top-level modules
-  // (preserving top-level order). Default: ignore.
+  // Called by module_base::create_instance for instances whose builder was
+  // marked via ModuleBuilder::set_owner_of_submodules — i.e. modules
+  // constructed inside a parent module rather than by the environment.
+  // Implementations should append these to their views (after top-level
+  // modules, preserving top-level ordering). Default: ignore.
   virtual void enroll_nested_instance(const std::string& /*interface_name*/, const std::string& /*name*/, std::any /*instance*/) {}
 
   // Typed convenience wrapper: casts the any values to T* and returns reference_wrappers.

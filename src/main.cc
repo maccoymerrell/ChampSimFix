@@ -45,6 +45,7 @@ std::vector<phase_stats> main(modules::environment_module& env, std::vector<phas
 void assign_identities(modules::environment_module& env);
 } // namespace champsim
 
+// Collect all $varname references from a JSON document (recursive).
 static void collect_config_vars(const nlohmann::json& node, std::set<std::string>& out_vars)
 {
   if (node.is_string()) {
@@ -88,7 +89,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 
   app.add_option("--listeners", requested_listeners, "A list of the listeners to be attached to the run");
 
-  // First pass reads the config file path; the second uses the resolved core count for trace validation.
+  // First CLI pass reads the config file path; the second pass uses the resolved core count for trace validation.
   app.allow_extras(true);
   try {
     app.parse(argc, argv);
@@ -99,6 +100,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   if (knob_dump)
     fmt::print("=== Module Builder Dump ===\n");
 
+  // Read JSON config from file or stdin
   nlohmann::json config_json;
   if (config_file_path == "-") {
     try {
@@ -125,15 +127,18 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     fmt::print(stderr, "\nConfig: {}\n\n", config_json["_description"].get<std::string>());
   }
 
+  // Parse config for system parameters
   std::string env_model = config_json.value("environment", std::string("LEGACY_ENVIRONMENT"));
   bool is_legacy_env = (env_model == "LEGACY_ENVIRONMENT");
-  // CLI expects one trace per packet producer. Legacy env spawns one producer per core (count is num_cores); explicit envs allow any count.
+  // CLI expects one trace per packet producer. The legacy env spawns one producer per core,
+  // so its producer count == num_cores; explicit envs declare producers in the config and accept any count.
   std::size_t legacy_num_producers = config_json.value("num_cores", 1u);
 
-  // "cycle_skip" (default true) lets idle operables skip via poll_cycle(); false forces operate() every cycle (A/B switch).
+  // "cycle_skip" (default true) lets idle operables skip cycles; false forces operate() each cycle (A/B verification switch).
   champsim::operable::set_skip_enabled(config_json.value("cycle_skip", true));
 
-  // Each config $varname not covered by an explicit CLI option becomes a --varname option in the second pass (substituted via cli_args).
+  // Scan config for $varname refs not covered by explicit CLI options; each becomes a
+  // --varname option in the second pass, substituted into module params via cli_args.
   static const std::set<std::string> builtin_cli_vars = {"warmup_instructions", "simulation_instructions", "cloudsuite"};
   std::set<std::string> raw_config_vars;
   collect_config_vars(config_json, raw_config_vars);
@@ -147,6 +152,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     dynamic_cli_vars[vn] = "";
   }
 
+  // Second CLI parse with full validation
   bool hide_heartbeat = false;
   CLI::App app2{"A microarchitecture simulator for research and education"};
   app2.add_option("--config", config_file_path, "Path to the JSON configuration file");
@@ -166,7 +172,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
       app2.add_option("--json", json_file_name, "The name of the file to receive JSON output. If no name is specified, stdout will be used")->expected(0, 1);
   app2.add_option("--listeners", requested_listeners, "A list of the listeners to be attached to the run");
 
-  // Legacy env requires exactly legacy_num_producers traces; explicit envs allow any number (traces resolve via $traceN vars).
+  // Legacy env requires exactly legacy_num_producers traces; explicit envs allow any (resolved via $traceN).
   auto* trace_option = app2.add_option("traces", trace_names, "The paths to the traces");
   if (is_legacy_env) {
     trace_option->required()->expected(static_cast<int>(legacy_num_producers))->check(CLI::ExistingFile);
@@ -193,7 +199,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     warmup_instructions = simulation_instructions / 5;
   }
 
-  // CLI args map for $-variable substitution, now that all CLI args are known.
+  // Construct the environment (after all CLI args are known); build a CLI args map for $-variable substitution.
   nlohmann::json cli_args = nlohmann::json::object();
   cli_args["warmup_instructions"] = warmup_instructions;
   cli_args["simulation_instructions"] = simulation_instructions;
@@ -241,8 +247,8 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     }
   }
 
-  // Phase list from the environment's phase controllers: the first non-empty list owns the run structure, a second that
-  // disagrees is a config error. Else fall back to the classic warmup+sim pair driven by -w/-i.
+  // Phase list from the environment's phase controllers: first non-empty list wins, a
+  // conflicting second is a config error; else fall back to the classic two-phase (-w/-i).
   std::vector<champsim::phase_info> phases;
   for (champsim::modules::phase_controller& pc : gen_environment->typed_view<champsim::modules::phase_controller>("phase_controller")) {
     auto controller_phases = pc.get_phases();
@@ -272,13 +278,16 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   for (const auto& p : phases) {
     fmt::print("{} Instructions: {}\n", p.name, p.length);
   }
-  // Module counts: each interface reports its own plural label (see register_interface in
-  // src/modules.cc), so the listing is generated rather than hardcoding cores/producers.
+  // Module counts: every registered interface with instances is listed, labelled by the plural
+  // it reports at registration (falling back to its interface name), so nothing here is
+  // hardcoded and a new interface appears automatically.
   for (const auto& iface : champsim::modules::interface_registry::get_interface_names()) {
-    const auto label = champsim::modules::interface_registry::interface_display_name(iface);
-    if (!label.empty()) {
-      fmt::print("{}: {}\n", label, gen_environment->get_num(iface));
+    const auto count = gen_environment->get_num(iface);
+    if (count == 0) {
+      continue;
     }
+    const auto label = champsim::modules::interface_registry::interface_display_name(iface);
+    fmt::print("{}: {}\n", label.empty() ? iface : label, count);
   }
   fmt::print("Page size: {}\n\n", gen_environment->get_page_size());
 

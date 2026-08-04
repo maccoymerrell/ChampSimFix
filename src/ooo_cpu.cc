@@ -119,13 +119,13 @@ namespace
 {
 void do_stack_pointer_folding(ooo_model_instr& arch_instr)
 {
-  // The stack pointer's true value can usually be determined right after decode,
-  // without waiting for its dependency chain to resolve.
+  // The exact, true value of the stack pointer for any given instruction can usually be determined immediately after the instruction is decoded without
+  // waiting for the stack pointer's dependency chain to be resolved.
   bool writes_sp = (std::count(std::begin(arch_instr.destination_registers), std::end(arch_instr.destination_registers), champsim::REG_STACK_POINTER) > 0);
   if (writes_sp) {
-    // Avoid stack-pointer register deps for calls/returns/pushes/pops, but not
-    // for variable-sized changes. reads_other means the SP changes by a
-    // variable amount, unknowable before execution.
+    // Avoid creating register dependencies on the stack pointer for calls, returns, pushes, and pops, but not for variable-sized changes in the
+    // stack pointer position. reads_other indicates that the stack pointer is being changed by a variable amount, which can't be determined before
+    // execution.
     bool reads_other =
         (std::count_if(std::begin(arch_instr.source_registers), std::end(arch_instr.source_registers),
                        [](auto r) { return r != champsim::REG_STACK_POINTER && r != champsim::REG_FLAGS && r != champsim::REG_INSTRUCTION_POINTER; })
@@ -142,7 +142,7 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
 {
   bool stop_fetch = false;
 
-  // Predict for all instructions; we don't yet know if this is a branch.
+  // handle branch prediction for all instructions as at this point we do not know if the instruction is a branch
   sim_stats.total_branch_types.increment(arch_instr.branch);
   auto [predicted_branch_target, always_taken] = impl_btb_prediction(arch_instr.ip, arch_instr.branch);
   arch_instr.branch_prediction = impl_predict_branch(arch_instr.ip, predicted_branch_target, always_taken, arch_instr.branch) || always_taken;
@@ -185,8 +185,7 @@ std::size_t O3_CPU::instructions_requested() { return IN_QUEUE_SIZE - static_cas
 
 bool O3_CPU::do_init_instruction(ooo_model_instr& arch_instr)
 {
-  // Fast warmup drops inter-instruction register deps; predictor, caches, and
-  // prefetchers still warm up.
+  // fast warmup eliminates register dependencies between instructions branch predictor, cache contents, and prefetchers are still warmed up
   if (is_warmup()) {
     arch_instr.source_registers.clear();
     arch_instr.destination_registers.clear();

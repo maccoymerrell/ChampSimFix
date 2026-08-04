@@ -204,8 +204,9 @@ public:
   channel_type* lower_level;
   channel_type* lower_translate;
 
-  // Provenance of the most recently served packet; stamped onto prefetches this
-  // cache issues (they attribute to whoever touched the cache last).
+  // Provenance of the most recently served packet; stamped onto prefetches
+  // issued by this cache (attribution: prefetches belong to whoever touched
+  // the cache last).
   champsim::origin last_served_origin{};
   std::string NAME;
   uint32_t NUM_SET, NUM_WAY, MSHR_SIZE;

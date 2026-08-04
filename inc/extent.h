@@ -44,8 +44,9 @@ struct dynamic_extent {
   champsim::data::bits lower;
 
   /**
-   * Default-construct a zero-width extent (upper == lower == 0), letting
-   * ``address_slice<dynamic_extent>`` array placeholders get a real extent later.
+   * Default-construct a zero-width extent (upper == lower == 0). Allows
+   * ``address_slice<dynamic_extent>`` to be default-constructed for array
+   * placeholders that get a real extent assigned to them on first use.
    */
   constexpr dynamic_extent() : upper{}, lower{} {}
 
@@ -149,11 +150,12 @@ inline std::size_t size(page_offset_extent ext) { return to_underlying(ext.upper
 inline std::size_t size(block_number_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
 inline std::size_t size(block_offset_extent ext) { return to_underlying(ext.upper) - to_underlying(ext.lower); }
 
-// Rewrite the cached page/block extents used by the default constructors of
-// page_number_extent / block_offset_extent etc. Call once after publishing
-// log2_page_size / log2_block_size to ModuleBuilder::globals(); later-built
-// address slices then pick up the new geometry without a per-construction
-// globals lookup.
+// Refresh the cached page/block extent values used by the default
+// constructors of ``page_number_extent`` / ``block_offset_extent`` etc.
+// Call once after publishing ``log2_page_size`` / ``log2_block_size`` to
+// ``ModuleBuilder::globals()`` so any subsequently-constructed address
+// slice picks up the new geometry. Avoids per-construction globals
+// lookups on the hot path.
 void refresh_address_extents();
 
 template <champsim::data::bits UP, champsim::data::bits LOW>

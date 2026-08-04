@@ -38,19 +38,12 @@ public:
   virtual void initialize() {} // LCOV_EXCL_LINE
   virtual long operate() = 0;
 
-  // Idle-skip hook, run before each local cycle (current_time already advanced to
-  // it). Return 0 to simulate this cycle; return n>0 to skip n cycles (time jumps
-  // n*clock_period with no simulation). Two rules: still tick any contractually
-  // per-cycle submodule hook (e.g. prefetcher_cycle_operate) on skipped cycles,
-  // and skip at most 1 cycle if work can arrive by external push. Globally
-  // disabled by cycle_skip=false (A/B behavior verification).
+  // Idle-skip hook: return 0 to simulate this cycle, n>0 to skip n cycles (no progress). Must still tick per-cycle submodule hooks on skips, and
+  // skip at most 1 cycle if work can arrive by external push. Disabled globally via set_skip_enabled(false) / config "cycle_skip".
   virtual long poll_cycle() { return 0; } // LCOV_EXCL_LINE
 
-  // True when self-scheduled work will complete at a known future time with NO
-  // external input (DRAM refresh in flight, bank busy timer): while any reports
-  // pending work, zero global progress counts as scheduled quiet time, not
-  // deadlock. Must NOT be true for work awaiting another module (e.g. an MSHR on
-  // a lower level) — that is exactly what the deadlock detector must catch.
+  // True when this operable has self-scheduled work completing at a known future time WITHOUT external input (e.g. DRAM refresh, bank timer) —
+  // treated as scheduled quiet, not deadlock. Do NOT return true for work depending on another module responding; that is what the deadlock detector catches.
   virtual bool has_pending_work() const { return false; } // LCOV_EXCL_LINE
 
   virtual void print_deadlock() {} // LCOV_EXCL_LINE

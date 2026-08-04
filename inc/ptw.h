@@ -37,9 +37,9 @@ class PageTableWalker : public champsim::modules::page_table_walker_module, publ
     champsim::address vaddr;
     champsim::address ptw_addr;
     std::size_t level;
-    // Address space of this cached walk step. The walker is shared hardware,
-    // so entries are asid-tagged to keep concurrent address spaces from hitting
-    // each other's steps.
+    // The address space this cached walk step belongs to. A walker is
+    // hardware owned by a consumer, not by an address space: entries are
+    // asid-tagged so concurrent address spaces never hit each other's steps.
     champsim::origin::id_type asid = 0;
   };
 

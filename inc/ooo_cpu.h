@@ -40,13 +40,13 @@
 #include "channel.h"
 #include "core_stats.h"
 #include "instruction.h"
-#include "instruction_producer.h"
 #include "modules.h"
 #include "msl/lru_table.h"
 #include "operable.h"
 #include "register_allocator.h"
 #include "util/ring_buffer.h"
 #include "util/to_underlying.h"
+#include "instruction_producer.h"
 
 class CACHE;
 class CacheBus
@@ -90,7 +90,8 @@ struct LSQ_ENTRY : champsim::program_ordered<LSQ_ENTRY> {
 class O3_CPU : public champsim::modules::core_module, public champsim::module_phase, public champsim::module_stat
 {
 public:
-  // This core's consumer id (its "CPU number"): hardware-context identity.
+  // This core's consumer id (its "CPU number"): hardware-context identity
+  // for provenance stamping, tables, stats, and phase tracking.
 
   // cycle
   champsim::chrono::clock::time_point begin_phase_time{};

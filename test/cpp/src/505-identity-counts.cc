@@ -1,11 +1,12 @@
 #include <catch.hpp>
+
 #include <map>
 #include <nlohmann/json.hpp>
 
 #include "environment.h"
 #include "instr.h"
-#include "instruction_producer.h"
 #include "modules.h"
+#include "instruction_producer.h"
 
 namespace champsim
 {
@@ -48,8 +49,8 @@ static champsim::modules::core_module::register_module<probe_core_505> probe_cor
 
 TEST_CASE("num_consumers, num_producers, and num_producer_groups are each counted in their own space")
 {
-  // Two consumers (cores). Four sources: c0 holds three (two sharing a
-  // producer_group label, one on its own), c1 holds one. Three source groups: the
+  // Two consumers (cores). Four producers: c0 holds three (two sharing a
+  // producer_group label, one on its own), c1 holds one. Three producer groups: the
   // shared label collapses c0's pair onto one id. Every count differs (2, 4, 3),
   // so any conflation fails loudly.
   nlohmann::json config = {
@@ -70,15 +71,16 @@ TEST_CASE("num_consumers, num_producers, and num_producer_groups are each counte
                {"name", "t505_c1"},
                {"module", "core"},
                {"model", "PROBE_CORE_505"},
-               {"children", nlohmann::json::array({
-                                nlohmann::json{{"name", "t505_c1_src"}, {"module", "instruction_producer"}, {"model", "PROBE_PRODUCER_505"}},
-                            })},
+               {"children",
+                nlohmann::json::array({
+                    nlohmann::json{{"name", "t505_c1_src"}, {"module", "instruction_producer"}, {"model", "PROBE_PRODUCER_505"}},
+                })},
            },
        })},
   };
 
-  auto env_builder =
-      champsim::modules::ModuleBuilder("t505_env", "ENVIRONMENT").add_parameter("config_json", config).add_parameter("cli_args", nlohmann::json::object());
+  auto env_builder = champsim::modules::ModuleBuilder("t505_env", "ENVIRONMENT").add_parameter("config_json", config).add_parameter("cli_args",
+                                                                                                                                    nlohmann::json::object());
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
   REQUIRE(env != nullptr);
 
@@ -87,18 +89,18 @@ TEST_CASE("num_consumers, num_producers, and num_producer_groups are each counte
   CHECK(globals.get_parameter<std::size_t>("num_producers") == 4);
   CHECK(globals.get_parameter<std::size_t>("num_producer_groups") == 3);
 
-  // c0's labeled pair share one source id; c0's third source and c1's source
+  // c0's labeled pair share one producer id; c0's third producer and c1's producer
   // each get their own. (View order is top-level modules before nested ones, so
   // assertions key on names, not positions.)
   champsim::assign_identities(*env);
-  auto sources = env->typed_view<champsim::modules::packet_producer>("packet_producer");
-  REQUIRE(std::size(sources) == 4);
+  auto producers = env->typed_view<champsim::modules::packet_producer>("packet_producer");
+  REQUIRE(std::size(producers) == 4);
   std::map<std::string, uint32_t> producer_of;
-  for (auto& src : sources) {
+  for (auto& src : producers) {
     producer_of[src.get().producer_name()] = src.get().producer_id();
   }
   REQUIRE(std::size(producer_of) == 4);
-  CHECK(producer_of.at("t505_c0_srcA") == producer_of.at("t505_c0_srcB")); // shared label, one source id
+  CHECK(producer_of.at("t505_c0_srcA") == producer_of.at("t505_c0_srcB")); // shared label, one producer id
   CHECK(producer_of.at("t505_c0_srcC") != producer_of.at("t505_c0_srcA"));
   CHECK(producer_of.at("t505_c1_src") != producer_of.at("t505_c0_srcA"));
   CHECK(producer_of.at("t505_c1_src") != producer_of.at("t505_c0_srcC"));

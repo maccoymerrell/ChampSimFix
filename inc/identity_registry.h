@@ -25,9 +25,11 @@
 
 namespace champsim
 {
-// Name<->id map for framework-assigned identities (never in configs, populated
-// by assign_identities()): a consumer id maps to one name, a source id to the
-// source names sharing its "producer_group" label.
+/**
+ * Name <-> id map for framework-assigned identities (populated by assign_identities()),
+ * used to translate ids to configured instance names. Consumer id -> one name; producer id
+ * -> one or more producer names (producers sharing a "producer_group" label share one id).
+ */
 class identity_registry
 {
   std::map<int, std::string> consumer_names_;
@@ -42,12 +44,13 @@ public:
     consumer_names_[id] = std::move(name);
   }
 
-  void register_producer(uint32_t source, std::string name)
+  void register_producer(uint32_t producer, std::string name)
   {
-    producer_ids_[name] = source;
-    packet_producers_[source].push_back(std::move(name));
+    producer_ids_[name] = producer;
+    packet_producers_[producer].push_back(std::move(name));
   }
 
+  /** The configured name of the consumer holding this id. */
   std::optional<std::string> consumer_name(int id) const
   {
     if (auto it = consumer_names_.find(id); it != std::end(consumer_names_)) {
@@ -56,6 +59,7 @@ public:
     return std::nullopt;
   }
 
+  /** The id assigned to the consumer configured under this name. */
   std::optional<int> consumer_id(const std::string& name) const
   {
     if (auto it = consumer_ids_.find(name); it != std::end(consumer_ids_)) {
@@ -64,14 +68,16 @@ public:
     return std::nullopt;
   }
 
-  std::vector<std::string> packet_producers(uint32_t source) const
+  /** The configured names of every producer stamping this producer id. */
+  std::vector<std::string> packet_producers(uint32_t producer) const
   {
-    if (auto it = packet_producers_.find(source); it != std::end(packet_producers_)) {
+    if (auto it = packet_producers_.find(producer); it != std::end(packet_producers_)) {
       return it->second;
     }
     return {};
   }
 
+  /** The producer id assigned to the producer configured under this name. */
   std::optional<uint32_t> producer_id(const std::string& name) const
   {
     if (auto it = producer_ids_.find(name); it != std::end(producer_ids_)) {
