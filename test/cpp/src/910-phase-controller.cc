@@ -4,12 +4,22 @@
 #include <any>
 #include <map>
 #include <functional>
+#include <nlohmann/json.hpp>
 
 #include "modules.h"
 #include "phase_controller.h"
 #include "operable.h"
 
 namespace {
+
+// The controller owns its phases; a test supplies them through the builder. begin_phase() then
+// steps to the next one and informs the operables, exactly as it does under the real environment.
+nlohmann::json one_phase(const std::string& name, bool warmup, uint64_t length)
+{
+  nlohmann::json phases = nlohmann::json::array();
+  phases.push_back({{"name", name}, {"is_warmup", warmup}, {"length", length}});
+  return phases;
+}
 
 // Mock core with controllable instruction count and EOF state
 struct mock_core : public champsim::modules::core_module {
@@ -91,10 +101,11 @@ TEST_CASE("Phase controller completes when all cores reach instruction count")
   mock_env->cores_ = {mc0, mc1};
 
   auto pc_builder = champsim::modules::ModuleBuilder("pc", "PHASE_CONTROLLER")
-    .add_parameter("deadlock_cycles", 1000);
+    .add_parameter("deadlock_cycles", 1000)
+    .add_parameter("phases", one_phase("Test", false, 100));
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
-  pc->begin_phase("Test", false, 100);
+  pc->begin_phase();
 
   // Neither core has completed
   auto s = pc->advance(1);
@@ -114,15 +125,13 @@ TEST_CASE("Phase controller completes when all cores reach instruction count")
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
   REQUIRE(pc->newly_completed_consumers().empty());
 
-  // Core 1 reaches target -> phase complete
+  // Core 1 reaches target -> the last (only) phase is done
   mc1->instr_count = 100;
   s = pc->advance(1);
-  REQUIRE(s == champsim::modules::phase_controller::status::COMPLETE);
+  REQUIRE(s == champsim::modules::phase_controller::status::DONE);
   completed = pc->newly_completed_consumers();
   REQUIRE(completed.size() == 1);
   REQUIRE(completed[0] == 1);
-
-  pc->end_phase();
 }
 
 TEST_CASE("Phase controller detects deadlock on stalled cycles")
@@ -139,10 +148,11 @@ TEST_CASE("Phase controller detects deadlock on stalled cycles")
 
   // Use a small deadlock cycle limit for testing
   auto pc_builder = champsim::modules::ModuleBuilder("pc_dl", "PHASE_CONTROLLER")
-    .add_parameter("deadlock_cycles", 5);
+    .add_parameter("deadlock_cycles", 5)
+    .add_parameter("phases", one_phase("Deadlock Test", false, 1000));
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
-  pc->begin_phase("Deadlock Test", false, 1000);
+  pc->begin_phase();
 
   // Progress > 0: no deadlock
   for (int i = 0; i < 10; ++i) {
@@ -159,8 +169,6 @@ TEST_CASE("Phase controller detects deadlock on stalled cycles")
   // 5th stalled cycle: ABORT
   auto s = pc->advance(0);
   REQUIRE(s == champsim::modules::phase_controller::status::ABORT);
-
-  pc->end_phase();
 }
 
 TEST_CASE("Phase controller completes all consumers when one producer hits EOF (complete_all)")
@@ -182,22 +190,21 @@ TEST_CASE("Phase controller completes all consumers when one producer hits EOF (
   mock_env->cores_ = {mc0, mc1};
 
   auto pc_builder = champsim::modules::ModuleBuilder("pc_eof", "PHASE_CONTROLLER")
-    .add_parameter("deadlock_cycles", 1000);
+    .add_parameter("deadlock_cycles", 1000)
+    .add_parameter("phases", one_phase("EOF Test", false, 1000000));
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
-  pc->begin_phase("EOF Test", false, 1000000);
+  pc->begin_phase();
 
   auto s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
 
-  // Core 0's producers reach EOF: default policy ends the phase for everyone
+  // Core 0's producers reach EOF: default policy ends the (only) phase for everyone
   mc0->producers_eof_ = true;
   s = pc->advance(1);
-  REQUIRE(s == champsim::modules::phase_controller::status::COMPLETE);
+  REQUIRE(s == champsim::modules::phase_controller::status::DONE);
   auto completed = pc->newly_completed_consumers();
   REQUIRE(completed.size() == 2);
-
-  pc->end_phase();
 }
 
 TEST_CASE("Phase controller completes only the exhausted consumer under complete_consumer policy")
@@ -220,10 +227,11 @@ TEST_CASE("Phase controller completes only the exhausted consumer under complete
 
   auto pc_builder = champsim::modules::ModuleBuilder("pc_eofs", "PHASE_CONTROLLER")
     .add_parameter("deadlock_cycles", 1000)
-    .add_parameter("eof_policy", std::string{"complete_consumer"});
+    .add_parameter("eof_policy", std::string{"complete_consumer"})
+    .add_parameter("phases", one_phase("EOF Producer Test", false, 100));
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
-  pc->begin_phase("EOF Producer Test", false, 100);
+  pc->begin_phase();
 
   // Core 0's producers reach EOF: only consumer 0 completes
   mc0->producers_eof_ = true;
@@ -233,15 +241,13 @@ TEST_CASE("Phase controller completes only the exhausted consumer under complete
   REQUIRE(completed.size() == 1);
   REQUIRE(completed[0] == 0);
 
-  // Core 1 finishes by progress: phase completes
+  // Core 1 finishes by progress: the (only) phase completes
   mc1->instr_count = 100;
   s = pc->advance(1);
-  REQUIRE(s == champsim::modules::phase_controller::status::COMPLETE);
+  REQUIRE(s == champsim::modules::phase_controller::status::DONE);
   completed = pc->newly_completed_consumers();
   REQUIRE(completed.size() == 1);
   REQUIRE(completed[0] == 1);
-
-  pc->end_phase();
 }
 
 TEST_CASE("Phase controller defers deadlock while a consumer reports pending work")
@@ -265,10 +271,11 @@ TEST_CASE("Phase controller defers deadlock while a consumer reports pending wor
   mock_env->cores_ = {mc0};
 
   auto pc_builder = champsim::modules::ModuleBuilder("pc_pend", "PHASE_CONTROLLER")
-    .add_parameter("deadlock_cycles", 5);
+    .add_parameter("deadlock_cycles", 5)
+    .add_parameter("phases", one_phase("Pending Test", false, 1000));
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
-  pc->begin_phase("Pending Test", false, 1000);
+  pc->begin_phase();
 
   // Zero progress but pending work scheduled: never aborts
   mc0->pending_ = true;
@@ -284,8 +291,6 @@ TEST_CASE("Phase controller defers deadlock while a consumer reports pending wor
     s = pc->advance(0);
   }
   REQUIRE(s == champsim::modules::phase_controller::status::ABORT);
-
-  pc->end_phase();
 }
 
 TEST_CASE("Phase controller resets state between phases")
@@ -300,25 +305,31 @@ TEST_CASE("Phase controller resets state between phases")
   auto* mc0 = dynamic_cast<mock_core*>(core0);
   mock_env->cores_ = {mc0};
 
+  // Two phases owned by the controller: Warmup(100) then Simulation(200).
+  nlohmann::json phases = nlohmann::json::array();
+  phases.push_back({{"name", "Phase1"}, {"is_warmup", true}, {"length", 100}});
+  phases.push_back({{"name", "Phase2"}, {"is_warmup", false}, {"length", 200}});
+
   auto pc_builder = champsim::modules::ModuleBuilder("pc_reset", "PHASE_CONTROLLER")
-    .add_parameter("deadlock_cycles", 1000);
+    .add_parameter("deadlock_cycles", 1000)
+    .add_parameter("phases", phases);
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
   // Phase 1: complete immediately — progress reaches the phase length on first advance
   mc0->instr_count = 0;
-  pc->begin_phase("Phase1", true, 100);
-  mc0->instr_count = 100;  // delta = 100 - baseline(0) = 100 >= length(100) → COMPLETE
+  pc->begin_phase();
+  REQUIRE(pc->phase().name == "Phase1");
+  mc0->instr_count = 100;  // delta = 100 - baseline(0) = 100 >= length(100) → phase 1 done, more remain
   auto s = pc->advance(1);
-  REQUIRE(s == champsim::modules::phase_controller::status::COMPLETE);
-  pc->end_phase();
+  REQUIRE(s == champsim::modules::phase_controller::status::PHASE_COMPLETE);
 
   // Phase 2: baseline = 100 (instr_count at Phase 2 start), length = 200
-  pc->begin_phase("Phase2", false, 200);
+  pc->begin_phase();
+  REQUIRE(pc->phase().name == "Phase2");
   s = pc->advance(1);
   REQUIRE(s == champsim::modules::phase_controller::status::CONTINUE);
 
-  mc0->instr_count = 300;  // delta = 300 - baseline(100) = 200 >= length(200) → COMPLETE
+  mc0->instr_count = 300;  // delta = 300 - baseline(100) = 200 >= length(200) → last phase done
   s = pc->advance(1);
-  REQUIRE(s == champsim::modules::phase_controller::status::COMPLETE);
-  pc->end_phase();
+  REQUIRE(s == champsim::modules::phase_controller::status::DONE);
 }

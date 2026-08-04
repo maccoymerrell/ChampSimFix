@@ -25,8 +25,10 @@
 #include <vector>
 #include <fmt/chrono.h>
 #include <fmt/core.h>
+#include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
 
+#include "module_phase.h"
 #include "modules.h"
 
 namespace
@@ -56,6 +58,11 @@ class default_phase_controller : public champsim::modules::phase_controller
   // Per-phase state
   std::string phase_name_;
   uint64_t length_ = 0;
+  int phase_idx_ = -1; // index into phases_; begin_phase() steps it
+
+  // module_phase operables, informed of each phase's begin/end. Cached lazily on first begin_phase().
+  std::vector<std::reference_wrapper<champsim::module_phase>> phase_modules_;
+  bool phase_modules_cached_ = false;
 
   // Configurable phase list (set at construction from builder params)
   std::vector<champsim::phase_info> phases_;
@@ -87,7 +94,8 @@ public:
   explicit default_phase_controller(champsim::modules::ModuleBuilder builder)
   {
     env_ = builder.get_parent<champsim::modules::environment_module>();
-    deadlock_cycles_ = builder.get_parameter<int>("deadlock_cycles", true, 500);
+    // Default to the environment's dynamic threshold; a config "deadlock_cycles" overrides.
+    deadlock_cycles_ = builder.get_parameter<int>("deadlock_cycles", true, env_->get_deadlock_cycles());
     health_period_ = builder.get_parameter<uint64_t>("health_period", true, 10000000ULL);
     complete_all_on_eof_ = builder.get_parameter<std::string>("eof_policy", true, std::string{"complete_all"}) != "complete_consumer";
 
@@ -120,10 +128,25 @@ public:
     }
   }
 
-  void begin_phase(const std::string& name, bool /*is_warmup*/, uint64_t length) override
+  void begin_phase() override
   {
-    phase_name_ = name;
-    length_ = length;
+    // Cache the module_phase operables on the first call (all modules are built by now).
+    if (!phase_modules_cached_) {
+      for (auto& op : env_->typed_view<champsim::operable>("operable")) {
+        if (auto* mp = dynamic_cast<champsim::module_phase*>(&op.get())) {
+          phase_modules_.emplace_back(*mp);
+        }
+      }
+      phase_modules_cached_ = true;
+    }
+
+    const auto& phase = phases_.at(static_cast<std::size_t>(++phase_idx_));
+    for (auto& mp : phase_modules_) {
+      mp.get().begin_phase(phase.is_warmup, phase.roi);
+    }
+
+    phase_name_ = phase.name;
+    length_ = phase.length;
     stalled_cycles_ = 0;
     health_timer_ = 0;
     health_abort_ = false;
@@ -222,18 +245,38 @@ public:
     }
 
     bool all_complete = !tracked_.empty() && incomplete_count_ == 0;
-    return all_complete ? status::COMPLETE : status::CONTINUE;
+    if (!all_complete) {
+      return status::CONTINUE;
+    }
+
+    // Phase complete: end it on the operables, then report whether more phases remain.
+    for (auto& mp : phase_modules_) {
+      mp.get().end_phase();
+    }
+    return (phase_idx_ + 1 < static_cast<int>(phases_.size())) ? status::PHASE_COMPLETE : status::DONE;
   }
+
+  const champsim::phase_info& phase() const override { return phases_.at(static_cast<std::size_t>(phase_idx_)); }
 
   std::vector<unsigned> newly_completed_consumers() const override { return newly_completed_; }
 
-  void end_phase() override
+  void print_phase_plan() const override
   {
-    packet_consumers_.clear();
-    operables_.clear();
-  }
+    std::map<std::string, std::vector<int>> ids_by_unit;
+    for (auto& sc : env_->typed_view<champsim::modules::packet_consumer>("packet_consumer"))
+      if (governs(sc.get().consumer_id()))
+        ids_by_unit[sc.get().progress_unit()].push_back(sc.get().consumer_id());
+    if (ids_by_unit.empty())
+      ids_by_unit.emplace("packets", std::vector<int>{});
 
-  std::vector<champsim::phase_info> get_phases() const override { return phases_; }
+    const bool disambiguate = ids_by_unit.size() > 1;
+    for (const auto& p : phases_)
+      for (const auto& [unit, ids] : ids_by_unit)
+        if (disambiguate)
+          fmt::print("{} {}: {} (consumers {})\n", p.name, unit, p.length, fmt::join(ids, ", "));
+        else
+          fmt::print("{} {}: {}\n", p.name, unit, p.length);
+  }
 };
 
 static champsim::modules::phase_controller::register_interface phase_controller_iface_reg("phase_controller", "phase controllers");

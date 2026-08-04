@@ -1205,4 +1205,6 @@ std::string champsim::modules::core_module::progress_message(uint64_t total_prog
                      interval_rate, cumulative_rate);
 }
 
+std::string champsim::modules::core_module::progress_unit() const { return "instructions"; }
+
 champsim::modules::core_module::register_module<O3_CPU> default_cpu_module("DEFAULT_CORE");

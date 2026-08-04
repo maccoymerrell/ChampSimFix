@@ -1,35 +1,80 @@
 #include <catch2/catch_test_macros.hpp>
 #include <functional>
+#include <set>
 #include <string>
 #include <vector>
 #include <nlohmann/json.hpp>
 
 #include "chrono.h"
 #include "modules.h"
-#include "phase_controller.h"
 #include "operable.h"
+#include "phase_controller.h"
 
-// Forward declare the generic driver functions from champsim.cc
-namespace champsim {
-long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables, champsim::chrono::clock& global_clock);
-void run_phase(const std::string& phase_name, bool is_warmup, bool roi, uint64_t length,
-               modules::environment_module& env,
-               std::vector<std::reference_wrapper<modules::phase_controller>>& controllers,
-               champsim::chrono::clock& global_clock,
-               std::function<void(unsigned)> on_consumer_complete);
-
-// Convenience for tests: drive a single controller through the multi-controller loop
-inline void run_phase(const std::string& phase_name, bool is_warmup, uint64_t length,
-                      modules::environment_module& env, modules::phase_controller& controller,
-                      champsim::chrono::clock& global_clock,
-                      std::function<void(unsigned)> on_consumer_complete)
+// do_cycle is the only orchestration primitive exposed by champsim.cc; the phase loop itself is
+// driven by the controllers through the phase_controller interface.
+namespace champsim
 {
-  std::vector<std::reference_wrapper<modules::phase_controller>> controllers{std::ref(controller)};
-  run_phase(phase_name, is_warmup, !is_warmup, length, env, controllers, global_clock, std::move(on_consumer_complete));
-}
+long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables, champsim::chrono::clock& global_clock);
 }
 
-namespace {
+namespace
+{
+
+// A local driver mirroring champsim::main's loop: each controller owns its phases and informs the
+// operables; we tick the operables, advance the controllers, and finish when every one is DONE.
+void drive(champsim::modules::environment_module& env,
+           std::vector<std::reference_wrapper<champsim::modules::phase_controller>> controllers, champsim::chrono::clock& clock,
+           const std::function<void(unsigned)>& on_complete)
+{
+  using status = champsim::modules::phase_controller::status;
+  auto operables = env.typed_view<champsim::operable>("operable");
+  std::vector<bool> finished(controllers.size(), false);
+  std::set<unsigned> seen;
+  std::size_t finished_count = 0;
+
+  for (auto& c : controllers) {
+    c.get().begin_phase();
+  }
+
+  while (finished_count < controllers.size()) {
+    clock.tick(champsim::chrono::picoseconds{250});
+    auto progress = champsim::do_cycle(operables, clock);
+    std::size_t i = 0;
+    for (auto& c : controllers) {
+      if (finished[i]) {
+        ++i;
+        continue;
+      }
+      auto s = c.get().advance(progress);
+      for (unsigned idx : c.get().newly_completed_consumers()) {
+        if (seen.insert(idx).second && on_complete) {
+          on_complete(idx);
+        }
+      }
+      if (s == status::DONE) {
+        finished[i] = true;
+        ++finished_count;
+      } else if (s == status::PHASE_COMPLETE) {
+        c.get().begin_phase();
+      }
+      ++i;
+    }
+  }
+}
+
+void drive_one(champsim::modules::environment_module& env, champsim::modules::phase_controller& controller, champsim::chrono::clock& clock,
+               const std::function<void(unsigned)>& on_complete)
+{
+  drive(env, {std::ref(controller)}, clock, on_complete);
+}
+
+// A controller that runs a single ROI phase of the given length (nothing is passed in from outside).
+nlohmann::json single_phase(const std::string& name, uint64_t length)
+{
+  nlohmann::json phases = nlohmann::json::array();
+  phases.push_back({{"name", name}, {"is_warmup", false}, {"length", length}});
+  return phases;
+}
 
 // A trivial operable that counts how many times it was operated
 struct counting_operable : public champsim::operable, public champsim::module_phase {
@@ -39,7 +84,8 @@ struct counting_operable : public champsim::operable, public champsim::module_ph
 
   counting_operable() : champsim::operable(champsim::chrono::picoseconds{250}) {}
 
-  long operate() override {
+  long operate() override
+  {
     ++op_count;
     return 1; // always make progress
   }
@@ -48,14 +94,14 @@ struct counting_operable : public champsim::operable, public champsim::module_ph
   void end_phase() override { ended_phases.push_back(0); }
 };
 
-// Mock core whose instruction count advances one per operated cycle, so phases complete naturally through the run_phase loop.
+// Mock core whose instruction count advances one per operated cycle, so phases complete naturally.
 struct mock_core_911 : public champsim::modules::core_module {
   uint64_t instr_count = 0;
   uint8_t cpu_num_ = 0;
   bool producers_eof_ = false; // a live core with attached producers is not at EOF
 
-  explicit mock_core_911(champsim::modules::ModuleBuilder builder)
-    : core_module(champsim::chrono::picoseconds{250}) {
+  explicit mock_core_911(champsim::modules::ModuleBuilder builder) : core_module(champsim::chrono::picoseconds{250})
+  {
     cpu_num_ = builder.get_parameter<uint8_t>("cpu_num", true, uint8_t{0});
     set_consumer_id(static_cast<int>(cpu_num_));
   }
@@ -64,7 +110,11 @@ struct mock_core_911 : public champsim::modules::core_module {
   std::size_t instructions_requested() override { return 0; }
   uint64_t sim_instr() const override { return instr_count; }
   uint64_t sim_cycle() const override { return 0; }
-  long operate() override { ++instr_count; return 1; }
+  long operate() override
+  {
+    ++instr_count;
+    return 1;
+  }
   cpu_stats get_sim_stats() const override { return {}; }
   cpu_stats get_roi_stats() const override { return {}; }
   bool producers_eof() const override { return producers_eof_; }
@@ -79,24 +129,25 @@ struct mock_env_911 : public champsim::modules::environment_module {
 
   explicit mock_env_911(champsim::modules::ModuleBuilder) {}
 
-  std::vector<std::any> view(const std::string& interface_type) const override {
+  std::vector<std::any> view(const std::string& interface_type) const override
+  {
     std::vector<std::any> result;
     if (interface_type == "operable") {
-      for (auto* op : operables_) result.push_back(op);
-      for (auto* c : cores_) result.push_back(static_cast<champsim::operable*>(static_cast<champsim::modules::core_module*>(c)));
+      for (auto* op : operables_)
+        result.push_back(op);
+      for (auto* c : cores_)
+        result.push_back(static_cast<champsim::operable*>(static_cast<champsim::modules::core_module*>(c)));
     } else if (interface_type == "core") {
-      for (auto* c : cores_) result.push_back(static_cast<champsim::modules::core_module*>(c));
+      for (auto* c : cores_)
+        result.push_back(static_cast<champsim::modules::core_module*>(c));
     } else if (interface_type == "packet_consumer") {
-      for (auto* c : cores_) result.push_back(static_cast<champsim::modules::packet_consumer*>(static_cast<champsim::modules::core_module*>(c)));
+      for (auto* c : cores_)
+        result.push_back(static_cast<champsim::modules::packet_consumer*>(static_cast<champsim::modules::core_module*>(c)));
     }
     return result;
   }
 
-
-
-  const champsim::modules::ModuleBuilder get_builder_params(const std::string&) const override {
-    return champsim::modules::ModuleBuilder();
-  }
+  const champsim::modules::ModuleBuilder get_builder_params(const std::string&) const override { return champsim::modules::ModuleBuilder(); }
 };
 
 static champsim::modules::environment_module::register_module<mock_env_911> mock_env_reg_911("MOCK_ENV_911");
@@ -123,15 +174,14 @@ TEST_CASE("do_cycle operates all operables and returns progress")
   REQUIRE(op2.op_count == 1);
 }
 
-TEST_CASE("run_phase completes when the consumer reaches the phase length")
+TEST_CASE("controller completes when the consumer reaches the phase length")
 {
   auto env_builder = champsim::modules::ModuleBuilder("env_hook", "MOCK_ENV_911");
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
   auto* mock_env = dynamic_cast<mock_env_911*>(env);
 
   // The mock core retires one instruction per cycle
-  auto core_builder = champsim::modules::ModuleBuilder("core_hook0", "MOCK_CORE_911")
-    .add_parameter("cpu_num", uint8_t{0});
+  auto core_builder = champsim::modules::ModuleBuilder("core_hook0", "MOCK_CORE_911").add_parameter("cpu_num", uint8_t{0});
   auto* core = champsim::modules::core_module::create_instance(core_builder, env);
   auto* mc = dynamic_cast<mock_core_911*>(core);
   mock_env->cores_ = {mc};
@@ -139,110 +189,105 @@ TEST_CASE("run_phase completes when the consumer reaches the phase length")
   counting_operable custom_op;
   mock_env->operables_ = {&custom_op};
 
-  auto pc_builder = champsim::modules::ModuleBuilder("pc_hook", "PHASE_CONTROLLER")
-    .add_parameter("deadlock_cycles", 1000);
+  auto pc_builder =
+      champsim::modules::ModuleBuilder("pc_hook", "PHASE_CONTROLLER").add_parameter("deadlock_cycles", 1000).add_parameter("phases", single_phase("LengthTest", 5));
   auto* controller = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
   std::vector<unsigned> completed;
-  auto on_complete = [&](unsigned idx) {
-    completed.push_back(idx);
-  };
+  auto on_complete = [&](unsigned idx) { completed.push_back(idx); };
 
   champsim::chrono::clock clock;
-  champsim::run_phase("LengthTest", false, 5, *env, *controller, clock, on_complete);
+  drive_one(*env, *controller, clock, on_complete);
 
   REQUIRE(mc->instr_count >= 5);
   REQUIRE(completed.size() == 1);
   REQUIRE(completed[0] == 0);
   REQUIRE(custom_op.phase_begun);
   REQUIRE(custom_op.op_count >= 5);
+  REQUIRE(custom_op.ended_phases.size() == 1); // the controller ended the phase on the operables
 }
 
-TEST_CASE("run_phase works with nullptr callbacks")
+TEST_CASE("controller drive works with a null completion callback")
 {
   auto env_builder = champsim::modules::ModuleBuilder("env_null", "MOCK_ENV_911");
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
   auto* mock_env = dynamic_cast<mock_env_911*>(env);
 
-  auto core_builder = champsim::modules::ModuleBuilder("core_null0", "MOCK_CORE_911")
-    .add_parameter("cpu_num", uint8_t{0});
+  auto core_builder = champsim::modules::ModuleBuilder("core_null0", "MOCK_CORE_911").add_parameter("cpu_num", uint8_t{0});
   auto* core = champsim::modules::core_module::create_instance(core_builder, env);
   auto* mc = dynamic_cast<mock_core_911*>(core);
   mock_env->cores_ = {mc};
 
-  auto pc_builder = champsim::modules::ModuleBuilder("pc_null", "PHASE_CONTROLLER")
-    .add_parameter("deadlock_cycles", 1000);
+  auto pc_builder =
+      champsim::modules::ModuleBuilder("pc_null", "PHASE_CONTROLLER").add_parameter("deadlock_cycles", 1000).add_parameter("phases", single_phase("NullTest", 0));
   auto* controller = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
   champsim::chrono::clock clock;
 
-  // Should not crash with an empty std::function; length=0 completes on first advance
-  REQUIRE_NOTHROW(champsim::run_phase("NullTest", false, 0, *env, *controller, clock, {}));
+  // Should not crash with an empty std::function; length=0 completes on the first advance.
+  REQUIRE_NOTHROW(drive_one(*env, *controller, clock, {}));
 }
 
-TEST_CASE("run_phase drives multiple controllers, each governing its own consumers")
+TEST_CASE("multiple controllers each govern their own consumers")
 {
   auto env_builder = champsim::modules::ModuleBuilder("env_multi", "MOCK_ENV_911");
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
   auto* mock_env = dynamic_cast<mock_env_911*>(env);
 
-  // Two cores that both retire 1/cycle, but the controllers give them different completion lengths.
-  auto core0_builder = champsim::modules::ModuleBuilder("core_multi0", "MOCK_CORE_911")
-    .add_parameter("cpu_num", uint8_t{0});
+  // Two cores that both retire 1/cycle.
+  auto core0_builder = champsim::modules::ModuleBuilder("core_multi0", "MOCK_CORE_911").add_parameter("cpu_num", uint8_t{0});
   auto* mc0 = dynamic_cast<mock_core_911*>(champsim::modules::core_module::create_instance(core0_builder, env));
-  auto core1_builder = champsim::modules::ModuleBuilder("core_multi1", "MOCK_CORE_911")
-    .add_parameter("cpu_num", uint8_t{1});
+  auto core1_builder = champsim::modules::ModuleBuilder("core_multi1", "MOCK_CORE_911").add_parameter("cpu_num", uint8_t{1});
   auto* mc1 = dynamic_cast<mock_core_911*>(champsim::modules::core_module::create_instance(core1_builder, env));
   mock_env->cores_ = {mc0, mc1};
 
   // Controller A governs consumer 0 only; controller B governs consumer 1 only.
   auto pcA_builder = champsim::modules::ModuleBuilder("pc_multiA", "PHASE_CONTROLLER")
-    .add_parameter("deadlock_cycles", 1000)
-    .add_parameter("consumers", nlohmann::json::array({0}));
+                         .add_parameter("deadlock_cycles", 1000)
+                         .add_parameter("consumers", nlohmann::json::array({0}))
+                         .add_parameter("phases", single_phase("MultiTest", 7));
   auto* pcA = champsim::modules::phase_controller::create_instance(pcA_builder, env);
   auto pcB_builder = champsim::modules::ModuleBuilder("pc_multiB", "PHASE_CONTROLLER")
-    .add_parameter("deadlock_cycles", 1000)
-    .add_parameter("consumers", nlohmann::json::array({1}));
+                         .add_parameter("deadlock_cycles", 1000)
+                         .add_parameter("consumers", nlohmann::json::array({1}))
+                         .add_parameter("phases", single_phase("MultiTest", 7));
   auto* pcB = champsim::modules::phase_controller::create_instance(pcB_builder, env);
-
-  std::vector<std::reference_wrapper<champsim::modules::phase_controller>> controllers{std::ref(*pcA), std::ref(*pcB)};
 
   std::vector<unsigned> completed;
   auto on_complete = [&](unsigned idx) { completed.push_back(idx); };
 
   champsim::chrono::clock clock;
-  champsim::run_phase("MultiTest", false, true, 7, *env, controllers, clock, on_complete);
+  drive(*env, {std::ref(*pcA), std::ref(*pcB)}, clock, on_complete);
 
-  // Both consumers complete exactly once, and the phase ends only when both controllers agree.
+  // Both consumers complete exactly once, and the run ends only when both controllers are DONE.
   REQUIRE(completed.size() == 2);
   REQUIRE(mc0->instr_count >= 7);
   REQUIRE(mc1->instr_count >= 7);
 }
 
-TEST_CASE("run_phase stops when a producer reaches EOF")
+TEST_CASE("controller stops when a producer reaches EOF")
 {
   auto env_builder = champsim::modules::ModuleBuilder("env_eof2", "MOCK_ENV_911");
   auto* env = champsim::modules::environment_module::create_instance(env_builder, static_cast<champsim::modules::environment_module*>(nullptr));
   auto* mock_env = dynamic_cast<mock_env_911*>(env);
 
-  auto core_builder = champsim::modules::ModuleBuilder("core_eof2_0", "MOCK_CORE_911")
-    .add_parameter("cpu_num", uint8_t{0});
+  auto core_builder = champsim::modules::ModuleBuilder("core_eof2_0", "MOCK_CORE_911").add_parameter("cpu_num", uint8_t{0});
   auto* core = champsim::modules::core_module::create_instance(core_builder, env);
   auto* mc = dynamic_cast<mock_core_911*>(core);
   mock_env->cores_ = {mc};
 
-  // The producer is exhausted from the start; the controller observes it through producers_eof() with no external notification.
+  // The producer is exhausted from the start; the controller observes it through producers_eof().
   mc->producers_eof_ = true;
 
-  auto pc_builder = champsim::modules::ModuleBuilder("pc_eof2", "PHASE_CONTROLLER")
-    .add_parameter("deadlock_cycles", 1000);
+  auto pc_builder =
+      champsim::modules::ModuleBuilder("pc_eof2", "PHASE_CONTROLLER").add_parameter("deadlock_cycles", 1000).add_parameter("phases", single_phase("EOFTest", 999999));
   auto* controller = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
   std::vector<unsigned> completed;
   auto on_complete = [&](unsigned idx) { completed.push_back(idx); };
 
   champsim::chrono::clock clock;
-  champsim::run_phase("EOFTest", false, 999999, *env, *controller, clock, on_complete);
+  drive_one(*env, *controller, clock, on_complete);
 
   // Phase should have completed due to EOF
   REQUIRE(completed.size() == 1);

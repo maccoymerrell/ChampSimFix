@@ -41,7 +41,7 @@
 
 namespace champsim
 {
-std::vector<phase_stats> main(modules::environment_module& env, std::vector<phase_info>& phases);
+std::vector<phase_stats> main(modules::environment_module& env);
 void assign_identities(modules::environment_module& env);
 } // namespace champsim
 
@@ -247,37 +247,10 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     }
   }
 
-  // Phase list from the environment's phase controllers: first non-empty list wins, a
-  // conflicting second is a config error; else fall back to the classic two-phase (-w/-i).
-  std::vector<champsim::phase_info> phases;
-  for (champsim::modules::phase_controller& pc : gen_environment->typed_view<champsim::modules::phase_controller>("phase_controller")) {
-    auto controller_phases = pc.get_phases();
-    if (controller_phases.empty())
-      continue;
-    if (phases.empty()) {
-      phases = std::move(controller_phases);
-    } else if (controller_phases.size() != phases.size()
-               || !std::equal(phases.begin(), phases.end(), controller_phases.begin(),
-                              [](const auto& a, const auto& b) { return a.name == b.name && a.is_warmup == b.is_warmup && a.length == b.length; })) {
-      fmt::print("ERROR: multiple phase controllers declare conflicting phase lists\n");
-      return 1;
-    }
-  }
-
-  if (phases.empty()) {
-    // Classic fallback: Warmup + Simulation driven by CLI -w/-i
-    phases = {
-        champsim::phase_info{"Warmup", true, false, static_cast<uint64_t>(warmup_instructions)},
-        champsim::phase_info{"Simulation", false, true, static_cast<uint64_t>(simulation_instructions)},
-    };
-  }
-
   fmt::print("\n*** ChampSim Multicore Out-of-Order Simulator ***\n");
-  // Phase intervals come from the resolved phase list the controllers own, so the labels
-  // follow the phase names rather than being hardcoded to warmup/simulation.
-  for (const auto& p : phases) {
-    fmt::print("{} Instructions: {}\n", p.name, p.length);
-  }
+  // Each phase controller reports its own plan; main does not need the phase list.
+  for (champsim::modules::phase_controller& pc : gen_environment->typed_view<champsim::modules::phase_controller>("phase_controller"))
+    pc.print_phase_plan();
   // Module counts: every registered interface with instances is listed, labelled by the plural
   // it reports at registration (falling back to its interface name), so nothing here is
   // hardcoded and a new interface appears automatically.
@@ -291,7 +264,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   }
   fmt::print("Page size: {}\n\n", gen_environment->get_page_size());
 
-  auto phase_stats = champsim::main(*gen_environment, phases);
+  auto phase_stats = champsim::main(*gen_environment);
 
   fmt::print("\nChampSim completed all phases\n\n");
 

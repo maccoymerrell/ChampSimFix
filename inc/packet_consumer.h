@@ -104,6 +104,9 @@ public:
     return fmt::format("Heartbeat consumer {} progress: {} cycles: {} rate: {:.4} cumulative rate: {:.4}", consumer_id(), total_progress, total_cycles,
                        interval_rate, cumulative_rate);
   }
+
+  // The unit this consumer measures phase progress in (a core reports "instructions").
+  virtual std::string progress_unit() const { return "packets"; }
 };
 } // namespace champsim::modules
 

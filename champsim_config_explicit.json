@@ -432,10 +432,9 @@
       ]
     },
     {
-      "_comment": "=== Phase controller ===",
-      "_comment2": "Drives the warmup + simulation phases. Uses CLI -w / -i via $vars.",
+      "_comment": "Phase controller: drives warmup + simulation from CLI -w/-i via $vars; omit deadlock_cycles to inherit the environment's dynamic threshold.",
       "name": "phase_controller", "module": "phase_controller", "model": "PHASE_CONTROLLER",
-      "deadlock_cycles": 500, "warmup_length": "$warmup_instructions", "simulation_length": "$simulation_instructions"
+      "warmup_length": "$warmup_instructions", "simulation_length": "$simulation_instructions"
     }
   ]
 }
