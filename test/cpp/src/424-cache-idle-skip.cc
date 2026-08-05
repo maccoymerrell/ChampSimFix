@@ -99,7 +99,7 @@ SCENARIO("A cache serves a request with identical timing whether or not idle ski
     std::array<champsim::operable*, 3> elements{{&uut, &mock_ll, &mock_ul}};
     for (auto* elem : elements) {
       elem->initialize();
-      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) {
+      if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) {
         mp->begin_phase(false, true);
       }
     }

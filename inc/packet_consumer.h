@@ -84,11 +84,6 @@ public:
   // Re-baseline health tracking; called by the controller at phase start.
   virtual void reset_health() {}
 
-  // True when this consumer knows more work is scheduled to arrive later
-  // (e.g. a paced producer waiting out a scheduled gap). While any consumer
-  // reports pending work, zero global progress is not a deadlock.
-  virtual bool has_pending_work() const { return false; }
-
   // Called when this consumer's producer finishes a phase. Return empty to suppress.
   virtual std::string producer_finish_message(const std::string& /*phase_name*/) const { return {}; }
 

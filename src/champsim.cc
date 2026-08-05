@@ -20,16 +20,13 @@
 #include <chrono>
 #include <functional>
 #include <numeric>
-#include <set>
 #include <vector>
-#include <fmt/chrono.h>
 #include <fmt/core.h>
 
 #include "event_listeners.h"
 #include "identity_registry.h"
 #include "json_stat_builder.h"
-#include "module_phase.h"
-#include "module_stat.h"
+#include "module_lifecycle.h"
 #include "modules.h"
 #include "operable.h"
 #include "phase_controller.h"
@@ -42,29 +39,27 @@ std::chrono::seconds elapsed_time() { return std::chrono::duration_cast<std::chr
 namespace champsim
 {
 
-// Discovery helper: gather module_stat instances across the environment so stat collection needn't re-query typed_view.
+// Discovery helper: gather the lifecycle modules that publish stats, so stat collection needn't re-query typed_view.
 struct module_stat_entry {
-  champsim::module_stat* ptr;
+  champsim::module_lifecycle* ptr;
   std::string interface_name;
   std::string model;
   std::string name;
 };
 
-static std::vector<module_stat_entry> collect_module_stat(modules::environment_module& env)
+static std::vector<module_stat_entry> collect_module_stat(const std::vector<champsim::module_lifecycle*>& governed)
 {
   std::vector<module_stat_entry> out;
-  for (const auto& iface : modules::interface_registry::get_interface_names()) {
-    auto to_ms = modules::interface_registry::get_to_module_stat(iface);
-    if (!to_ms)
-      continue;
-    for (const auto& inst : env.view(iface)) {
-      auto* ms = to_ms(inst);
-      if (ms) {
-        auto id = modules::interface_registry::identify(iface, inst);
-        out.push_back({ms, iface, id.model, id.name});
-      }
+  for (auto* ml : governed) {
+    // A governed module publishes stats only if it overrides the stat hooks (a PTW is phase-aware yet
+    // has no stats); skip the rest so they emit no empty entry. Identity was stamped at construction.
+    if (!ml->print_stats(false).empty()) {
+      out.push_back({ml, ml->stat_interface(), ml->stat_model(), ml->stat_name()});
     }
   }
+  // The flat plaintext stat lines are emitted in this order; group by interface (stable within one) so
+  // it matches the environment's alphabetical-by-interface view order.
+  std::stable_sort(std::begin(out), std::end(out), [](const auto& a, const auto& b) { return a.interface_name < b.interface_name; });
   return out;
 }
 
@@ -83,9 +78,10 @@ long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables
   return progress;
 }
 
-
-// Collect phase statistics generically: publish every module_stat instance's lines / JSON under [interface][model][name].
-static phase_stats collect_phase_stats(const phase_info& phase, modules::environment_module& env)
+// Collect one phase controller's statistics: every governed lifecycle module's lines / JSON under
+// [interface][model][name]. Scoped to the controller's governed set so concurrent controllers, each
+// in its own phase, do not clobber each other's stats.
+static phase_stats collect_phase_stats(const phase_info& phase, modules::environment_module& env, const std::vector<champsim::module_lifecycle*>& governed)
 {
   phase_stats stats;
   stats.name = phase.name;
@@ -99,7 +95,7 @@ static phase_stats collect_phase_stats(const phase_info& phase, modules::environ
   }
 
   // SIM and ROI passes share discovery; the bool selects which stat set to emit.
-  auto stat_modules = collect_module_stat(env);
+  auto stat_modules = collect_module_stat(governed);
   for (auto& e : stat_modules) {
     auto sim_lines = e.ptr->print_stats(false);
     auto roi_lines = e.ptr->print_stats(true);
@@ -208,21 +204,21 @@ std::vector<phase_stats> main(modules::environment_module& env)
   auto operables = env.typed_view<champsim::operable>("operable");
   const auto time_quantum = std::accumulate(std::cbegin(operables), std::cend(operables), champsim::chrono::clock::duration::max(),
                                             [](const auto acc, const operable& y) { return std::min(acc, y.clock_period); });
-  auto consumers = env.typed_view<champsim::modules::packet_consumer>("packet_consumer");
 
   champsim::chrono::clock global_clock;
   std::vector<phase_stats> results;
 
-  // Each controller owns its own phases and informs the operables of them. main ticks the
-  // operables each cycle, collects a phase's stats when a controller ends it (before the next
-  // begin_phase resets the modules' ROI stats), ends the run once every controller is DONE, and
-  // aborts if any controller aborts.
+  // Each controller owns and drives its own phases through advance(): between phases it begins the next
+  // one (setting the modules' warmup flag before that phase's first tick); on completion it ends the
+  // phase and reports COMPLETE/DONE. main only ticks the operables, calls advance(), collects a
+  // completed phase's stats (before re-calling advance() to begin the next), ends the run once every
+  // controller is DONE, and aborts if any controller aborts.
   std::vector<bool> finished(controllers.size(), false);
-  std::vector<std::set<unsigned>> completed(controllers.size());
   std::size_t finished_count = 0;
 
+  // Begin each controller's first phase before the first tick.
   for (modules::phase_controller& controller : controllers) {
-    controller.begin_phase();
+    controller.advance(0);
     handle_event<Event::BEGIN_PHASE>(controller.phase().is_warmup);
   }
 
@@ -239,41 +235,25 @@ std::vector<phase_stats> main(modules::environment_module& env)
       }
       auto phase_status = controller.advance(progress);
 
-      // Producer-finish messages, once per consumer id.
-      for (unsigned consumer_idx : controller.newly_completed_consumers()) {
-        if (completed[idx].insert(consumer_idx).second) {
-          for (auto& sc : consumers) {
-            if (sc.get().consumer_id() == static_cast<int>(consumer_idx)) {
-              auto msg = sc.get().producer_finish_message(controller.phase().name);
-              if (!msg.empty())
-                fmt::print("{} (Simulation time: {:%H hr %M min %S sec})\n", msg, elapsed_time());
-            }
-          }
+      // COMPLETE: a phase ended — collect its stats (before the controller begins the next phase and
+      // resets ROI stats), then advance() again to begin the next phase before its first tick.
+      if (phase_status == modules::phase_controller::status::COMPLETE) {
+        if (controller.phase().roi) {
+          results.push_back(collect_phase_stats(controller.phase(), env, controller.governed_modules()));
+        }
+        phase_status = controller.advance(0);
+        if (phase_status == modules::phase_controller::status::CONTINUE) {
+          handle_event<Event::BEGIN_PHASE>(controller.phase().is_warmup);
         }
       }
 
       if (phase_status == modules::phase_controller::status::ABORT) {
         any_abort = true;
-      } else if (phase_status != modules::phase_controller::status::CONTINUE) {
-        // Phase ended: completion summaries + stats, before the next begin_phase resets ROI stats.
-        for (auto& sc : consumers) {
-          auto msg = sc.get().phase_complete_message(controller.phase().name);
-          if (!msg.empty())
-            fmt::print("{} (Simulation time: {:%H hr %M min %S sec})\n", msg, elapsed_time());
-        }
-        if (controller.phase().roi) {
-          results.push_back(collect_phase_stats(controller.phase(), env));
-        }
-
-        if (phase_status == modules::phase_controller::status::DONE) {
-          finished[idx] = true;
-          ++finished_count;
-        } else { // PHASE_COMPLETE: start this controller's next phase
-          controller.begin_phase();
-          handle_event<Event::BEGIN_PHASE>(controller.phase().is_warmup);
-          completed[idx].clear();
-        }
+      } else if (phase_status == modules::phase_controller::status::DONE) {
+        finished[idx] = true;
+        ++finished_count;
       }
+      // CONTINUE: step the sim.
       ++idx;
     }
 

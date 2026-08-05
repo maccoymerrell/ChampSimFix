@@ -18,10 +18,13 @@
 #define OPERABLE_H
 
 #include "chrono.h"
+#include "module_lifecycle.h"
 
 namespace champsim
 {
-class operable
+// Every operable participates in the phase lifecycle (begin/end phase, per-phase stats), so it
+// auto-enrolls in module_lifecycle; a module overrides only the hooks it needs.
+class operable : public module_lifecycle
 {
 public:
   champsim::chrono::picoseconds clock_period{};
@@ -40,10 +43,6 @@ public:
   // Idle-skip hook: return 0 to simulate this cycle, n>0 to skip n cycles (no progress). Must still tick per-cycle submodule hooks on skips, and
   // skip at most 1 cycle if work can arrive by external push. Disabled globally via set_skip_enabled(false) / config "cycle_skip".
   virtual long poll_cycle() { return 0; } // LCOV_EXCL_LINE
-
-  // True when this operable has self-scheduled work completing at a known future time WITHOUT external input (e.g. DRAM refresh, bank timer) —
-  // treated as scheduled quiet, not deadlock. Do NOT return true for work depending on another module responding; that is what the deadlock detector catches.
-  virtual bool has_pending_work() const { return false; } // LCOV_EXCL_LINE
 
   virtual void print_deadlock() {} // LCOV_EXCL_LINE
   virtual void end_simulation() {} // LCOV_EXCL_LINE

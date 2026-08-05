@@ -9,7 +9,6 @@
 #include "defaults.hpp"
 #include "instruction.h"
 #include "matchers.hpp"
-#include "module_phase.h"
 #include "modules.h"
 #include "operable.h"
 
@@ -32,7 +31,7 @@ inline champsim::modules::ModuleBuilder test_core_defaults(const std::string& ws
 /*
  * A MemoryRequestConsumer that simply returns all packets on the next cycle
  */
-class do_nothing_MRC : public champsim::operable, public champsim::module_phase
+class do_nothing_MRC : public champsim::operable
 {
   struct packet : champsim::channel::request_type {
     int event_cycle = std::numeric_limits<int>::max();
@@ -90,7 +89,7 @@ public:
 /*
  * A MemoryRequestConsumer that returns only a particular address
  */
-class filter_MRC : public champsim::operable, public champsim::module_phase
+class filter_MRC : public champsim::operable
 {
   struct packet : champsim::channel::request_type {
     int event_cycle = std::numeric_limits<int>::max();
@@ -146,7 +145,7 @@ public:
 /*
  * A MemoryRequestConsumer that releases blocks when instructed to
  */
-class release_MRC : public champsim::operable, public champsim::module_phase
+class release_MRC : public champsim::operable
 {
   std::deque<champsim::channel::request_type> packets;
   std::size_t mpacket_count = 0;
@@ -216,7 +215,7 @@ struct counting_MRP {
   }
 };
 
-struct queue_issue_MRP : public champsim::operable, public champsim::module_phase {
+struct queue_issue_MRP : public champsim::operable {
   using request_type = typename champsim::channel::request_type;
   using response_type = typename champsim::channel::response_type;
 

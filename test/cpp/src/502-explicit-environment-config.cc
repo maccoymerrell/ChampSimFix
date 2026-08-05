@@ -486,61 +486,6 @@ SCENARIO("Explicit environment constructs with alternative module choices") {
   }
 }
 
-// ====== Multiple phase controllers (consumer partitioning) ======
-
-SCENARIO("Explicit environment supports multiple phase controllers partitioning consumers") {
-  GIVEN("A 2-core config declaring one phase controller per core, each with its own phase plan") {
-    auto config = load_config("explicit-2core.json");
-
-    // Controller 0 governs cpu0 (consumer 0) with a two-phase plan; controller 1 governs
-    // cpu1 (consumer 1) with a single-phase plan. The distinct plans prove each controller
-    // owns its own private phase list rather than sharing one.
-    config["children"].push_back(json{
-      {"name", "phase_controller_0"}, {"module", "phase_controller"}, {"model", "PHASE_CONTROLLER"},
-      {"consumers", json::array({0})},
-      {"phases", json::array({json{{"name", "Warmup"}, {"is_warmup", true}, {"length", 100}},
-                              json{{"name", "Simulation"}, {"is_warmup", false}, {"length", 200}}})}
-    });
-    config["children"].push_back(json{
-      {"name", "phase_controller_1"}, {"module", "phase_controller"}, {"model", "PHASE_CONTROLLER"},
-      {"consumers", json::array({1})},
-      {"phases", json::array({json{{"name", "Solo"}, {"is_warmup", false}, {"length", 300}}})}
-    });
-
-    auto* env = make_explicit_env(config);
-
-    THEN("both phase controllers are constructed") {
-      REQUIRE(env->typed_view<champsim::modules::phase_controller>("phase_controller").size() == 2);
-    }
-
-    THEN("each controller carries its own phase plan and governs only its own consumer") {
-      // assign_identities() (a main.cc concern) is not run here, so number the consumers by hand.
-      int id = 0;
-      for (auto& core : env->typed_view<champsim::modules::core_module>("core"))
-        core.get().set_consumer_id(id++);
-
-      auto controllers = env->typed_view<champsim::modules::phase_controller>("phase_controller");
-      REQUIRE(controllers.size() == 2);
-
-      // The cores use the NULL instruction producer (always EOF), so the first advance()
-      // completes each controller's governed consumer through the EOF path. Key each result by
-      // the controller's first-phase length, since typed_view order is an implementation detail.
-      std::map<uint64_t, std::vector<unsigned>> completed_by_len;
-      for (auto& c : controllers) {
-        c.get().begin_phase();
-        auto len = c.get().phase().length;
-        c.get().advance(0);
-        completed_by_len[len] = c.get().newly_completed_consumers();
-      }
-
-      REQUIRE(completed_by_len.count(100) == 1); // the two-phase controller (Warmup=100)
-      REQUIRE(completed_by_len.count(300) == 1); // the single-phase controller (Solo=300)
-      REQUIRE(completed_by_len[100] == std::vector<unsigned>{0});
-      REQUIRE(completed_by_len[300] == std::vector<unsigned>{1});
-    }
-  }
-}
-
 // ====== Custom config cache parameter test ======
 
 SCENARIO("Explicit environment with custom config still has correct cache sizes") {

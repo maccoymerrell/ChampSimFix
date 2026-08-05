@@ -92,7 +92,7 @@ void add_param(ModuleBuilder& builder, const std::string& key, const json& val, 
   }
   if (val.is_array() && is_ref_array(val)) {
     std::vector<std::any> refs;
-    std::string ref_iface;
+    std::vector<std::string> ref_ifaces;
     for (auto& elem : val) {
       auto rn = *try_parse_ref(elem.get<std::string>());
       auto mit = modules_by_name.find(rn);
@@ -100,17 +100,30 @@ void add_param(ModuleBuilder& builder, const std::string& key, const json& val, 
         fmt::print("[ENVIRONMENT] ERROR: @-reference '{}' not found (in array param '{}' of '{}')\n", rn, key, mod_name);
         std::exit(-1);
       }
-      std::string curr_iface = module_interfaces.at(rn);
-      if (ref_iface.empty()) {
-        ref_iface = curr_iface;
-      } else if (curr_iface != ref_iface) {
-        fmt::print("[ENVIRONMENT] ERROR: mixed interface types in array '{}' of '{}': expected '{}', got '{}' for '{}'\n", key, mod_name, ref_iface, curr_iface,
-                   rn);
+      refs.push_back(mit->second);
+      ref_ifaces.push_back(module_interfaces.at(rn));
+    }
+    bool homogeneous = true;
+    for (const auto& iface : ref_ifaces) {
+      homogeneous = homogeneous && (iface == ref_ifaces.front());
+    }
+    if (homogeneous) {
+      builder.add_raw_parameter(key, interface_registry::make_vector(ref_ifaces.front(), refs));
+      return;
+    }
+    // Members of different interfaces are legal only when they share the module_lifecycle interface
+    // (module_lifecycle-havers, e.g. a phase controller's governed set): resolve the array under it.
+    std::vector<champsim::module_lifecycle*> module_lifecycles;
+    for (std::size_t i = 0; i < refs.size(); ++i) {
+      auto to_module_lifecycle = interface_registry::get_to_module_lifecycle(ref_ifaces[i]);
+      auto* mp = to_module_lifecycle ? to_module_lifecycle(refs[i]) : nullptr;
+      if (mp == nullptr) {
+        fmt::print("[ENVIRONMENT] ERROR: mixed-interface @-reference array '{}' of '{}' has a member that is not a module_lifecycle\n", key, mod_name);
         std::exit(-1);
       }
-      refs.push_back(mit->second);
+      module_lifecycles.push_back(mp);
     }
-    builder.add_raw_parameter(key, interface_registry::make_vector(ref_iface, refs));
+    builder.add_raw_parameter(key, std::any{module_lifecycles});
     return;
   }
 
@@ -300,6 +313,8 @@ champsim::environment::environment(ModuleBuilder builder)
     if (min_ps < std::numeric_limits<ps_rep>::max() && min_ps > 0)
       deadlock_cycles_ = static_cast<int>(std::max((sum_ps / min_ps) * 3, ps_rep{500}));
   }
+
+  validate_phase_governance();
 }
 
 // ====== Nested-instance enrollment ======
@@ -345,6 +360,10 @@ auto champsim::environment::view(const std::string& interface_type) const -> std
 
   if (interface_type == "operable") {
     return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_operable(iface); });
+  }
+
+  if (interface_type == "module_lifecycle") {
+    return collect_aggregate([](const std::string& iface) { return interface_registry::get_to_module_lifecycle(iface); });
   }
 
   if (interface_type == "packet_consumer") {

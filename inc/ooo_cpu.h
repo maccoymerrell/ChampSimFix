@@ -80,7 +80,7 @@ struct LSQ_ENTRY : champsim::program_ordered<LSQ_ENTRY> {
 };
 
 // cpu
-class O3_CPU : public champsim::modules::core_module, public champsim::module_phase, public champsim::module_stat
+class O3_CPU : public champsim::modules::core_module
 {
 public:
   // This core's consumer id (its "CPU number"): hardware-context identity
@@ -147,7 +147,7 @@ public:
   void begin_phase(bool warmup, bool roi) override;
   void end_phase() override;
 
-  // module_stat
+  // module_lifecycle stats
   std::vector<std::string> print_stats(bool roi) const override;
   void json_stats(champsim::json_stat_builder& b, bool roi) const override;
 

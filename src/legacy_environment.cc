@@ -996,18 +996,6 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
     deadlock_cycles_ = static_cast<int>(std::min(ratio * 500000, int64_t{std::numeric_limits<int>::max()}));
   }
 
-  // Legacy env owns the classic Warmup + Simulation phases, built from -w/-i (via cli_args).
-  {
-    auto cli_args = builder.get_parameter<json>("cli_args", true, json::object());
-    auto pc_builder = ModuleBuilder{"phase_controller", "PHASE_CONTROLLER"};
-    pc_builder.add_parameter("warmup_length", static_cast<uint64_t>(cli_args.value("warmup_instructions", int64_t{0})))
-        .add_parameter("simulation_length", static_cast<uint64_t>(cli_args.value("simulation_instructions", int64_t{0})));
-    builder_params_["phase_controller"] = pc_builder;
-    auto* phase_ctrl = module_base<phase_controller, environment_module>::create_instance(pc_builder, this);
-    modules_by_type_["phase_controller"].push_back(phase_ctrl);
-    module_order_.emplace_back("phase_controller", "phase_controller");
-  }
-
   // Populate generic storage; order must match CT: cores -> caches -> PTWs -> DRAM (channels/vmem non-operable).
   for (auto* c : cores) {
     modules_by_type_["core"].push_back(c);
@@ -1029,6 +1017,21 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
     modules_by_type_["channel"].push_back(ch);
     module_order_.emplace_back(ch->NAME, "channel");
   }
+
+  // Legacy env owns the classic Warmup + Simulation phases, built from -w/-i (via cli_args). Built
+  // last so the controller's default "govern all" resolves against every module_lifecycle module.
+  {
+    auto cli_args = builder.get_parameter<json>("cli_args", true, json::object());
+    auto pc_builder = ModuleBuilder{"phase_controller", "PHASE_CONTROLLER"};
+    pc_builder.add_parameter("warmup_length", static_cast<uint64_t>(cli_args.value("warmup_instructions", int64_t{0})))
+        .add_parameter("simulation_length", static_cast<uint64_t>(cli_args.value("simulation_instructions", int64_t{0})));
+    builder_params_["phase_controller"] = pc_builder;
+    auto* phase_ctrl = module_base<phase_controller, environment_module>::create_instance(pc_builder, this);
+    modules_by_type_["phase_controller"].push_back(phase_ctrl);
+    module_order_.emplace_back("phase_controller", "phase_controller");
+  }
+
+  validate_phase_governance();
 }
 
 // ====== Nested-instance enrollment ======
@@ -1074,6 +1077,32 @@ auto champsim::legacy_environment::view(const std::string& interface_type) const
         continue;
       if (auto* op = to_op(nested_by_name_.at(name))) {
         result.push_back(op);
+      }
+    }
+    return result;
+  }
+
+  if (interface_type == "module_lifecycle") {
+    std::vector<std::any> result;
+    // Same per-instance dynamic_cast pattern as operable above: a module_lifecycle module may live under
+    // any interface, so advance the index for every instance but enroll only real module_lifecycle modules.
+    std::map<std::string, std::size_t> type_idx;
+    for (auto& [name, iface] : module_order_) {
+      auto to_mp = champsim::modules::interface_registry::get_to_module_lifecycle(iface);
+      if (!to_mp)
+        continue;
+      auto& vec = modules_by_type_.at(iface);
+      auto idx = type_idx[iface]++;
+      if (auto* mp = to_mp(vec.at(idx))) {
+        result.push_back(mp);
+      }
+    }
+    for (auto& [name, iface] : nested_order_) {
+      auto to_mp = champsim::modules::interface_registry::get_to_module_lifecycle(iface);
+      if (!to_mp)
+        continue;
+      if (auto* mp = to_mp(nested_by_name_.at(name))) {
+        result.push_back(mp);
       }
     }
     return result;

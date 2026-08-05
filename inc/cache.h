@@ -46,7 +46,7 @@
 #include "util/to_underlying.h" // for to_underlying
 #include "waitable.h"
 
-class CACHE : public champsim::modules::cache_module, public champsim::module_phase, public champsim::module_stat
+class CACHE : public champsim::modules::cache_module
 {
   enum [[deprecated(
       "Prefetchers may not specify arbitrary fill levels. Use CACHE::prefetch_line(pf_addr, fill_this_level, prefetch_metadata) instead.")]] FILL_LEVEL{
@@ -183,7 +183,7 @@ public:
   void end_phase() override;
   void end_simulation() final;
 
-  // module_stat
+  // module_lifecycle stats
   std::vector<std::string> print_stats(bool roi) const override;
   void json_stats(champsim::json_stat_builder& b, bool roi) const override;
 

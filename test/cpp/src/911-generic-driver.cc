@@ -33,7 +33,7 @@ void drive(champsim::modules::environment_module& env,
   std::size_t finished_count = 0;
 
   for (auto& c : controllers) {
-    c.get().begin_phase();
+    c.get().advance(0);
   }
 
   while (finished_count < controllers.size()) {
@@ -51,11 +51,12 @@ void drive(champsim::modules::environment_module& env,
           on_complete(idx);
         }
       }
+      if (s == status::COMPLETE) {
+        s = c.get().advance(0); // a phase ended (stats would be collected here); begin the next, or DONE
+      }
       if (s == status::DONE) {
         finished[i] = true;
         ++finished_count;
-      } else if (s == status::PHASE_COMPLETE) {
-        c.get().begin_phase();
       }
       ++i;
     }
@@ -77,7 +78,7 @@ nlohmann::json single_phase(const std::string& name, uint64_t length)
 }
 
 // A trivial operable that counts how many times it was operated
-struct counting_operable : public champsim::operable, public champsim::module_phase {
+struct counting_operable : public champsim::operable {
   long op_count = 0;
   bool phase_begun = false;
   std::vector<unsigned> ended_phases;
@@ -137,6 +138,11 @@ struct mock_env_911 : public champsim::modules::environment_module {
         result.push_back(op);
       for (auto* c : cores_)
         result.push_back(static_cast<champsim::operable*>(static_cast<champsim::modules::core_module*>(c)));
+    } else if (interface_type == "module_lifecycle") {
+      for (auto* op : operables_)
+        result.push_back(static_cast<champsim::module_lifecycle*>(op));
+      for (auto* c : cores_)
+        result.push_back(static_cast<champsim::module_lifecycle*>(static_cast<champsim::operable*>(static_cast<champsim::modules::core_module*>(c))));
     } else if (interface_type == "core") {
       for (auto* c : cores_)
         result.push_back(static_cast<champsim::modules::core_module*>(c));
@@ -241,15 +247,18 @@ TEST_CASE("multiple controllers each govern their own consumers")
   auto* mc1 = dynamic_cast<mock_core_911*>(champsim::modules::core_module::create_instance(core1_builder, env));
   mock_env->cores_ = {mc0, mc1};
 
-  // Controller A governs consumer 0 only; controller B governs consumer 1 only.
+  // Controller A governs core 0 only; controller B governs core 1 only (by @-ref to the module).
+  auto ml = [](mock_core_911* c) {
+    return static_cast<champsim::module_lifecycle*>(static_cast<champsim::operable*>(static_cast<champsim::modules::core_module*>(c)));
+  };
   auto pcA_builder = champsim::modules::ModuleBuilder("pc_multiA", "PHASE_CONTROLLER")
                          .add_parameter("deadlock_cycles", 1000)
-                         .add_parameter("consumers", nlohmann::json::array({0}))
+                         .add_parameter("governs", std::vector<champsim::module_lifecycle*>{ml(mc0)})
                          .add_parameter("phases", single_phase("MultiTest", 7));
   auto* pcA = champsim::modules::phase_controller::create_instance(pcA_builder, env);
   auto pcB_builder = champsim::modules::ModuleBuilder("pc_multiB", "PHASE_CONTROLLER")
                          .add_parameter("deadlock_cycles", 1000)
-                         .add_parameter("consumers", nlohmann::json::array({1}))
+                         .add_parameter("governs", std::vector<champsim::module_lifecycle*>{ml(mc1)})
                          .add_parameter("phases", single_phase("MultiTest", 7));
   auto* pcB = champsim::modules::phase_controller::create_instance(pcB_builder, env);
 

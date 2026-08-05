@@ -35,7 +35,7 @@ TEMPLATE_TEST_CASE("An untranslated access serializes translation before its tag
 
     for (auto elem : elements) {
       elem->initialize();
-      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
+      if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("An untranslated packet is sent")
@@ -100,7 +100,7 @@ TEST_CASE("A pre-translated access into a translating cache is not delayed by tr
 
   for (auto elem : elements) {
     elem->initialize();
-    if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
+    if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false, !false); };
   }
 
   WHEN("A pre-translated packet is sent")
@@ -153,7 +153,7 @@ SCENARIO("A non-translating (TLB-like) cache tag-checks without waiting on trans
     std::array<champsim::operable*, 3> elements{{&uut, &mock_ll, &mock_ul}};
     for (auto elem : elements) {
       elem->initialize();
-      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
+      if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("A pre-translated line is filled and then hit")

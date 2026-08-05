@@ -17,9 +17,10 @@
 #include "phase_controller.h"
 
 #include <algorithm>
-#include <functional>
+#include <chrono>
+#include <cstdlib>
+#include <iterator>
 #include <map>
-#include <set>
 #include <string>
 #include <vector>
 #include <fmt/chrono.h>
@@ -27,8 +28,50 @@
 #include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
 
-#include "module_phase.h"
+#include "module_lifecycle.h"
 #include "modules.h"
+
+// Defined (in the global namespace) in champsim.cc; the wall-clock stamp appended to completion reports.
+std::chrono::seconds elapsed_time();
+
+namespace champsim::modules
+{
+// --- Interface-provided mechanics, shared by every phase_controller implementation. ---
+
+phase_controller::phase_controller(environment_module* env, std::vector<champsim::module_lifecycle*> governed) : env_(env), governed_(std::move(governed))
+{
+  // An unspecified governed set means all module_lifecycle modules in the environment.
+  if (governed_.empty()) {
+    for (auto& mp : env_->typed_view<champsim::module_lifecycle>("module_lifecycle")) {
+      governed_.push_back(&mp.get());
+    }
+  }
+
+  // The governed set is fixed for the run: identify its packet_consumers once, here, so advance()'s
+  // per-cycle completion/health/deadlock checks iterate this cached vector instead of dynamic_cast-ing
+  // (and heap-allocating a fresh vector) every cycle.
+  for (auto* mp : governed_) {
+    if (auto* sc = dynamic_cast<packet_consumer*>(mp)) {
+      governed_consumers_.emplace_back(*sc);
+    }
+  }
+}
+
+void phase_controller::begin_phase_on_modules(const champsim::phase_info& phase) const
+{
+  for (auto* mp : governed_) {
+    mp->begin_phase(phase.is_warmup, phase.roi);
+  }
+}
+
+void phase_controller::end_phase_on_modules() const
+{
+  for (auto* mp : governed_) {
+    mp->end_phase();
+  }
+}
+
+} // namespace champsim::modules
 
 namespace
 {
@@ -36,7 +79,8 @@ namespace
 // Generic, packet-agnostic phase controller owning completion/deadlock/health
 // mechanics; per-consumer policy (e.g. livelock rate) lives in check_health.
 // Params: deadlock_cycles, health_period, eof_policy
-// (complete_all|complete_consumer), phases[] or warmup_length/simulation_length.
+// (complete_all|complete_consumer), phases[] or warmup_length/simulation_length,
+// governs[] (@-refs to the module_lifecycle-havers it governs; default all).
 class default_phase_controller : public champsim::modules::phase_controller
 {
   using consumer_health = champsim::modules::packet_consumer::consumer_health;
@@ -46,50 +90,31 @@ class default_phase_controller : public champsim::modules::phase_controller
   uint64_t health_period_ = 10000000;
   bool complete_all_on_eof_ = true;
 
-  // Parent environment, captured at construction.
-  champsim::modules::environment_module* env_ = nullptr;
-
-  // Per-phase caches (typed_view is expensive). Refreshed once per begin_phase().
-  std::vector<std::reference_wrapper<champsim::modules::packet_consumer>> packet_consumers_;
-  // Deadlock veto: operables with timer-scheduled work (e.g. DRAM refresh).
-  std::vector<std::reference_wrapper<champsim::operable>> operables_;
-
-  // Per-phase state
-  std::string phase_name_;
-  uint64_t length_ = 0;
-  int phase_idx_ = -1; // index into phases_; begin_phase() steps it
-
-  // module_phase operables, informed of each phase's begin/end. Cached lazily on first begin_phase().
-  std::vector<std::reference_wrapper<champsim::module_phase>> phase_modules_;
-  bool phase_modules_cached_ = false;
-
-  // Configurable phase list (set at construction from builder params)
+  // Owned phase list and a cursor into it; advance() steps the cursor when it begins a phase.
   std::vector<champsim::phase_info> phases_;
+  std::vector<champsim::phase_info>::const_iterator current_phase_;
+  bool phase_begun_ = false; // false between phases: the next advance() begins one
 
   int stalled_cycles_ = 0;
   uint64_t health_timer_ = 0;
   bool health_abort_ = false;
-
-  // Consumer ids this controller governs; empty = all.
-  std::set<int> governed_;
 
   // Consumer tracking: keyed by consumer_id from packet_consumer
   std::map<int, bool> consumer_complete_;
   std::map<int, uint64_t> progress_baseline_;
   std::vector<unsigned> newly_completed_;
 
-  bool governs(int idx) const { return governed_.empty() || governed_.count(idx) > 0; }
-
-public:
-  explicit default_phase_controller(champsim::modules::ModuleBuilder builder)
+  static std::vector<champsim::module_lifecycle*> parse_governed(champsim::modules::ModuleBuilder& builder)
   {
-    env_ = builder.get_parent<champsim::modules::environment_module>();
-    // Default to the environment's dynamic threshold; a config "deadlock_cycles" overrides.
-    deadlock_cycles_ = builder.get_parameter<int>("deadlock_cycles", true, env_->get_deadlock_cycles());
-    health_period_ = builder.get_parameter<uint64_t>("health_period", true, 10000000ULL);
-    complete_all_on_eof_ = builder.get_parameter<std::string>("eof_policy", true, std::string{"complete_all"}) != "complete_consumer";
+    if (builder.has_parameter("governs")) {
+      return builder.get_parameter<std::vector<champsim::module_lifecycle*>>("governs");
+    }
+    return {}; // empty => the interface governs all module_lifecycle modules
+  }
 
-    // Build phases from explicit JSON array, else warmup/simulation scalars.
+  static std::vector<champsim::phase_info> parse_phases(champsim::modules::ModuleBuilder& builder)
+  {
+    std::vector<champsim::phase_info> phases;
     if (builder.has_parameter("phases")) {
       for (auto& p : builder.get_parameter<nlohmann::json>("phases")) {
         champsim::phase_info pi;
@@ -97,69 +122,58 @@ public:
         pi.is_warmup = p.value("is_warmup", false);
         pi.roi = p.value("roi", !pi.is_warmup);
         pi.length = p.value("length", uint64_t{0});
-        phases_.push_back(pi);
+        phases.push_back(pi);
       }
     } else if (builder.has_parameter("warmup_length") || builder.has_parameter("simulation_length")) {
       uint64_t wlen = builder.get_parameter<uint64_t>("warmup_length", true, 0ULL);
       uint64_t slen = builder.get_parameter<uint64_t>("simulation_length", true, 0ULL);
-      phases_ = {
+      phases = {
           champsim::phase_info{"Warmup", true, false, wlen},
           champsim::phase_info{"Simulation", false, true, slen},
       };
     }
-    // If neither is set, phases_ stays empty — caller owns the phase list.
+    // If neither is set, phases stays empty — the caller owns the phase list.
+    return phases;
+  }
 
-    // Optional consumer-id subset: controllers can partition a run's consumers,
-    // each applying its own policy. Default: govern all.
-    if (builder.has_parameter("consumers")) {
-      for (auto& s : builder.get_parameter<nlohmann::json>("consumers")) {
-        governed_.insert(s.get<int>());
+  // Emit this controller's own completion reports over its governed consumers: producer-finish lines for
+  // the consumers that completed this advance(), plus phase-complete lines when the phase just ended.
+  // advance() calls this itself, so the orchestrator prints nothing and controllers never cross-report.
+  void report_completions(bool phase_ended) const
+  {
+    for (unsigned id : newly_completed_) {
+      for (auto& sc : governed_consumers()) {
+        if (sc.get().consumer_id() == static_cast<int>(id)) {
+          auto msg = sc.get().producer_finish_message(current_phase_->name);
+          if (!msg.empty()) {
+            fmt::print("{} (Simulation time: {:%H hr %M min %S sec})\n", msg, ::elapsed_time());
+          }
+        }
+      }
+    }
+    if (phase_ended) {
+      for (auto& sc : governed_consumers()) {
+        auto msg = sc.get().phase_complete_message(current_phase_->name);
+        if (!msg.empty()) {
+          fmt::print("{} (Simulation time: {:%H hr %M min %S sec})\n", msg, ::elapsed_time());
+        }
       }
     }
   }
 
-  void begin_phase() override
+public:
+  explicit default_phase_controller(champsim::modules::ModuleBuilder builder)
+      : phase_controller(builder.get_parent<champsim::modules::environment_module>(), parse_governed(builder)), phases_(parse_phases(builder)),
+        current_phase_(std::cend(phases_)) // sentinel: not yet started
   {
-    // Cache the module_phase operables on the first call (all modules are built by now).
-    if (!phase_modules_cached_) {
-      for (auto& op : env_->typed_view<champsim::operable>("operable")) {
-        if (auto* mp = dynamic_cast<champsim::module_phase*>(&op.get())) {
-          phase_modules_.emplace_back(*mp);
-        }
-      }
-      phase_modules_cached_ = true;
-    }
+    // Default to the environment's dynamic threshold; a config "deadlock_cycles" overrides.
+    deadlock_cycles_ = builder.get_parameter<int>("deadlock_cycles", true, builder.get_parent<champsim::modules::environment_module>()->get_deadlock_cycles());
+    health_period_ = builder.get_parameter<uint64_t>("health_period", true, 10000000ULL);
+    complete_all_on_eof_ = builder.get_parameter<std::string>("eof_policy", true, std::string{"complete_all"}) != "complete_consumer";
 
-    const auto& phase = phases_.at(static_cast<std::size_t>(++phase_idx_));
-    for (auto& mp : phase_modules_) {
-      mp.get().begin_phase(phase.is_warmup, phase.roi);
-    }
-
-    phase_name_ = phase.name;
-    length_ = phase.length;
-    stalled_cycles_ = 0;
-    health_timer_ = 0;
-    health_abort_ = false;
-    newly_completed_.clear();
-    consumer_complete_.clear();
-
-    // Refresh per-phase view caches (typed_view is expensive; reuse across cycles).
-    packet_consumers_ = env_->typed_view<champsim::modules::packet_consumer>("packet_consumer");
-    operables_ = env_->typed_view<champsim::operable>("operable");
-
-    // Restrict to governed consumers, then re-baseline progress and health.
-    if (!governed_.empty()) {
-      packet_consumers_.erase(
-          std::remove_if(std::begin(packet_consumers_), std::end(packet_consumers_), [this](const auto& sc) { return !governs(sc.get().consumer_id()); }),
-          std::end(packet_consumers_));
-    }
-    for (auto& sc : packet_consumers_) {
-      int idx = sc.get().consumer_id();
-      if (idx >= 0) {
-        consumer_complete_[idx] = false;
-        progress_baseline_[idx] = sc.get().sim_progress();
-      }
-      sc.get().reset_health();
+    if (phases_.empty()) {
+      fmt::print("ERROR: phase controller declares no phases (set \"phases\", or warmup_length/simulation_length)\n");
+      std::exit(-1);
     }
   }
 
@@ -167,25 +181,48 @@ public:
   {
     newly_completed_.clear();
 
-    // Deadlock: consecutive zero-progress cycles are a hang unless a consumer
-    // or operable has scheduled work pending (e.g. a DRAM refresh in flight).
-    if (progress == 0) {
-      const bool pending = std::any_of(std::begin(packet_consumers_), std::end(packet_consumers_), [](const auto& sc) { return sc.get().has_pending_work(); })
-                           || std::any_of(std::begin(operables_), std::end(operables_), [](const auto& op) { return op.get().has_pending_work(); });
-      stalled_cycles_ = pending ? 0 : stalled_cycles_ + 1;
-    } else {
+    // advance() owns both phase edges. Between phases it steps to the next one and informs the
+    // governed modules (their warmup flag must be set before this phase's first operated cycle), then
+    // returns without consuming this call's progress. The orchestrator re-calls advance() to start a
+    // phase — after it has collected the ended phase's stats — so it never begins/ends phases itself.
+    if (!phase_begun_) {
+      // Between phases: step to the next one and begin it, or report DONE when none remain.
+      auto next_phase = (current_phase_ == std::cend(phases_)) ? std::cbegin(phases_) : std::next(current_phase_);
+      if (next_phase == std::cend(phases_)) {
+        return status::DONE;
+      }
+      current_phase_ = next_phase;
+      begin_phase_on_modules(*current_phase_);
       stalled_cycles_ = 0;
+      health_timer_ = 0;
+      health_abort_ = false;
+      consumer_complete_.clear();
+      for (auto& sc : governed_consumers()) {
+        int idx = sc.get().consumer_id();
+        if (idx >= 0) {
+          consumer_complete_[idx] = false;
+          progress_baseline_[idx] = sc.get().sim_progress();
+        }
+        sc.get().reset_health();
+      }
+      phase_begun_ = true;
+      return status::CONTINUE;
     }
+
+    // Deadlock: consecutive zero-progress cycles are a hang. Work that is scheduled but produces no
+    // visible retirement (e.g. an in-flight DRAM refresh) reports itself through progress, so a plain
+    // zero-progress count suffices here.
+    stalled_cycles_ = (progress == 0) ? stalled_cycles_ + 1 : 0;
 
     // Health aggregation: each consumer judges itself over the window.
     if (++health_timer_ >= health_period_) {
-      for (auto& sc : packet_consumers_) {
+      for (auto& sc : governed_consumers()) {
         if (sc.get().consumer_id() < 0) {
           continue;
         }
         auto health = sc.get().check_health(health_period_);
         if (health == consumer_health::stalled) {
-          fmt::print("{} consumer {} reported stalled\n", phase_name_, sc.get().consumer_id());
+          fmt::print("{} consumer {} reported stalled\n", current_phase_->name, sc.get().consumer_id());
           health_abort_ = true;
         }
       }
@@ -197,7 +234,7 @@ public:
     }
 
     // Completion: per-producer EOF (policy-dependent) and progress thresholds.
-    for (auto& sc : packet_consumers_) {
+    for (auto& sc : governed_consumers()) {
       int idx = sc.get().consumer_id();
       if (idx < 0) {
         continue;
@@ -222,7 +259,7 @@ public:
         continue;
       }
 
-      if ((sc.get().sim_progress() - progress_baseline_[idx]) >= length_) {
+      if ((sc.get().sim_progress() - progress_baseline_[idx]) >= current_phase_->length) {
         consumer_complete_[idx] = true;
         newly_completed_.push_back(static_cast<unsigned>(idx));
       }
@@ -230,27 +267,28 @@ public:
 
     bool all_complete =
         !consumer_complete_.empty() && std::all_of(consumer_complete_.begin(), consumer_complete_.end(), [](const auto& p) { return p.second; });
-    if (!all_complete) {
-      return status::CONTINUE;
+    if (all_complete) {
+      // Phase complete: end it on the governed modules and return to the "between phases" state. The
+      // orchestrator collects this phase's stats, then calls advance() again to begin the next (or to
+      // get DONE if this was the last).
+      end_phase_on_modules();
+      phase_begun_ = false;
     }
 
-    // Phase complete: end it on the operables, then report whether more phases remain.
-    for (auto& mp : phase_modules_) {
-      mp.get().end_phase();
-    }
-    return (phase_idx_ + 1 < static_cast<int>(phases_.size())) ? status::PHASE_COMPLETE : status::DONE;
+    // The controller reports its own completions (producer-finish, and phase-complete when it just ended).
+    report_completions(all_complete);
+    return all_complete ? status::COMPLETE : status::CONTINUE;
   }
 
-  const champsim::phase_info& phase() const override { return phases_.at(static_cast<std::size_t>(phase_idx_)); }
+  const champsim::phase_info& phase() const override { return *current_phase_; }
 
   std::vector<unsigned> newly_completed_consumers() const override { return newly_completed_; }
 
   void print_phase_plan() const override
   {
     std::map<std::string, std::vector<int>> ids_by_unit;
-    for (auto& sc : env_->typed_view<champsim::modules::packet_consumer>("packet_consumer"))
-      if (governs(sc.get().consumer_id()))
-        ids_by_unit[sc.get().progress_unit()].push_back(sc.get().consumer_id());
+    for (auto& sc : governed_consumers())
+      ids_by_unit[sc.get().progress_unit()].push_back(sc.get().consumer_id());
     if (ids_by_unit.empty())
       ids_by_unit.emplace("packets", std::vector<int>{});
 

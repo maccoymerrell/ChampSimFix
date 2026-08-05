@@ -40,7 +40,7 @@ struct merge_testbed {
   {
     for (auto elem : elements) {
       elem->initialize();
-      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
+      if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     issue_type(seed_ul, type);
