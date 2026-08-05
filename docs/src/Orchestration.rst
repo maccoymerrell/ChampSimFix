@@ -19,17 +19,22 @@ out-of-order CPU simulator with the default orchestration modules.
 The Simulation Loop
 ------------------------------------------
 
-Each phase, the orchestrator:
+Each cycle, the orchestrator:
 
-1. Collects every **operable** in the environment (see :ref:`Orch_Discovery`) and calls
-   ``begin_phase`` on modules that opt into phase notifications.
-2. Ticks a global picosecond clock by the smallest clock period among the operables, and
-   lets every operable catch up to it (``operable::operate_on``). Operables in slower
-   clock domains naturally run on fewer ticks.
-3. Sums the *progress* returned by every ``operate()`` call and passes it to every phase
+1. Ticks a global picosecond clock by the smallest clock period among the operables (see
+   :ref:`Orch_Discovery`) and lets every operable catch up to it (``operable::operate_on``).
+   Operables in slower clock domains naturally run on fewer ticks.
+2. Sums the *progress* returned by every ``operate()`` call and passes it to every phase
    controller's ``advance()``.
-4. Ends the phase when all controllers report completion, or aborts when any reports
-   failure.
+3. Acts on each controller's returned status: **CONTINUE** keeps ticking; **COMPLETE** means
+   a phase ended, so it collects that phase's statistics and calls ``advance()`` again to
+   begin the next; **DONE** retires that controller; **ABORT** stops the run early. The run
+   ends once every controller is DONE.
+
+A phase controller owns *both* edges of its phases: ``advance()`` begins the next phase
+(setting each governed module's warmup flag before that phase's first simulated cycle) and,
+on completion, ends it. The orchestrator never begins or ends a phase itself — it only ticks
+operables, calls ``advance()``, and collects a completed phase's statistics.
 
 Phases are described by ``champsim::phase_info``: a name, an ``is_warmup`` flag, an
 ``roi`` flag, and a length denominated in **each consumer's own progress unit**
@@ -102,21 +107,14 @@ mixin. It is the orchestration layer's entire view of "the thing doing work":
       virtual bool producers_eof() const;             // all attached producers exhausted
       virtual consumer_health check_health(uint64_t elapsed);  // periodic self-check
       virtual void reset_health();                 // re-baseline at phase start
-      virtual bool has_pending_work() const;       // scheduled future work (paced gaps)
       // report formatting: producer_finish_message, phase_complete_message
     };
 
-Two contracts deserve emphasis:
-
-* **Health is the consumer's own judgment.** The consumer knows its expected progress
-  rate (a core knows what a plausible IPC floor is; a packet injector knows its schedule),
-  so the phase controller delegates the liveness decision to ``check_health``: it is
-  called every ``health_period`` cycles, and a ``stalled`` verdict aborts the run.
-  ``core_module`` implements the instruction-rate policy.
-* **Scheduled quiet time is not a deadlock.** ``has_pending_work()`` returns true when the
-  consumer knows more work arrives at a known future time (a paced producer waiting out a
-  gap). While any consumer — or any operable, see below — reports pending work, zero
-  global progress does not advance the deadlock counter.
+**Health is the consumer's own judgment.** The consumer knows its expected progress rate
+(a core knows what a plausible IPC floor is; a packet injector knows its schedule), so the
+phase controller delegates the liveness decision to ``check_health``: it is called every
+``health_period`` cycles, and a ``stalled`` verdict aborts the run. ``core_module``
+implements the instruction-rate policy.
 
 Consumer ids are framework-assigned by enumerating consumers in declaration order, dense
 from 0; they are never set in a configuration. The consumer count — derived automatically
@@ -133,20 +131,24 @@ an ordinary module (interface ``phase_controller``, parent: the environment):
 .. code-block:: cpp
 
     struct phase_controller {
-      virtual void begin_phase(const std::string& name, bool is_warmup, uint64_t length) = 0;
-      virtual status advance(long progress) = 0;   // CONTINUE, COMPLETE, or ABORT
+      enum class status { CONTINUE, COMPLETE, ABORT, DONE };
+      // The sole driver; owns both phase edges. Returns CONTINUE (keep ticking), COMPLETE
+      // (a phase ended — the orchestrator collects its stats, then calls advance() again to
+      // begin the next), DONE (no phases remain — stop clean), or ABORT (deadlock — stop early).
+      virtual status advance(long progress) = 0;
+      virtual const phase_info& phase() const = 0;                     // the phase now running
       virtual std::vector<unsigned> newly_completed_consumers() const = 0;
-      virtual void end_phase() = 0;
-      virtual std::vector<phase_info> get_phases() const;  // non-empty = owns run structure
+      const std::vector<module_lifecycle*>& governed_modules() const;  // the set it governs
     };
 
-The generic shipped model is ``PHASE_CONTROLLER``. It is packet-agnostic and owns only
-generic mechanics:
+The generic shipped model is ``PHASE_CONTROLLER``. It is packet-agnostic and owns its own
+phase plan plus these generic mechanics over its governed set:
 
 * **Completion** — a consumer completes when its ``sim_progress()`` delta reaches the
   phase length (in its own packet unit), or when one of its producers signals end-of-stream.
-* **Deadlock** — ``deadlock_cycles`` consecutive zero-progress cycles abort the run,
-  unless a consumer or operable reports ``has_pending_work()``.
+* **Deadlock** — ``deadlock_cycles`` consecutive zero-progress cycles abort the run. Work
+  that is scheduled but retires nothing (an in-flight DRAM refresh) reports itself through
+  ``operate()``'s progress, so a plain zero-progress count is sufficient.
 * **Health** — every ``health_period`` cycles each governed consumer's ``check_health``
   runs; a ``stalled`` verdict aborts.
 
@@ -180,11 +182,14 @@ arbitrary phase list::
     ]
 
 **Multiple controllers.** A configuration may declare any number of phase controllers.
-Each may name the consumer ids it governs (``"consumers": [0, 1]``; default: all), so
-different completion and health policies can apply to different parts of a heterogeneous
-system. Composition rules: the phase aborts if *any* controller aborts, completes when
-*all* controllers report complete, and the phase list is taken from the first controller
-with a non-empty ``get_phases()`` (conflicting non-empty lists are a config error).
+Each governs a set of ``module_lifecycle`` modules, named by reference in
+``"governs": [@L1D, @L2C]`` (default: all of them), so different completion and health
+policies can apply to different parts of a heterogeneous system. The governed sets must be
+disjoint and together cover every ``module_lifecycle`` module — so each module hears phase
+edges from exactly one controller and its statistics are attributed unambiguously — which
+the environment validates at startup. Each controller owns its own phase plan and drives it
+independently: the run aborts if *any* controller aborts and ends once *every* controller is
+DONE.
 
 When a configuration declares no controller, the orchestrator creates a default
 ``PHASE_CONTROLLER`` and the ``-w``/``-i`` CLI options define the phases — this is the
@@ -248,11 +253,12 @@ walker). Skipping is enabled by default; the root config key ``"cycle_skip": fal
 disables it globally, which is the switch used to A/B-verify that skipping does not change
 results.
 
-``operable::has_pending_work()`` is the related liveness contract: return true only for
-**timer-scheduled** work that completes at a known future time without external input
-(a DRAM refresh in flight, a busy bank). Do *not* return true for work that waits on
-another module's response — that is exactly the state the deadlock detector exists to
-catch.
+Liveness is judged purely by progress: the deadlock detector counts consecutive cycles in
+which every ``operate()`` returned zero. **Timer-scheduled** work that retires nothing but
+is genuinely advancing — a DRAM refresh in flight, a busy bank — must therefore report a
+non-zero progress from its ``operate()`` so those cycles do not count as a stall. Work that
+merely waits on another module's response reports zero, which is exactly the state the
+deadlock detector exists to catch.
 
 .. _Orch_Discovery:
 
@@ -276,8 +282,11 @@ with ``view(name).size()``.
 
 Modules opt into further orchestration roles by inheriting mixins:
 
-* ``champsim::module_phase`` — receives ``begin_phase(warmup, roi)`` / ``end_phase``.
-* ``champsim::module_stat`` — contributes lines and JSON to the per-phase statistics.
+* ``champsim::module_lifecycle`` — a phase-and-statistics participant: it receives
+  ``begin_phase(warmup, roi)`` / ``end_phase`` on the edges of the phases whose controller
+  governs it, and contributes lines and JSON to that phase's statistics. A controller governs
+  a set of these; ``operable`` inherits it, and non-operables (there are none shipped, but the
+  mixin is independent) may inherit it directly.
 
 ------------------------------------------
 Root Configuration Key Reference

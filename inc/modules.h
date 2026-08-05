@@ -41,8 +41,7 @@
 #include "dram_stats.h"
 #include "instruction.h"
 #include "json_stat_builder.h"
-#include "module_phase.h"
-#include "module_stat.h"
+#include "module_lifecycle.h"
 #include "operable.h"
 #include "packet.h"
 #include "phase_info.h"
@@ -436,10 +435,8 @@ public:
     std::function<champsim::operable*(const std::any&)> to_operable;
     // Returns packet_consumer* from a typed any, or nullptr if the interface doesn't inherit packet_consumer
     std::function<packet_consumer*(const std::any&)> to_packet_consumer;
-    // Returns module_phase* from a typed any, or nullptr if the impl doesn't inherit module_phase
-    std::function<champsim::module_phase*(const std::any&)> to_module_phase;
-    // Returns module_stat* from a typed any, or nullptr if the impl doesn't inherit module_stat
-    std::function<champsim::module_stat*(const std::any&)> to_module_stat;
+    // Returns module_lifecycle* from a typed any, or nullptr if the impl doesn't inherit module_lifecycle
+    std::function<champsim::module_lifecycle*(const std::any&)> to_module_lifecycle;
     // Returns the registered model name and the instance NAME for an instance any.
     std::function<instance_id(const std::any&)> identify;
     // True when the named model's implementation class is a packet_consumer
@@ -535,13 +532,9 @@ public:
   {
     return get_member(interface_name, &interface_info::to_packet_consumer);
   }
-  static std::function<champsim::module_phase*(const std::any&)> get_to_module_phase(const std::string& interface_name)
+  static std::function<champsim::module_lifecycle*(const std::any&)> get_to_module_lifecycle(const std::string& interface_name)
   {
-    return get_member(interface_name, &interface_info::to_module_phase);
-  }
-  static std::function<champsim::module_stat*(const std::any&)> get_to_module_stat(const std::string& interface_name)
-  {
-    return get_member(interface_name, &interface_info::to_module_stat);
+    return get_member(interface_name, &interface_info::to_module_lifecycle);
   }
 
   // Read instance metadata (model + name) for an instance any belonging to a known interface.
@@ -734,7 +727,7 @@ public:
     }
   };
 
-  // Per-instance dynamic_cast to a mixin (operable, module_phase, ...): works even when
+  // Per-instance dynamic_cast to a mixin (operable, module_lifecycle, ...): works even when
   // only the implementation, not the interface, inherits it — e.g. a channel model that
   // is operable while other models of the same interface are not.
   template <typename Target>
@@ -771,8 +764,7 @@ public:
       };
       info.to_operable = &to_mixin<champsim::operable>;
       info.to_packet_consumer = &to_mixin<packet_consumer>;
-      info.to_module_phase = &to_mixin<champsim::module_phase>;
-      info.to_module_stat = &to_mixin<champsim::module_stat>;
+      info.to_module_lifecycle = &to_mixin<champsim::module_lifecycle>;
       info.to_packet_producer = &to_mixin<packet_producer>;
       info.identify = [](const std::any& a) -> interface_registry::instance_id {
         B* ptr = std::any_cast<B*>(a);
@@ -1336,6 +1328,11 @@ struct environment_module : public module_base<environment_module, environment_m
   // New: allow snooping of ModuleBuilder parameters by module name
   virtual const ModuleBuilder get_builder_params(const std::string& module_name) const = 0;
 
+  // Check, after the hierarchy is built, that every module_lifecycle module is governed by exactly one
+  // phase controller (governance sets disjoint and covering). An environment calls this once it has
+  // constructed its phase controllers; it exits with a diagnostic on misconfiguration.
+  void validate_phase_governance() const;
+
   virtual ~environment_module() = default;
 };
 
@@ -1348,6 +1345,9 @@ void module_base<B, C>::finalize_created_instance(B* instance_ptr, ModuleBuilder
   }
   if (auto* as_producer = dynamic_cast<packet_producer*>(instance_ptr); as_producer != nullptr) {
     as_producer->set_identity_name(builder.get_name());
+  }
+  if (auto* as_lifecycle = dynamic_cast<champsim::module_lifecycle*>(instance_ptr); as_lifecycle != nullptr) {
+    as_lifecycle->set_stat_identity(registered_interface_name(), builder.get_model(), builder.get_name());
   }
   instance_ptr->bind(builder.get_parent<C>());
   // Nested-instance enrollment: submodule builders carry the owning environment;

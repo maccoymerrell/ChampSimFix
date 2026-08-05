@@ -16,12 +16,52 @@
 
 #include "modules.h"
 
+#include <cstdlib>
+#include <map>
+#include <fmt/core.h>
+
 #include "cache.h"
 #include "instruction_producer.h"
+#include "module_lifecycle.h"
+#include "phase_controller.h"
 
 // Static member definitions
 bool champsim::modules::ModuleBuilder::global_dump_enabled_ = false;
 std::string champsim::modules::ModuleBuilder::dump_log_;
+
+// Every module_lifecycle module must be governed by exactly one phase controller (disjoint sets that
+// cover all of them), so no module hears a phase edge from a controller in a different phase. An
+// environment calls this once its phase controllers are built.
+void champsim::modules::environment_module::validate_phase_governance() const
+{
+  auto controllers = typed_view<phase_controller>("phase_controller");
+  if (controllers.empty()) {
+    return; // the orchestrator reports the missing-controller error
+  }
+
+  std::map<champsim::module_lifecycle*, std::size_t> owning_controller;
+  std::size_t controller_idx = 0;
+  for (auto& controller : controllers) {
+    for (auto* mp : controller.get().governed_modules()) {
+      if (!owning_controller.try_emplace(mp, controller_idx).second) {
+        fmt::print("ERROR: a module_lifecycle module is governed by more than one phase controller; governance sets must be disjoint\n");
+        std::exit(-1);
+      }
+    }
+    ++controller_idx;
+  }
+
+  std::size_t orphans = 0;
+  for (auto& mp : typed_view<champsim::module_lifecycle>("module_lifecycle")) {
+    if (owning_controller.find(&mp.get()) == owning_controller.end()) {
+      ++orphans;
+    }
+  }
+  if (orphans > 0) {
+    fmt::print("ERROR: {} module_lifecycle module(s) are governed by no phase controller; every phase module must be governed\n", orphans);
+    std::exit(-1);
+  }
+}
 
 // Initialize the process-wide globals builder with the system-wide defaults so
 // modules constructed without an environment (e.g. unit tests) still get sane

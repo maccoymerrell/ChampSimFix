@@ -26,7 +26,7 @@ TEMPLATE_TEST_CASE("Caches issue translations", "", to_wq_MRP, to_rq_MRP, to_pq_
 
     for (auto elem : elements) {
       elem->initialize();
-      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
+      if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("A packet is sent")
@@ -78,7 +78,7 @@ TEMPLATE_TEST_CASE("Translations work even if the addresses happen to be the sam
 
     for (auto elem : elements) {
       elem->initialize();
-      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
+      if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("A packet is sent")

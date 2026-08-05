@@ -30,7 +30,7 @@ std::size_t run_stride_test(do_nothing_MRC& mock_ll, to_rq_MRP& mock_ul, CACHE& 
 
   for (auto elem : elements) {
     elem->initialize();
-    if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
+    if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false, !false); };
   }
 
   static uint64_t id = 1;

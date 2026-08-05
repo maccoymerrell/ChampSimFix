@@ -31,7 +31,7 @@
 #include "util/ring_buffer.h"
 #include "waitable.h"
 
-class PageTableWalker : public champsim::modules::page_table_walker_module, public champsim::module_phase
+class PageTableWalker : public champsim::modules::page_table_walker_module
 {
   struct pscl_entry {
     champsim::address vaddr;

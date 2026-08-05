@@ -15,7 +15,7 @@ namespace
 {
 
 // Records the (warmup, roi) pair its phase hooks observe.
-struct phase_probe_915 : public champsim::operable, public champsim::module_phase {
+struct phase_probe_915 : public champsim::operable {
   std::vector<std::pair<bool, bool>> begins;
   phase_probe_915() : champsim::operable(champsim::chrono::picoseconds{250}) {}
   long operate() override { return 1; }
@@ -47,6 +47,10 @@ struct mock_env_915 : public champsim::modules::environment_module {
     if (interface_type == "operable") {
       for (auto* op : operables_) result.push_back(op);
       for (auto* c : cores_) result.push_back(static_cast<champsim::operable*>(static_cast<champsim::modules::core_module*>(c)));
+    } else if (interface_type == "module_lifecycle") {
+      for (auto* op : operables_) result.push_back(static_cast<champsim::module_lifecycle*>(op));
+      for (auto* c : cores_)
+        result.push_back(static_cast<champsim::module_lifecycle*>(static_cast<champsim::operable*>(static_cast<champsim::modules::core_module*>(c))));
     } else if (interface_type == "packet_consumer") {
       for (auto* c : cores_) result.push_back(static_cast<champsim::modules::packet_consumer*>(static_cast<champsim::modules::core_module*>(c)));
     }
@@ -83,26 +87,27 @@ TEST_CASE("A phase controller's config can declare non-warmup phases outside the
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
   // The controller owns its phases; stepping through them exposes each phase's parsed roi flag.
-  pc->begin_phase();
+  pc->advance(0);
   REQUIRE(pc->phase().name == "Warmup");
   REQUIRE(pc->phase().is_warmup); // roi defaults to !is_warmup
   REQUIRE_FALSE(pc->phase().roi);
   core->instr_count = 10;
-  REQUIRE(pc->advance(1) == status::PHASE_COMPLETE);
+  REQUIRE(pc->advance(1) == status::COMPLETE);
 
-  pc->begin_phase();
+  pc->advance(0);
   REQUIRE(pc->phase().name == "FastForward");
   REQUIRE_FALSE(pc->phase().is_warmup); // non-warmup, explicitly unmeasured
   REQUIRE_FALSE(pc->phase().roi);
   core->instr_count = 30;
-  REQUIRE(pc->advance(1) == status::PHASE_COMPLETE);
+  REQUIRE(pc->advance(1) == status::COMPLETE);
 
-  pc->begin_phase();
+  pc->advance(0);
   REQUIRE(pc->phase().name == "Measured");
   REQUIRE_FALSE(pc->phase().is_warmup); // roi defaults on
   REQUIRE(pc->phase().roi);
   core->instr_count = 60;
-  REQUIRE(pc->advance(1) == status::DONE);
+  REQUIRE(pc->advance(1) == status::COMPLETE); // the final phase ends
+  REQUIRE(pc->advance(0) == status::DONE);     // no phases left
 }
 
 TEST_CASE("The roi flag is forwarded to module phase begin hooks")
@@ -130,13 +135,14 @@ TEST_CASE("The roi flag is forwarded to module phase begin hooks")
     .add_parameter("phases", phases_json);
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
-  pc->begin_phase(); // FastForward: begin_phase(false, false) on the probe
+  pc->advance(0); // FastForward: begin_phase(false, false) on the probe
   core->instr_count = 5;
-  REQUIRE(pc->advance(1) == status::PHASE_COMPLETE);
+  REQUIRE(pc->advance(1) == status::COMPLETE);
 
-  pc->begin_phase(); // Measured: begin_phase(false, true) on the probe
+  pc->advance(0); // Measured: begin_phase(false, true) on the probe
   core->instr_count = 10;
-  REQUIRE(pc->advance(1) == status::DONE);
+  REQUIRE(pc->advance(1) == status::COMPLETE); // the final phase ends
+  REQUIRE(pc->advance(0) == status::DONE);     // no phases left
 
   REQUIRE(probe.begins.size() == 2);
   // An unmeasured non-warmup phase: neither warmup nor roi

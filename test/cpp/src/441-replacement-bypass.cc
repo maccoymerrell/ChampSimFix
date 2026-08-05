@@ -52,7 +52,7 @@ SCENARIO("The replacement policy can bypass") {
 
     for (auto elem : elements) {
       elem->initialize();
-      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
+      if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("A packet is issued")

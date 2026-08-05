@@ -255,17 +255,12 @@ public:
   // is parent-ticked, so its own poll_cycle() is never consulted.
   bool would_do_work_at(champsim::chrono::clock::time_point t) const;
 
-  // Timer-scheduled work in flight (refresh, busy banks, an occupied data
-  // bus): completes at a known future time without external input. Vetoes
-  // the zero-progress deadlock abort while requests stall behind a refresh.
-  bool has_pending_work() const final;
-
   std::size_t bank_request_capacity() const;
   std::size_t bankgroup_request_capacity() const;
   [[nodiscard]] champsim::data::bytes density() const;
 };
 
-class MEMORY_CONTROLLER : public champsim::modules::memory_controller_module, public champsim::module_phase, public champsim::module_stat
+class MEMORY_CONTROLLER : public champsim::modules::memory_controller_module
 {
   using channel_type = champsim::modules::channel_module;
   using request_type = typename channel_type::request_type;
@@ -291,12 +286,11 @@ public:
   void initialize() final;
   long operate() final;
   long poll_cycle() final;
-  bool has_pending_work() const final;
   void begin_phase(bool warmup, bool roi) override;
   void end_phase() override;
   void print_deadlock() final;
 
-  // module_stat
+  // module_lifecycle stats
   std::vector<std::string> print_stats(bool roi) const override;
   void json_stats(champsim::json_stat_builder& b, bool roi) const override;
 

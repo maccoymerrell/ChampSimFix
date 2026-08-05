@@ -30,7 +30,7 @@ SCENARIO("A cache returns a miss after the specified latency")
 
     for (auto elem : elements) {
       elem->initialize();
-      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
+      if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     THEN("The MSHR occupancy starts at zero")
@@ -127,7 +127,7 @@ SCENARIO("A cache completes a fill after the specified latency")
 
     for (auto elem : elements) {
       elem->initialize();
-      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
+      if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("A " + std::string{str} + " packet is issued")
@@ -202,7 +202,7 @@ SCENARIO("The MSHR bandwidth limits the number of outstanding misses")
 
     for (auto elem : elements) {
       elem->initialize();
-      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
+      if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     uint64_t id = 1;
@@ -262,7 +262,7 @@ SCENARIO("A lower-level queue refusal limits the number of outstanding misses")
 
     for (auto elem : elements) {
       elem->initialize();
-      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) { mp->begin_phase(false, !false); };
+      if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false, !false); };
     }
 
     WHEN("A packet is sent")

@@ -138,18 +138,6 @@ long MEMORY_CONTROLLER::poll_cycle()
   return 1;
 }
 
-bool DRAM_CHANNEL::has_pending_work() const
-{
-  // Timer-scheduled work only: in-flight refreshes, banks busy until a known ready_time, or an active data-bus transfer. Queued-but-unscheduled
-  // packets are excluded (they schedule on the next operated cycle).
-  return active_request != std::cend(bank_request) || valid_bank_count > 0 || refresh_pending_banks > 0;
-}
-
-bool MEMORY_CONTROLLER::has_pending_work() const
-{
-  return std::any_of(std::cbegin(channels), std::cend(channels), [](const auto& chan) { return chan.has_pending_work(); });
-}
-
 bool DRAM_CHANNEL::would_do_work_at(champsim::chrono::clock::time_point t) const
 {
   // A due refresh mutates bank state and counts progress.
@@ -217,6 +205,15 @@ long DRAM_CHANNEL::operate()
     progress += service_packet(schedule_packet());
   }
 
+  // Timer-scheduled work in flight — an active data-bus transfer, or a bank busy/mid-refresh — does
+  // no request work this cycle but is liveness, not a stall. Report it as progress so a stalled-but-
+  // waiting system (e.g. behind a refresh) is not flagged as deadlocked.
+  if (progress == 0 && (active_request != std::cend(bank_request) || std::any_of(std::cbegin(bank_request), std::cend(bank_request), [](const auto& b_req) {
+                          return b_req.valid || b_req.need_refresh || b_req.under_refresh;
+                        }))) {
+    progress = 1;
+  }
+
   return progress;
 }
 
@@ -263,8 +260,8 @@ void DRAM_CHANNEL::schedule_refresh()
       refresh_row -= address_mapping.rows();
   }
 
-  // Handle refreshes per bank. Refresh is housekeeping, not workload progress, so it feeds no liveness signal; requests stalled behind an
-  // in-flight refresh are protected by has_pending_work() instead.
+  // Handle refreshes per bank. A refresh services no request, but operate() still reports it as
+  // progress (a busy/mid-refresh bank is liveness), so a system stalled behind one is not deadlocked.
   for (auto& b_req : bank_request) {
     // refresh is now needed for this bank
     if (schedule_refresh) {

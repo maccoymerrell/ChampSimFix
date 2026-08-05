@@ -9,15 +9,13 @@
 #include "core_stats.h"
 #include "dram_stats.h"
 #include "json_stat_builder.h"
-#include "module_phase.h"
-#include "module_stat.h"
 #include "modules.h"
 #include "phase_info.h"
 
 namespace {
 
-// A test core that publishes stats via the module_stat interface.
-struct stats_core : public champsim::modules::core_module, public champsim::module_stat {
+// A test core that publishes stats via the module_lifecycle interface.
+struct stats_core : public champsim::modules::core_module {
   cpu_stats sim_stats_{};
   cpu_stats roi_stats_{};
 
@@ -44,8 +42,8 @@ struct stats_core : public champsim::modules::core_module, public champsim::modu
 
 static champsim::modules::core_module::register_module<stats_core> stats_core_reg("STATS_CORE_912");
 
-// A test cache that publishes stats via the module_stat interface.
-struct stats_cache : public champsim::modules::cache_module, public champsim::module_stat {
+// A test cache that publishes stats via the module_lifecycle interface.
+struct stats_cache : public champsim::modules::cache_module {
   cache_stats sim_stats_{};
   cache_stats roi_stats_{};
 
@@ -114,7 +112,7 @@ struct stats_env : public champsim::modules::environment_module {
 
 } // anonymous namespace
 
-TEST_CASE("module_stat::print_stats returns formatted plaintext from format_plaintext") {
+TEST_CASE("module_lifecycle::print_stats returns formatted plaintext from format_plaintext") {
   auto builder = champsim::modules::ModuleBuilder("test_core", "STATS_CORE_912");
   stats_env env_dummy(champsim::modules::ModuleBuilder{});
   auto* core = champsim::modules::core_module::create_instance(builder, &env_dummy);
@@ -126,14 +124,14 @@ TEST_CASE("module_stat::print_stats returns formatted plaintext from format_plai
   impl->roi_stats_.begin_cycles = 0;
   impl->roi_stats_.end_cycles = 50;
 
-  auto* ms = dynamic_cast<champsim::module_stat*>(core);
+  auto* ms = dynamic_cast<champsim::module_lifecycle*>(core);
   REQUIRE(ms != nullptr);
   auto lines = ms->print_stats(true);
   REQUIRE(!lines.empty());
   REQUIRE(lines.front().find("core0 cumulative IPC") != std::string::npos);
 }
 
-TEST_CASE("module_stat::json_stats fills the json_stat_builder") {
+TEST_CASE("module_lifecycle::json_stats fills the json_stat_builder") {
   auto builder = champsim::modules::ModuleBuilder("test_core_json", "STATS_CORE_912");
   stats_env env_dummy(champsim::modules::ModuleBuilder{});
   auto* core = champsim::modules::core_module::create_instance(builder, &env_dummy);
@@ -145,7 +143,7 @@ TEST_CASE("module_stat::json_stats fills the json_stat_builder") {
   impl->sim_stats_.begin_cycles = 0;
   impl->sim_stats_.end_cycles = 100;
 
-  auto* ms = dynamic_cast<champsim::module_stat*>(core);
+  auto* ms = dynamic_cast<champsim::module_lifecycle*>(core);
   REQUIRE(ms != nullptr);
   champsim::json_stat_builder b;
   ms->json_stats(b, false);
@@ -154,7 +152,7 @@ TEST_CASE("module_stat::json_stats fills the json_stat_builder") {
   REQUIRE(b.json().contains("cycles"));
 }
 
-TEST_CASE("cache module_stat::print_stats produces lines tagged with the cache name") {
+TEST_CASE("cache module_lifecycle::print_stats produces lines tagged with the cache name") {
   auto builder = champsim::modules::ModuleBuilder("test_cache_912", "STATS_CACHE_912");
   stats_env env_dummy(champsim::modules::ModuleBuilder{});
   auto* cache = champsim::modules::cache_module::create_instance(builder, &env_dummy);
@@ -163,16 +161,16 @@ TEST_CASE("cache module_stat::print_stats produces lines tagged with the cache n
   impl->roi_stats_.name = "L1D";
   impl->roi_stats_.hits.set({access_type::LOAD, std::size_t{0}}, 100);
 
-  auto* ms = dynamic_cast<champsim::module_stat*>(cache);
+  auto* ms = dynamic_cast<champsim::module_lifecycle*>(cache);
   REQUIRE(ms != nullptr);
   auto lines = ms->print_stats(true);
   REQUIRE(!lines.empty());
   REQUIRE(lines.front().find("L1D") != std::string::npos);
 }
 
-TEST_CASE("interface_registry exposes module_stat conversions for opted-in interfaces") {
-  REQUIRE(champsim::modules::interface_registry::get_to_module_stat("core") != nullptr);
-  REQUIRE(champsim::modules::interface_registry::get_to_module_stat("cache") != nullptr);
+TEST_CASE("interface_registry exposes module_lifecycle conversions for opted-in interfaces") {
+  REQUIRE(champsim::modules::interface_registry::get_to_module_lifecycle("core") != nullptr);
+  REQUIRE(champsim::modules::interface_registry::get_to_module_lifecycle("cache") != nullptr);
 }
 
 TEST_CASE("interface_registry::identify reports model and name for an instance") {
