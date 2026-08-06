@@ -737,8 +737,7 @@ class wrong_path_tracereader
 
     // Note: The trace contains register file values but ChampSim doesn't care about them. We maintain this regfile for posterity's sake only
     using RegFileType = std::map<uint64_t, std::map<uint64_t, std::bitset<512>>>;
-    RegFileType cp_regfile;
-    std::optional<RegFileType> wp_regfile; // Speculative register file for wrong path
+    RegFileType regfile;
 
     // Persistent overlay
     struct overlay_key {
@@ -751,13 +750,17 @@ class wrong_path_tracereader
     };
 
     using OverlayType = std::map<overlay_key, std::map<uint64_t, std::bitset<512>>>;
-    OverlayType cp_overlay; // Each overlay value is a fid -> delta map
+    OverlayType overlay; // Each overlay value is a fid -> delta map
 
-    // This overlay is forked from the correct path overlay at the beginning of the wrong path execution. The deltas on the wrong path are accumulated in this
-    // overlay
-    std::optional<OverlayType> wp_overlay;
-    std::optional<const body_entry> last_body_entry; // The most recent BODY_TAG_ENTRY section that was used to generate instructions
-    uint64_t next_cp_bb_pc = 0xdeadbeef;             // The start PC of the next BB on the correct path. Used for detecting re-steers
+    struct wp_state_type {
+      RegFileType regfile;
+      OverlayType overlay;
+    };
+    std::optional<wp_state_type> wp_state; // This state is forked from the correct path state at the beginning of the wrong path execution
+
+    std::optional<const body_entry>
+        last_body_entry;                 // The most recent BODY_TAG_ENTRY section that was used to generate instructions. Used for generating WP instructions
+    uint64_t next_cp_bb_pc = 0xdeadbeef; // The start PC of the next BB on the correct path. Used for detecting re-steers
 
     // Members needed to read the trace in bulk
     std::deque<ooo_model_instr> instr_buffer; // Holds the decoded instructions without branch instruction fixes
@@ -875,10 +878,12 @@ class wrong_path_tracereader
             throw std::runtime_error(
                 fmt::format("[ERROR] Observed data for register #{} for an instruction with {} registers", reg_index, instruction_template.dst_regs.size()));
           const uint64_t reg_id = instruction_template.dst_regs[reg_index];
-          if constexpr (wrong_path)
-            wp_regfile.value()[previous_thread_id][reg_id] = delta;
-          else
-            cp_regfile[previous_thread_id][reg_id] = delta;
+          if constexpr (wrong_path) {
+            if (!wp_state)
+              throw std::runtime_error("[ERROR] Not running in WP mode");
+            wp_state.value().regfile[previous_thread_id][reg_id] = delta;
+          } else
+            regfile[previous_thread_id][reg_id] = delta;
         } else if (fid_name.rfind("CST_FID_LOAD_SIZE", 0) == 0) {
           /* Not implemented */
           max_observed_load_count = std::max(max_observed_load_count, extract_suffix(fid_name, "CST_FID_LOAD_SIZE"));
@@ -971,19 +976,20 @@ class wrong_path_tracereader
                              src_mem, instruction_template.instr_size);
     }
 
-    constexpr void apply_deltas_to_overlay(const delta_section& delta_sec, OverlayType& overlay, const uint32_t template_id, const std::size_t num_instrs)
+    constexpr void apply_deltas_to_overlay(const delta_section& delta_sec, OverlayType& overlay_to_use, const uint32_t template_id,
+                                           const std::size_t num_instrs)
     {
       const auto& deltas = delta_sec.records;
       for (const auto& delta : deltas) {
         if (delta.ipos >= num_instrs)
           throw std::runtime_error(
-              fmt::format("[ERROR] Illegal instruction position {} found for template {}with {} instructions", delta.ipos, template_id, num_instrs));
+              fmt::format("[ERROR] Illegal instruction position {} found for template {} with {} instructions", delta.ipos, template_id, num_instrs));
 
         const overlay_key key(template_id, delta.ipos);
-        if (overlay.find(key) == overlay.end())
-          overlay[key][delta.fid] = delta.delta;
+        if (overlay_to_use.find(key) == overlay_to_use.end())
+          overlay_to_use[key][delta.fid] = delta.delta;
         else
-          overlay[key][delta.fid] = add_bitset(overlay[key][delta.fid], delta.delta);
+          overlay_to_use[key][delta.fid] = add_bitset(overlay_to_use[key][delta.fid], delta.delta);
       }
     }
 
@@ -1002,7 +1008,7 @@ class wrong_path_tracereader
       const auto& bb_template = header.templates.at(entry.template_id);
       const auto& instructions = bb_template.instructions;
 
-      apply_deltas_to_overlay(entry.cp_delta, cp_overlay, entry.template_id, instructions.size());
+      apply_deltas_to_overlay(entry.cp_delta, overlay, entry.template_id, instructions.size());
 
       // Generate instructions
       const std::size_t num_instr = instructions.size();
@@ -1012,7 +1018,7 @@ class wrong_path_tracereader
       uint64_t next_pc = pc; // The PC for the instruction after this instruction
       for (uint64_t ipos = 0; ipos < num_instr; ipos++) {
         const overlay_key key(entry.template_id, ipos);
-        retvec.emplace_back(generate_instruction(pc, instructions[ipos], cp_overlay[key], next_pc));
+        retvec.emplace_back(generate_instruction(pc, instructions[ipos], overlay[key], next_pc));
       }
 
       next_cp_bb_pc = next_pc;
@@ -1022,11 +1028,12 @@ class wrong_path_tracereader
 
     [[nodiscard]] constexpr std::vector<ooo_model_instr> start_wp(const body_entry& entry, [[maybe_unused]] const uint64_t next_bb_pc)
     {
-      if (wp_overlay or wp_regfile)
+      if (wp_state)
         throw std::runtime_error(fmt::format("[ERROR] Attempting to instantiate a nested wrong path!"));
 
-      wp_overlay.emplace(cp_overlay); // Fork off a copy of the current overlay
-      wp_regfile.emplace(cp_regfile); // Fork off a copy of the current regfile
+      wp_state = std::make_optional<wp_state_type>();
+      wp_state.value().overlay = overlay; // Fork off a copy of the current overlay
+      wp_state.value().regfile = regfile; // Fork off a copy of the current regfile
 
       const wp_chain_section& wp_chain = entry.wp_chain;
       const wp_events_section& wp_events = entry.wp_events;
@@ -1056,7 +1063,7 @@ class wrong_path_tracereader
         const auto& bb_template = header.templates.at(template_id);
         const auto& instructions = bb_template.instructions;
 
-        apply_deltas_to_overlay(deltas, wp_overlay.value(), template_id, instructions.size());
+        apply_deltas_to_overlay(deltas, wp_state.value().overlay, template_id, instructions.size());
 
         const std::size_t num_instr = instructions.size();
         retvec.reserve(retvec.size() + instructions.size());
@@ -1064,7 +1071,7 @@ class wrong_path_tracereader
         uint64_t _;
         for (uint64_t ipos = 0; ipos < num_instr; ipos++) {
           const overlay_key key(template_id, ipos);
-          retvec.emplace_back(generate_instruction<true>(pc, instructions[ipos], (*wp_overlay)[key], _));
+          retvec.emplace_back(generate_instruction<true>(pc, instructions[ipos], wp_state.value().overlay[key], _));
           retvec.back().set_wp_event_flags(); // Mark as wrong path non-faulting instruction
 
           if (faulting_instructions.find(i) != faulting_instructions.end()) {
@@ -1080,11 +1087,10 @@ class wrong_path_tracereader
 
     [[nodiscard]] constexpr std::vector<ooo_model_instr> stop_wp(const body_entry& entry)
     {
-      if (!wp_overlay or !wp_regfile)
+      if (!wp_state)
         throw std::runtime_error(fmt::format("[ERROR] Detected mangled transient state!"));
 
-      wp_overlay.reset(); // Discard transient WP state
-      wp_regfile.reset(); // Discard the transient register file state
+      wp_state.reset(); // Discard transient WP state
       return continue_cp(entry);
     }
 
@@ -1094,10 +1100,7 @@ class wrong_path_tracereader
       if (header.templates.find(entry.template_id) == header.templates.end())
         throw std::runtime_error(fmt::format("[ERROR] Unknown template ID {} found", entry.template_id));
 
-      if (wp_overlay.has_value() != wp_regfile.has_value())
-        throw std::runtime_error("[ERROR] Detected mangled transient state!");
-
-      const bool previously_on_wp = wp_overlay.has_value();
+      const bool previously_on_wp = wp_state.has_value();
       const bool now_on_wp = next_bb_pc != next_cp_bb_pc and false; // TODO: Fix this
 
       if (previously_on_wp and now_on_wp) // Exhausted WP instructions from body entry. Use trace inferred wrong path
@@ -1133,7 +1136,7 @@ class wrong_path_tracereader
         const uint8_t gen_id = static_cast<uint8_t>(compressed_body_stream.read());
         const uint8_t width = static_cast<uint8_t>(compressed_body_stream.read());
         const std::vector<char> bytes = compressed_body_stream.read_bytes(width);
-        cp_regfile[thread_id][gen_id] = cast_to_bitset(bytes);
+        regfile[thread_id][gen_id] = cast_to_bitset(bytes);
       }
     }
 
@@ -1262,7 +1265,7 @@ class wrong_path_tracereader
       return retval;
     }
 
-    constexpr void validate_overlay(const OverlayType& overlay, const delta_section& delta_sec, const uint32_t template_id) const
+    constexpr void validate_overlay(const OverlayType& overlay_to_use, const delta_section& delta_sec, const uint32_t template_id) const
     {
       if (header.templates.find(template_id) == header.templates.end())
         throw std::runtime_error(fmt::format("[ERROR] Template #{} does not exist in the header. Validate failed!", template_id));
@@ -1270,28 +1273,25 @@ class wrong_path_tracereader
       const auto& deltas = delta_sec.records;
       for (const auto& delta : deltas) {
         const overlay_key key(template_id, delta.ipos);
-        if (overlay.find(key) == cp_overlay.end() or overlay.at(key).find(delta.fid) == overlay.at(key).end())
+        if (overlay_to_use.find(key) == overlay_to_use.end() or overlay_to_use.at(key).find(delta.fid) == overlay_to_use.at(key).end())
           throw std::runtime_error(fmt::format("[ERROR] IFRAME validation failed! Overlay key {} not found in the overlay map", key.format()));
-        if (overlay.at(key).at(delta.fid) != delta.delta)
+        if (overlay_to_use.at(key).at(delta.fid) != delta.delta)
           throw std::runtime_error(
               fmt::format("[ERROR] IFRAME validation failed! Delta value mismatch for key {} and FID {}\n\tExpected Value = {}\n\tStored Value = {}",
-                          key.format(), delta.fid, delta.delta.to_string(), overlay.at(key).at(delta.fid).to_string()));
+                          key.format(), delta.fid, delta.delta.to_string(), overlay_to_use.at(key).at(delta.fid).to_string()));
       }
     }
 
     constexpr void handle_iframe()
     {
       delta_section cp_delta = read_cp_delta_section();
-      validate_overlay(cp_overlay, cp_delta, previous_template_id);
+      validate_overlay(overlay, cp_delta, previous_template_id);
 
       if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
         wp_chain_section wp_chain = read_wp_chain_section(previous_template_id);
         wp_events_section wp_events = read_wp_events_section();
 
-        if (wp_overlay.has_value() != wp_regfile.has_value())
-          throw std::runtime_error("[ERROR] Mangled transient state detected. Exiting");
-
-        if (wp_overlay) // Verify WP only when executing WP
+        if (wp_state) // Verify WP only when executing WP
         {
           std::set<uint32_t> processed_templates; // Tracks the template IDs for the templates that have been verified
           const int64_t num_entries = static_cast<int64_t>(wp_chain.num_wp);
@@ -1302,7 +1302,7 @@ class wrong_path_tracereader
             if (processed_templates.find(current_template_id) != processed_templates.end())
               continue; // Only validate the last instance of each template
 
-            validate_overlay(wp_overlay.value(), wp_chain.wp_deltas[i], current_template_id);
+            validate_overlay(wp_state.value().overlay, wp_chain.wp_deltas[i], current_template_id);
             processed_templates.insert(current_template_id); // Mark this template as done
           }
         }
