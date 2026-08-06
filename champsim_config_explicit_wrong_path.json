@@ -437,7 +437,7 @@
           "model": "WRONG_PATH_TRACE_WORKLOAD_SOURCE",
           "trace_file": "$trace0",
           "cpu": 0,
-          "cloudsuite": "$cloudsuite",
+          "wrong_path_enabled": false,
           "repeat": true
         }
       ]

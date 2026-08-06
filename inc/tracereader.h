@@ -160,6 +160,7 @@ ooo_model_instr bulk_tracereader<T, F>::operator()()
 std::string get_fptr_cmd(std::string_view fname);
 } // namespace champsim
 
-champsim::tracereader get_tracereader(const std::string& fname, uint8_t cpu, bool is_cloudsuite, bool repeat, bool wrong_path = false);
+champsim::tracereader get_tracereader(const std::string& fname, uint8_t cpu, bool is_cloudsuite, bool repeat);
+champsim::tracereader get_wp_tracereader(const std::string& fname, const uint8_t cpu, const bool repeat, const bool wp_enabled);
 
 #endif

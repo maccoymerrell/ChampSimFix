@@ -55,16 +55,8 @@ champsim::tracereader get_tracereader_for_type(std::string fname, uint8_t cpu)
 template <typename T, typename S>
 using repeatable_reader_t = champsim::repeatable<champsim::bulk_tracereader<T, S>, uint8_t, std::string>;
 
-champsim::tracereader get_tracereader(const std::string& fname, uint8_t cpu, bool is_cloudsuite, bool repeat, bool wrong_path_trace)
+champsim::tracereader get_tracereader(const std::string& fname, uint8_t cpu, bool is_cloudsuite, bool repeat)
 {
-  if (wrong_path_trace && !repeat) {
-    return champsim::tracereader{champsim::wrong_path_tracereader(fname, cpu)};
-  }
-
-  if (wrong_path_trace && repeat) {
-    return champsim::tracereader{champsim::repeatable<champsim::wrong_path_tracereader, const std::string, const uint8_t>(fname, cpu)};
-  }
-
   if (is_cloudsuite && repeat) {
     return champsim::get_tracereader_for_type<repeatable_reader_t, cloudsuite_instr>(fname, cpu);
   }
@@ -78,4 +70,12 @@ champsim::tracereader get_tracereader(const std::string& fname, uint8_t cpu, boo
   }
 
   return champsim::get_tracereader_for_type<champsim::bulk_tracereader, input_instr>(fname, cpu);
+}
+
+champsim::tracereader get_wp_tracereader(const std::string& fname, const uint8_t cpu, const bool repeat, const bool wp_enabled)
+{
+  if (repeat)
+    return champsim::tracereader{champsim::repeatable<champsim::wrong_path_tracereader, const std::string, const uint8_t, const bool>(fname, cpu, wp_enabled)};
+
+  return champsim::tracereader{champsim::wrong_path_tracereader(fname, cpu, wp_enabled)};
 }
