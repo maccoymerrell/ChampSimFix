@@ -60,7 +60,7 @@ class wrong_path_tracereader
   void cleanup() const { std::filesystem::remove_all(trace_extract_dir); }
 
   void parse_trace();
-  void verify_trace_file_type() const;
+  constexpr void verify_trace_file_type() const;
   [[nodiscard]] std::filesystem::path create_extract_dir() const;
   void extract_trace() const;
   [[nodiscard]] std::filesystem::path get_header_path() const;
@@ -83,24 +83,24 @@ class wrong_path_tracereader
   static constexpr const std::size_t lz4_magic_position = 0;
 
   template <const char* magic, const std::size_t magic_length, const std::size_t position>
-  constexpr static bool check_file_type(const std::string& file_name);
+  static constexpr bool check_file_type(const std::string& file_name);
 
-  std::function<bool(const std::string&)> is_tar = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
+  static constexpr auto is_tar = [] [[nodiscard]] (const std::string& file_name) -> bool {
     return check_file_type<tar_magic, sizeof(tar_magic), tar_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_gzip = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
+  static constexpr auto is_gzip = [] [[nodiscard]] (const std::string& file_name) -> bool {
     return (file_name.substr(std::size(file_name) - 2) == "gz") and check_file_type<gzip_magic, sizeof(gzip_magic), gzip_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_lzma = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
+  static constexpr auto is_lzma = [] [[nodiscard]] (const std::string& file_name) -> bool {
     return (file_name.substr(std::size(file_name) - 2) == "xz") and check_file_type<lzma_magic, sizeof(lzma_magic), lzma_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_bzip2 = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
+  static constexpr auto is_bzip2 = [] [[nodiscard]] (const std::string& file_name) -> bool {
     return (file_name.substr(std::size(file_name) - 3) == "bz2") and check_file_type<bzip2_magic, sizeof(bzip2_magic), bzip2_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_zstd = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
+  static constexpr auto is_zstd = [] [[nodiscard]] (const std::string& file_name) -> bool {
     return (file_name.substr(std::size(file_name) - 3) == "zst") and check_file_type<zstd_magic, sizeof(zstd_magic), zstd_magic_position>(file_name);
   };
-  std::function<bool(const std::string&)> is_lz4 = [] [[nodiscard]] (const std::string& file_name) constexpr -> bool {
+  static constexpr auto is_lz4 = [] [[nodiscard]] (const std::string& file_name) -> bool {
     return (file_name.substr(std::size(file_name) - 3) == "lz4") and check_file_type<lz4_magic, sizeof(lz4_magic), lz4_magic_position>(file_name);
   };
 
@@ -818,11 +818,11 @@ class wrong_path_tracereader
     }
 
     template <bool wrong_path = false>
-    [[nodiscard]] ooo_model_instr generate_instruction(uint64_t& instruction_pc, const header_wrapper::Instruction& instruction_template,
-                                                       const std::map<uint64_t, std::bitset<512>>& deltas, uint64_t& next_pc)
+    [[nodiscard]] constexpr ooo_model_instr generate_instruction(uint64_t& instruction_pc, const header_wrapper::Instruction& instruction_template,
+                                                                 const std::map<uint64_t, std::bitset<512>>& deltas, uint64_t& next_pc)
     {
       // Useful functions
-      auto bitset_to_uint64_t = [] [[nodiscard]] (const std::bitset<512>& bits) -> uint64_t {
+      const auto bitset_to_uint64_t = [] [[nodiscard]] (const std::bitset<512>& bits) -> uint64_t {
         try {
           return static_cast<uint64_t>(bits.to_ullong());
         } catch (const std::overflow_error& er) {
@@ -830,7 +830,7 @@ class wrong_path_tracereader
         }
       };
 
-      auto extract_suffix = [] [[nodiscard]] (const std::string& str, const char* prefix) constexpr noexcept -> uint64_t {
+      const auto extract_suffix = [] [[nodiscard]] (const std::string& str, const char* prefix) constexpr noexcept -> uint64_t {
         uint64_t value;
         const std::string suffix_string = str.substr(std::string_view(prefix).size());
         std::istringstream iss(std::move(suffix_string));
@@ -1596,7 +1596,7 @@ template <const char* magic, const std::size_t magic_length, const std::size_t p
   return (std::memcmp(magic_bytes, magic, magic_length) == 0);
 }
 
-void wrong_path_tracereader::verify_trace_file_type() const
+constexpr void wrong_path_tracereader::verify_trace_file_type() const
 {
   // Verify that the file type is correct
   if (!is_tar(trace_file))
