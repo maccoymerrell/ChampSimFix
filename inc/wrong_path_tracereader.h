@@ -688,7 +688,7 @@ class wrong_path_tracereader
   {
   public:
     // Fetch from the next_pc
-    virtual ooo_model_instr read(const uint64_t next_pc = 0xdeadbeef) = 0;
+    virtual ooo_model_instr read(const uint64_t next_pc = 0xdeadbeef, const bool resteer = false) = 0;
     virtual bool eof() const = 0;
     virtual ~body_wrapper() = default;
   };
@@ -1123,13 +1123,14 @@ class wrong_path_tracereader
     }
 
     // Applies the deltas to the overlays and constructs a vector of ooo_model_instr from a single body entry
-    [[nodiscard]] constexpr std::vector<ooo_model_instr> construct_instructions(const body_entry& entry, const uint64_t next_bb_pc = 0xdeadbeef)
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> construct_instructions(const body_entry& entry, const uint64_t next_bb_pc = 0xdeadbeef,
+                                                                                const bool resteer = false)
     {
       if (header.templates.find(entry.template_id) == header.templates.end())
         throw std::runtime_error(fmt::format("[ERROR] Unknown template ID {} found", entry.template_id));
 
       const bool previously_on_wp = wp_state.has_value();
-      const bool now_on_wp = (next_bb_pc != next_cp_bb_pc and wp_enabled and !first_entry);
+      const bool now_on_wp = (next_bb_pc != next_cp_bb_pc and wp_enabled and !first_entry and resteer);
 
       fmt::print(stderr, "[INFO] next_bb_pc = {:x}, next_cp_bb_pc = {:x}, previously_on_wp = {}, now_on_wp = {}, wp_enabled = {}, first_entry = {}\n",
                  next_bb_pc, next_cp_bb_pc, previously_on_wp, now_on_wp, wp_enabled, first_entry);
@@ -1383,19 +1384,19 @@ class wrong_path_tracereader
     // Expects that the stream pointer points to the next BODY_TAG_ENTRY
     // Returns a vector of *all* the instructions generated from the basic block template in BODY_TAG_ENTRY
     // This function should *never* be called on correct path to generate instructions from the middle of basic block
-    [[nodiscard]] constexpr std::vector<ooo_model_instr> get_next_instrs(const uint64_t next_bb_pc = 0xdeadbeef)
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> get_next_instrs(const uint64_t next_bb_pc = 0xdeadbeef, const bool resteer = false)
     {
       fmt::print(stderr, "Fetching from {} path\n", next_bb_pc == 0xdeadbeef ? "correct" : "wrong");
 
       std::vector<ooo_model_instr> retvec;
       if (next_bb_pc == next_cp_bb_pc or !wp_enabled or first_entry) { // Fetch from the correct path
         last_body_entry.emplace(handle_entry());
-        retvec = construct_instructions(last_body_entry.value(), next_bb_pc);
+        retvec = construct_instructions(last_body_entry.value(), next_bb_pc, resteer);
         read_till_next_entry(); // Keep reading until we reach the next section (but don't read the section yet) to prepare for the next call
       } else {                  // Fetch from the wrong path
         if (!last_body_entry)   // There must always be a last_body_entry present for us to generate wrong path instructions
           throw std::runtime_error(fmt::format("[ERROR] Can't generate wrong path instruction without the last BODY_TAG_ENTRY section"));
-        retvec = construct_instructions(last_body_entry.value(), next_bb_pc);
+        retvec = construct_instructions(last_body_entry.value(), next_bb_pc, resteer);
       }
       return retvec;
     }
@@ -1438,7 +1439,7 @@ class wrong_path_tracereader
     {
     }
 
-    [[nodiscard]] constexpr ooo_model_instr read(const uint64_t next_pc = 0xdeadbeef)
+    [[nodiscard]] constexpr ooo_model_instr read(const uint64_t next_pc = 0xdeadbeef, const bool resteer = false)
     {
       // Lazy initialization
       if (!initialized)
@@ -1458,7 +1459,7 @@ class wrong_path_tracereader
       // Handle trace inferred wrong path execution
       const bool exhausted_current_basic_block = (instr_buffer_fixed.size() == 0);
       if (!exhausted_current_basic_block) {
-        const bool diverged = (next_pc != instr_buffer_fixed.front().ip.to<uint64_t>());
+        const bool diverged = (next_pc != instr_buffer_fixed.front().ip.to<uint64_t>()) or resteer;
         if (diverged and wp_enabled) { // Drop the instructions in the buffer
           instr_buffer.clear();
           instr_buffer_fixed.clear(); // TODO: Revert back to instr_buffer
@@ -1471,7 +1472,7 @@ class wrong_path_tracereader
       // TODO: Revert back to instr_buffer
       if ((instr_buffer_fixed.size() == 0)) {
         if (instr_buffer.size() <= 1) { // Populate the instr_buffer if its empty. It might have one branch instruction left over since last time
-          const auto instrs = get_next_instrs(next_pc);
+          const auto instrs = get_next_instrs(next_pc, resteer);
           if (instrs.size() == 0)
             throw std::runtime_error("[ERROR] Could not generate instructions");
           instr_buffer.insert(std::end(instr_buffer), std::make_move_iterator(std::begin(instrs)), std::make_move_iterator(std::end(instrs)));
@@ -1532,12 +1533,16 @@ class wrong_path_tracereader
   std::unique_ptr<body_wrapper> body_stream = nullptr;
 
 public:
-  [[nodiscard]] ooo_model_instr operator()(const uint64_t next_pc = 0xdeadbeef)
+  // next_pc is the PC of the next instruction that the core wants to execute
+  // resteer is set to true only in the very first call after a frontend resteer. It's set to false every other time
+  [[nodiscard]] ooo_model_instr operator()(const uint64_t next_pc = 0xdeadbeef, const bool resteer = false)
   {
+
+    fmt::print(stderr, "Resteer = {}\n", resteer);
     if (!parsed_header)
       parse_trace();
 
-    const ooo_model_instr& instr = body_stream->read(next_pc);
+    const ooo_model_instr& instr = body_stream->read(next_pc, resteer);
 
     fmt::print(stderr, "{:x}: branch = {}, taken = {}, dst regs = {}, src regs = {}\n", instr.ip.to<uint64_t>(), instr.is_branch, instr.branch_taken,
                instr.destination_registers, instr.source_registers);

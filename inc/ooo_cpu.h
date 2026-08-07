@@ -206,7 +206,7 @@ public:
   std::vector<champsim::modules::btb*> btb_module_pimpl;
   std::vector<champsim::modules::workload_source*> workload_source_pimpl;
 
-  void fill_from_sources(const uint64_t next_pc);
+  void fill_from_sources();
   bool source_eof() const final;
 
   // NOLINTBEGIN(readability-make-member-function-const): legacy modules use non-const hooks

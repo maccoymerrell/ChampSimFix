@@ -47,7 +47,7 @@ long O3_CPU::operate()
 
   progress += fetch_instruction(); // fetch
   progress += check_dib();
-  fill_from_sources(0xdeadbeef);  // TODO: Fix this. Set correct_path appropriately
+  fill_from_sources();
   initialize_instruction();
 
   return progress;
@@ -726,11 +726,11 @@ long O3_CPU::retire_rob()
   return retire_count;
 }
 
-void O3_CPU::fill_from_sources(const uint64_t next_pc = 0xdeadbeef)
+void O3_CPU::fill_from_sources()
 {
   for (auto* src : workload_source_pimpl) {
     for (auto space = instructions_requested(); !src->eof() && space > 0; --space) {
-      push_instruction(src->next_instruction(next_pc));
+      push_instruction(src->next_instruction(0xdeadbeef, false)); // TODO: Fix this
     }
   }
 }

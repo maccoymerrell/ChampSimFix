@@ -17,7 +17,7 @@ namespace
 struct null_workload_source_mock : public champsim::modules::workload_source {
   explicit null_workload_source_mock(champsim::modules::ModuleBuilder /*builder*/) {}
 
-  ooo_model_instr next_instruction() override { return ooo_model_instr{0, input_instr{}}; }
+  ooo_model_instr next_instruction(const uint64_t, const bool) override { return ooo_model_instr{0, input_instr{}}; }
   [[nodiscard]] bool eof() const override { return true; }
 };
 

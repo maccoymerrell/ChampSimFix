@@ -23,7 +23,7 @@ struct wrong_path_trace_workload_source : public champsim::modules::workload_sou
   {
   }
 
-  ooo_model_instr next_instruction(const uint64_t next_pc = 0xdeadbeef) override { return reader_(next_pc); }
+  ooo_model_instr next_instruction(const uint64_t next_pc = 0xdeadbeef, const bool resteer = false) override { return reader_(next_pc, resteer); }
   [[nodiscard]] bool eof() const override { return reader_.eof(); }
 };
 

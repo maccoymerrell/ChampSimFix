@@ -16,7 +16,7 @@ struct mock_source_913 : public champsim::modules::workload_source {
 
   explicit mock_source_913(champsim::modules::ModuleBuilder) {}
 
-  ooo_model_instr next_instruction() override {
+  ooo_model_instr next_instruction(const uint64_t = 0xdeadbeef, const bool = false) override {
     auto instr = instructions_.front();
     instructions_.pop_front();
     return instr;
@@ -35,7 +35,7 @@ static champsim::modules::workload_source::register_module<mock_source_913>
 // A minimal no-op source to test default hook behavior
 struct noop_source_913 : public champsim::modules::workload_source {
   explicit noop_source_913(champsim::modules::ModuleBuilder) {}
-  ooo_model_instr next_instruction() override { return champsim::test::instruction_with_ip(0); }
+  ooo_model_instr next_instruction(const uint64_t, const bool) override { return champsim::test::instruction_with_ip(0); }
   [[nodiscard]] bool eof() const override { return true; }
   // No override of hooks — uses defaults
 };

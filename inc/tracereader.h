@@ -47,7 +47,7 @@ class tracereader
   static uint64_t instr_unique_id; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
   struct reader_concept {
     virtual ~reader_concept() = default;
-    virtual ooo_model_instr operator()(const uint64_t next_pc) = 0;
+    virtual ooo_model_instr operator()(const uint64_t next_pc, const bool resteer) = 0;
     [[nodiscard]] virtual bool eof() const = 0;
   };
 
@@ -59,10 +59,10 @@ class tracereader
     template <typename U>
     using has_eof = decltype(std::declval<U>().eof());
 
-    ooo_model_instr operator()(const uint64_t next_pc = 0xdeadbeef) override
+    ooo_model_instr operator()(const uint64_t next_pc = 0xdeadbeef, const bool resteer = false) override
     {
       if constexpr (supports_wrong_path<T>::value)
-        return intern_(next_pc);
+        return intern_(next_pc, resteer);
       else
         return intern_();
     }
@@ -83,9 +83,9 @@ public:
   {
   }
 
-  auto operator()(const uint64_t next_pc = 0xdeadbeef)
+  auto operator()(const uint64_t next_pc = 0xdeadbeef, const bool resteer = false)
   {
-    auto retval = (*pimpl_)(next_pc);
+    auto retval = (*pimpl_)(next_pc, resteer);
     retval.instr_id = instr_unique_id++;
     return retval;
   }
