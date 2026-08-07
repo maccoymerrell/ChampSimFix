@@ -763,6 +763,7 @@ class wrong_path_tracereader
     std::optional<const body_entry>
         last_body_entry;                 // The most recent BODY_TAG_ENTRY section that was used to generate instructions. Used for generating WP instructions
     uint64_t next_cp_bb_pc = 0xdeadbeef; // The start PC of the next BB on the correct path. Used for detecting re-steers
+    bool first_entry = true; // True iff no BODY_TAG_ENTRY sections have been processed yet. Needed since we can't start the simulation from the wrong path
 
     // Members needed to read the trace in bulk
     std::deque<ooo_model_instr> instr_buffer; // Holds the decoded instructions without branch instruction fixes
@@ -997,15 +998,20 @@ class wrong_path_tracereader
 
     // This function is only called when there are no more wrong path instructions left to be generated but a re-steer hasn't been observed yet
     // Generates trace inferred wrong path instructions starting from next_bb_pc
-    [[nodiscard]] constexpr std::vector<ooo_model_instr> continue_wp([[maybe_unused]] const uint64_t next_bb_pc)
+    template <std::size_t N = 128>
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> continue_wp([[maybe_unused]] const uint64_t next_bb_pc) const
     {
+      std::vector<ooo_model_instr> retvec;
+      retvec.reserve(N);
+
       if (!wp_enabled)
         throw std::runtime_error("[ERROR] Can't generate wrong path instructions since wrong path isn't enabled");
 
         // TODO: Implement trace inferred wrong path here
 #warning "Trace inferred wrong path not implemented yet"
+      throw std::runtime_error("[ERROR] Trace inferred wrong path not implemented yet");
 
-      return {};
+      return retvec;
     }
 
     [[nodiscard]] constexpr std::vector<ooo_model_instr> continue_cp(const body_entry& entry)
@@ -1027,12 +1033,15 @@ class wrong_path_tracereader
       }
 
       next_cp_bb_pc = next_pc;
+      first_entry = false;
 
       return retvec;
     }
 
     [[nodiscard]] constexpr std::vector<ooo_model_instr> start_wp(const body_entry& entry, [[maybe_unused]] const uint64_t next_bb_pc)
     {
+      fmt::print(stderr, "[INFO] Starting wrong path from template {}\n", entry.template_id);
+
       if (!wp_enabled)
         throw std::runtime_error("[ERROR] Can't generate wrong path instructions since wrong path isn't enabled");
 
@@ -1051,6 +1060,7 @@ class wrong_path_tracereader
         return continue_wp(next_bb_pc);
 
       const uint32_t next_wp_template_id = wp_chain.template_ids[0];
+      fmt::print(stderr, "[INFO] Next WP template id = {}\n", next_wp_template_id);
       const uint64_t next_wp_bb_pc = header.templates.at(next_wp_template_id).start_pc;
 
       // Wrong path isn't available. Fall back to trace inferred wrong path
@@ -1072,6 +1082,7 @@ class wrong_path_tracereader
         const auto& instructions = bb_template.instructions;
 
         apply_deltas_to_overlay(deltas, wp_state.value().overlay, template_id, instructions.size());
+        fmt::print(stderr, "[INFO] Applied deltas for {}\n", template_id);
 
         const std::size_t num_instr = instructions.size();
         retvec.reserve(retvec.size() + instructions.size());
@@ -1088,7 +1099,13 @@ class wrong_path_tracereader
             retvec.back().set_wp_event_flags(is_faulting); // Mark as wrong path faulting instruction
           }
         }
+        fmt::print(stderr, "[INFO] Generated instructions for {}, size = {}\n", template_id, retvec.size());
       }
+
+      fmt::print(stderr, "[INFO] Generated {} wrong path instructions\n", retvec.size());
+      for (const auto& instr : retvec)
+        fmt::print(stderr, "[INFO] {:x}: branch = {}, taken = {}, dst regs = {}, src regs = {}, is_wp = {}, is_wp_fault = {}\n", instr.ip.to<uint64_t>(),
+                   instr.is_branch, instr.branch_taken, instr.destination_registers, instr.source_registers, instr.is_wp, instr.is_wp_fault);
 
       return retvec;
     }
@@ -1112,7 +1129,10 @@ class wrong_path_tracereader
         throw std::runtime_error(fmt::format("[ERROR] Unknown template ID {} found", entry.template_id));
 
       const bool previously_on_wp = wp_state.has_value();
-      const bool now_on_wp = next_bb_pc != next_cp_bb_pc and wp_enabled;
+      const bool now_on_wp = (next_bb_pc != next_cp_bb_pc and wp_enabled and !first_entry);
+
+      fmt::print(stderr, "[INFO] next_bb_pc = {:x}, next_cp_bb_pc = {:x}, previously_on_wp = {}, now_on_wp = {}, wp_enabled = {}, first_entry = {}\n",
+                 next_bb_pc, next_cp_bb_pc, previously_on_wp, now_on_wp, wp_enabled, first_entry);
 
       if (previously_on_wp and now_on_wp) // Exhausted WP instructions from body entry. Use trace inferred wrong path
         return continue_wp(next_bb_pc);
@@ -1184,16 +1204,17 @@ class wrong_path_tracereader
       return cp_delta;
     }
 
-    [[nodiscard]] constexpr wp_chain_section read_wp_chain_section(const uint32_t last_template_id)
+    [[nodiscard]] constexpr wp_chain_section read_wp_chain_section()
     {
       const uint64_t section_size = compressed_body_stream.parse_uleb();
       const uint64_t initial_bytes_read = compressed_body_stream.total_bytes_read;
 
       wp_chain_section wp_chain;
       wp_chain.num_wp = compressed_body_stream.parse_uleb();
+      uint32_t template_id = 0;
       for (uint64_t i = 0; i < wp_chain.num_wp; i++) {
         const int64_t template_id_delta = compressed_body_stream.parse_sleb();
-        const uint32_t template_id = static_cast<uint32_t>(static_cast<int64_t>(last_template_id) + template_id_delta);
+        template_id = static_cast<uint32_t>(static_cast<int64_t>(template_id) + template_id_delta);
         wp_chain.template_ids.emplace_back(template_id);
         wp_chain.wp_deltas.emplace_back(read_cp_delta_section());
       }
@@ -1268,7 +1289,7 @@ class wrong_path_tracereader
       retval.template_id = current_template_id;
       retval.cp_delta = read_cp_delta_section();
       if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
-        retval.wp_chain = read_wp_chain_section(current_template_id);
+        retval.wp_chain = read_wp_chain_section();
         retval.wp_events = read_wp_events_section();
         validate_wp(retval.wp_chain, retval.wp_events);
       }
@@ -1299,7 +1320,7 @@ class wrong_path_tracereader
       validate_overlay(overlay, cp_delta, previous_template_id);
 
       if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
-        wp_chain_section wp_chain = read_wp_chain_section(previous_template_id);
+        wp_chain_section wp_chain = read_wp_chain_section();
         wp_events_section wp_events = read_wp_events_section();
 
         if (wp_state) // Verify WP only when executing WP
@@ -1367,7 +1388,7 @@ class wrong_path_tracereader
       fmt::print(stderr, "Fetching from {} path\n", next_bb_pc == 0xdeadbeef ? "correct" : "wrong");
 
       std::vector<ooo_model_instr> retvec;
-      if (next_bb_pc == next_cp_bb_pc or !wp_enabled) { // Fetch from the correct path
+      if (next_bb_pc == next_cp_bb_pc or !wp_enabled or first_entry) { // Fetch from the correct path
         last_body_entry.emplace(handle_entry());
         retvec = construct_instructions(last_body_entry.value(), next_bb_pc);
         read_till_next_entry(); // Keep reading until we reach the next section (but don't read the section yet) to prepare for the next call
@@ -1526,12 +1547,15 @@ public:
 
   wrong_path_tracereader(const std::string& tf, const uint8_t cpu_idx, const bool wp_enabled_) noexcept : cpu(cpu_idx), trace_file(tf), wp_enabled(wp_enabled_)
   {
+    fmt::print("[TRACEREADER] Wrong path {}abled\n", wp_enabled ? "en" : "dis");
   }
 
-  void move_from(champsim::wrong_path_tracereader&& other)
+  void move_from(champsim::wrong_path_tracereader&& other) noexcept
   {
-    if (other.moved)
-      throw std::runtime_error("[ERROR] Moving from a moved-from object");
+    if (other.moved) {
+      fmt::print(stderr, "[ERROR] Moving from a moved-from object");
+      std::exit(-1);
+    }
 
     if (this->trace_file == other.trace_file) { // this and other are reading from the same trace. No need to cleanup state
       this->moved = false;
@@ -1558,10 +1582,10 @@ public:
     this->construct_body_stream(); // Create a fresh copy of the body stream
   }
 
-  wrong_path_tracereader(champsim::wrong_path_tracereader&& other) { move_from(std::forward<champsim::wrong_path_tracereader>(other)); }
+  wrong_path_tracereader(champsim::wrong_path_tracereader&& other) noexcept { move_from(std::forward<champsim::wrong_path_tracereader>(other)); }
 
   constexpr wrong_path_tracereader& operator=(wrong_path_tracereader& other) = default;
-  constexpr wrong_path_tracereader& operator=(wrong_path_tracereader&& other)
+  constexpr wrong_path_tracereader& operator=(wrong_path_tracereader&& other) noexcept
   {
     if (this != &other)
       move_from(std::forward<champsim::wrong_path_tracereader>(other));
