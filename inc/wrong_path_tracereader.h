@@ -1007,7 +1007,7 @@ class wrong_path_tracereader
       if (!wp_enabled)
         throw std::runtime_error("[ERROR] Can't generate wrong path instructions since wrong path isn't enabled");
 
-        // TODO: Implement trace inferred wrong path here
+      // TODO: Implement trace inferred wrong path here
 #warning "Trace inferred wrong path not implemented yet"
       throw std::runtime_error("[ERROR] Trace inferred wrong path not implemented yet");
 
@@ -1038,35 +1038,8 @@ class wrong_path_tracereader
       return retvec;
     }
 
-    [[nodiscard]] constexpr std::vector<ooo_model_instr> start_wp(const body_entry& entry, [[maybe_unused]] const uint64_t next_bb_pc)
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> construct_wp_instructions(const wp_chain_section& wp_chain, const wp_events_section& wp_events)
     {
-      fmt::print(stderr, "[INFO] Starting wrong path from template {}\n", entry.template_id);
-
-      if (!wp_enabled)
-        throw std::runtime_error("[ERROR] Can't generate wrong path instructions since wrong path isn't enabled");
-
-      if (wp_state)
-        throw std::runtime_error(fmt::format("[ERROR] Attempting to instantiate a nested wrong path!"));
-
-      wp_state = std::make_optional<wp_state_type>();
-      wp_state.value().overlay = overlay; // Fork off a copy of the current overlay
-      wp_state.value().regfile = regfile; // Fork off a copy of the current regfile
-
-      const wp_chain_section& wp_chain = entry.wp_chain;
-      const wp_events_section& wp_events = entry.wp_events;
-
-      // Wrong path isn't available. Fall back to trace inferred wrong path
-      if (wp_chain.num_wp == 0)
-        return continue_wp(next_bb_pc);
-
-      const uint32_t next_wp_template_id = wp_chain.template_ids[0];
-      fmt::print(stderr, "[INFO] Next WP template id = {}\n", next_wp_template_id);
-      const uint64_t next_wp_bb_pc = header.templates.at(next_wp_template_id).start_pc;
-
-      // Wrong path isn't available. Fall back to trace inferred wrong path
-      if (next_wp_bb_pc != next_bb_pc)
-        return continue_wp(next_bb_pc);
-
       // Create a map of faulting instructions
       std::map<uint64_t, std::set<uint64_t>> faulting_instructions;
       for (std::size_t i = 0; i < wp_events.wp_index.size(); i++)
@@ -1108,6 +1081,38 @@ class wrong_path_tracereader
                    instr.is_branch, instr.branch_taken, instr.destination_registers, instr.source_registers, instr.is_wp, instr.is_wp_fault);
 
       return retvec;
+    }
+
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> start_wp(const body_entry& entry, [[maybe_unused]] const uint64_t next_bb_pc)
+    {
+      fmt::print(stderr, "[INFO] Starting wrong path from template {}\n", entry.template_id);
+
+      if (!wp_enabled)
+        throw std::runtime_error("[ERROR] Can't generate wrong path instructions since wrong path isn't enabled");
+
+      if (wp_state)
+        throw std::runtime_error(fmt::format("[ERROR] Attempting to instantiate a nested wrong path!"));
+
+      wp_state = std::make_optional<wp_state_type>();
+      wp_state.value().overlay = overlay; // Fork off a copy of the current overlay
+      wp_state.value().regfile = regfile; // Fork off a copy of the current regfile
+
+      const wp_chain_section& wp_chain = entry.wp_chain;
+      const wp_events_section& wp_events = entry.wp_events;
+
+      // Wrong path isn't available. Fall back to trace inferred wrong path
+      if (wp_chain.num_wp == 0)
+        return continue_wp(next_bb_pc);
+
+      const uint32_t next_wp_template_id = wp_chain.template_ids[0];
+      fmt::print(stderr, "[INFO] Next WP template id = {}\n", next_wp_template_id);
+      const uint64_t next_wp_bb_pc = header.templates.at(next_wp_template_id).start_pc;
+
+      // Wrong path isn't available. Fall back to trace inferred wrong path
+      if (next_wp_bb_pc != next_bb_pc)
+        return continue_wp(next_bb_pc);
+
+      return construct_wp_instructions(wp_chain, wp_events);
     }
 
     [[nodiscard]] constexpr std::vector<ooo_model_instr> stop_wp(const body_entry& entry)
@@ -1380,7 +1385,7 @@ class wrong_path_tracereader
       }
     }
 
-    // Reads the next instruction from the trace (from the next BODY_TAG_ENTRY), constructs an ooo_model_instr from it, and return it
+    // Reads the next instruction from the trace (from the next BODY_TAG_ENTRY), constructs an ooo_model_instr from it, and returns it
     // Expects that the stream pointer points to the next BODY_TAG_ENTRY
     // Returns a vector of *all* the instructions generated from the basic block template in BODY_TAG_ENTRY
     // This function should *never* be called on correct path to generate instructions from the middle of basic block
@@ -1467,8 +1472,8 @@ class wrong_path_tracereader
       }
 
       // Time to re-fill the buffer
-      // Note: Buffer is refilled *only* (i) at basic block boundaries or (ii) at the start of a wrong path chain or (iii) when trace inferred wrong path
-      // instructions are needed
+      // Note: Buffer is refilled *only* (i) at basic block boundaries, or (ii) at the start of a wrong path chain, or (iii) when trace inferred wrong
+      // path instructions are needed
       // TODO: Revert back to instr_buffer
       if ((instr_buffer_fixed.size() == 0)) {
         if (instr_buffer.size() <= 1) { // Populate the instr_buffer if its empty. It might have one branch instruction left over since last time
@@ -1514,7 +1519,7 @@ class wrong_path_tracereader
 
       // Each instruction in the source application can potentially result in multiple trace instructions. For example, one `rep` in X86 can result in tens of
       // trace instructions. Moreover, the writer collects the trace till cp_instruction_num instructions are reached *and* the last executing basic block is
-      // finished, resulting in potentially 5-10 extra trace instructions
+      // finished, resulting in potentially few extra trace instructions
       const bool comsumed_expected_num_cp_instructions = header.prolog.total_target_instructions <= cp_instruction_num;
       const bool unbounded_trace = header.prolog.total_target_instructions == 0; // The trace was collected until the application exited
 
