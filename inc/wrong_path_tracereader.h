@@ -110,7 +110,7 @@ class wrong_path_tracereader
   class stream_reader
   {
     CompressedStreamType stream;
-    std::array<char, buffer_size> decompressed_buffer; // This buffer temporarily the decompressed bytes
+    std::array<char, buffer_size> decompressed_buffer; // This buffer temporarily holds the decompressed bytes
     decltype(decompressed_buffer.end()) buffer_iter = decompressed_buffer.begin();
     decltype(decompressed_buffer.end()) max_buffer_iter = decompressed_buffer.begin();
 
@@ -304,6 +304,15 @@ class wrong_path_tracereader
       std::memcpy(&retval, bytes.data(), 8);
       return retval;
     }
+
+    // Reads a u64 from the stream
+    [[nodiscard]] constexpr uint64_t parse_u64()
+    {
+      uint64_t retval = 0;
+      const auto bytes = read_bytes(8);
+      std::memcpy(&retval, bytes.data(), 8);
+      return retval;
+    }
   };
 
   // Forward declare body_parser
@@ -330,6 +339,7 @@ class wrong_path_tracereader
       uint64_t warmup_instructions;
       uint64_t total_target_instructions;
       double simpoint_weight;
+      uint64_t warmup_end_arch_instructions;
 
       std::string command;
       std::string datetime;
@@ -396,6 +406,7 @@ class wrong_path_tracereader
 
   public:
     virtual void parse() = 0;
+    virtual bool eof() const = 0;
     virtual ~header_wrapper() = default;
   };
 
@@ -484,6 +495,13 @@ class wrong_path_tracereader
       if (compressed_header_stream.total_bytes_read - initial_bytes_read != encoding_size) {
         throw std::runtime_error("[ERROR] Encoding section overflowed its size");
       }
+    }
+
+    constexpr void parse_warnmup_end_arch_insns()
+    {
+      prolog.warmup_end_arch_instructions = compressed_header_stream.parse_uleb();
+
+      fmt::print(stderr, "Warmup End Architecture Instructions = {}\n", prolog.warmup_end_arch_instructions);
     }
 
     [[nodiscard]] constexpr Dependency parse_dependency(const uint8_t n_dst, const uint8_t max_dep_stores, const uint8_t max_dep_loads)
@@ -673,11 +691,14 @@ class wrong_path_tracereader
       parse_prolog();
       parse_prolog_strings();
       parse_encoding_maps();
+      parse_warnmup_end_arch_insns();
       parse_templates();
 
       if (!compressed_header_stream.eof)
         throw std::runtime_error("[ERROR] Unexpected bytes found at the end of the header");
     }
+
+    constexpr bool eof() const override { return compressed_header_stream.eof; }
 
     ~header_parser() override = default;
   };
@@ -712,12 +733,6 @@ class wrong_path_tracereader
       std::vector<field_delta_section> records;
     };
 
-    struct wp_chain_section {
-      uint64_t num_wp;
-      std::vector<uint32_t> template_ids;
-      std::vector<delta_section> wp_deltas;
-    };
-
     struct wp_events_section {
       uint64_t num_events;
       uint8_t ev_flags;
@@ -725,11 +740,19 @@ class wrong_path_tracereader
       std::vector<std::optional<uint64_t>> fault_instr_index;
     };
 
+    struct wp_chain_section {
+      uint64_t hdr;
+      uint64_t num_wp;
+      bool has_wp_events;
+      std::vector<uint32_t> template_ids;
+      std::vector<delta_section> wp_deltas;
+      std::optional<wp_events_section> events;
+    };
+
     struct body_entry {
       uint32_t template_id;
       delta_section cp_delta;
-      wp_chain_section wp_chain;
-      wp_events_section wp_events;
+      std::optional<wp_chain_section> wp_chain;
     };
 
     stream_reader<BodyCompressedType> compressed_body_stream;
@@ -767,15 +790,20 @@ class wrong_path_tracereader
 
     // Members needed to read the trace in bulk
     std::deque<ooo_model_instr> instr_buffer; // Holds the decoded instructions without branch instruction fixes
-    // TODO: Remove this
-    std::deque<ooo_model_instr> instr_buffer_fixed; // Holds the decoded instructions with branch instruction fixes
 
     // Members needed to walk the trace
     uint32_t previous_template_id = 0;
     uint32_t previous_thread_id = 0;
+    uint32_t previous_asid_index = 0;
     uint32_t seq_num = 0;
     uint64_t cp_instruction_num = 0; // Counts the number of parsed correct path instructions
     std::set<uint64_t> valid_body_tags;
+
+    struct asid_index_type {
+      uint64_t root_page_table_phys_addr;
+      uint64_t signature;
+    };
+    std::map<uint32_t, asid_index_type> observed_asids; // Tracks the observed ASIDs so far
 
     template <std::size_t width>
     [[nodiscard]] constexpr std::bitset<width> add_bitset(std::bitset<width> b1, std::bitset<width> b2) const noexcept
@@ -836,6 +864,18 @@ class wrong_path_tracereader
         }
       };
 
+      // Useful functions
+      const auto bitset_to_int64_t = [] [[nodiscard]] (const std::bitset<512>& bits) -> uint64_t {
+        try {
+          const uint64_t val = static_cast<uint64_t>(bits.to_ullong());
+          int64_t retval = 0;
+          std::memcpy(&retval, &val, sizeof(uint64_t));
+          return retval;
+        } catch (const std::overflow_error& er) {
+          throw std::runtime_error(fmt::format("[ERROR] Can't cast bitset with value {} to uint64_t", bits.to_string()));
+        }
+      };
+
       const auto extract_suffix = [] [[nodiscard]] (const std::string& str, const char* prefix) constexpr noexcept -> uint64_t {
         uint64_t value;
         const std::string suffix_string = str.substr(std::string_view(prefix).size());
@@ -855,6 +895,8 @@ class wrong_path_tracereader
       uint64_t n_stores = 0;
       uint64_t max_observed_load_count = 0;
       uint64_t max_observed_store_count = 0;
+      bool branch_taken = false;
+      uint64_t branch_target = 0xdeadbeef;
       for (const auto& [fid, delta] : deltas) {
         const std::string& fid_name = header.ids.at("field_id").right.at(fid);
         if (fid_name == "CST_FID_N_LOADS") {
@@ -919,6 +961,10 @@ class wrong_path_tracereader
           /* Not implemented */
         } else if (fid_name == "CST_FID_EXTENDED") {
           /* Not implemented */
+        } else if (fid_name == "CST_FID_BRANCH_TAKEN") {
+          branch_taken = (bitset_to_uint64_t(delta) == 1);
+        } else if (fid_name == "CST_FID_BRANCH_TARGET") {
+          branch_target = static_cast<uint64_t>(static_cast<int64_t>(instruction_pc) + bitset_to_int64_t(delta));
         } else {
           throw std::runtime_error(fmt::format("[ERROR] Unknown FID: {} detected", fid_name));
         }
@@ -939,9 +985,6 @@ class wrong_path_tracereader
 
       const std::set<std::string> branch_opcodes{"GEN_OP_BRANCH", "GEN_OP_RET", "GEN_OP_SYSCALL"};
       const bool is_branch = (branch_opcodes.find(opcode_name) != branch_opcodes.end());
-
-      // TODO: Identify branch direction via FIDs
-      const bool branch_taken = false; // Branch direction is fixed later
 
       branch_type br_type{NOT_BRANCH};
       if (is_branch) {
@@ -971,8 +1014,10 @@ class wrong_path_tracereader
           br_type = branch_type::BRANCH_OTHER;
       }
 
-      // TODO: Set the next pc correctly
-      next_pc = 0xdeadbeef;
+      next_pc = branch_target;
+
+      if (is_branch)
+        fmt::print(stderr, "[INFO] {:x}: is_branch = {}, next_pc = {:x}\n", instruction_pc, is_branch, next_pc);
 
       // Construct an ooo_model_instr and return
       return ooo_model_instr(instruction_pc, is_branch, branch_taken, cpu, br_type, instruction_template.dst_regs, instruction_template.src_regs, dst_mem,
@@ -999,15 +1044,17 @@ class wrong_path_tracereader
     // This function is only called when there are no more wrong path instructions left to be generated but a re-steer hasn't been observed yet
     // Generates trace inferred wrong path instructions starting from next_bb_pc
     template <std::size_t N = 128>
-    [[nodiscard]] constexpr std::vector<ooo_model_instr> continue_wp([[maybe_unused]] const uint64_t next_bb_pc) const
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> continue_wp([[maybe_unused]] const uint64_t next_pc) const
     {
+      fmt::print(stderr, "[INFO] Starting trace inferred WP from PC = {:x}\n", next_pc);
+
       std::vector<ooo_model_instr> retvec;
       retvec.reserve(N);
 
       if (!wp_enabled)
         throw std::runtime_error("[ERROR] Can't generate wrong path instructions since wrong path isn't enabled");
 
-      // TODO: Implement trace inferred wrong path here
+        // TODO: Implement trace inferred wrong path here
 #warning "Trace inferred wrong path not implemented yet"
       throw std::runtime_error("[ERROR] Trace inferred wrong path not implemented yet");
 
@@ -1038,13 +1085,15 @@ class wrong_path_tracereader
       return retvec;
     }
 
-    [[nodiscard]] constexpr std::vector<ooo_model_instr> construct_wp_instructions(const wp_chain_section& wp_chain, const wp_events_section& wp_events)
+    [[nodiscard]] constexpr std::vector<ooo_model_instr> construct_wp_instructions(const wp_chain_section& wp_chain)
     {
       // Create a map of faulting instructions
       std::map<uint64_t, std::set<uint64_t>> faulting_instructions;
-      for (std::size_t i = 0; i < wp_events.wp_index.size(); i++)
-        if (wp_events.fault_instr_index[i])
-          faulting_instructions[wp_events.wp_index[i]].insert(wp_events.fault_instr_index[i].value());
+      if (wp_chain.events) {
+        for (std::size_t i = 0; i < wp_chain.events.value().wp_index.size(); i++)
+          if (wp_chain.events.value().fault_instr_index[i])
+            faulting_instructions[wp_chain.events.value().wp_index[i]].insert(wp_chain.events.value().fault_instr_index[i].value());
+      }
 
       // Generate wrong path instructions from wp_chain and set the event flags appropriately
       std::vector<ooo_model_instr> retvec;
@@ -1093,12 +1142,14 @@ class wrong_path_tracereader
       if (wp_state)
         throw std::runtime_error(fmt::format("[ERROR] Attempting to instantiate a nested wrong path!"));
 
+      if (not entry.wp_chain)
+        throw std::runtime_error(fmt::format("[ERROR] WP chain is unavailable. Can't start WP!"));
+
       wp_state = std::make_optional<wp_state_type>();
       wp_state.value().overlay = overlay; // Fork off a copy of the current overlay
       wp_state.value().regfile = regfile; // Fork off a copy of the current regfile
 
-      const wp_chain_section& wp_chain = entry.wp_chain;
-      const wp_events_section& wp_events = entry.wp_events;
+      const wp_chain_section& wp_chain = entry.wp_chain.value();
 
       // Wrong path isn't available. Fall back to trace inferred wrong path
       if (wp_chain.num_wp == 0)
@@ -1112,11 +1163,12 @@ class wrong_path_tracereader
       if (next_wp_bb_pc != next_bb_pc)
         return continue_wp(next_bb_pc);
 
-      return construct_wp_instructions(wp_chain, wp_events);
+      return construct_wp_instructions(wp_chain);
     }
 
     [[nodiscard]] constexpr std::vector<ooo_model_instr> stop_wp(const body_entry& entry)
     {
+      fmt::print(stderr, "[INFO] Stopping WP\n");
       if (!wp_enabled)
         throw std::runtime_error("[ERROR] Can't stop wrong path since wrong path isn't enabled");
 
@@ -1134,17 +1186,23 @@ class wrong_path_tracereader
       if (header.templates.find(entry.template_id) == header.templates.end())
         throw std::runtime_error(fmt::format("[ERROR] Unknown template ID {} found", entry.template_id));
 
+      if (wp_state.has_value() and !wp_enabled)
+        throw std::runtime_error("[ERROR] WP is disabled but were previously on wrong path");
+
       const bool previously_on_wp = wp_state.has_value();
-      const bool now_on_wp = (next_bb_pc != next_cp_bb_pc and wp_enabled and !first_entry and resteer);
+      const bool wp_to_cp = previously_on_wp and resteer and (next_bb_pc == next_cp_bb_pc);
+      const bool wp_to_wp = previously_on_wp and !wp_to_cp;
+      const bool previously_on_cp = !previously_on_wp;
+      const bool cp_to_wp = previously_on_cp and (next_bb_pc != next_cp_bb_pc) and wp_enabled;
 
-      fmt::print(stderr, "[INFO] next_bb_pc = {:x}, next_cp_bb_pc = {:x}, previously_on_wp = {}, now_on_wp = {}, wp_enabled = {}, first_entry = {}\n",
-                 next_bb_pc, next_cp_bb_pc, previously_on_wp, now_on_wp, wp_enabled, first_entry);
+      if ((wp_to_wp or cp_to_wp) and !wp_enabled)
+        throw std::runtime_error("[ERROR] WP is disabled but trying to move to wrong path");
 
-      if (previously_on_wp and now_on_wp) // Exhausted WP instructions from body entry. Use trace inferred wrong path
+      if (wp_to_wp) // Exhausted WP instructions from body entry. Use trace inferred wrong path
         return continue_wp(next_bb_pc);
-      else if (previously_on_wp and !now_on_wp)
+      else if (wp_to_cp)
         return stop_wp(entry);
-      else if (!previously_on_wp and now_on_wp)
+      else if (cp_to_wp)
         return start_wp(entry, next_bb_pc);
       return continue_cp(entry);
     }
@@ -1153,6 +1211,16 @@ class wrong_path_tracereader
     {
       const int64_t thread_id_delta = compressed_body_stream.parse_sleb();
       previous_thread_id += static_cast<uint32_t>(static_cast<int64_t>(previous_thread_id) + thread_id_delta);
+    }
+
+    constexpr void handle_asid_switch()
+    {
+      const int64_t asid_delta = compressed_body_stream.parse_sleb();
+      previous_asid_index += static_cast<uint32_t>(static_cast<int64_t>(previous_asid_index) + asid_delta);
+      if (observed_asids.find(previous_asid_index) == observed_asids.end()) { // This is the first time we've seen this ASID
+        observed_asids[previous_asid_index].root_page_table_phys_addr = compressed_body_stream.parse_u64();
+        observed_asids[previous_asid_index].signature = compressed_body_stream.parse_u64();
+      }
     }
 
     [[nodiscard]] constexpr std::bitset<512> cast_to_bitset(const std::vector<char>& bytes) const noexcept
@@ -1175,6 +1243,28 @@ class wrong_path_tracereader
         const std::vector<char> bytes = compressed_body_stream.read_bytes(width);
         regfile[thread_id][gen_id] = cast_to_bitset(bytes);
       }
+    }
+
+    constexpr void handle_devio_start()
+    {
+      /* NOTE: The tracer parses this section but does *not* do anything with the parsed information */
+
+      [[maybe_unused]] const uint64_t request_id = compressed_body_stream.parse_uleb();
+      [[maybe_unused]] const uint8_t rw = compressed_body_stream.read();
+      [[maybe_unused]] const uint64_t bytes = compressed_body_stream.parse_uleb();
+      [[maybe_unused]] const uint64_t block = compressed_body_stream.parse_uleb();
+      [[maybe_unused]] const uint8_t attr = compressed_body_stream.read();
+      if (attr == 1) {
+        [[maybe_unused]] const uint64_t owner_thread_id = compressed_body_stream.parse_uleb();
+        [[maybe_unused]] const uint64_t owner_asid = compressed_body_stream.parse_uleb();
+      }
+    }
+
+    constexpr void handle_devio_stop()
+    {
+      /* NOTE: The tracer parses this section but does *not* do anything with the parsed information */
+
+      [[maybe_unused]] const uint64_t request_id = compressed_body_stream.parse_uleb();
     }
 
     [[nodiscard]] constexpr field_delta_section read_field_delta_section(uint32_t& ipos)
@@ -1210,28 +1300,6 @@ class wrong_path_tracereader
       return cp_delta;
     }
 
-    [[nodiscard]] constexpr wp_chain_section read_wp_chain_section()
-    {
-      const uint64_t section_size = compressed_body_stream.parse_uleb();
-      const uint64_t initial_bytes_read = compressed_body_stream.total_bytes_read;
-
-      wp_chain_section wp_chain;
-      wp_chain.num_wp = compressed_body_stream.parse_uleb();
-      uint32_t template_id = 0;
-      for (uint64_t i = 0; i < wp_chain.num_wp; i++) {
-        const int64_t template_id_delta = compressed_body_stream.parse_sleb();
-        template_id = static_cast<uint32_t>(static_cast<int64_t>(template_id) + template_id_delta);
-        wp_chain.template_ids.emplace_back(template_id);
-        wp_chain.wp_deltas.emplace_back(read_cp_delta_section());
-      }
-
-      if (compressed_body_stream.total_bytes_read - initial_bytes_read != section_size) {
-        throw std::runtime_error("[ERROR] Wrong Path Chain section overflowed its size");
-      }
-
-      return wp_chain;
-    }
-
     [[nodiscard]] constexpr wp_events_section read_wp_events_section()
     {
       const uint64_t section_size = compressed_body_stream.parse_uleb();
@@ -1260,12 +1328,45 @@ class wrong_path_tracereader
       return wp_events;
     }
 
-    constexpr void validate_wp(const wp_chain_section& chain, const wp_events_section& events)
+    [[nodiscard]] constexpr wp_chain_section read_wp_chain_section()
     {
-      if (events.wp_index.size() == 0)
+      const uint64_t section_size = compressed_body_stream.parse_uleb();
+      const uint64_t initial_bytes_read = compressed_body_stream.total_bytes_read;
+
+      if (header.ids.find("wp_chain_flag") == header.ids.end())
+        throw std::runtime_error("[ERROR] wp_chain_flag encodings not available");
+
+      wp_chain_section wp_chain;
+      wp_chain.hdr = compressed_body_stream.parse_uleb();
+      wp_chain.num_wp = wp_chain.hdr >> 1;
+      wp_chain.has_wp_events = (wp_chain.hdr & header.ids.at("wp_chain_flag").left.at("CST_WP_CHAIN_HAS_EVENTS")) != 0;
+
+      uint32_t template_id = 0;
+      for (uint64_t i = 0; i < wp_chain.num_wp; i++) {
+        const int64_t template_id_delta = compressed_body_stream.parse_sleb();
+        template_id = static_cast<uint32_t>(static_cast<int64_t>(template_id) + template_id_delta);
+        wp_chain.template_ids.emplace_back(template_id);
+        wp_chain.wp_deltas.emplace_back(read_cp_delta_section());
+      }
+
+      if (compressed_body_stream.total_bytes_read - initial_bytes_read != section_size) {
+        throw std::runtime_error("[ERROR] Wrong Path Chain section overflowed its size");
+      }
+
+      if (wp_chain.has_wp_events)
+        wp_chain.events = read_wp_events_section();
+
+      return wp_chain;
+    }
+
+    constexpr void validate_wp(const wp_chain_section& chain)
+    {
+      if (not chain.events)
+        return;
+      if (chain.events.value().wp_index.size() == 0)
         return;
 
-      const uint64_t max_index = *std::max_element(events.wp_index.cbegin(), events.wp_index.cend());
+      const uint64_t max_index = *std::max_element(chain.events.value().wp_index.cbegin(), chain.events.value().wp_index.cend());
 
       // Default case: wrong path is valid
       if (max_index < chain.num_wp)
@@ -1273,8 +1374,8 @@ class wrong_path_tracereader
 
       // Special case: wrong path was detected but not captured due to translation failure
       const bool no_wp_bbs = (chain.num_wp == 0);
-      const bool single_event = (events.num_events == 1);
-      const bool translation_failure = (events.ev_flags == header.ids.at("wp_event_flag").left.at("CST_WP_EVENT_TRANSLATION_UNAVAIL"));
+      const bool single_event = (chain.events.value().num_events == 1);
+      const bool translation_failure = (chain.events.value().ev_flags == header.ids.at("wp_event_flag").left.at("CST_WP_EVENT_TRANSLATION_UNAVAIL"));
       if (no_wp_bbs and single_event and translation_failure)
         return;
 
@@ -1296,8 +1397,7 @@ class wrong_path_tracereader
       retval.cp_delta = read_cp_delta_section();
       if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
         retval.wp_chain = read_wp_chain_section();
-        retval.wp_events = read_wp_events_section();
-        validate_wp(retval.wp_chain, retval.wp_events);
+        validate_wp(retval.wp_chain.value());
       }
 
       return retval;
@@ -1327,7 +1427,6 @@ class wrong_path_tracereader
 
       if (header.prolog.fixed_size.flags & header.ids.at("header_flag").left.at("CST_FLAG_WP")) {
         wp_chain_section wp_chain = read_wp_chain_section();
-        wp_events_section wp_events = read_wp_events_section();
 
         if (wp_state) // Verify WP only when executing WP
         {
@@ -1373,8 +1472,14 @@ class wrong_path_tracereader
 
         if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_THREAD_SWITCH") {
           handle_thread_switch();
+        } else if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_ASID_SWITCH") {
+          handle_asid_switch();
         } else if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_REGFILE") {
           handle_regfile();
+        } else if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_DEVIO_START") {
+          handle_devio_start();
+        } else if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_DEVIO_STOP") {
+          handle_devio_stop();
         } else if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_ENTRY") {
           return; // Don't parse the BODY_TAG_ENTRY section yet
         } else if (header.ids.at("body_tag").right.at(tag) == "BODY_TAG_IFRAME") {
@@ -1391,10 +1496,17 @@ class wrong_path_tracereader
     // This function should *never* be called on correct path to generate instructions from the middle of basic block
     [[nodiscard]] constexpr std::vector<ooo_model_instr> get_next_instrs(const uint64_t next_bb_pc = 0xdeadbeef, const bool resteer = false)
     {
-      fmt::print(stderr, "Fetching from {} path\n", next_bb_pc == 0xdeadbeef ? "correct" : "wrong");
+      const bool now_on_cp = (next_bb_pc == next_cp_bb_pc);
+      const bool was_on_cp = (!wp_state.has_value());
+      const bool was_on_wp = (wp_state.has_value());
+      const bool resteer_from_wp_to_cp = (was_on_wp && resteer);
+      const bool cp_to_cp = was_on_cp and now_on_cp;
+      const bool wp_to_cp = was_on_wp and resteer_from_wp_to_cp;
+      const bool wp_disabled = (!wp_enabled);
+      const bool fetch_from_cp = wp_disabled or first_entry or cp_to_cp or wp_to_cp;
 
       std::vector<ooo_model_instr> retvec;
-      if (next_bb_pc == next_cp_bb_pc or !wp_enabled or first_entry) { // Fetch from the correct path
+      if (fetch_from_cp) { // Fetch from the correct path
         last_body_entry.emplace(handle_entry());
         retvec = construct_instructions(last_body_entry.value(), next_bb_pc, resteer);
         read_till_next_entry(); // Keep reading until we reach the next section (but don't read the section yet) to prepare for the next call
@@ -1409,12 +1521,11 @@ class wrong_path_tracereader
     // Returns the next instruction from the instruction buffer
     [[nodiscard]] constexpr ooo_model_instr pop_from_instr_buffer()
     {
-      // TODO: Revert back to instr_buffer
-      if (instr_buffer_fixed.size() == 0)
+      if (instr_buffer.size() == 0)
         throw std::runtime_error(fmt::format("[ERROR] Attempting to pop from empty instruction buffer"));
 
-      const auto retval = instr_buffer_fixed.front();
-      instr_buffer_fixed.pop_front();
+      const auto retval = instr_buffer.front();
+      instr_buffer.pop_front();
       cp_instruction_num++;
       return retval;
     }
@@ -1453,59 +1564,30 @@ class wrong_path_tracereader
       // No more instruction left in the stream
       if (eof_) {
         // Drain the buffer
-        // TODO: Revert back to instr_buffer
-        if (instr_buffer_fixed.size() > 0)
+        if (instr_buffer.size() > 0)
           return pop_from_instr_buffer();
 
         // We should never reach this point
         throw std::runtime_error("[ERROR] No more instructions left to read. Exiting...");
       }
 
-      // Handle trace inferred wrong path execution
-      const bool exhausted_current_basic_block = (instr_buffer_fixed.size() == 0);
+      // Flush the buffer if the core has diverged from the trace
+      const bool exhausted_current_basic_block = (instr_buffer.size() == 0);
       if (!exhausted_current_basic_block) {
-        const bool diverged = (next_pc != instr_buffer_fixed.front().ip.to<uint64_t>()) or resteer;
+        const bool diverged = (next_pc != instr_buffer.front().ip.to<uint64_t>()) or resteer;
         if (diverged and wp_enabled) { // Drop the instructions in the buffer
           instr_buffer.clear();
-          instr_buffer_fixed.clear(); // TODO: Revert back to instr_buffer
         }
       }
 
       // Time to re-fill the buffer
       // Note: Buffer is refilled *only* (i) at basic block boundaries, or (ii) at the start of a wrong path chain, or (iii) when trace inferred wrong
       // path instructions are needed
-      // TODO: Revert back to instr_buffer
-      if ((instr_buffer_fixed.size() == 0)) {
-        if (instr_buffer.size() <= 1) { // Populate the instr_buffer if its empty. It might have one branch instruction left over since last time
-          const auto instrs = get_next_instrs(next_pc, resteer);
-          if (instrs.size() == 0)
-            throw std::runtime_error("[ERROR] Could not generate instructions");
-          instr_buffer.insert(std::end(instr_buffer), std::make_move_iterator(std::begin(instrs)), std::make_move_iterator(std::end(instrs)));
-        }
-
-        // Populate the instr_buffer_fixed using instr_buffer
-        // TODO: Revert back to instr_buffer
-        using iter_type = typename decltype(instr_buffer)::iterator;
-        iter_type i = instr_buffer.begin();
-        while (i != instr_buffer.end()) {
-          if (!(*i).is_branch) { // All non-branch instruction can be moved directly
-            instr_buffer_fixed.emplace_back(std::move(*i));
-            instr_buffer.erase(i);
-            i = instr_buffer.begin();
-          } else {
-            // The instruction after the branch is available
-            if (std::distance(i, instr_buffer.end()) > 1) { // There should be at least one instruction after i to resolve the branch
-              iter_type target = i + 1;                     // j points to the instruction executed after the branch
-              const auto fall_through_pc = ((*i).ip.template to<uint64_t>() + (*i).instr_size);
-              const auto target_pc = (*target).ip.template to<uint64_t>(); // Observed next PC
-              (*i).branch_taken = fall_through_pc != target_pc;
-              instr_buffer_fixed.emplace_back(std::move(*i));
-              instr_buffer.erase(i);
-              i = instr_buffer.begin();
-            } else
-              i++;
-          }
-        }
+      if ((instr_buffer.size() == 0)) {
+        const auto instrs = get_next_instrs(next_pc, resteer);
+        if (instrs.size() == 0)
+          throw std::runtime_error("[ERROR] Could not generate instructions");
+        instr_buffer.insert(std::end(instr_buffer), std::make_move_iterator(std::begin(instrs)), std::make_move_iterator(std::end(instrs)));
       }
 
       // Return the next instruction
@@ -1514,14 +1596,16 @@ class wrong_path_tracereader
 
     [[nodiscard]] constexpr bool eof() const override
     {
-      // TODO: Revert to instr_buffer
-      const bool retval = (instr_buffer_fixed.size() == 0 and eof_);
+      const bool retval = (instr_buffer.size() == 0 and eof_);
 
       // Each instruction in the source application can potentially result in multiple trace instructions. For example, one `rep` in X86 can result in tens of
       // trace instructions. Moreover, the writer collects the trace till cp_instruction_num instructions are reached *and* the last executing basic block is
       // finished, resulting in potentially few extra trace instructions
       const bool comsumed_expected_num_cp_instructions = header.prolog.total_target_instructions <= cp_instruction_num;
       const bool unbounded_trace = header.prolog.total_target_instructions == 0; // The trace was collected until the application exited
+
+      if (retval)
+        fmt::print(stderr, "Cp instructions = {}\n", cp_instruction_num);
 
       if (retval and !unbounded_trace and !comsumed_expected_num_cp_instructions)
         throw std::runtime_error(fmt::format(
@@ -1543,7 +1627,8 @@ public:
   [[nodiscard]] ooo_model_instr operator()(const uint64_t next_pc = 0xdeadbeef, const bool resteer = false)
   {
 
-    fmt::print(stderr, "Resteer = {}\n", resteer);
+    if (resteer)
+      fmt::print(stderr, "[INFO] Resteered to {:x}\n", next_pc);
     if (!parsed_header)
       parse_trace();
 
@@ -1624,6 +1709,8 @@ void wrong_path_tracereader::parse_trace()
   extract_trace();
   construct_header_stream();
   header_stream->parse();
+  if (not header_stream->eof())
+    throw std::runtime_error("[ERROR] Unexpected bytes found at the end of the trace header");
   parsed_header = true;
   construct_body_stream();
 }
