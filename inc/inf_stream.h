@@ -105,8 +105,9 @@ struct raw_data_tag_t {
 };
 
 struct zst_tag_t {
-  std::function<void(detail::zst_state_type*)> deleter = [](detail::zst_state_type* state) {
+  static constexpr auto deleter = [](detail::zst_state_type* state) {
     ZSTD_freeDStream(state->zds);
+    delete state;
   };
   using state_type = detail::zst_state_type;
   using in_char_type = std::remove_pointer_t<decltype(state_type::next_in)>;
@@ -141,7 +142,7 @@ struct zst_tag_t {
 
   static inflate_state_type new_inflate_state()
   {
-    inflate_state_type state{new detail::zst_state_type};
+    inflate_state_type state(new detail::zst_state_type, deleter);
     state->zds = ZSTD_createDStream();
     state->next_in = NULL;
     state->avail_in = 0U;
@@ -152,8 +153,9 @@ struct zst_tag_t {
 };
 
 struct lz4_tag_t {
-  std::function<void(detail::lz4_state_type*)> deleter = [](detail::lz4_state_type* state) {
+  static constexpr auto deleter = [](detail::lz4_state_type* state) {
     LZ4F_freeDecompressionContext(state->dctx);
+    delete state;
   };
   using state_type = detail::lz4_state_type;
   using in_char_type = std::remove_pointer_t<decltype(state_type::next_in)>;
@@ -182,7 +184,7 @@ struct lz4_tag_t {
 
   static inflate_state_type new_inflate_state()
   {
-    inflate_state_type state{new detail::lz4_state_type};
+    inflate_state_type state(new detail::lz4_state_type, deleter);
     LZ4F_createDecompressionContext(&(state->dctx), LZ4F_VERSION);
     state->next_in = NULL;
     state->avail_in = 0U;
