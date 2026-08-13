@@ -890,6 +890,7 @@ class wrong_path_tracereader
       // Apply the overlays delta. The deltas are relative to the templates
       uint8_t opcode_id = instruction_template.opcode;
       uint8_t branch_type_id = instruction_template.branch_type;
+      uint8_t instr_size = instruction_template.instr_size;
       std::vector<uint64_t> src_mem, dst_mem;
       uint64_t n_loads = 0;
       uint64_t n_stores = 0;
@@ -958,7 +959,7 @@ class wrong_path_tracereader
         } else if (fid_name == "CST_FID_INSN_IMMEDIATE") {
           /* Not implemented */
         } else if (fid_name == "CST_FID_INSN_SIZE") {
-          /* Not implemented */
+          instr_size = static_cast<uint8_t>(bitset_to_uint64_t(delta));
         } else if (fid_name == "CST_FID_EXTENDED") {
           /* Not implemented */
         } else if (fid_name == "CST_FID_BRANCH_TAKEN") {
@@ -1020,8 +1021,8 @@ class wrong_path_tracereader
         fmt::print(stderr, "[INFO] {:x}: is_branch = {}, next_pc = {:x}\n", instruction_pc, is_branch, next_pc);
 
       // Construct an ooo_model_instr and return
-      return ooo_model_instr(instruction_pc, is_branch, branch_taken, cpu, br_type, instruction_template.dst_regs, instruction_template.src_regs, dst_mem,
-                             src_mem, instruction_template.instr_size);
+      return ooo_model_instr(instruction_pc, instr_size, is_branch, branch_taken, cpu, br_type, instruction_template.dst_regs, instruction_template.src_regs,
+                             dst_mem, src_mem);
     }
 
     constexpr void apply_deltas_to_overlay(const delta_section& delta_sec, OverlayType& overlay_to_use, const uint32_t template_id,
