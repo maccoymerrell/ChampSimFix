@@ -170,8 +170,11 @@ class hook<void(Args...)> final : public hook_base
 public:
   explicit hook(std::string name) : hook_base(std::move(name)) {}
 
-  // Notify every subscriber. With none attached this is a load and a branch, which is what a hook
-  // in a hot path costs when nobody is listening.
+  // True when anything is listening. Test this before building a payload that costs something to
+  // compute -- emit() short-circuits on its own, but only after its arguments have been evaluated.
+  [[nodiscard]] bool active() const { return !subscribers_.empty(); }
+
+  // Notify every subscriber. Emitting to nobody is a load and a branch.
   void emit(const Args&... args) const
   {
     if (subscribers_.empty()) {

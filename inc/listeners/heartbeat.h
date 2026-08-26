@@ -1,113 +1,69 @@
-#ifndef HEARTBEAT_H
-#define HEARTBEAT_H
+/*
+ *    Copyright 2026 The ChampSim Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
-#include <chrono>
+#ifndef LISTENERS_HEARTBEAT_H
+#define LISTENERS_HEARTBEAT_H
+
+#include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <vector>
-#include <fmt/chrono.h>
-#include <fmt/ostream.h>
 
-#include "events.h"
-#include "packet_consumer.h"
+#include "hook.h"
+#include "modules.h"
 
-// The always-on heartbeat listener. It is packet-agnostic: it consumes the generic
-// PROGRESS event (a consumer advanced by some amount, in the consumer's own unit) and
-// lets the consumer format the line via packet_consumer::progress_message — so a core
-// reports "instructions", a hypothetical network consumer reports packets, etc. The
-// heartbeat itself knows nothing about instructions.
-class Heartbeat
+namespace champsim::listeners
+{
+
+/**
+ * Periodic progress output: the "Heartbeat CPU N instructions: ..." line.
+ *
+ * Packet-agnostic -- it reports whatever a consumer counts, worded by that consumer through
+ * packet_consumer::progress_message, so a core reports instructions and another consumer reports
+ * its own unit.
+ *
+ * Parameter: frequency, the progress units between lines. Falls through to the root
+ * heartbeat_frequency, and defaults to 10,000,000.
+ */
+class heartbeat : public champsim::modules::listener
 {
 public:
-  std::ostream* std_out;
+  explicit heartbeat(champsim::modules::ModuleBuilder builder);
 
-  explicit Heartbeat(std::ostream* so) { std_out = so; }
+  // Redirect the output. Production writes to stdout; tests capture it.
+  void set_output(std::ostream& stream) { out_ = &stream; }
 
-  static constexpr auto cli_key = "Heartbeat";
+private:
+  void on_progress(const champsim::modules::packet_consumer& consumer, uint64_t total_progress, uint64_t total_cycles);
+  void track(std::size_t idx);
 
-  uint64_t cycles_between_printouts = 10000000;
+  std::ostream* out_ = &std::cout;
+  uint64_t period_ = 10000000;
 
   // Per-consumer bookkeeping, indexed by consumer_id and grown on demand.
-  std::vector<uint64_t> last_printout_progress;
-  std::vector<uint64_t> last_printout_cycles;
-  std::vector<uint64_t> phase_start_progress;
-  std::vector<uint64_t> phase_start_cycles;
-  std::vector<bool> switched_phase; // a BEGIN_PHASE fired since this consumer's last PROGRESS
+  std::vector<uint64_t> last_printout_progress_;
+  std::vector<uint64_t> last_printout_cycles_;
+  std::vector<uint64_t> phase_start_progress_;
+  std::vector<uint64_t> phase_start_cycles_;
+  std::vector<bool> switched_phase_; // a phase began since this consumer's last progress report
 
-  template <Event e, typename... Args>
-  void handle_event(const Args&... args);
-
-  void add_consumer(std::size_t idx)
-  {
-    while (idx >= switched_phase.size()) {
-      last_printout_progress.push_back(0);
-      last_printout_cycles.push_back(0);
-      phase_start_progress.push_back(0);
-      phase_start_cycles.push_back(0);
-      switched_phase.push_back(false);
-    }
-  }
+  champsim::subscription progress_sub_;
+  champsim::subscription phase_sub_;
 };
 
-std::chrono::seconds elapsed_time();
+} // namespace champsim::listeners
 
-namespace heartbeat
-{
-// Generic fallback: an event this listener does not observe.
-template <Event e, typename... Args>
-inline void handle_event(Heartbeat* hb, const Args&... args)
-{
-}
-
-template <>
-inline void handle_event<Event::BEGIN_PHASE>(Heartbeat* hb, [[maybe_unused]] const bool& is_warmup)
-{
-  for (std::size_t i = 0; i < hb->switched_phase.size(); i++) {
-    hb->switched_phase[i] = true;
-  }
-}
-
-template <>
-inline void handle_event<Event::PROGRESS>(Heartbeat* hb, const champsim::modules::packet_consumer& consumer, const uint64_t& total_progress,
-                                          const uint64_t& total_cycles)
-{
-  const int id = consumer.consumer_id();
-  if (id < 0) {
-    return;
-  }
-  const auto idx = static_cast<std::size_t>(id);
-  hb->add_consumer(idx);
-
-  if (hb->switched_phase[idx]) {
-    hb->switched_phase[idx] = false;
-    hb->phase_start_progress[idx] = total_progress;
-    hb->phase_start_cycles[idx] = total_cycles;
-  }
-
-  if (total_progress >= hb->last_printout_progress[idx] + hb->cycles_between_printouts) {
-    const auto interval_progress = static_cast<double>(total_progress - hb->last_printout_progress[idx]);
-    const auto interval_cycles = static_cast<double>(total_cycles - hb->last_printout_cycles[idx]);
-    const auto phase_progress = static_cast<double>(total_progress - hb->phase_start_progress[idx]);
-    const auto phase_cycles = static_cast<double>(total_cycles - hb->phase_start_cycles[idx]);
-
-    const auto msg = consumer.progress_message(total_progress, total_cycles, interval_progress / interval_cycles, phase_progress / phase_cycles);
-    if (!msg.empty()) {
-      fmt::print(*(hb->std_out), "{} (Simulation time: {:%H hr %M min %S sec})\n", msg, elapsed_time());
-    }
-
-    // Advance the baseline by whole interval multiples rather than snapping to the current
-    // count: snapping would accumulate per-heartbeat overshoot and drift the schedule.
-    const auto overshoot = total_progress - hb->last_printout_progress[idx];
-    hb->last_printout_progress[idx] += (overshoot / hb->cycles_between_printouts) * hb->cycles_between_printouts;
-    hb->last_printout_cycles[idx] = total_cycles;
-  }
-}
-} // namespace heartbeat
-
-template <Event e, typename... Args>
-void Heartbeat::handle_event(const Args&... args)
-{
-  heartbeat::handle_event<e>(this, args...);
-}
-
-#endif
+#endif // LISTENERS_HEARTBEAT_H

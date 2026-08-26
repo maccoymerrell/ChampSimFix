@@ -30,6 +30,7 @@
 #include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
 
+#include "hooks.h"
 #include "module_lifecycle.h"
 #include "modules.h"
 #include "stat_report.h"
@@ -65,6 +66,7 @@ void phase_controller::begin_phase_on_modules(const champsim::phase_info& phase)
   for (auto* mp : governed_) {
     mp->begin_phase(phase.is_warmup);
   }
+  champsim::hooks::phase_begin.emit(phase);
 }
 
 void phase_controller::end_phase_on_modules(const champsim::phase_info& phase)

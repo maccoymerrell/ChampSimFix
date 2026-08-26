@@ -3,8 +3,9 @@
 #include <string>
 #include <vector>
 
-#include "events.h"
+#include "hooks.h"
 #include "listeners/heartbeat.h"
+#include "modules.h"
 #include "packet_consumer.h"
 
 namespace
@@ -20,30 +21,36 @@ struct hb_consumer : champsim::modules::packet_consumer {
   }
 };
 
-// Drive the generic PROGRESS event. The consumer is upcast to packet_consumer& so the
-// handler's const packet_consumer& specialization is selected (not the generic no-op).
-void emit_progress(Heartbeat& hb, const hb_consumer& c, uint64_t total, uint64_t cycles)
+// The builder a configured heartbeat is constructed from.
+champsim::modules::ModuleBuilder heartbeat_builder(uint64_t frequency)
 {
-  const champsim::modules::packet_consumer& base = c;
-  hb.handle_event<Event::PROGRESS>(base, total, cycles);
+  champsim::modules::ModuleBuilder builder{"hb", "HEARTBEAT"};
+  builder.add_parameter("frequency", frequency);
+  return builder;
 }
 
-void emit_begin_phase(Heartbeat& hb, bool is_warmup) { hb.handle_event<Event::BEGIN_PHASE>(is_warmup); }
+// Emissions go to the named hook, not to a particular listener -- whoever subscribed hears them.
+void emit_progress(const hb_consumer& consumer, uint64_t total, uint64_t cycles)
+{
+  champsim::hooks::progress.emit(static_cast<const champsim::modules::packet_consumer&>(consumer), total, cycles);
+}
+
+void emit_begin_phase(bool is_warmup) { champsim::hooks::phase_begin.emit(champsim::phase_info{"Test", is_warmup, !is_warmup, 0}); }
 
 } // namespace
 
 TEST_CASE("The heartbeat prints one line after 10M packets of progress") {
     std::ostringstream capture{};
-    Heartbeat hb{&capture};
-    hb.cycles_between_printouts = 10000000ULL;
+    champsim::listeners::heartbeat hb{heartbeat_builder(10000000ULL)};
+    hb.set_output(capture);
     hb_consumer cpu0{0};
 
-    emit_begin_phase(hb, false);
+    emit_begin_phase(false);
 
     uint64_t total = 0;
     for (int i = 0; i < 5000000; ++i) {
         total += 2;
-        emit_progress(hb, cpu0, total, static_cast<uint64_t>(i));
+        emit_progress(cpu0, total, static_cast<uint64_t>(i));
     }
 
     std::string res = capture.str();
@@ -55,16 +62,16 @@ TEST_CASE("The heartbeat prints one line after 10M packets of progress") {
 
 TEST_CASE("The heartbeat prints cumulative and heartbeat IPC correctly after a phase change") {
     std::ostringstream capture{};
-    Heartbeat hb{&capture};
-    hb.cycles_between_printouts = 10000000ULL;
+    champsim::listeners::heartbeat hb{heartbeat_builder(10000000ULL)};
+    hb.set_output(capture);
     hb_consumer cpu0{0};
 
-    emit_begin_phase(hb, true);
+    emit_begin_phase(true);
 
     uint64_t total = 0;
     for (int i = 0; i < 11000000; ++i) {
         if (i == 5000000) {
-          emit_begin_phase(hb, false);
+          emit_begin_phase(false);
         }
 
         if (i < 4000000) {
@@ -72,7 +79,7 @@ TEST_CASE("The heartbeat prints cumulative and heartbeat IPC correctly after a p
         } else {
           total += 2;
         }
-        emit_progress(hb, cpu0, total, static_cast<uint64_t>(i));
+        emit_progress(cpu0, total, static_cast<uint64_t>(i));
     }
 
     std::string res = capture.str();
@@ -88,17 +95,17 @@ TEST_CASE("The heartbeat prints cumulative and heartbeat IPC correctly after a p
 
 TEST_CASE("The heartbeat tracks each consumer independently") {
     std::ostringstream capture{};
-    Heartbeat hb{&capture};
-    hb.cycles_between_printouts = 10000000ULL;
+    champsim::listeners::heartbeat hb{heartbeat_builder(10000000ULL)};
+    hb.set_output(capture);
     std::vector<hb_consumer> cpus{hb_consumer{0}, hb_consumer{1}, hb_consumer{2}, hb_consumer{3}};
 
-    emit_begin_phase(hb, false);
+    emit_begin_phase(false);
 
     std::vector<uint64_t> totals(4, 0);
     for (int i = 0; i < 5000000; ++i) {
         for (int c = 0; c < 4; ++c) {
             totals[static_cast<std::size_t>(c)] += 2;
-            emit_progress(hb, cpus[static_cast<std::size_t>(c)], totals[static_cast<std::size_t>(c)], static_cast<uint64_t>(i));
+            emit_progress(cpus[static_cast<std::size_t>(c)], totals[static_cast<std::size_t>(c)], static_cast<uint64_t>(i));
         }
     }
 
@@ -116,16 +123,16 @@ TEST_CASE("The heartbeat tracks each consumer independently") {
 
 TEST_CASE("The heartbeat honors a configured interval") {
     std::ostringstream capture{};
-    Heartbeat hb{&capture};
-    hb.cycles_between_printouts = 1000000ULL;
+    champsim::listeners::heartbeat hb{heartbeat_builder(1000000ULL)};
+    hb.set_output(capture);
     hb_consumer cpu0{0};
 
-    emit_begin_phase(hb, false);
+    emit_begin_phase(false);
 
     uint64_t total = 0;
     for (int i = 0; i < 500000; ++i) {
         total += 2;
-        emit_progress(hb, cpu0, total, static_cast<uint64_t>(i));
+        emit_progress(cpu0, total, static_cast<uint64_t>(i));
     }
 
     std::string res = capture.str();
@@ -134,16 +141,16 @@ TEST_CASE("The heartbeat honors a configured interval") {
 
 TEST_CASE("The heartbeat baseline advances by whole intervals when progress overshoots") {
     std::ostringstream capture{};
-    Heartbeat hb{&capture};
-    hb.cycles_between_printouts = 9ULL;
+    champsim::listeners::heartbeat hb{heartbeat_builder(9ULL)};
+    hb.set_output(capture);
     hb_consumer cpu0{0};
 
-    emit_begin_phase(hb, false);
+    emit_begin_phase(false);
 
     uint64_t total = 0;
     for (int i = 0; i < 14; ++i) {
         total += 4;
-        emit_progress(hb, cpu0, total, static_cast<uint64_t>(i));
+        emit_progress(cpu0, total, static_cast<uint64_t>(i));
     }
 
     std::string res = capture.str();

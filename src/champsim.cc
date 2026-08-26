@@ -24,7 +24,6 @@
 #include <vector>
 #include <fmt/core.h>
 
-#include "event_listeners.h"
 #include "identity_registry.h"
 #include "modules.h"
 #include "operable.h"
@@ -153,7 +152,6 @@ std::vector<phase_stats> main(modules::environment_module& env)
   // Begin each controller's first phase before the first tick.
   for (modules::phase_controller& controller : controllers) {
     controller.advance(0);
-    handle_event<Event::BEGIN_PHASE>(controller.phase().is_warmup);
   }
 
   while (finished_count < controllers.size()) {
@@ -176,9 +174,6 @@ std::vector<phase_stats> main(modules::environment_module& env)
           results.push_back(std::move(*collected));
         }
         phase_status = controller.advance(0);
-        if (phase_status == modules::phase_controller::status::CONTINUE) {
-          handle_event<Event::BEGIN_PHASE>(controller.phase().is_warmup);
-        }
       }
 
       if (phase_status == modules::phase_controller::status::ABORT) {
