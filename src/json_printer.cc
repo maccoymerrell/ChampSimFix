@@ -32,4 +32,10 @@ void to_json(nlohmann::json& j, const champsim::phase_stats& stats)
 }
 } // namespace champsim
 
-void champsim::json_printer::print(std::vector<phase_stats>& stats) { stream << nlohmann::json::array_t{std::begin(stats), std::end(stats)}; }
+void champsim::json_printer::print(std::vector<phase_stats>& stats)
+{
+  // Indented rather than one dense line: these files are read by people at least as often as by
+  // scripts, and a parser does not care either way.
+  const nlohmann::json document = nlohmann::json::array_t{std::begin(stats), std::end(stats)};
+  stream << document.dump(2) << '\n';
+}
