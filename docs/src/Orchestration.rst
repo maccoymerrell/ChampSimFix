@@ -38,9 +38,10 @@ operables, calls ``advance()``, and collects a completed phase's statistics.
 
 Phases are described by ``champsim::phase_info``: a name, an ``is_warmup`` flag, an
 ``roi`` flag, and a length denominated in **each consumer's own progress unit**
-(instructions for a core). ``roi`` defaults to ``!is_warmup``; setting it explicitly
-allows unmeasured non-warmup phases (e.g. a fast-forward region between warmup and the
-measured region). Statistics are collected only for ROI phases.
+(instructions for a core). ``roi`` decides whether the controller keeps what that phase
+measured; it defaults to ``!is_warmup``, and setting it explicitly allows unmeasured
+non-warmup phases (e.g. a fast-forward region between warmup and the measured region).
+A phase appears in the results exactly when its ``roi`` is set.
 
 ------------------------------------------
 Packets: Producers and Consumers
@@ -133,12 +134,13 @@ an ordinary module (interface ``phase_controller``, parent: the environment):
     struct phase_controller {
       enum class status { CONTINUE, COMPLETE, ABORT, DONE };
       // The sole driver; owns both phase edges. Returns CONTINUE (keep ticking), COMPLETE
-      // (a phase ended — the orchestrator collects its stats, then calls advance() again to
-      // begin the next), DONE (no phases remain — stop clean), or ABORT (deadlock — stop early).
+      // (a phase ended — the orchestrator takes the stats it collected, then calls advance()
+      // again to begin the next), DONE (no phases remain — stop clean), or ABORT (deadlock).
       virtual status advance(long progress) = 0;
       virtual const phase_info& phase() const = 0;                     // the phase now running
       virtual std::vector<unsigned> newly_completed_consumers() const = 0;
       const std::vector<module_lifecycle*>& governed_modules() const;  // the set it governs
+      std::optional<phase_stats> take_phase_stats();                   // what a measured phase reported
     };
 
 The generic shipped model is ``PHASE_CONTROLLER``. It is packet-agnostic and owns its own
@@ -196,28 +198,103 @@ When a configuration declares no controller, the orchestrator creates a default
 legacy environment's path.
 
 ------------------------------------------
-Listeners
+Hooks and Listeners
 ------------------------------------------
 
-Listeners are compile-time instrumentation, not modules. They live in
-``inc/listeners/`` and observe typed **events** emitted at hook points throughout the
-simulator (``inc/events.h`` — ``BEGIN_PHASE`` from the run loop, ``RETIRE`` from a core).
-The set of listeners is a ``std::tuple`` in ``inc/event_listeners.h``; a hook site fires an
-event with ``handle_event<Event::X>(args...)``, which dispatches to every activated
-listener's ``handle_event<Event::X>`` specialization. Adding an event means extending the
-enum and placing a hook; adding a listener means dropping a struct into ``inc/listeners/``
-and adding it to the tuple. Users are not expected to author listeners in the common course
-of using ChampSim, so they are not configured as modules.
+A **listener** watches a run and reports on it without being part of it. Performance
+characterisation lives here: anything that wants to observe what the simulator is doing --
+count events, trace behaviour, print progress -- is a listener, and none of it requires
+touching the models being measured.
 
-The always-on ``Heartbeat`` (``inc/listeners/heartbeat.h``) consumes ``RETIRE`` to print the
-periodic ``Heartbeat CPU N instructions: ... cumulative IPC: ...`` line.
+Listeners observe **hooks**: named points the simulator reports from. The hooks it emits are
 
-Selection:
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
 
-* Activate a compiled-in listener on the command line: ``--listeners Heartbeat``. The
-  heartbeat is index 0 and always active.
-* The heartbeat interval comes from the root-level ``"heartbeat_frequency"`` key;
-  ``--hide-heartbeat`` quiets every core so it stops emitting ``RETIRE`` events.
+   * - Hook
+     - Reported when
+   * - ``progress``
+     - A consumer advanced. Carries the consumer, and its cumulative progress and cycles, in
+       that consumer's own unit.
+   * - ``phase_begin``
+     - A phase controller began a phase on the modules it governs. Carries the ``phase_info``.
+
+Using listeners
+^^^^^^^^^^^^^^^^^^^^
+
+A listener is an ordinary module: you get one because a configuration asks for one, and a run
+that asks for nothing observes nothing. Declare it alongside the caches and cores::
+
+    {"name": "heartbeat", "module": "listener", "model": "HEARTBEAT", "frequency": 1000000}
+
+Give a parameter a ``$var`` and it becomes a command-line option, so a listener's settings can
+change per run without editing the configuration::
+
+    {"name": "heartbeat", "module": "listener", "model": "HEARTBEAT", "frequency": "$hb_freq"}
+
+then ``--hb_freq 1000000``. There is no separate switch for choosing listeners; declaring them
+is how you choose them.
+
+The legacy configuration format has no place to declare one, so it builds a ``HEARTBEAT`` of
+its own — the classic ChampSim behaviour, where every run prints progress. Its interval comes
+from the root-level ``"heartbeat_frequency"``, and ``--hide-heartbeat`` (or ``"hide_heartbeat":
+true``) omits it.
+
+The shipped ``HEARTBEAT`` prints the periodic
+``Heartbeat CPU N instructions: ... cumulative IPC: ...`` line.
+
+Writing a listener
+^^^^^^^^^^^^^^^^^^^^
+
+Subscribe to the hooks you care about and keep the handles. Parameters come from the
+configuration, so a study's knobs can change without recompiling:
+
+.. code-block:: cpp
+
+    class miss_counter : public champsim::modules::listener
+    {
+      uint64_t threshold_;
+      champsim::subscription sub_;
+
+    public:
+      explicit miss_counter(champsim::modules::ModuleBuilder builder)
+        : threshold_(builder.get_parameter<uint64_t>("threshold", true, 1000)),
+          sub_(champsim::hooks::progress.subscribe(
+              [this](const champsim::modules::packet_consumer& consumer, const uint64_t& progress, const uint64_t& cycles) {
+                // ... observe ...
+              }))
+      {}
+    };
+    static champsim::modules::listener::register_module<miss_counter> reg("MISS_COUNTER");
+
+Put the implementation in ``src/listeners/``; it is compiled in from there. Keep the
+``champsim::subscription`` a member -- dropping it unsubscribes, so a listener that discards
+its handles is never called.
+
+To report something new, declare a hook next to whatever reports it and emit it. No central
+file lists them, so a study can add its own without modifying the framework:
+
+.. code-block:: cpp
+
+    // in your own header
+    namespace champsim::hooks {
+    inline champsim::hook<void(const champsim::address&, bool)> my_event{"my_event"};
+    }
+
+    // wherever the event happens
+    champsim::hooks::my_event.emit(addr, hit);
+
+A hook with no listeners costs a branch, so one may sit in a hot path. If building the payload
+itself costs anything — a division, a lookup — guard the whole thing::
+
+    if (champsim::hooks::my_event.active()) {
+      champsim::hooks::my_event.emit(addr, expensive_to_compute());
+    }
+
+A listener that needs phase edges, or that wants to publish its own statistics into a phase's
+results, may also inherit ``champsim::module_lifecycle`` -- it is then a phase participant and
+must be governed by a phase controller like any other.
 
 ------------------------------------------
 Idle Cycle Skipping
@@ -282,11 +359,19 @@ with ``view(name).size()``.
 
 Modules opt into further orchestration roles by inheriting mixins:
 
-* ``champsim::module_lifecycle`` — a phase-and-statistics participant: it receives
-  ``begin_phase(warmup, roi)`` / ``end_phase`` on the edges of the phases whose controller
-  governs it, and contributes lines and JSON to that phase's statistics. A controller governs
-  a set of these; ``operable`` inherits it, and non-operables (there are none shipped, but the
-  mixin is independent) may inherit it directly.
+* ``champsim::module_lifecycle`` — a module that resets each phase and reports what that
+  phase measured. Implement two hooks:
+
+  .. code-block:: cpp
+
+      virtual void begin_phase(bool warmup) {}               // start counting again
+      virtual void end_phase(champsim::stat_report& out) {}  // write what this phase measured
+
+  Write plaintext lines and JSON into the same report; whatever you write appears in that
+  phase's results, keyed by your module's interface, model and name. Write nothing and your
+  module simply has no statistics. ``operable`` already inherits this, so a cache or a core
+  need only override the hooks; a module that is not operable may inherit it directly. Each
+  one must be governed by exactly one phase controller.
 
 ------------------------------------------
 Root Configuration Key Reference
@@ -298,7 +383,9 @@ Root Configuration Key Reference
 ``cycle_skip``
     Enable idle cycle skipping (default ``true``).
 ``heartbeat_frequency``
-    Interval, in each consumer's own progress unit, for the default heartbeat listener.
+    Interval, in each consumer's own progress unit, for the heartbeat the legacy format builds.
+``hide_heartbeat``
+    Omit the heartbeat the legacy format would otherwise build (what ``--hide-heartbeat`` sets).
 ``block_size``, ``page_size``
     System-wide geometry, published to all modules via the builder globals.
 
