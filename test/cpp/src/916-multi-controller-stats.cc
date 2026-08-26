@@ -40,13 +40,12 @@ struct stat_core_916 : public champsim::modules::core_module {
     return 1;
   }
   cpu_stats get_sim_stats() const override { return {}; }
-  cpu_stats get_roi_stats() const override { return {}; }
   bool producers_eof() const override { return false; }
 
-  void report_stats(bool roi, champsim::stat_report& out) const override
+  void report_stats(champsim::stat_report& out) const override
   {
-    out.line("MOCKSTAT " + stat_name() + (roi ? " roi" : " sim"));
-    out.json().add("who", stat_name()).add("roi", roi ? 1 : 0);
+    out.line("MOCKSTAT " + stat_name());
+    out.json().add("who", stat_name());
   }
 };
 static champsim::modules::core_module::register_module<stat_core_916> stat_core_reg_916("STAT_CORE_916");
@@ -117,10 +116,12 @@ TEST_CASE("Two controllers with disjoint governance collect independent, correct
                                                                        .add_parameter("phases", a_phases),
                                                                    env);
 
-  // Controller B governs coreB with a *different* plan: a warmup phase (which must NOT be collected)
-  // followed by a differently-named ROI phase of a different length.
+  // Controller B governs coreB with a *different* plan: a warmup phase and a non-warmup but
+  // explicitly unmeasured phase (neither of which may be collected), then a differently-named ROI
+  // phase of a different length.
   nlohmann::json b_phases = nlohmann::json::array();
   b_phases.push_back({{"name", "WarmB"}, {"is_warmup", true}, {"length", 2}});
+  b_phases.push_back({{"name", "FastB"}, {"is_warmup", false}, {"roi", false}, {"length", 3}});
   b_phases.push_back({{"name", "MeasuredB"}, {"is_warmup", false}, {"length", 6}});
   auto* pcB = champsim::modules::phase_controller::create_instance(ModuleBuilder("pcB", "PHASE_CONTROLLER")
                                                                        .add_parameter("deadlock_cycles", 100000)
@@ -135,7 +136,7 @@ TEST_CASE("Two controllers with disjoint governance collect independent, correct
 
   auto results = champsim::main(*env);
 
-  // Exactly the two ROI phases were collected; B's warmup phase produced no stats block.
+  // Exactly the two ROI phases were collected; B's warmup and unmeasured phases produced no stats block.
   REQUIRE(results.size() == 2);
   auto by_name = [&](const std::string& n) -> const champsim::phase_stats* {
     for (const auto& s : results)
@@ -144,6 +145,7 @@ TEST_CASE("Two controllers with disjoint governance collect independent, correct
     return nullptr;
   };
   REQUIRE(by_name("WarmB") == nullptr);
+  REQUIRE(by_name("FastB") == nullptr); // non-warmup, but roi:false -- the controller discards its report
   const auto* A = by_name("MeasuredA");
   const auto* B = by_name("MeasuredB");
   REQUIRE(A != nullptr);
@@ -151,14 +153,14 @@ TEST_CASE("Two controllers with disjoint governance collect independent, correct
 
   // Plaintext is scoped to each controller's governed set: A sees only coreA, B only coreB — proving the
   // two controllers collect independently and neither clobbers the other's stats.
-  REQUIRE(contains(A->roi_lines, "MOCKSTAT coreA"));
-  REQUIRE_FALSE(contains(A->roi_lines, "MOCKSTAT coreB"));
-  REQUIRE(contains(B->roi_lines, "MOCKSTAT coreB"));
-  REQUIRE_FALSE(contains(B->roi_lines, "MOCKSTAT coreA"));
+  REQUIRE(contains(A->lines, "MOCKSTAT coreA"));
+  REQUIRE_FALSE(contains(A->lines, "MOCKSTAT coreB"));
+  REQUIRE(contains(B->lines, "MOCKSTAT coreB"));
+  REQUIRE_FALSE(contains(B->lines, "MOCKSTAT coreA"));
 
   // JSON is scoped the same way: one "core" entry per phase, keyed by the governed module's name.
-  REQUIRE(A->roi_json.at("core").size() == 1);
-  REQUIRE(A->roi_json.at("core").front().first == "coreA");
-  REQUIRE(B->roi_json.at("core").size() == 1);
-  REQUIRE(B->roi_json.at("core").front().first == "coreB");
+  REQUIRE(A->stats.at("core").at("STAT_CORE_916").size() == 1);
+  REQUIRE(A->stats.at("core").at("STAT_CORE_916").contains("coreA"));
+  REQUIRE(B->stats.at("core").at("STAT_CORE_916").size() == 1);
+  REQUIRE(B->stats.at("core").at("STAT_CORE_916").contains("coreB"));
 }

@@ -17,12 +17,10 @@
 #ifndef PHASE_INFO_H
 #define PHASE_INFO_H
 
-#include <any>
 #include <cstdint>
-#include <map>
 #include <string>
-#include <utility>
 #include <vector>
+#include <nlohmann/json.hpp>
 
 namespace champsim
 {
@@ -42,15 +40,13 @@ struct phase_info {
   uint64_t length;
 };
 
+// One measured phase's statistics: what its governed modules reported, in both output formats.
+// A phase is the measurement window, so there is exactly one set of numbers per entry.
 struct phase_stats {
   std::string name;
   std::vector<std::string> trace_names;
-  // Pre-collected by collect_phase_stats
-  std::vector<std::string> sim_lines; // all sim plaintext lines
-  std::vector<std::string> roi_lines; // all roi plaintext lines
-  // interface -> [(module_name, json_any)] for JSON compilation
-  std::map<std::string, std::vector<std::pair<std::string, std::any>>> sim_json;
-  std::map<std::string, std::vector<std::pair<std::string, std::any>>> roi_json;
+  std::vector<std::string> lines; // every reporting module's plaintext lines, in interface order
+  nlohmann::json stats;           // [interface][model][instance name]
 };
 
 } // namespace champsim

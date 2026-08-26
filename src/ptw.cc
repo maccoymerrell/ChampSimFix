@@ -254,13 +254,11 @@ void PageTableWalker::finish_packet(const response_type& packet)
   MSHR.erase(std::begin(MSHR), last_finished);
 }
 
-void PageTableWalker::begin_phase(bool warmup, bool /*roi*/)
+void PageTableWalker::begin_phase(bool warmup)
 {
   warmup_ = warmup;
   for (auto* ul : upper_levels) {
-    channel_type::stats_type ul_new_roi_stats;
     channel_type::stats_type ul_new_sim_stats;
-    ul->get_roi_stats() = ul_new_roi_stats;
     ul->get_sim_stats() = ul_new_sim_stats;
   }
 }

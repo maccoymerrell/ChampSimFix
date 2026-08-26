@@ -864,54 +864,16 @@ void CACHE::initialize()
   impl_initialize_replacement();
 }
 
-void CACHE::begin_phase(bool warmup, bool roi)
+void CACHE::begin_phase(bool warmup)
 {
   warmup_ = warmup;
-  roi_ = roi;
-  stats_type new_roi_stats;
   stats_type new_sim_stats;
-
-  new_roi_stats.name = NAME;
   new_sim_stats.name = NAME;
-
-  roi_stats = new_roi_stats;
   sim_stats = new_sim_stats;
 
   for (auto* ul : upper_levels) {
-    channel_type::stats_type ul_new_roi_stats;
     channel_type::stats_type ul_new_sim_stats;
-    ul->get_roi_stats() = ul_new_roi_stats;
     ul->get_sim_stats() = ul_new_sim_stats;
-  }
-}
-
-void CACHE::end_phase()
-{
-  roi_stats.total_miss_latency_cycles = sim_stats.total_miss_latency_cycles;
-
-  roi_stats.hits = sim_stats.hits;
-  roi_stats.misses = sim_stats.misses;
-  roi_stats.miss_merge = sim_stats.miss_merge;
-  roi_stats.fill = sim_stats.fill;
-
-  roi_stats.pf_requested = sim_stats.pf_requested;
-  roi_stats.pf_issued = sim_stats.pf_issued;
-  roi_stats.pf_useful = sim_stats.pf_useful;
-  roi_stats.pf_useless = sim_stats.pf_useless;
-  roi_stats.pf_fill = sim_stats.pf_fill;
-
-  for (auto* ul : upper_levels) {
-    ul->get_roi_stats().RQ_ACCESS = ul->get_sim_stats().RQ_ACCESS;
-    ul->get_roi_stats().RQ_FULL = ul->get_sim_stats().RQ_FULL;
-    ul->get_roi_stats().RQ_TO_CACHE = ul->get_sim_stats().RQ_TO_CACHE;
-
-    ul->get_roi_stats().PQ_ACCESS = ul->get_sim_stats().PQ_ACCESS;
-    ul->get_roi_stats().PQ_FULL = ul->get_sim_stats().PQ_FULL;
-    ul->get_roi_stats().PQ_TO_CACHE = ul->get_sim_stats().PQ_TO_CACHE;
-
-    ul->get_roi_stats().WQ_ACCESS = ul->get_sim_stats().WQ_ACCESS;
-    ul->get_roi_stats().WQ_FULL = ul->get_sim_stats().WQ_FULL;
-    ul->get_roi_stats().WQ_TO_CACHE = ul->get_sim_stats().WQ_TO_CACHE;
   }
 }
 
@@ -959,7 +921,7 @@ void CACHE::print_deadlock()
 }
 // LCOV_EXCL_STOP
 
-void CACHE::report_stats(bool roi, champsim::stat_report& out) const { format_stats(roi ? roi_stats : sim_stats, out); }
+void CACHE::report_stats(champsim::stat_report& out) const { format_stats(sim_stats, out); }
 
 void champsim::modules::cache_module::format_stats(const stats_type& stats, champsim::stat_report& out)
 {

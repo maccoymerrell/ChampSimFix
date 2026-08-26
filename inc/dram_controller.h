@@ -92,9 +92,8 @@ struct DRAM_ADDRESS_MAPPING {
 };
 
 struct DRAM_CHANNEL final : public champsim::operable {
-  // Warmup/ROI flags are propagated from the owning MEMORY_CONTROLLER each phase.
+  // The warmup flag is propagated from the owning MEMORY_CONTROLLER each phase.
   bool warmup = true;
-  bool roi = false;
 
   using response_type = champsim::response;
 
@@ -159,7 +158,7 @@ struct DRAM_CHANNEL final : public champsim::operable {
   std::size_t DRAM_ROWS_PER_REFRESH;
 
   using stats_type = dram_stats;
-  stats_type roi_stats, sim_stats;
+  stats_type sim_stats;
 
   // Latencies
   const champsim::chrono::clock::duration tRP, tRCD, tCAS, tRAS, tREF, tRFC, DRAM_DBUS_TURN_AROUND_TIME, DRAM_DBUS_RETURN_TIME, DRAM_DBUS_BANKGROUP_STALL;
@@ -221,15 +220,13 @@ public:
   void initialize() final;
   long operate() final;
   long poll_cycle() final;
-  void begin_phase(bool warmup, bool roi) override;
-  void end_phase() override;
+  void begin_phase(bool warmup) override;
   void print_deadlock() final;
 
   // module_lifecycle stats
-  void report_stats(bool roi, champsim::stat_report& out) const override;
+  void report_stats(champsim::stat_report& out) const override;
 
   stats_type get_sim_stats(std::size_t channel_no) const final;
-  stats_type get_roi_stats(std::size_t channel_no) const final;
   std::size_t get_num_channels() const final { return channels.size(); }
 
   [[nodiscard]] champsim::data::bytes size() const;

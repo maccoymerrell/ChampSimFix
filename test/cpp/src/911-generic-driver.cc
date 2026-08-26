@@ -91,7 +91,7 @@ struct counting_operable : public champsim::operable {
     return 1; // always make progress
   }
 
-  void begin_phase(bool, bool) override { phase_begun = true; }
+  void begin_phase(bool) override { phase_begun = true; }
   void end_phase() override { ended_phases.push_back(0); }
 };
 
@@ -117,7 +117,6 @@ struct mock_core_911 : public champsim::modules::core_module {
     return 1;
   }
   cpu_stats get_sim_stats() const override { return {}; }
-  cpu_stats get_roi_stats() const override { return {}; }
   bool producers_eof() const override { return producers_eof_; }
 };
 

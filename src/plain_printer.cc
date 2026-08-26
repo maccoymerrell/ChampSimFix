@@ -38,17 +38,10 @@ std::vector<std::string> champsim::plain_printer::format(champsim::phase_stats& 
     lines.push_back(fmt::format("CPU {} runs {}", i++, tn));
   }
 
-  if (stats.trace_names.size() > 1) {
-    lines.emplace_back("");
-    lines.emplace_back("Total Simulation Statistics (not including warmup)");
-    lines.emplace_back("");
-    lines.insert(lines.end(), stats.sim_lines.begin(), stats.sim_lines.end());
-  }
-
   lines.emplace_back("");
   lines.emplace_back("Region of Interest Statistics");
   lines.emplace_back("");
-  lines.insert(lines.end(), stats.roi_lines.begin(), stats.roi_lines.end());
+  lines.insert(lines.end(), stats.lines.begin(), stats.lines.end());
 
   return lines;
 }

@@ -97,7 +97,7 @@ public:
 
   using stats_type = cpu_stats;
 
-  stats_type roi_stats{}, sim_stats{};
+  stats_type sim_stats{};
 
   // instruction buffer
   struct dib_shift {
@@ -144,19 +144,17 @@ public:
 
   void initialize() final;
   long operate() final;
-  void begin_phase(bool warmup, bool roi) override;
+  void begin_phase(bool warmup) override;
   void end_phase() override;
 
   // module_lifecycle stats
-  void report_stats(bool roi, champsim::stat_report& out) const override;
+  void report_stats(champsim::stat_report& out) const override;
 
 private:
   bool warmup_ = true;
-  [[maybe_unused]] bool roi_ = false;
 
 public:
   bool is_warmup() const { return warmup_; }
-  bool is_roi() const { return roi_; }
 
   void push_instruction(ooo_model_instr instr) final;
   std::size_t instructions_requested() final;
@@ -188,12 +186,9 @@ public:
   bool do_complete_store(const LSQ_ENTRY& sq_entry);
   bool execute_load(const LSQ_ENTRY& lq_entry);
 
-  [[nodiscard]] auto roi_instr() const { return roi_stats.instrs(); }
-  [[nodiscard]] auto roi_cycle() const { return roi_stats.cycles(); }
   [[nodiscard]] uint64_t sim_instr() const final { return num_retired - begin_phase_instr; }
   [[nodiscard]] uint64_t sim_cycle() const final { return (current_time.time_since_epoch() / clock_period) - sim_stats.begin_cycles; }
   stats_type get_sim_stats() const final { return sim_stats; }
-  stats_type get_roi_stats() const final { return roi_stats; }
 
   bool show_heartbeat = true;
   void quiet(bool enable) final { show_heartbeat = !enable; }

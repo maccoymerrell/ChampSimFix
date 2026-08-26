@@ -19,7 +19,6 @@ struct mock_core_914 : public champsim::modules::core_module {
   uint64_t sim_cycle() const override { return 0; }
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return {}; }
-  cpu_stats get_roi_stats() const override { return {}; }
   bool producers_eof() const override { return false; }
 };
 

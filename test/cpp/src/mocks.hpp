@@ -81,7 +81,7 @@ public:
     return 1; // never deadlock
   }
 
-  void begin_phase(bool, bool) override {}
+  void begin_phase(bool) override {}
   void end_phase() override {}
   std::size_t packet_count() const { return std::size(addresses); }
 };
@@ -137,7 +137,7 @@ public:
     return 1; // never deadlock
   }
 
-  void begin_phase(bool, bool) override {}
+  void begin_phase(bool) override {}
   void end_phase() override {}
   std::size_t packet_count() const { return mpacket_count; }
 };
@@ -174,7 +174,7 @@ public:
     return 1; // never deadlock
   }
 
-  void begin_phase(bool, bool) override {}
+  void begin_phase(bool) override {}
   void end_phase() override {}
   std::size_t packet_count() const { return mpacket_count; }
 
@@ -254,7 +254,7 @@ struct queue_issue_MRP : public champsim::operable {
     return 1; // never deadlock
   }
 
-  void begin_phase(bool, bool) override {}
+  void begin_phase(bool) override {}
   void end_phase() override {}
 };
 

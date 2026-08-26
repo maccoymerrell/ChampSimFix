@@ -39,32 +39,6 @@ std::chrono::seconds elapsed_time() { return std::chrono::duration_cast<std::chr
 namespace champsim
 {
 
-// Discovery helper: gather the lifecycle modules that publish stats, so stat collection needn't re-query typed_view.
-struct module_stat_entry {
-  champsim::module_lifecycle* ptr;
-  std::string interface_name;
-  std::string model;
-  std::string name;
-};
-
-static std::vector<module_stat_entry> collect_module_stat(const std::vector<champsim::module_lifecycle*>& governed)
-{
-  std::vector<module_stat_entry> out;
-  for (auto* ml : governed) {
-    // A governed module publishes stats only if it overrides the stat hook (a PTW is phase-aware yet
-    // has no stats); skip the rest so they emit no empty entry. Identity was stamped at construction.
-    champsim::stat_report probe;
-    ml->report_stats(false, probe);
-    if (!probe.empty()) {
-      out.push_back({ml, ml->stat_interface(), ml->stat_model(), ml->stat_name()});
-    }
-  }
-  // The flat plaintext stat lines are emitted in this order; group by interface (stable within one) so
-  // it matches the environment's alphabetical-by-interface view order.
-  std::stable_sort(std::begin(out), std::end(out), [](const auto& a, const auto& b) { return a.interface_name < b.interface_name; });
-  return out;
-}
-
 // Sort a per-cycle copy (not in place) and operate all operables, so tie-breaks match develop's fresh-copy sort.
 long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables, champsim::chrono::clock& global_clock)
 {
@@ -96,24 +70,27 @@ static phase_stats collect_phase_stats(const phase_info& phase, modules::environ
     }
   }
 
-  // SIM and ROI passes share discovery; the bool selects which stat set to emit.
-  auto stat_modules = collect_module_stat(governed);
-  for (auto& e : stat_modules) {
-    champsim::stat_report sim_report, roi_report;
-    e.ptr->report_stats(false, sim_report);
-    e.ptr->report_stats(true, roi_report);
+  // A governed module publishes statistics only if it overrides the stat hook (a PTW is phase-aware
+  // yet has no stats); one that reports nothing contributes no entry. Identity was stamped at
+  // construction, so the module itself carries the [interface][model][name] keys.
+  std::vector<std::pair<champsim::module_lifecycle*, champsim::stat_report>> reports;
+  for (auto* ml : governed) {
+    champsim::stat_report report;
+    ml->report_stats(report);
+    if (!report.empty()) {
+      reports.emplace_back(ml, std::move(report));
+    }
+  }
 
-    stats.sim_lines.insert(stats.sim_lines.end(), sim_report.text().begin(), sim_report.text().end());
-    stats.roi_lines.insert(stats.roi_lines.end(), roi_report.text().begin(), roi_report.text().end());
+  // The flat plaintext stat lines are emitted in this order; group by interface (stable within one)
+  // so it matches the environment's alphabetical-by-interface view order.
+  std::stable_sort(std::begin(reports), std::end(reports),
+                   [](const auto& lhs, const auto& rhs) { return lhs.first->stat_interface() < rhs.first->stat_interface(); });
 
-    // Wrap the per-instance JSON as {model:{name:{...}}} for [interface][model][name] keying; the printer merges by interface.
-    nlohmann::json sim_wrapped = nlohmann::json::object();
-    sim_wrapped[e.model][e.name] = sim_report.json_object();
-    nlohmann::json roi_wrapped = nlohmann::json::object();
-    roi_wrapped[e.model][e.name] = roi_report.json_object();
-
-    stats.sim_json[e.interface_name].emplace_back(e.name, std::any{sim_wrapped});
-    stats.roi_json[e.interface_name].emplace_back(e.name, std::any{roi_wrapped});
+  stats.stats = nlohmann::json::object();
+  for (const auto& [ml, report] : reports) {
+    stats.lines.insert(stats.lines.end(), report.text().begin(), report.text().end());
+    stats.stats[ml->stat_interface()][ml->stat_model()][ml->stat_name()] = report.json_object();
   }
 
   return stats;

@@ -101,7 +101,7 @@ public:
   long operate() final;
   long poll_cycle() final;
 
-  void begin_phase(bool warmup, bool roi) override;
+  void begin_phase(bool warmup) override;
   void end_phase() override {}
   void print_deadlock() final;
 

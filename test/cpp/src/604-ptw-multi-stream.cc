@@ -28,7 +28,7 @@ SCENARIO("One page table walker serves multiple address spaces")
 
     std::array<champsim::operable*, 3> elements{{&mock_ul, &uut, &mock_ll}};
 
-    uut.begin_phase(false, true);
+    uut.begin_phase(false);
 
     auto drive = [&](champsim::origin origin) {
       decltype(mock_ul)::request_type test;

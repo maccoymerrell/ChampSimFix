@@ -68,10 +68,9 @@ void O3_CPU::initialize()
   impl_initialize_btb();
 }
 
-void O3_CPU::begin_phase(bool warmup, bool roi)
+void O3_CPU::begin_phase(bool warmup)
 {
   warmup_ = warmup;
-  roi_ = roi;
   begin_phase_instr = num_retired;
   begin_phase_time = current_time;
 
@@ -91,8 +90,6 @@ void O3_CPU::end_phase()
 
   finish_phase_instr = num_retired;
   finish_phase_time = current_time;
-
-  roi_stats = sim_stats;
 }
 
 void O3_CPU::initialize_instruction()
@@ -888,7 +885,7 @@ bool CacheBus::issue_write(request_type data_packet)
   return lower_level->add_wq(data_packet);
 }
 
-void O3_CPU::report_stats(bool roi, champsim::stat_report& out) const { format_stats(roi ? roi_stats : sim_stats, out); }
+void O3_CPU::report_stats(champsim::stat_report& out) const { format_stats(sim_stats, out); }
 
 void champsim::modules::core_module::format_stats(const stats_type& stats, champsim::stat_report& out)
 {
