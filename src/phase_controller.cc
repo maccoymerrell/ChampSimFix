@@ -21,7 +21,9 @@
 #include <cstdlib>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 #include <fmt/chrono.h>
 #include <fmt/core.h>
@@ -30,6 +32,7 @@
 
 #include "module_lifecycle.h"
 #include "modules.h"
+#include "stat_report.h"
 
 // Defined (in the global namespace) in champsim.cc; the wall-clock stamp appended to completion reports.
 std::chrono::seconds elapsed_time();
@@ -64,11 +67,53 @@ void phase_controller::begin_phase_on_modules(const champsim::phase_info& phase)
   }
 }
 
-void phase_controller::end_phase_on_modules() const
+void phase_controller::end_phase_on_modules(const champsim::phase_info& phase)
 {
+  // Every governed module ends the phase and reports it in the same call. A module that reports
+  // nothing publishes no statistics (a PTW is phase-aware yet has none).
+  std::vector<std::pair<champsim::module_lifecycle*, champsim::stat_report>> reports;
   for (auto* mp : governed_) {
-    mp->end_phase();
+    champsim::stat_report report;
+    mp->end_phase(report);
+    if (!report.empty()) {
+      reports.emplace_back(mp, std::move(report));
+    }
   }
+
+  if (!phase.roi) {
+    return; // unmeasured: the modules still ended the phase, but nothing is collected from it
+  }
+
+  champsim::phase_stats stats;
+  stats.name = phase.name;
+
+  // Workload identity comes from the producers themselves, in creation order (legacy: one trace per core, in core order).
+  for (packet_producer& src : env_->typed_view<packet_producer>("packet_producer")) {
+    auto desc = src.describe();
+    if (!desc.empty()) {
+      stats.trace_names.push_back(desc);
+    }
+  }
+
+  // The flat plaintext stat lines are emitted in this order; group by interface (stable within one)
+  // so it matches the environment's alphabetical-by-interface view order.
+  std::stable_sort(std::begin(reports), std::end(reports),
+                   [](const auto& lhs, const auto& rhs) { return lhs.first->stat_interface() < rhs.first->stat_interface(); });
+
+  stats.stats = nlohmann::json::object();
+  for (const auto& [mp, report] : reports) {
+    stats.lines.insert(stats.lines.end(), report.text().begin(), report.text().end());
+    stats.stats[mp->stat_interface()][mp->stat_model()][mp->stat_name()] = report.json_object();
+  }
+
+  completed_stats_ = std::move(stats);
+}
+
+std::optional<champsim::phase_stats> phase_controller::take_phase_stats()
+{
+  auto collected = std::move(completed_stats_);
+  completed_stats_.reset();
+  return collected;
 }
 
 } // namespace champsim::modules
@@ -271,7 +316,7 @@ public:
       // Phase complete: end it on the governed modules and return to the "between phases" state. The
       // orchestrator collects this phase's stats, then calls advance() again to begin the next (or to
       // get DONE if this was the last).
-      end_phase_on_modules();
+      end_phase_on_modules(*current_phase_);
       phase_begun_ = false;
     }
 

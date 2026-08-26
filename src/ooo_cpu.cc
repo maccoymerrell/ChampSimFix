@@ -82,14 +82,16 @@ void O3_CPU::begin_phase(bool warmup)
   sim_stats = stats;
 }
 
-void O3_CPU::end_phase()
+void O3_CPU::end_phase(champsim::stat_report& out)
 {
-  // Record where the phase ended.
+  // Record where the phase ended, then report it.
   sim_stats.end_instrs = num_retired;
   sim_stats.end_cycles = current_time.time_since_epoch() / clock_period;
 
   finish_phase_instr = num_retired;
   finish_phase_time = current_time;
+
+  format_stats(sim_stats, out);
 }
 
 void O3_CPU::initialize_instruction()
@@ -884,8 +886,6 @@ bool CacheBus::issue_write(request_type data_packet)
 
   return lower_level->add_wq(data_packet);
 }
-
-void O3_CPU::report_stats(champsim::stat_report& out) const { format_stats(sim_stats, out); }
 
 void champsim::modules::core_module::format_stats(const stats_type& stats, champsim::stat_report& out)
 {

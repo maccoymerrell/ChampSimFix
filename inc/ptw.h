@@ -102,7 +102,6 @@ public:
   long poll_cycle() final;
 
   void begin_phase(bool warmup) override;
-  void end_phase() override {}
   void print_deadlock() final;
 
 private:

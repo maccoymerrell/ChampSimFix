@@ -682,7 +682,7 @@ champsim::modules::memory_controller_module::stats_type MEMORY_CONTROLLER::get_s
   }
 }
 
-void MEMORY_CONTROLLER::report_stats(champsim::stat_report& out) const
+void MEMORY_CONTROLLER::end_phase(champsim::stat_report& out)
 {
   std::size_t i = 0;
   for (const auto& chan : channels) {

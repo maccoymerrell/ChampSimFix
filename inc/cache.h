@@ -180,10 +180,8 @@ public:
   long poll_cycle() final;
   void initialize() final;
   void begin_phase(bool warmup) override;
+  void end_phase(champsim::stat_report& out) override;
   void end_simulation() final;
-
-  // module_lifecycle stats
-  void report_stats(champsim::stat_report& out) const override;
 
 private:
   // Snapshot of the warmup flag for the current phase.

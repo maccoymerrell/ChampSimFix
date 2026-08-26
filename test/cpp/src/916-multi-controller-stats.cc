@@ -42,7 +42,7 @@ struct stat_core_916 : public champsim::modules::core_module {
   cpu_stats get_sim_stats() const override { return {}; }
   bool producers_eof() const override { return false; }
 
-  void report_stats(champsim::stat_report& out) const override
+  void end_phase(champsim::stat_report& out) override
   {
     out.line("MOCKSTAT " + stat_name());
     out.json().add("who", stat_name());

@@ -221,10 +221,8 @@ public:
   long operate() final;
   long poll_cycle() final;
   void begin_phase(bool warmup) override;
+  void end_phase(champsim::stat_report& out) override;
   void print_deadlock() final;
-
-  // module_lifecycle stats
-  void report_stats(champsim::stat_report& out) const override;
 
   stats_type get_sim_stats(std::size_t channel_no) const final;
   std::size_t get_num_channels() const final { return channels.size(); }

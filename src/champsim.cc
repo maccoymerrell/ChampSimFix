@@ -20,17 +20,16 @@
 #include <chrono>
 #include <functional>
 #include <numeric>
+#include <utility>
 #include <vector>
 #include <fmt/core.h>
 
 #include "event_listeners.h"
 #include "identity_registry.h"
-#include "module_lifecycle.h"
 #include "modules.h"
 #include "operable.h"
 #include "phase_controller.h"
 #include "phase_info.h"
-#include "stat_report.h"
 
 const auto start_time = std::chrono::steady_clock::now();
 
@@ -52,48 +51,6 @@ long do_cycle(std::vector<std::reference_wrapper<champsim::operable>>& operables
   }
 
   return progress;
-}
-
-// Collect one phase controller's statistics: every governed lifecycle module's lines / JSON under
-// [interface][model][name]. Scoped to the controller's governed set so concurrent controllers, each
-// in its own phase, do not clobber each other's stats.
-static phase_stats collect_phase_stats(const phase_info& phase, modules::environment_module& env, const std::vector<champsim::module_lifecycle*>& governed)
-{
-  phase_stats stats;
-  stats.name = phase.name;
-
-  // Workload identity comes from the producers themselves, in creation order (legacy: one trace per core, in core order).
-  for (modules::packet_producer& src : env.typed_view<modules::packet_producer>("packet_producer")) {
-    auto desc = src.describe();
-    if (!desc.empty()) {
-      stats.trace_names.push_back(desc);
-    }
-  }
-
-  // A governed module publishes statistics only if it overrides the stat hook (a PTW is phase-aware
-  // yet has no stats); one that reports nothing contributes no entry. Identity was stamped at
-  // construction, so the module itself carries the [interface][model][name] keys.
-  std::vector<std::pair<champsim::module_lifecycle*, champsim::stat_report>> reports;
-  for (auto* ml : governed) {
-    champsim::stat_report report;
-    ml->report_stats(report);
-    if (!report.empty()) {
-      reports.emplace_back(ml, std::move(report));
-    }
-  }
-
-  // The flat plaintext stat lines are emitted in this order; group by interface (stable within one)
-  // so it matches the environment's alphabetical-by-interface view order.
-  std::stable_sort(std::begin(reports), std::end(reports),
-                   [](const auto& lhs, const auto& rhs) { return lhs.first->stat_interface() < rhs.first->stat_interface(); });
-
-  stats.stats = nlohmann::json::object();
-  for (const auto& [ml, report] : reports) {
-    stats.lines.insert(stats.lines.end(), report.text().begin(), report.text().end());
-    stats.stats[ml->stat_interface()][ml->stat_model()][ml->stat_name()] = report.json_object();
-  }
-
-  return stats;
 }
 
 // Assign framework-internal identities: consumers enumerate densely in config order; each producer gets its own id unless producers share a
@@ -187,9 +144,9 @@ std::vector<phase_stats> main(modules::environment_module& env)
 
   // Each controller owns and drives its own phases through advance(): between phases it begins the next
   // one (setting the modules' warmup flag before that phase's first tick); on completion it ends the
-  // phase and reports COMPLETE/DONE. main only ticks the operables, calls advance(), collects a
-  // completed phase's stats (before re-calling advance() to begin the next), ends the run once every
-  // controller is DONE, and aborts if any controller aborts.
+  // phase, collects what its governed modules reported, and returns COMPLETE/DONE. main only ticks the
+  // operables, calls advance(), takes a completed phase's stats (before re-calling advance() to begin
+  // the next), ends the run once every controller is DONE, and aborts if any controller aborts.
   std::vector<bool> finished(controllers.size(), false);
   std::size_t finished_count = 0;
 
@@ -212,11 +169,11 @@ std::vector<phase_stats> main(modules::environment_module& env)
       }
       auto phase_status = controller.advance(progress);
 
-      // COMPLETE: a phase ended — collect its stats (before the controller begins the next phase and
-      // resets ROI stats), then advance() again to begin the next phase before its first tick.
+      // COMPLETE: a phase ended — take the stats it collected (before the controller begins the next
+      // phase and the modules reset), then advance() again to begin the next phase before its first tick.
       if (phase_status == modules::phase_controller::status::COMPLETE) {
-        if (controller.phase().roi) {
-          results.push_back(collect_phase_stats(controller.phase(), env, controller.governed_modules()));
+        if (auto collected = controller.take_phase_stats(); collected.has_value()) {
+          results.push_back(std::move(*collected));
         }
         phase_status = controller.advance(0);
         if (phase_status == modules::phase_controller::status::CONTINUE) {

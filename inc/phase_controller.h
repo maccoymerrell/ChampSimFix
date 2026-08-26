@@ -18,6 +18,7 @@
 #define PHASE_CONTROLLER_H
 
 #include <functional>
+#include <optional>
 #include <vector>
 
 #include "module_lifecycle.h"
@@ -72,11 +73,18 @@ struct phase_controller : public module_base<phase_controller, environment_modul
   // are disjoint and cover every module_lifecycle module.
   const std::vector<champsim::module_lifecycle*>& governed_modules() const { return governed_; }
 
+  // The stats of the phase this controller just completed, or nothing when that phase was
+  // unmeasured. Taking them clears them, so each completed phase is collected exactly once.
+  std::optional<champsim::phase_stats> take_phase_stats();
+
 protected:
   // Broadcast a phase edge to exactly the governed module_lifecycle modules. Not virtual: implementations
   // call these; which modules to inform is the interface's business, not theirs.
   void begin_phase_on_modules(const champsim::phase_info& phase) const;
-  void end_phase_on_modules() const;
+  // Ends the phase on every governed module and collects what each one reports. A measured phase's
+  // stats are stashed for take_phase_stats(); an unmeasured phase's are discarded, but every module
+  // is ended either way.
+  void end_phase_on_modules(const champsim::phase_info& phase);
 
   // The packet_consumers among the governed module_lifecycle-havers. Cast once at construction (the
   // governed set is fixed for the run), not re-derived on every advance().
@@ -86,6 +94,7 @@ private:
   environment_module* env_;
   std::vector<champsim::module_lifecycle*> governed_;
   std::vector<std::reference_wrapper<packet_consumer>> governed_consumers_;
+  std::optional<champsim::phase_stats> completed_stats_;
 };
 } // namespace champsim::modules
 

@@ -145,10 +145,7 @@ public:
   void initialize() final;
   long operate() final;
   void begin_phase(bool warmup) override;
-  void end_phase() override;
-
-  // module_lifecycle stats
-  void report_stats(champsim::stat_report& out) const override;
+  void end_phase(champsim::stat_report& out) override;
 
 private:
   bool warmup_ = true;

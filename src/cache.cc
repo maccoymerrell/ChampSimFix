@@ -921,7 +921,7 @@ void CACHE::print_deadlock()
 }
 // LCOV_EXCL_STOP
 
-void CACHE::report_stats(champsim::stat_report& out) const { format_stats(sim_stats, out); }
+void CACHE::end_phase(champsim::stat_report& out) { format_stats(sim_stats, out); }
 
 void champsim::modules::cache_module::format_stats(const stats_type& stats, champsim::stat_report& out)
 {
