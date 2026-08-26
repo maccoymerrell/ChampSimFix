@@ -1111,11 +1111,9 @@ bool CacheBus::issue_write(request_type data_packet)
   return lower_level->add_wq(data_packet);
 }
 
-std::vector<std::string> O3_CPU::print_stats(bool roi) const { return format_plaintext(roi ? roi_stats : sim_stats); }
+void O3_CPU::report_stats(bool roi, champsim::stat_report& out) const { format_stats(roi ? roi_stats : sim_stats, out); }
 
-void O3_CPU::json_stats(champsim::json_stat_builder& b, bool roi) const { format_json(roi ? roi_stats : sim_stats, b); }
-
-std::vector<std::string> champsim::modules::core_module::format_plaintext(const stats_type& stats)
+void champsim::modules::core_module::format_stats(const stats_type& stats, champsim::stat_report& out)
 {
   constexpr std::array types{branch_type::BRANCH_DIRECT_JUMP, branch_type::BRANCH_INDIRECT,      branch_type::BRANCH_CONDITIONAL,
                              branch_type::BRANCH_DIRECT_CALL, branch_type::BRANCH_INDIRECT_CALL, branch_type::BRANCH_RETURN};
@@ -1124,32 +1122,21 @@ std::vector<std::string> champsim::modules::core_module::format_plaintext(const 
   auto total_mispredictions = std::ceil(
       std::accumulate(std::begin(types), std::end(types), 0LL, [btm = stats.branch_type_misses](auto acc, auto next) { return acc + btm.value_or(next, 0); }));
 
-  std::vector<std::string> lines{};
-  lines.push_back(fmt::format("{} cumulative IPC: {} instructions: {} cycles: {}", stats.name, champsim::print_ratio(stats.instrs(), stats.cycles()),
-                              stats.instrs(), stats.cycles()));
+  out.line(fmt::format("{} cumulative IPC: {} instructions: {} cycles: {}", stats.name, champsim::print_ratio(stats.instrs(), stats.cycles()), stats.instrs(),
+                       stats.cycles()));
 
-  lines.push_back(fmt::format("{} Branch Prediction Accuracy: {}% MPKI: {} Average ROB Occupancy at Mispredict: {}", stats.name,
-                              champsim::print_ratio(100 * (total_branch - total_mispredictions), total_branch),
-                              champsim::print_ratio(std::kilo::num * total_mispredictions, stats.instrs()),
-                              champsim::print_ratio(stats.total_rob_occupancy_at_branch_mispredict, total_mispredictions)));
+  out.line(fmt::format("{} Branch Prediction Accuracy: {}% MPKI: {} Average ROB Occupancy at Mispredict: {}", stats.name,
+                       champsim::print_ratio(100 * (total_branch - total_mispredictions), total_branch),
+                       champsim::print_ratio(std::kilo::num * total_mispredictions, stats.instrs()),
+                       champsim::print_ratio(stats.total_rob_occupancy_at_branch_mispredict, total_mispredictions)));
 
-  lines.emplace_back("Branch type MPKI");
+  out.line("Branch type MPKI");
   for (auto idx : types) {
-    lines.push_back(fmt::format("{}: {}", branch_type_names.at(champsim::to_underlying(idx)),
-                                champsim::print_ratio(std::kilo::num * stats.branch_type_misses.value_or(idx, 0), stats.instrs())));
+    out.line(fmt::format("{}: {}", branch_type_names.at(champsim::to_underlying(idx)),
+                         champsim::print_ratio(std::kilo::num * stats.branch_type_misses.value_or(idx, 0), stats.instrs())));
   }
 
-  return lines;
-}
-
-void champsim::modules::core_module::format_json(const stats_type& stats, champsim::json_stat_builder& b)
-{
-  constexpr std::array types{branch_type::BRANCH_DIRECT_JUMP, branch_type::BRANCH_INDIRECT,      branch_type::BRANCH_CONDITIONAL,
-                             branch_type::BRANCH_DIRECT_CALL, branch_type::BRANCH_INDIRECT_CALL, branch_type::BRANCH_RETURN};
-
-  auto total_mispredictions = std::ceil(
-      std::accumulate(std::begin(types), std::end(types), 0LL, [btm = stats.branch_type_misses](auto acc, auto next) { return acc + btm.value_or(next, 0); }));
-
+  auto b = out.json();
   b.add("instructions", stats.instrs())
       .add("cycles", stats.cycles())
       .add("Avg ROB occupancy at mispredict", std::ceil(stats.total_rob_occupancy_at_branch_mispredict) / std::ceil(total_mispredictions));

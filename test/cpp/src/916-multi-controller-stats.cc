@@ -7,7 +7,6 @@
 
 #include "chrono.h"
 #include "core_stats.h"
-#include "json_stat_builder.h"
 #include "modules.h"
 #include "operable.h"
 #include "phase_controller.h"
@@ -44,8 +43,11 @@ struct stat_core_916 : public champsim::modules::core_module {
   cpu_stats get_roi_stats() const override { return {}; }
   bool producers_eof() const override { return false; }
 
-  std::vector<std::string> print_stats(bool roi) const override { return {"MOCKSTAT " + stat_name() + (roi ? " roi" : " sim")}; }
-  void json_stats(champsim::json_stat_builder& b, bool roi) const override { b.add("who", stat_name()).add("roi", roi ? 1 : 0); }
+  void report_stats(bool roi, champsim::stat_report& out) const override
+  {
+    out.line("MOCKSTAT " + stat_name() + (roi ? " roi" : " sim"));
+    out.json().add("who", stat_name()).add("roi", roi ? 1 : 0);
+  }
 };
 static champsim::modules::core_module::register_module<stat_core_916> stat_core_reg_916("STAT_CORE_916");
 

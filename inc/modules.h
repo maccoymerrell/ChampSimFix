@@ -40,11 +40,11 @@
 #include "core_stats.h"
 #include "dram_stats.h"
 #include "instruction.h"
-#include "json_stat_builder.h"
 #include "module_lifecycle.h"
 #include "operable.h"
 #include "packet.h"
 #include "phase_info.h"
+#include "stat_report.h"
 #include "util/ring_buffer.h"
 #include "util/type_traits.h"
 
@@ -814,8 +814,7 @@ struct core_module : public module_base<core_module, environment_module>, public
   /** Return region-of-interest statistics for this core. */
   virtual stats_type get_roi_stats() const = 0;
 
-  static std::vector<std::string> format_plaintext(const stats_type& stats);
-  static void format_json(const stats_type& stats, champsim::json_stat_builder& b);
+  static void format_stats(const stats_type& stats, champsim::stat_report& out);
 
   // packet_consumer hooks: core_module provides CPU-specific messages.
   uint64_t sim_progress() const override;
@@ -862,8 +861,7 @@ struct cache_module : public module_base<cache_module, environment_module>, publ
   /** Return region-of-interest statistics for this cache. */
   virtual stats_type get_roi_stats() const = 0;
 
-  static std::vector<std::string> format_plaintext(const stats_type& stats);
-  static void format_json(const stats_type& stats, champsim::json_stat_builder& b);
+  static void format_stats(const stats_type& stats, champsim::stat_report& out);
 
   /** Return true if this cache uses virtual addresses for prefetching. */
   virtual bool is_virtual_prefetch() const = 0;
@@ -936,8 +934,9 @@ struct memory_controller_module : public module_base<memory_controller_module, e
   /** Return region-of-interest statistics for the given channel. */
   virtual stats_type get_roi_stats(std::size_t channel_no) const = 0;
 
-  static std::vector<std::string> format_plaintext(const stats_type& stats);
-  static void format_json(const stats_type& stats, champsim::json_stat_builder& b);
+  // One channel's statistics: plaintext lines into the report, JSON under "channel <channel_no>".
+  // The channel index is a parameter because a controller reports every channel into one report.
+  static void format_stats(const stats_type& stats, std::size_t channel_no, champsim::stat_report& out);
 
   /** Return the total DRAM size. */
   virtual champsim::data::bytes size() const = 0;

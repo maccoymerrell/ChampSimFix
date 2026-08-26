@@ -241,8 +241,7 @@ public:
   void end_simulation() final;
 
   // module_lifecycle stats
-  std::vector<std::string> print_stats(bool roi) const override;
-  void json_stats(champsim::json_stat_builder& b, bool roi) const override;
+  void report_stats(bool roi, champsim::stat_report& out) const override;
 
 private:
   // Snapshot of the warmup/ROI flags for the current phase.
