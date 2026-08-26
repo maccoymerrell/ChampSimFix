@@ -21,7 +21,7 @@ struct phase_probe_915 : public champsim::operable {
   phase_probe_915() : champsim::operable(champsim::chrono::picoseconds{250}) {}
   long operate() override { return 1; }
   void begin_phase(bool warmup) override { begins.push_back(warmup); }
-  void end_phase() override { ++ends; }
+  void end_phase(champsim::stat_report&) override { ++ends; }
 };
 
 struct mock_core_915 : public champsim::modules::core_module {

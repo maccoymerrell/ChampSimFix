@@ -29,7 +29,7 @@ struct stats_core : public champsim::modules::core_module {
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return sim_stats_; }
 
-  void report_stats(champsim::stat_report& out) const override { format_stats(sim_stats_, out); }
+  void end_phase(champsim::stat_report& out) override { format_stats(sim_stats_, out); }
 };
 
 static champsim::modules::core_module::register_module<stats_core> stats_core_reg("STATS_CORE_912");
@@ -66,7 +66,7 @@ struct stats_cache : public champsim::modules::cache_module {
   std::size_t num_ways() const override { return 0; }
   champsim::data::bits get_offset_bits() const override { return champsim::data::bits{}; }
 
-  void report_stats(champsim::stat_report& out) const override { format_stats(sim_stats_, out); }
+  void end_phase(champsim::stat_report& out) override { format_stats(sim_stats_, out); }
 };
 
 static champsim::modules::cache_module::register_module<stats_cache> stats_cache_reg("STATS_CACHE_912");
@@ -110,7 +110,7 @@ TEST_CASE("module_lifecycle::report_stats fills the report with formatted plaint
   auto* ms = dynamic_cast<champsim::module_lifecycle*>(core);
   REQUIRE(ms != nullptr);
   champsim::stat_report report;
-  ms->report_stats(report);
+  ms->end_phase(report);
   REQUIRE(!report.text().empty());
   REQUIRE(report.text().front().find("core0 cumulative IPC") != std::string::npos);
 }
@@ -130,7 +130,7 @@ TEST_CASE("module_lifecycle::report_stats fills the report's JSON object") {
   auto* ms = dynamic_cast<champsim::module_lifecycle*>(core);
   REQUIRE(ms != nullptr);
   champsim::stat_report report;
-  ms->report_stats(report);
+  ms->end_phase(report);
   REQUIRE(!report.empty());
   REQUIRE(report.json_object().contains("instructions"));
   REQUIRE(report.json_object().contains("cycles"));
@@ -148,7 +148,7 @@ TEST_CASE("cache module_lifecycle::report_stats produces lines tagged with the c
   auto* ms = dynamic_cast<champsim::module_lifecycle*>(cache);
   REQUIRE(ms != nullptr);
   champsim::stat_report report;
-  ms->report_stats(report);
+  ms->end_phase(report);
   REQUIRE(!report.text().empty());
   REQUIRE(report.text().front().find("L1D") != std::string::npos);
 }

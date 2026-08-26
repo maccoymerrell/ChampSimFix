@@ -32,13 +32,11 @@ class stat_report;
 struct module_lifecycle {
   virtual ~module_lifecycle() = default;
 
-  // Phase edges.
+  // Phase edges. Ending a phase and reporting what it measured are one event -- the numbers are
+  // final exactly then -- so end_phase finalises its counters and writes them into the report,
+  // plaintext lines and JSON alike. A module that reports nothing publishes no statistics.
   virtual void begin_phase(bool /*warmup*/) {}
-  virtual void end_phase() {}
-
-  // Report this phase's stats -- plaintext lines and JSON -- into one report. A module that
-  // reports nothing publishes no statistics.
-  virtual void report_stats(stat_report& /*out*/) const {}
+  virtual void end_phase(stat_report& /*out*/) {}
 
   // Stat identity (interface / model / instance name), stamped once at construction. It lets a phase
   // controller collect its governed modules' stats directly, without re-discovering them by interface.

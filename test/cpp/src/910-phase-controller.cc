@@ -42,7 +42,6 @@ struct mock_core : public champsim::modules::core_module {
   cpu_stats get_sim_stats() const override { return {}; }
   bool producers_eof() const override { return producers_eof_; }
   void begin_phase(bool) override {}
-  void end_phase() override {}
 };
 
 static champsim::modules::core_module::register_module<mock_core> mock_core_reg_910("MOCK_CORE_910");

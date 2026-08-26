@@ -82,7 +82,6 @@ public:
   }
 
   void begin_phase(bool) override {}
-  void end_phase() override {}
   std::size_t packet_count() const { return std::size(addresses); }
 };
 
@@ -138,7 +137,6 @@ public:
   }
 
   void begin_phase(bool) override {}
-  void end_phase() override {}
   std::size_t packet_count() const { return mpacket_count; }
 };
 
@@ -175,7 +173,6 @@ public:
   }
 
   void begin_phase(bool) override {}
-  void end_phase() override {}
   std::size_t packet_count() const { return mpacket_count; }
 
   void release_all()
@@ -255,7 +252,6 @@ struct queue_issue_MRP : public champsim::operable {
   }
 
   void begin_phase(bool) override {}
-  void end_phase() override {}
 };
 
 namespace Catch

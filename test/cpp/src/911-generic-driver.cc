@@ -92,7 +92,7 @@ struct counting_operable : public champsim::operable {
   }
 
   void begin_phase(bool) override { phase_begun = true; }
-  void end_phase() override { ended_phases.push_back(0); }
+  void end_phase(champsim::stat_report&) override { ended_phases.push_back(0); }
 };
 
 // Mock core whose instruction count advances one per operated cycle, so phases complete naturally.
