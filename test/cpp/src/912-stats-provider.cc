@@ -11,6 +11,7 @@
 #include "json_stat_builder.h"
 #include "modules.h"
 #include "phase_info.h"
+#include "stat_report.h"
 
 namespace {
 
@@ -30,13 +31,9 @@ struct stats_core : public champsim::modules::core_module {
   cpu_stats get_sim_stats() const override { return sim_stats_; }
   cpu_stats get_roi_stats() const override { return roi_stats_; }
 
-  std::vector<std::string> print_stats(bool roi) const override
+  void report_stats(bool roi, champsim::stat_report& out) const override
   {
-    return format_plaintext(roi ? roi_stats_ : sim_stats_);
-  }
-  void json_stats(champsim::json_stat_builder& b, bool roi) const override
-  {
-    format_json(roi ? roi_stats_ : sim_stats_, b);
+    format_stats(roi ? roi_stats_ : sim_stats_, out);
   }
 };
 
@@ -76,13 +73,9 @@ struct stats_cache : public champsim::modules::cache_module {
   std::size_t num_ways() const override { return 0; }
   champsim::data::bits get_offset_bits() const override { return champsim::data::bits{}; }
 
-  std::vector<std::string> print_stats(bool roi) const override
+  void report_stats(bool roi, champsim::stat_report& out) const override
   {
-    return format_plaintext(roi ? roi_stats_ : sim_stats_);
-  }
-  void json_stats(champsim::json_stat_builder& b, bool roi) const override
-  {
-    format_json(roi ? roi_stats_ : sim_stats_, b);
+    format_stats(roi ? roi_stats_ : sim_stats_, out);
   }
 };
 
@@ -112,7 +105,7 @@ struct stats_env : public champsim::modules::environment_module {
 
 } // anonymous namespace
 
-TEST_CASE("module_lifecycle::print_stats returns formatted plaintext from format_plaintext") {
+TEST_CASE("module_lifecycle::report_stats fills the report with formatted plaintext") {
   auto builder = champsim::modules::ModuleBuilder("test_core", "STATS_CORE_912");
   stats_env env_dummy(champsim::modules::ModuleBuilder{});
   auto* core = champsim::modules::core_module::create_instance(builder, &env_dummy);
@@ -126,12 +119,13 @@ TEST_CASE("module_lifecycle::print_stats returns formatted plaintext from format
 
   auto* ms = dynamic_cast<champsim::module_lifecycle*>(core);
   REQUIRE(ms != nullptr);
-  auto lines = ms->print_stats(true);
-  REQUIRE(!lines.empty());
-  REQUIRE(lines.front().find("core0 cumulative IPC") != std::string::npos);
+  champsim::stat_report report;
+  ms->report_stats(true, report);
+  REQUIRE(!report.text().empty());
+  REQUIRE(report.text().front().find("core0 cumulative IPC") != std::string::npos);
 }
 
-TEST_CASE("module_lifecycle::json_stats fills the json_stat_builder") {
+TEST_CASE("module_lifecycle::report_stats fills the report's JSON object") {
   auto builder = champsim::modules::ModuleBuilder("test_core_json", "STATS_CORE_912");
   stats_env env_dummy(champsim::modules::ModuleBuilder{});
   auto* core = champsim::modules::core_module::create_instance(builder, &env_dummy);
@@ -145,14 +139,14 @@ TEST_CASE("module_lifecycle::json_stats fills the json_stat_builder") {
 
   auto* ms = dynamic_cast<champsim::module_lifecycle*>(core);
   REQUIRE(ms != nullptr);
-  champsim::json_stat_builder b;
-  ms->json_stats(b, false);
-  REQUIRE(!b.empty());
-  REQUIRE(b.json().contains("instructions"));
-  REQUIRE(b.json().contains("cycles"));
+  champsim::stat_report report;
+  ms->report_stats(false, report);
+  REQUIRE(!report.empty());
+  REQUIRE(report.json_object().contains("instructions"));
+  REQUIRE(report.json_object().contains("cycles"));
 }
 
-TEST_CASE("cache module_lifecycle::print_stats produces lines tagged with the cache name") {
+TEST_CASE("cache module_lifecycle::report_stats produces lines tagged with the cache name") {
   auto builder = champsim::modules::ModuleBuilder("test_cache_912", "STATS_CACHE_912");
   stats_env env_dummy(champsim::modules::ModuleBuilder{});
   auto* cache = champsim::modules::cache_module::create_instance(builder, &env_dummy);
@@ -163,9 +157,10 @@ TEST_CASE("cache module_lifecycle::print_stats produces lines tagged with the ca
 
   auto* ms = dynamic_cast<champsim::module_lifecycle*>(cache);
   REQUIRE(ms != nullptr);
-  auto lines = ms->print_stats(true);
-  REQUIRE(!lines.empty());
-  REQUIRE(lines.front().find("L1D") != std::string::npos);
+  champsim::stat_report report;
+  ms->report_stats(true, report);
+  REQUIRE(!report.text().empty());
+  REQUIRE(report.text().front().find("L1D") != std::string::npos);
 }
 
 TEST_CASE("interface_registry exposes module_lifecycle conversions for opted-in interfaces") {

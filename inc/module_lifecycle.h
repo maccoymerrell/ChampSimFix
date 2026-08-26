@@ -18,12 +18,11 @@
 #define MODULE_LIFECYCLE_H
 
 #include <string>
-#include <vector>
 
 namespace champsim
 {
 
-class json_stat_builder;
+class stat_report;
 
 // A module that participates in the run's phase lifecycle and reports its per-phase stats. Phase
 // edges and stats are one concern -- stats accumulate within a phase and reset on its edge -- so a
@@ -37,9 +36,9 @@ struct module_lifecycle {
   virtual void begin_phase(bool /*warmup*/, bool /*roi*/) {}
   virtual void end_phase() {}
 
-  // Plaintext / JSON stats. roi selects region-of-interest vs sim-wide.
-  virtual std::vector<std::string> print_stats(bool /*roi*/) const { return {}; }
-  virtual void json_stats(json_stat_builder& /*builder*/, bool /*roi*/) const {}
+  // Report this phase's stats -- plaintext lines and JSON -- into one report. roi selects
+  // region-of-interest vs sim-wide. A module that reports nothing publishes no statistics.
+  virtual void report_stats(bool /*roi*/, stat_report& /*out*/) const {}
 
   // Stat identity (interface / model / instance name), stamped once at construction. It lets a phase
   // controller collect its governed modules' stats directly, without re-discovering them by interface.

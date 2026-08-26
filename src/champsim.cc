@@ -25,12 +25,12 @@
 
 #include "event_listeners.h"
 #include "identity_registry.h"
-#include "json_stat_builder.h"
 #include "module_lifecycle.h"
 #include "modules.h"
 #include "operable.h"
 #include "phase_controller.h"
 #include "phase_info.h"
+#include "stat_report.h"
 
 const auto start_time = std::chrono::steady_clock::now();
 
@@ -51,9 +51,11 @@ static std::vector<module_stat_entry> collect_module_stat(const std::vector<cham
 {
   std::vector<module_stat_entry> out;
   for (auto* ml : governed) {
-    // A governed module publishes stats only if it overrides the stat hooks (a PTW is phase-aware yet
+    // A governed module publishes stats only if it overrides the stat hook (a PTW is phase-aware yet
     // has no stats); skip the rest so they emit no empty entry. Identity was stamped at construction.
-    if (!ml->print_stats(false).empty()) {
+    champsim::stat_report probe;
+    ml->report_stats(false, probe);
+    if (!probe.empty()) {
       out.push_back({ml, ml->stat_interface(), ml->stat_model(), ml->stat_name()});
     }
   }
@@ -97,20 +99,18 @@ static phase_stats collect_phase_stats(const phase_info& phase, modules::environ
   // SIM and ROI passes share discovery; the bool selects which stat set to emit.
   auto stat_modules = collect_module_stat(governed);
   for (auto& e : stat_modules) {
-    auto sim_lines = e.ptr->print_stats(false);
-    auto roi_lines = e.ptr->print_stats(true);
-    stats.sim_lines.insert(stats.sim_lines.end(), sim_lines.begin(), sim_lines.end());
-    stats.roi_lines.insert(stats.roi_lines.end(), roi_lines.begin(), roi_lines.end());
+    champsim::stat_report sim_report, roi_report;
+    e.ptr->report_stats(false, sim_report);
+    e.ptr->report_stats(true, roi_report);
+
+    stats.sim_lines.insert(stats.sim_lines.end(), sim_report.text().begin(), sim_report.text().end());
+    stats.roi_lines.insert(stats.roi_lines.end(), roi_report.text().begin(), roi_report.text().end());
 
     // Wrap the per-instance JSON as {model:{name:{...}}} for [interface][model][name] keying; the printer merges by interface.
-    champsim::json_stat_builder sim_builder, roi_builder;
-    e.ptr->json_stats(sim_builder, false);
-    e.ptr->json_stats(roi_builder, true);
-
     nlohmann::json sim_wrapped = nlohmann::json::object();
-    sim_wrapped[e.model][e.name] = sim_builder.json();
+    sim_wrapped[e.model][e.name] = sim_report.json_object();
     nlohmann::json roi_wrapped = nlohmann::json::object();
-    roi_wrapped[e.model][e.name] = roi_builder.json();
+    roi_wrapped[e.model][e.name] = roi_report.json_object();
 
     stats.sim_json[e.interface_name].emplace_back(e.name, std::any{sim_wrapped});
     stats.roi_json[e.interface_name].emplace_back(e.name, std::any{roi_wrapped});

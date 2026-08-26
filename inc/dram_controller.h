@@ -226,8 +226,7 @@ public:
   void print_deadlock() final;
 
   // module_lifecycle stats
-  std::vector<std::string> print_stats(bool roi) const override;
-  void json_stats(champsim::json_stat_builder& b, bool roi) const override;
+  void report_stats(bool roi, champsim::stat_report& out) const override;
 
   stats_type get_sim_stats(std::size_t channel_no) const final;
   stats_type get_roi_stats(std::size_t channel_no) const final;
