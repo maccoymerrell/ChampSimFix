@@ -236,9 +236,8 @@ champsim::environment::environment(ModuleBuilder builder)
   {
     auto& g = ModuleBuilder::globals();
 
-    static const std::set<std::string> reserved{"children",    "name",      "module",     "model",  "_comment",  "_description",
-                                                "environment", "num_cores", "cycle_skip", "phases", "listeners", "heartbeat_frequency",
-                                                "globals"};
+    static const std::set<std::string> reserved{"children",    "name",      "module", "model",      "_comment", "_description",
+                                                "environment", "num_cores", "phases", "cycle_skip", "globals"};
     ModuleBuilder root_scope{"<root>", "<scope>"};
     for (auto& [key, val] : config.items()) {
       if (reserved.count(key) != 0 || val.is_structured() || val.is_null()) {

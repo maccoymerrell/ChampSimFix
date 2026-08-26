@@ -432,6 +432,11 @@
       ]
     },
     {
+      "_comment": "Listeners observe a run without taking part in it. The explicit format declares them like any other module, so a run gets exactly the instrumentation its configuration asks for. Give a parameter a $var to expose it on the command line.",
+      "name": "heartbeat", "module": "listener", "model": "HEARTBEAT",
+      "frequency": "$heartbeat_frequency"
+    },
+    {
       "_comment": "Phase controller: drives warmup + simulation from CLI -w/-i via $vars; omit deadlock_cycles to inherit the environment's dynamic threshold.",
       "name": "phase_controller", "module": "phase_controller", "model": "PHASE_CONTROLLER",
       "warmup_length": "$warmup_instructions", "simulation_length": "$simulation_instructions"

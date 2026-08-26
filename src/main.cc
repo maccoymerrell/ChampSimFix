@@ -30,7 +30,6 @@
 #include "champsim.h"
 #include "defaults.hpp"
 #include "environment.h"
-#include "event_listeners.h"
 #include "legacy_environment.h"
 #include "modules.h"
 #include "ooo_cpu.h" // for O3_CPU
@@ -71,7 +70,6 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   long long warmup_instructions = 0;
   long long simulation_instructions = std::numeric_limits<long long>::max();
   std::string json_file_name;
-  std::vector<std::string> requested_listeners;
   std::vector<std::string> trace_names;
 
   app.add_option("--config", config_file_path, "Path to the JSON configuration file (use \"-\" for stdin)");
@@ -86,8 +84,6 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
       app.add_option("--simulation_instructions", simulation_instructions, "[deprecated] use --simulation-instructions instead")->excludes(sim_instr_option);
   auto* json_option =
       app.add_option("--json", json_file_name, "The name of the file to receive JSON output. If no name is specified, stdout will be used")->expected(0, 1);
-
-  app.add_option("--listeners", requested_listeners, "A list of the listeners to be attached to the run");
 
   // First CLI pass reads the config file path; the second pass uses the resolved core count for trace validation.
   app.allow_extras(true);
@@ -170,7 +166,6 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     app2.add_option("--" + vn, val, "Config variable: $" + vn);
   json_option =
       app2.add_option("--json", json_file_name, "The name of the file to receive JSON output. If no name is specified, stdout will be used")->expected(0, 1);
-  app2.add_option("--listeners", requested_listeners, "A list of the listeners to be attached to the run");
 
   // Legacy env requires exactly legacy_num_producers traces; explicit envs allow any (resolved via $traceN).
   auto* trace_option = app2.add_option("traces", trace_names, "The paths to the traces");
@@ -204,6 +199,10 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   cli_args["warmup_instructions"] = warmup_instructions;
   cli_args["simulation_instructions"] = simulation_instructions;
   cli_args["cloudsuite"] = knob_cloudsuite;
+  // --hide-heartbeat is an input to whatever builds the heartbeat, so it travels with the config.
+  if (hide_heartbeat) {
+    config_json["hide_heartbeat"] = true;
+  }
   // Populate dynamic $-variables collected from the config; coerce to numeric where possible
   for (auto& [vn, val] : dynamic_cli_vars) {
     try {
@@ -233,19 +232,6 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 
   if (knob_dump)
     fmt::print("=== End Module Builder Dump ===\n");
-
-  // Event listeners are compile-time (inc/event_listeners.h): the always-on Heartbeat plus
-  // any activated by --listeners. Apply the root "heartbeat_frequency" to the global Heartbeat;
-  // --hide-heartbeat quiets every core so it stops emitting RETIRE events.
-  if (config_json.contains("heartbeat_frequency")) {
-    std::get<Heartbeat>(listeners).cycles_between_printouts = config_json.value("heartbeat_frequency", uint64_t{10000000});
-  }
-  init_event_listeners(requested_listeners);
-  if (hide_heartbeat) {
-    for (champsim::modules::core_module& cpu : gen_environment->typed_view<champsim::modules::core_module>("core")) {
-      cpu.quiet(true);
-    }
-  }
 
   fmt::print("\n*** ChampSim Multicore Out-of-Order Simulator ***\n");
   // Each phase controller reports its own plan; main does not need the phase list.

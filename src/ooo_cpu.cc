@@ -32,7 +32,7 @@
 #include "cache.h"
 #include "champsim.h"
 #include "deadlock.h"
-#include "event_listeners.h"
+#include "hooks.h"
 #include "instruction.h"
 #include "instruction_producer.h"
 #include "json_stat_builder.h"
@@ -956,13 +956,11 @@ long O3_CPU::retire_rob()
   // against externally injected ROB state (unit tests).
   num_scheduled_ = std::max(num_scheduled_ - retire_count, long{0});
   num_retired += retire_count;
-  if (retire_count > 0 && show_heartbeat) {
-    // Generic PROGRESS event: pass ourselves as a packet_consumer (upcast, so the handler's
-    // const packet_consumer& specialization is selected) plus our progress in instructions.
-    const auto& self = static_cast<const champsim::modules::packet_consumer&>(*this);
-    uint64_t progress = static_cast<uint64_t>(num_retired);
-    uint64_t cycles = static_cast<uint64_t>(current_time.time_since_epoch() / clock_period);
-    handle_event<Event::PROGRESS>(self, progress, cycles);
+  // Report that we advanced, in instructions -- but only if something is listening: the cycle
+  // count below costs a division, and an unobserved hook should cost a branch.
+  if (retire_count > 0 && champsim::hooks::progress.active()) {
+    champsim::hooks::progress.emit(static_cast<const champsim::modules::packet_consumer&>(*this), static_cast<uint64_t>(num_retired),
+                                   static_cast<uint64_t>(current_time.time_since_epoch() / clock_period));
   }
   ROB.erase(retire_begin, retire_end);
 

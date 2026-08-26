@@ -490,9 +490,6 @@ public:
   [[nodiscard]] uint64_t sim_cycle() const final { return (current_time.time_since_epoch() / clock_period) - sim_stats.begin_cycles; }
   stats_type get_sim_stats() const final { return sim_stats; }
 
-  bool show_heartbeat = true;
-  void quiet(bool enable) final { show_heartbeat = !enable; }
-
   void print_deadlock() final;
 
   std::vector<champsim::modules::branch_predictor*> branch_module_pimpl;

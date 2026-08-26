@@ -1031,6 +1031,17 @@ champsim::legacy_environment::legacy_environment(champsim::modules::ModuleBuilde
     module_order_.emplace_back("phase_controller", "phase_controller");
   }
 
+  // The classic environment reports progress, so it builds the heartbeat the way it builds
+  // everything else. "hide_heartbeat" (what --hide-heartbeat sets) omits it.
+  if (!config.value("hide_heartbeat", false)) {
+    auto hb_builder = ModuleBuilder{"heartbeat", "HEARTBEAT"};
+    hb_builder.add_parameter("frequency", config.value("heartbeat_frequency", uint64_t{10000000}));
+    builder_params_["heartbeat"] = hb_builder;
+    auto* heartbeat = module_base<listener, environment_module>::create_instance(hb_builder, this);
+    modules_by_type_["listener"].push_back(heartbeat);
+    module_order_.emplace_back("heartbeat", "listener");
+  }
+
   validate_phase_governance();
 }
 

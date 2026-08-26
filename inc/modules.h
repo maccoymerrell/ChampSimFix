@@ -821,9 +821,6 @@ struct core_module : public module_base<core_module, environment_module>, public
   std::string progress_message(uint64_t total_progress, uint64_t total_cycles, double interval_rate, double cumulative_rate) const override;
   std::string progress_unit() const override;
 
-  // Heartbeat suppression (--hide-heartbeat): a core stops emitting PROGRESS events.
-  virtual void quiet(bool /*enable*/) {}
-
   // Health policy for instruction consumers: progress rate (instructions
   // per cycle) over the check window against retirement-rate floors.
   // These are the former phase-controller livelock thresholds, now owned
@@ -1279,6 +1276,27 @@ struct btb : public module_base<btb, core_module> {
  * consumer records, a network consumer would take packets — all meshing
  * in one run because the orchestrator never sees the packet type.
  */
+/**
+ * Interface for listener modules.
+ *
+ * A listener observes named hooks (see hook.h): it attaches callbacks in its constructor and holds
+ * the returned subscriptions, so it stops being called when it goes away. Listeners are compiled in
+ * rather than chosen at configuration time -- what being a module buys them is construction with
+ * parameters, so a study's knobs live in the configuration instead of in a recompile.
+ *
+ * A listener that wants phase edges or wants to publish its own per-phase statistics may inherit
+ * champsim::module_lifecycle as well; it is then a phase participant and must be governed like one.
+ */
+struct listener : public module_base<listener, environment_module> {
+  listener() = default;
+  // A listener's subscriptions hold callbacks that capture `this`, so an instance must stay put.
+  listener(const listener&) = delete;
+  listener& operator=(const listener&) = delete;
+  listener(listener&&) = delete;
+  listener& operator=(listener&&) = delete;
+  virtual ~listener() = default;
+};
+
 /**
  * Interface for the top-level environment module.
  *
