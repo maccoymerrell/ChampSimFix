@@ -4,6 +4,7 @@
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
 #include "extent.h"
+#include "hook.h"
 #include "modules.h"
 
 namespace {
@@ -26,6 +27,9 @@ void reset_globals_to_defaults()
   g.add_parameter("num_consumers", std::size_t{1});
   // Re-sync the cached extents used by page_number / block_offset / etc.
   champsim::refresh_address_extents();
+  // Module instances live in a static registry for the life of the binary, so any hook a module
+  // subscribed to in one test case would still be calling it in the next. Drop every subscription.
+  champsim::hook_registry::clear_all_subscribers();
 }
 
 struct globals_reset_listener : Catch::EventListenerBase {
