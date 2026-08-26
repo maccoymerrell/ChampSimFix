@@ -87,11 +87,11 @@ void phase_controller::end_phase_on_modules(const champsim::phase_info& phase)
   champsim::phase_stats stats;
   stats.name = phase.name;
 
-  // Workload identity comes from the producers themselves, in creation order (legacy: one trace per core, in core order).
-  for (packet_producer& src : env_->typed_view<packet_producer>("packet_producer")) {
-    auto desc = src.describe();
-    if (!desc.empty()) {
-      stats.trace_names.push_back(desc);
+  // Workload identity comes from this controller's own consumers, each naming what feeds it. Scoped
+  // like the rest of the collection, so two controllers do not each report every workload.
+  for (auto& sc : governed_consumers()) {
+    for (auto& desc : sc.get().producer_descriptions()) {
+      stats.workloads.emplace_back(sc.get().consumer_id(), std::move(desc));
     }
   }
 

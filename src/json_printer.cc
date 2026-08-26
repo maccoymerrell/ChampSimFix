@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+#include <iterator>
+#include <string>
+#include <vector>
 #include <nlohmann/json.hpp>
 
 #include "stats_printer.h"
@@ -22,7 +26,9 @@ namespace champsim
 {
 void to_json(nlohmann::json& j, const champsim::phase_stats& stats)
 {
-  j = nlohmann::json{{"name", stats.name}, {"traces", stats.trace_names}, {"roi", stats.stats}};
+  std::vector<std::string> traces;
+  std::transform(std::begin(stats.workloads), std::end(stats.workloads), std::back_inserter(traces), [](const auto& w) { return w.second; });
+  j = nlohmann::json{{"name", stats.name}, {"traces", traces}, {"roi", stats.stats}};
 }
 } // namespace champsim
 

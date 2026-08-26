@@ -198,6 +198,7 @@ public:
 
   void fill_from_producers();
   bool producers_eof() const final;
+  std::vector<std::string> producer_descriptions() const final;
 
   // NOLINTBEGIN(readability-make-member-function-const): legacy modules use non-const hooks
   void impl_initialize_branch_predictor() const;
