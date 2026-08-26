@@ -33,9 +33,8 @@ std::vector<std::string> champsim::plain_printer::format(champsim::phase_stats& 
   std::vector<std::string> lines{};
   lines.push_back(fmt::format("=== {} ===", stats.name));
 
-  int i = 0;
-  for (auto tn : stats.trace_names) {
-    lines.push_back(fmt::format("CPU {} runs {}", i++, tn));
+  for (const auto& [consumer, description] : stats.workloads) {
+    lines.push_back(fmt::format("CPU {} runs {}", consumer, description));
   }
 
   lines.emplace_back("");

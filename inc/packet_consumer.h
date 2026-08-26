@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 #include <fmt/core.h>
 
 namespace champsim::modules
@@ -72,6 +73,11 @@ private:
   std::string identity_name_{};
 
 public:
+  // The workloads feeding this consumer, as its producers describe themselves (e.g. trace paths).
+  // Reported against this consumer's id, so a consumer fed by two producers names both against
+  // itself rather than being counted twice.
+  virtual std::vector<std::string> producer_descriptions() const { return {}; }
+
   // Progress metric for phase completion, in packets (e.g. instructions
   // retired). Return 0 to indicate no progress tracking (complete only on EOF).
   virtual uint64_t sim_progress() const { return 0; }

@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 #include <nlohmann/json.hpp>
 
@@ -44,7 +45,9 @@ struct phase_info {
 // A phase is the measurement window, so there is exactly one set of numbers per entry.
 struct phase_stats {
   std::string name;
-  std::vector<std::string> trace_names;
+  // (consumer id, workload description) -- the id comes from the consumer being fed, not from
+  // counting producers, so a consumer with two producers names both against itself.
+  std::vector<std::pair<int, std::string>> workloads;
   std::vector<std::string> lines; // every reporting module's plaintext lines, in interface order
   nlohmann::json stats;           // [interface][model][instance name]
 };

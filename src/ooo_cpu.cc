@@ -982,6 +982,17 @@ void O3_CPU::fill_from_producers()
   }
 }
 
+std::vector<std::string> O3_CPU::producer_descriptions() const
+{
+  std::vector<std::string> out;
+  for (const auto* src : instruction_producer_pimpl) {
+    if (auto desc = src->describe(); !desc.empty()) {
+      out.push_back(std::move(desc));
+    }
+  }
+  return out;
+}
+
 bool O3_CPU::producers_eof() const
 {
   if (instruction_producer_pimpl.empty())
