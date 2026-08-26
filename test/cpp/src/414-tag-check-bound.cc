@@ -24,7 +24,7 @@ TEST_CASE("Tag checks do not break when translation misses back up")
 
   for (auto elem : elements) {
     elem->initialize();
-    if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false, !false); };
+    if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false); };
   }
 
   std::array<champsim::page_number, 12> addresses;
@@ -85,7 +85,7 @@ TEST_CASE("Backed up translation misses do not prevent translated packets from a
 
   for (auto elem : elements) {
     elem->initialize();
-    if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false, !false); };
+    if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) { mp->begin_phase(false); };
   }
 
   std::array<champsim::page_number, 12> addresses;

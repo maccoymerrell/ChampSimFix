@@ -32,13 +32,13 @@ class stat_report;
 struct module_lifecycle {
   virtual ~module_lifecycle() = default;
 
-  // Phase edges. roi (contributes to ROI stats) is usually the inverse of warmup but need not be.
-  virtual void begin_phase(bool /*warmup*/, bool /*roi*/) {}
+  // Phase edges.
+  virtual void begin_phase(bool /*warmup*/) {}
   virtual void end_phase() {}
 
-  // Report this phase's stats -- plaintext lines and JSON -- into one report. roi selects
-  // region-of-interest vs sim-wide. A module that reports nothing publishes no statistics.
-  virtual void report_stats(bool /*roi*/, stat_report& /*out*/) const {}
+  // Report this phase's stats -- plaintext lines and JSON -- into one report. A module that
+  // reports nothing publishes no statistics.
+  virtual void report_stats(stat_report& /*out*/) const {}
 
   // Stat identity (interface / model / instance name), stamped once at construction. It lets a phase
   // controller collect its governed modules' stats directly, without re-discovering them by interface.

@@ -14,13 +14,14 @@
 namespace
 {
 
-// Records the (warmup, roi) pair its phase hooks observe.
+// Records the warmup flag its phase hooks observe, and how many phases it was driven through.
 struct phase_probe_915 : public champsim::operable {
-  std::vector<std::pair<bool, bool>> begins;
+  std::vector<bool> begins;
+  int ends = 0;
   phase_probe_915() : champsim::operable(champsim::chrono::picoseconds{250}) {}
   long operate() override { return 1; }
-  void begin_phase(bool warmup, bool roi) override { begins.emplace_back(warmup, roi); }
-  void end_phase() override {}
+  void begin_phase(bool warmup) override { begins.push_back(warmup); }
+  void end_phase() override { ++ends; }
 };
 
 struct mock_core_915 : public champsim::modules::core_module {
@@ -33,7 +34,6 @@ struct mock_core_915 : public champsim::modules::core_module {
   uint64_t sim_cycle() const override { return 0; }
   long operate() override { ++instr_count; return 1; }
   cpu_stats get_sim_stats() const override { return {}; }
-  cpu_stats get_roi_stats() const override { return {}; }
   bool producers_eof() const override { return false; }
 };
 static champsim::modules::core_module::register_module<mock_core_915> core_reg_915("MOCK_CORE_915");
@@ -110,7 +110,7 @@ TEST_CASE("A phase controller's config can declare non-warmup phases outside the
   REQUIRE(pc->advance(0) == status::DONE);     // no phases left
 }
 
-TEST_CASE("The roi flag is forwarded to module phase begin hooks")
+TEST_CASE("A module is driven identically through measured and unmeasured phases")
 {
   using status = champsim::modules::phase_controller::status;
 
@@ -125,8 +125,9 @@ TEST_CASE("The roi flag is forwarded to module phase begin hooks")
   phase_probe_915 probe;
   mock_env->operables_ = {&probe};
 
-  // Two non-warmup phases, one unmeasured and one measured, owned by the controller.
+  // A warmup phase, an unmeasured non-warmup phase, and a measured one.
   auto phases_json = nlohmann::json::array({
+      nlohmann::json{{"name", "Warmup"}, {"is_warmup", true}, {"length", 5}},
       nlohmann::json{{"name", "FastForward"}, {"is_warmup", false}, {"roi", false}, {"length", 5}},
       nlohmann::json{{"name", "Measured"}, {"is_warmup", false}, {"roi", true}, {"length", 5}},
   });
@@ -135,17 +136,15 @@ TEST_CASE("The roi flag is forwarded to module phase begin hooks")
     .add_parameter("phases", phases_json);
   auto* pc = champsim::modules::phase_controller::create_instance(pc_builder, env);
 
-  pc->advance(0); // FastForward: begin_phase(false, false) on the probe
-  core->instr_count = 5;
-  REQUIRE(pc->advance(1) == status::COMPLETE);
+  for (uint64_t target : {uint64_t{5}, uint64_t{10}, uint64_t{15}}) {
+    pc->advance(0);
+    core->instr_count = target;
+    REQUIRE(pc->advance(1) == status::COMPLETE);
+  }
+  REQUIRE(pc->advance(0) == status::DONE); // no phases left
 
-  pc->advance(0); // Measured: begin_phase(false, true) on the probe
-  core->instr_count = 10;
-  REQUIRE(pc->advance(1) == status::COMPLETE); // the final phase ends
-  REQUIRE(pc->advance(0) == status::DONE);     // no phases left
-
-  REQUIRE(probe.begins.size() == 2);
-  // An unmeasured non-warmup phase: neither warmup nor roi
-  REQUIRE(probe.begins[0] == std::pair{false, false});
-  REQUIRE(probe.begins[1] == std::pair{false, true});
+  // Whether a phase is measured is the controller's business: the module hears every phase edge the
+  // same way and is told only whether it is warming up. Nothing about roi reaches it.
+  REQUIRE(probe.begins == std::vector<bool>{true, false, false});
+  REQUIRE(probe.ends == 3);
 }

@@ -478,7 +478,7 @@ void MEMORY_CONTROLLER::initialize()
 
 void DRAM_CHANNEL::initialize() {}
 
-void MEMORY_CONTROLLER::begin_phase(bool warmup, bool roi)
+void MEMORY_CONTROLLER::begin_phase(bool warmup)
 {
   std::size_t chan_idx = 0;
   for (auto& chan : channels) {
@@ -486,21 +486,11 @@ void MEMORY_CONTROLLER::begin_phase(bool warmup, bool roi)
     new_stats.name = "Channel " + std::to_string(chan_idx++);
     chan.sim_stats = new_stats;
     chan.warmup = warmup;
-    chan.roi = roi;
   }
 
   for (auto* ul : queues) {
-    channel_type::stats_type ul_new_roi_stats;
     channel_type::stats_type ul_new_sim_stats;
-    ul->get_roi_stats() = ul_new_roi_stats;
     ul->get_sim_stats() = ul_new_sim_stats;
-  }
-}
-
-void MEMORY_CONTROLLER::end_phase()
-{
-  for (auto& chan : channels) {
-    chan.roi_stats = chan.sim_stats;
   }
 }
 
@@ -791,20 +781,11 @@ champsim::modules::memory_controller_module::stats_type MEMORY_CONTROLLER::get_s
   }
 }
 
-champsim::modules::memory_controller_module::stats_type MEMORY_CONTROLLER::get_roi_stats(std::size_t channel_no) const
-{
-  if (channel_no < std::size(channels)) {
-    return channels[channel_no].roi_stats;
-  } else {
-    throw std::out_of_range("Channel number out of range");
-  }
-}
-
-void MEMORY_CONTROLLER::report_stats(bool roi, champsim::stat_report& out) const
+void MEMORY_CONTROLLER::report_stats(champsim::stat_report& out) const
 {
   std::size_t i = 0;
   for (const auto& chan : channels) {
-    format_stats(roi ? chan.roi_stats : chan.sim_stats, i++, out);
+    format_stats(chan.sim_stats, i++, out);
   }
 }
 

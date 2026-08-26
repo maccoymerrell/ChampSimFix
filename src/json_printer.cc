@@ -14,45 +14,15 @@
  * limitations under the License.
  */
 
-#include <any>
 #include <nlohmann/json.hpp>
 
 #include "stats_printer.h"
-
-namespace
-{
-// Each entry in `entries` is a pair (instance_name, std::any holding a
-// nlohmann::json wrapped under {model: {name: {...}}}).
-// We merge them so the final shape is {interface: {model: {name: {...}}}}.
-nlohmann::json compile_section(const std::map<std::string, std::vector<std::pair<std::string, std::any>>>& entries)
-{
-  nlohmann::json section = nlohmann::json::object();
-  for (const auto& [iface, modules] : entries) {
-    nlohmann::json iface_json = nlohmann::json::object();
-    for (const auto& [name, json_any] : modules) {
-      if (!json_any.has_value())
-        continue;
-      const auto& wrapped = std::any_cast<const nlohmann::json&>(json_any);
-      // wrapped looks like {model: {name: {...}}} — merge into iface_json.
-      for (auto it = wrapped.begin(); it != wrapped.end(); ++it) {
-        if (!iface_json.contains(it.key()))
-          iface_json[it.key()] = nlohmann::json::object();
-        for (auto inner = it.value().begin(); inner != it.value().end(); ++inner) {
-          iface_json[it.key()][inner.key()] = inner.value();
-        }
-      }
-    }
-    section[iface] = iface_json;
-  }
-  return section;
-}
-} // namespace
 
 namespace champsim
 {
 void to_json(nlohmann::json& j, const champsim::phase_stats& stats)
 {
-  j = nlohmann::json{{"name", stats.name}, {"traces", stats.trace_names}, {"roi", compile_section(stats.roi_json)}, {"sim", compile_section(stats.sim_json)}};
+  j = nlohmann::json{{"name", stats.name}, {"traces", stats.trace_names}, {"roi", stats.stats}};
 }
 } // namespace champsim
 

@@ -40,9 +40,8 @@ struct mock_core : public champsim::modules::core_module {
   uint64_t sim_cycle() const override { return cycle_count; }
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return {}; }
-  cpu_stats get_roi_stats() const override { return {}; }
   bool producers_eof() const override { return producers_eof_; }
-  void begin_phase(bool, bool) override {}
+  void begin_phase(bool) override {}
   void end_phase() override {}
 };
 

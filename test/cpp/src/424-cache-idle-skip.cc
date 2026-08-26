@@ -55,7 +55,7 @@ SCENARIO("An idle cache skips its simulation but still ticks its prefetchers eve
     REQUIRE(pref != nullptr);
 
     uut.initialize();
-    uut.begin_phase(false, true);
+    uut.begin_phase(false);
 
     WHEN("The cache runs 100 cycles through the orchestrator path with empty queues")
     {
@@ -100,7 +100,7 @@ SCENARIO("A cache serves a request with identical timing whether or not idle ski
     for (auto* elem : elements) {
       elem->initialize();
       if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) {
-        mp->begin_phase(false, true);
+        mp->begin_phase(false);
       }
     }
 

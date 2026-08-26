@@ -61,7 +61,7 @@ phase_controller::phase_controller(environment_module* env, std::vector<champsim
 void phase_controller::begin_phase_on_modules(const champsim::phase_info& phase) const
 {
   for (auto* mp : governed_) {
-    mp->begin_phase(phase.is_warmup, phase.roi);
+    mp->begin_phase(phase.is_warmup);
   }
 }
 

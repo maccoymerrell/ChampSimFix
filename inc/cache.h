@@ -223,7 +223,7 @@ public:
 
   using stats_type = cache_stats;
 
-  stats_type sim_stats, roi_stats;
+  stats_type sim_stats;
 
   // MSHR capacity is exactly MSHR_SIZE (admission-gated). inflight_fills has no
   // admission gate (writebacks and closed MSHR entries land unconditionally,
@@ -236,17 +236,15 @@ public:
   long operate() final;
   long poll_cycle() final;
   void initialize() final;
-  void begin_phase(bool warmup, bool roi) override;
-  void end_phase() override;
+  void begin_phase(bool warmup) override;
   void end_simulation() final;
 
   // module_lifecycle stats
-  void report_stats(bool roi, champsim::stat_report& out) const override;
+  void report_stats(champsim::stat_report& out) const override;
 
 private:
-  // Snapshot of the warmup/ROI flags for the current phase.
+  // Snapshot of the warmup flag for the current phase.
   bool warmup_ = true;
-  [[maybe_unused]] bool roi_ = false;
   // Hoisted invariants (set once at construction):
   // MAX_TAG * (HIT_LATENCY / clock_period) — the tag-check window limit
   long tag_check_window_limit_ = 0;
@@ -264,14 +262,12 @@ private:
 
 public:
   bool is_warmup() const { return warmup_; }
-  bool is_roi() const { return roi_; }
 
   [[deprecated]] std::size_t get_occupancy(uint8_t queue_type, champsim::address address) const;
   [[deprecated]] std::size_t get_size(uint8_t queue_type, champsim::address address) const;
 
   champsim::bandwidth::maximum_type get_max_tag_bandwidth() const { return MAX_TAG; }
   stats_type get_sim_stats() const final { return sim_stats; }
-  stats_type get_roi_stats() const final { return roi_stats; }
 
   bool is_virtual_prefetch() const final { return virtual_prefetch; }
 

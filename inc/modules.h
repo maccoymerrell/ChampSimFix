@@ -807,12 +807,10 @@ struct core_module : public module_base<core_module, environment_module>, public
   /** Return the number of cycles simulated so far. */
   virtual uint64_t sim_cycle() const = 0;
 
-  /** The stats type returned by get_sim_stats() and get_roi_stats(). */
+  /** The stats type returned by get_sim_stats(). */
   using stats_type = cpu_stats;
-  /** Return simulation-wide statistics for this core. */
+  /** Return this phase's statistics for this core. */
   virtual stats_type get_sim_stats() const = 0;
-  /** Return region-of-interest statistics for this core. */
-  virtual stats_type get_roi_stats() const = 0;
 
   static void format_stats(const stats_type& stats, champsim::stat_report& out);
 
@@ -854,12 +852,10 @@ struct cache_module : public module_base<cache_module, environment_module>, publ
   virtual void impl_prefetcher_branch_operate(champsim::address ip, uint8_t branch_type, champsim::address target) const = 0;
   /** \endcond */
 
-  /** The stats type returned by get_sim_stats() and get_roi_stats(). */
+  /** The stats type returned by get_sim_stats(). */
   using stats_type = cache_stats;
-  /** Return simulation-wide statistics for this cache. */
+  /** Return this phase's statistics for this cache. */
   virtual stats_type get_sim_stats() const = 0;
-  /** Return region-of-interest statistics for this cache. */
-  virtual stats_type get_roi_stats() const = 0;
 
   static void format_stats(const stats_type& stats, champsim::stat_report& out);
 
@@ -925,14 +921,12 @@ struct memory_controller_module : public module_base<memory_controller_module, e
   virtual ~memory_controller_module() = default;
   /** \endcond */
 
-  /** The stats type returned by get_sim_stats() and get_roi_stats(). */
+  /** The stats type returned by get_sim_stats(). */
   using stats_type = dram_stats;
   /** Return the number of DRAM channels. */
   virtual std::size_t get_num_channels() const = 0;
-  /** Return simulation-wide statistics for the given channel. */
+  /** Return this phase's statistics for the given channel. */
   virtual stats_type get_sim_stats(std::size_t channel_no) const = 0;
-  /** Return region-of-interest statistics for the given channel. */
-  virtual stats_type get_roi_stats(std::size_t channel_no) const = 0;
 
   // One channel's statistics: plaintext lines into the report, JSON under "channel <channel_no>".
   // The channel index is a parameter because a controller reports every channel into one report.
@@ -963,7 +957,7 @@ struct channel_module : public module_base<channel_module, environment_module> {
   using request_type = champsim::request;
   using response_type = champsim::response;
   /** \endcond */
-  /** The stats type returned by get_sim_stats() and get_roi_stats(). */
+  /** The stats type returned by get_sim_stats(). */
   using stats_type = champsim::cache_queue_stats;
 
   virtual bool add_rq(const request_type& packet) = 0;
@@ -998,7 +992,6 @@ struct channel_module : public module_base<channel_module, environment_module> {
 
   // Stats accessors
   virtual stats_type& get_sim_stats() = 0;
-  virtual stats_type& get_roi_stats() = 0;
 
   virtual ~channel_module() = default;
 };
