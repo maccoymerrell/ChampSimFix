@@ -246,9 +246,6 @@
       "name": "tile0_DRAM",
       "module": "memory_controller",
       "model": "RAMULATOR_MC",
-      "clock_period": {
-        "time": "417p"
-      },
       "config": "config/nmfc/ramulator/tile_ddr5.yaml",
       "size": 4294967296,
       "max_accept": {
@@ -263,9 +260,6 @@
       "name": "tile1_DRAM",
       "module": "memory_controller",
       "model": "RAMULATOR_MC",
-      "clock_period": {
-        "time": "417p"
-      },
       "config": "config/nmfc/ramulator/tile_ddr5.yaml",
       "size": 4294967296,
       "max_accept": {
@@ -280,9 +274,6 @@
       "name": "tile2_DRAM",
       "module": "memory_controller",
       "model": "RAMULATOR_MC",
-      "clock_period": {
-        "time": "417p"
-      },
       "config": "config/nmfc/ramulator/tile_ddr5.yaml",
       "size": 4294967296,
       "max_accept": {
@@ -297,9 +288,6 @@
       "name": "tile3_DRAM",
       "module": "memory_controller",
       "model": "RAMULATOR_MC",
-      "clock_period": {
-        "time": "417p"
-      },
       "config": "config/nmfc/ramulator/tile_ddr5.yaml",
       "size": 4294967296,
       "max_accept": {

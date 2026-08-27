@@ -118,7 +118,6 @@ def build(args, nmfc_enabled):
             children.append({
                 "_comment": f"memory tile {t}: DRAM modeled by ramulator2",
                 "name": f"tile{t}_DRAM", "module": "memory_controller", "model": "RAMULATOR_MC",
-                "clock_period": {"time": f"{args.dram_period}p"},
                 "config": args.ramulator_config,
                 "size": args.tile_bytes,
                 "max_accept": {"bandwidth": 4},
@@ -330,8 +329,6 @@ def main():
     parser.add_argument("--placement", default="round_robin")
     parser.add_argument("--dram", choices=["default", "ramulator"], default="default")
     parser.add_argument("--ramulator-config", default="config/nmfc/ramulator/tile_ddr5.yaml")
-    parser.add_argument("--dram-period", type=int, default=417,
-                        help="picoseconds; must match the ramulator config's tCK")
     parser.add_argument("--tile-bytes", type=int, default=4 << 30)
     parser.add_argument("--out-dir", default="config/nmfc")
     args = parser.parse_args()
