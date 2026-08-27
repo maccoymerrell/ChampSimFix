@@ -156,7 +156,7 @@ def build(args, nmfc_enabled):
     # separate models rather than a parameter.
     children.append({
         "_comment": "Who owns an address, and when that is known. See inc/nmfc/tile_router.h.",
-        "name": "ROUTER", "module": "tile_router", "model": args.router,
+        "name": "ROUTER", "module": "tile_router", "model": args.router, "clock_period": CLOCK,
     })
 
     children.append({
@@ -421,7 +421,7 @@ def main():
     parser.add_argument("--walk-routing", default="local", choices=["local", "fabric"],
                         help="page-table walks stay on the tile (partitioned table) or route over the fabric (shared table)")
     parser.add_argument("--router", default="CONGRUENT_ROUTER",
-                        choices=["CONGRUENT_ROUTER", "RELOCATION_ROUTER", "PHYSICAL_ROUTER"],
+                        choices=["CONGRUENT_ROUTER", "RELOCATION_ROUTER", "PHYSICAL_ROUTER", "ADAPTIVE_ROUTER"],
                         help="when the owning tile is decided, relative to translation")
     parser.add_argument("--dram", choices=["default", "ramulator"], default="default")
     parser.add_argument("--mmu", action="store_true", default=True,

@@ -46,6 +46,8 @@
 
 #include "address.h"
 #include "modules.h"
+#include "operable.h"
+#include "nmfc/nmfc_vmem.h"
 #include "origin.h"
 
 namespace nmfc
@@ -59,8 +61,14 @@ enum class routing_order {
   TRANSLATE_FIRST,
 };
 
-struct tile_router_module : public champsim::modules::module_base<tile_router_module, champsim::modules::environment_module> {
+struct tile_router_module : public champsim::modules::module_base<tile_router_module, champsim::modules::environment_module>, public champsim::operable {
+  explicit tile_router_module(champsim::chrono::picoseconds clock_period_) : champsim::operable(clock_period_) {}
   virtual ~tile_router_module() = default;
+
+  // A static router has nothing to do on a cycle; it is operable so that it can
+  // report statistics and, where the policy is adaptive, run an epoch.
+  long operate() override { return 0; }
+  long poll_cycle() override { return 1; }
 
   /** Which of the two machines this is. Callers branch on it; it is not hidden. */
   [[nodiscard]] virtual routing_order order() const = 0;
@@ -101,6 +109,16 @@ struct tile_router_module : public champsim::modules::module_base<tile_router_mo
 
   /** A context on `from` had to move to `to` in order to reach `vaddr`. */
   virtual void note_migration(champsim::origin /*origin*/, champsim::address /*vaddr*/, std::size_t /*from*/, std::size_t /*to*/) {}
+
+  /**
+   * The allocator introduces itself.
+   *
+   * References resolve in configuration order and the allocator is declared
+   * after the router, so it registers rather than the router holding a forward
+   * reference it could not resolve -- the same arrangement the fabric uses.
+   * A router that never moves anything ignores this.
+   */
+  virtual void attach_placement(page_placement_sink* /*placement*/) {}
 };
 
 } // namespace nmfc

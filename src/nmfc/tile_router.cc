@@ -28,7 +28,10 @@ namespace
 class congruent_router : public nmfc::tile_router_module
 {
 public:
-  explicit congruent_router(champsim::modules::ModuleBuilder builder) : map_(nmfc::tile_map_from(builder)) {}
+  explicit congruent_router(champsim::modules::ModuleBuilder builder)
+      : nmfc::tile_router_module(builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), map_(nmfc::tile_map_from(builder))
+  {
+  }
 
   [[nodiscard]] nmfc::routing_order order() const override { return nmfc::routing_order::VIRTUAL_FIRST; }
 

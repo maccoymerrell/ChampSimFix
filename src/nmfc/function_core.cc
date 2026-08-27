@@ -70,6 +70,7 @@ public:
       : nmfc::function_core_module(builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), tile_(builder.get_parameter<std::size_t>("tile")),
         map_(nmfc::tile_map_from(builder)), fabric_(builder.get_parameter<nmfc::function_fabric_module*>("fabric")),
         image_(builder.get_parameter<nmfc::function_image_module*>("image")), router_(builder.get_parameter<nmfc::tile_router_module*>("router")),
+        placement_(dynamic_cast<nmfc::page_placement_sink*>(builder.get_parameter<champsim::modules::vmem_module*>("vmem", true, nullptr))),
         dcache_(builder.get_parameter<channel_type*>("dcache")),
         icache_(builder.get_parameter<channel_type*>("icache")),
         issue_width_(builder.get_parameter<champsim::bandwidth::maximum_type>("issue_width", true, champsim::bandwidth::maximum_type{4})),
@@ -532,6 +533,44 @@ private:
     return true;
   }
 
+  /**
+   * Discard a context's own translations if a page has moved under them.
+   *
+   * A context caches only a handful of entries, but they are the ones it is
+   * about to use, so a remap that left them standing would send it to a frame
+   * that is no longer its own. Coarse on purpose: this is a shootdown.
+   */
+  void honour_remaps(nmfc::context& ctx)
+  {
+    if (placement_ == nullptr) {
+      return;
+    }
+    const auto& log = placement_->remap_log();
+    if (ctx.xlat_generation >= log.size()) {
+      return;
+    }
+    // Only the entries for grains that actually moved. A context holds a few
+    // entries and they are the ones it is about to use, so this is cheap and
+    // exact where discarding all of them would price a page migration as a
+    // machine-wide flush.
+    for (auto i = ctx.xlat_generation; i < log.size(); ++i) {
+      const auto [asid, vgrain] = log[i];
+      if (asid != ctx.origin.asid()) {
+        continue;
+      }
+      const auto in_grain = [&](const nmfc::ctx_translation& e) { return e.valid && (e.vpage >> (map_.grain_bits() - e.shift)) == vgrain; };
+      if (in_grain(ctx.xlat.code)) {
+        ctx.xlat.code = {};
+      }
+      for (auto& entry : ctx.xlat.data) {
+        if (in_grain(entry)) {
+          entry = {};
+        }
+      }
+    }
+    ctx.xlat_generation = log.size();
+  }
+
   /** The context's own entries, which is where translation locality actually lives. */
   const nmfc::ctx_translation* context_lookup(const nmfc::context& ctx, std::uint64_t vaddr, bool code) const
   {
@@ -571,6 +610,7 @@ private:
    */
   bool resolve(std::size_t slot, std::uint64_t vaddr, bool code, std::uint64_t& physical)
   {
+    honour_remaps(contexts_[slot]);
     auto& ctx = contexts_[slot];
 
     if (const auto* entry = context_lookup(ctx, vaddr, code); entry != nullptr) {
@@ -662,6 +702,7 @@ private:
     if (!translate_first) {
       for (std::size_t i = 0; i < ops; ++i) {
         if (const auto target = router_->owner_of(ctx.origin, instr.mem[i]); target != tile_) {
+          ctx.last_route_address = instr.mem[i];
           return begin_migration(slot, target);
         }
       }
@@ -684,6 +725,7 @@ private:
       // is the real cost of this model and what the cold-start statistic counts.
       for (std::size_t i = 0; i < ops; ++i) {
         if (const auto target = map_.tile_of(champsim::address{physical[i]}); target != tile_) {
+          ctx.last_route_address = instr.mem[i];
           return begin_migration(slot, target);
         }
       }
@@ -817,6 +859,10 @@ private:
       ctx.state = nmfc::ctx_state::BLOCKED;
       return false;
     }
+    // A migration is evidence, not only a cost: it says a context on this tile
+    // needed an address that lives on another. A policy that can move pages
+    // gets to act on that; one that cannot ignores it.
+    router_->note_migration(ctx.origin, ctx.last_route_address, tile_, target);
     release_context_lock(ctx);
     ctx.prepare_for_migration();
     migrating_.push_back(std::pair{slot, target});
@@ -888,6 +934,7 @@ private:
   nmfc::function_fabric_module* fabric_;
   nmfc::function_image_module* image_;
   nmfc::tile_router_module* router_;
+  nmfc::page_placement_sink* placement_;
   channel_type* dcache_;
   channel_type* icache_;
   champsim::bandwidth::maximum_type issue_width_;

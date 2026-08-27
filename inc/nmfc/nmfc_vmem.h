@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "address.h"
 #include "chrono.h"
@@ -45,6 +46,35 @@ struct placement_hint {
  */
 struct page_placement_sink {
   virtual ~page_placement_sink() = default;
+
+  /**
+   * Move an already-backed grain to another tile.
+   *
+   * Only meaningful where routing follows the physical address; under
+   * congruence the tile is named by the virtual address, so "moving" a grain
+   * would mean changing an address the program can see. Returns false when the
+   * grain is not established, is replicated, or the target has no room.
+   *
+   * Everything holding a translation for this grain is now wrong, which is
+   * what mapping_generation() is for: it is a shootdown, modelled coarsely as
+   * one, rather than a remap that silently leaves stale entries behind.
+   */
+  virtual bool remap_grain(std::uint32_t asid, std::uint64_t vgrain, std::size_t tile) = 0;
+
+  /**
+   * Bumped whenever a mapping changes under a cached translation.
+   *
+   * Anything that caches a virtual-to-physical answer compares this against
+   * what it saw last, and if they differ reads the log below to find out which
+   * grains actually moved. Invalidating everything on any remap would be a
+   * model of a shootdown so coarse that it dominates the very policy it is
+   * meant to price -- measured, it doubled the runtime for a 2% change in
+   * migrations.
+   */
+  [[nodiscard]] virtual std::uint64_t mapping_generation() const = 0;
+
+  /** The grains that moved, in order. Consumers keep an index into this. */
+  [[nodiscard]] virtual const std::vector<std::pair<std::uint32_t, std::uint64_t>>& remap_log() const = 0;
 
   /** Ask that (asid, vpage) be backed from `hint`'s region and tile. */
   virtual void hint_placement(std::uint32_t asid, std::uint64_t vpage, placement_hint hint) = 0;

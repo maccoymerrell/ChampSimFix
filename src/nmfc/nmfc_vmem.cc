@@ -73,6 +73,7 @@ public:
         log2_page_size_(builder.get_parameter<unsigned>("log2_page_size", true, 12U)),
         default_nmfc_(builder.get_parameter<std::string>("default_region", true, std::string{"standard"}) == "nmfc")
     {
+    router_->attach_placement(this);
     if (map_.grain_bits() < log2_page_size_) {
       fmt::print("[NMFC_VMEM] ERROR: grain ({} bits) is smaller than a page ({} bits)\n", map_.grain_bits(), log2_page_size_);
       std::exit(-1);
@@ -178,6 +179,32 @@ public:
     }
     ++hints_received_;
   }
+
+  bool remap_grain(std::uint32_t asid, std::uint64_t vgrain, std::size_t tile) override
+  {
+    const auto key = std::pair{asid, vgrain};
+    if (replicated_grains_.count(key) != 0) {
+      return false; // every tile already has a copy; there is nothing to move
+    }
+    auto it = nmfc_grains_.find(key);
+    if (it == std::end(nmfc_grains_) || map_.tile_of((it->second << map_.grain_bits()) | (std::uint64_t{1} << map_.mode_bit())) == tile) {
+      return false;
+    }
+    if (free_grains_[tile].empty()) {
+      return false; // no room there; the policy asked for something impossible
+    }
+    const auto old_frame = it->second;
+    it->second = take_grain(tile);
+    free_grains_[old_frame % map_.num_tiles()].push_back(old_frame);
+    ++remaps_;
+    ++generation_;
+    remap_log_.emplace_back(asid, vgrain);
+    return true;
+  }
+
+  [[nodiscard]] std::uint64_t mapping_generation() const override { return generation_; }
+
+  [[nodiscard]] const std::vector<std::pair<std::uint32_t, std::uint64_t>>& remap_log() const override { return remap_log_; }
 
   [[nodiscard]] std::optional<std::uint64_t> grain_mapping(std::uint32_t asid, std::uint64_t vaddr) const override
   {
@@ -297,7 +324,7 @@ public:
 
     out.line(fmt::format("NMFC_VMEM ALLOCATIONS nmfc: {} standard: {} pt_pages: {} HINTS APPLIED (cumulative): {}", nmfc_allocs_, standard_allocs_,
                          pt_pages_, hints_received_));
-    out.line(fmt::format("NMFC_VMEM SPILLS: {} FREE GRAIN IMBALANCE: {:.0f}", spills_, imbalance));
+    out.line(fmt::format("NMFC_VMEM SPILLS: {} FREE GRAIN IMBALANCE: {:.0f} REMAPS: {}", spills_, imbalance, remaps_));
 
     auto json = out.json();
     json.add("nmfc_allocations", nmfc_allocs_);
@@ -532,6 +559,9 @@ private:
    * that has been picked over cannot promise one.
    */
   std::uint64_t total_sets_ = 0;
+  std::uint64_t remaps_ = 0;
+  std::uint64_t generation_ = 0;
+  std::vector<std::pair<std::uint32_t, std::uint64_t>> remap_log_;
   std::set<std::pair<std::uint32_t, std::uint64_t>> replicated_grains_;
   std::uint64_t replica_allocs_ = 0;
   /** Set only for the duration of a replicated page's walk. */

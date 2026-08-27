@@ -56,6 +56,7 @@ struct rig {
     // The allocator asks the router where a grain belongs, so the rig has to
     // supply one. Congruent is the routing rule these tests are about.
     auto router_builder = builder_t{"router" + tag, "CONGRUENT_ROUTER"}
+                              .add_parameter("clock_period", champsim::chrono::picoseconds{1000})
                               .add_parameter("nmfc_num_tiles", std::size_t{TILES})
                               .add_parameter("log2_block_size", BLOCK_BITS)
                               .add_parameter("nmfc_grain_bits", GRAIN_BITS)

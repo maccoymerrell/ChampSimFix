@@ -148,6 +148,10 @@ struct context {
   std::uint8_t live_regs = 0;
 
   ctx_xlat_cache xlat{};
+  /** The allocator generation these entries were built under. */
+  std::uint64_t xlat_generation = 0;
+  /** The address that forced the pending migration -- the evidence a policy acts on. */
+  champsim::address last_route_address{};
 
   ctx_state state = ctx_state::FREE;
   champsim::chrono::clock::time_point wake_time{};

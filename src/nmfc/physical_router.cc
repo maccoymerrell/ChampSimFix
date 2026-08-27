@@ -42,7 +42,7 @@ class physical_router : public nmfc::tile_router_module
 {
 public:
   explicit physical_router(champsim::modules::ModuleBuilder builder)
-      : map_(nmfc::tile_map_from(builder)), policy_(builder.get_parameter<std::string>("placement", true, std::string{"round_robin"}))
+      : nmfc::tile_router_module(builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), map_(nmfc::tile_map_from(builder)), policy_(builder.get_parameter<std::string>("placement", true, std::string{"round_robin"}))
   {
   }
 

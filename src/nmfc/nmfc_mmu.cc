@@ -120,8 +120,31 @@ public:
 
   // ---- the cycle ----
 
+  /**
+   * A remap invalidates every cached answer for the moved grain. Rather than
+   * track which, this discards the arrays whenever the allocator's generation
+   * moves -- a shootdown, which is what a page migration actually costs, and
+   * honest about it in a way that quietly keeping stale entries would not be.
+   */
+  void honour_remaps()
+  {
+    if (placement_ == nullptr) {
+      return;
+    }
+    const auto& log = placement_->remap_log();
+    while (seen_remaps_ < log.size()) {
+      const auto [asid, vgrain] = log[seen_remaps_++];
+      // Only the entries describing the grain that moved. A page migration
+      // shoots down the mappings for that page, not the whole array.
+      small_.invalidate_grain(asid, vgrain, map_.grain_bits() - page_bits_);
+      huge_.invalidate(asid, vgrain);
+      ++shootdowns_;
+    }
+  }
+
   long operate() final
   {
+    honour_remaps();
     long progress = 0;
     progress += collect_walk_returns();
     progress += advance_walks();
@@ -180,6 +203,29 @@ private:
     };
 
     tlb_array(std::size_t sets, std::size_t ways) : sets_(std::max<std::size_t>(sets, 1)), ways_(std::max<std::size_t>(ways, 1)), entries_(sets_ * ways_) {}
+
+    /** Discard everything, for a shootdown after a page has moved. */
+    void clear() { entries_.assign(sets_ * ways_, {}); }
+
+    /** Drop the entry for one page number, if present. */
+    void invalidate(std::uint32_t asid, std::uint64_t vpn)
+    {
+      for (auto& e : entries_) {
+        if (e.valid && e.asid == asid && e.vpn == vpn) {
+          e.valid = false;
+        }
+      }
+    }
+
+    /** Drop every small-page entry inside a grain that has moved. */
+    void invalidate_grain(std::uint32_t asid, std::uint64_t vgrain, unsigned pages_shift)
+    {
+      for (auto& e : entries_) {
+        if (e.valid && e.asid == asid && (e.vpn >> pages_shift) == vgrain) {
+          e.valid = false;
+        }
+      }
+    }
 
     [[nodiscard]] const entry* probe(std::uint32_t asid, std::uint64_t vpn)
     {
@@ -458,6 +504,8 @@ private:
   unsigned page_bits_;
   std::size_t walk_levels_ = 5;
 
+  std::size_t seen_remaps_ = 0;
+  std::uint64_t shootdowns_ = 0;
   tlb_array small_;
   tlb_array huge_;
 

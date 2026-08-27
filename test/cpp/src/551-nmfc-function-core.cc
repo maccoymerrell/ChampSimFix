@@ -97,7 +97,7 @@ struct rig {
     image = nmfc::function_image_module::create_instance(image_builder, static_cast<champsim::modules::environment_module*>(nullptr));
 
     // Both the fabric and the core ask the router which tile owns an address.
-    auto router_builder = geometry(builder_t{"router" + tag, "CONGRUENT_ROUTER"});
+    auto router_builder = geometry(builder_t{"router" + tag, "CONGRUENT_ROUTER"}).add_parameter("clock_period", champsim::chrono::picoseconds{1000});
     router = nmfc::tile_router_module::create_instance(router_builder, static_cast<champsim::modules::environment_module*>(nullptr));
 
     auto fabric_builder =
