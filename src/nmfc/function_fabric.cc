@@ -33,6 +33,7 @@
 
 #include "bandwidth.h"
 #include "modules.h"
+#include "nmfc/tile_router.h"
 #include "nmfc/function_core.h"
 #include "nmfc/function_fabric.h"
 #include "nmfc/nmfc_config.h"
@@ -65,7 +66,8 @@ public:
         hop_latency_(nmfc::cycles_from(builder, "hop_latency", 8)), queue_size_(builder.get_parameter<std::size_t>("queue_size", true, std::size_t{64})),
         max_deliver_(builder.get_parameter<champsim::bandwidth::maximum_type>("max_deliver", true, champsim::bandwidth::maximum_type{4})),
         policy_(parse_policy(builder.get_parameter<std::string>("placement_policy", true, std::string{"round_robin"}))),
-        rng_(builder.get_parameter<std::uint64_t>("random_seed", true, std::uint64_t{0x9E3779B97F4A7C15ULL})), tiles_(map_.num_tiles(), nullptr),
+        rng_(builder.get_parameter<std::uint64_t>("random_seed", true, std::uint64_t{0x9E3779B97F4A7C15ULL})),
+        router_(builder.get_parameter<nmfc::tile_router_module*>("router")), tiles_(map_.num_tiles(), nullptr),
         per_tile_invocations_(map_.num_tiles(), 0), migrations_(map_.num_tiles())
   {
     // Split the configured buffering across the destinations rather than adding
@@ -263,7 +265,7 @@ private:
       if (msg.body != nullptr) {
         for (const auto& instr : msg.body->instrs) {
           if (instr.num_mem_ops() > 0) {
-            return map_.tile_of_virtual(instr.mem[0]);
+            return router_->owner_of(msg.origin, instr.mem[0]);
           }
         }
       }
@@ -433,6 +435,7 @@ private:
   champsim::chrono::clock::duration hop_latency_;
   std::size_t queue_size_;
   champsim::bandwidth::maximum_type max_deliver_;
+  nmfc::tile_router_module* router_;
   nmfc::placement_policy policy_;
   std::size_t reserved_contexts_ = 1;
   std::set<std::uint64_t> want_migrate_; // offered but not yet delivered

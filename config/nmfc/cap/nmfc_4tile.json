@@ -631,6 +631,12 @@
       ]
     },
     {
+      "_comment": "Who owns an address, and when that is known. See inc/nmfc/tile_router.h.",
+      "name": "ROUTER",
+      "module": "tile_router",
+      "model": "CONGRUENT_ROUTER"
+    },
+    {
       "_comment": "Congruent allocation: a virtual grain gets a frame from the tile its own address names, which is what lets a function core decide local-vs-migrate before translating.",
       "name": "VMEM",
       "module": "vmem",
@@ -643,6 +649,7 @@
         "time": "50000p"
       },
       "default_region": "standard",
+      "router": "@ROUTER",
       "dram": "@tile0_DRAM"
     },
     {
@@ -699,6 +706,7 @@
       "name": "fn_fabric",
       "module": "function_fabric",
       "model": "FUNCTION_FABRIC",
+      "router": "@ROUTER",
       "clock_period": {
         "time": "250p"
       },
@@ -948,6 +956,7 @@
       "fabric": "@fn_fabric",
       "image": "@fn_image",
       "vmem": "@VMEM",
+      "router": "@ROUTER",
       "dcache": "@tile0_fc_dcache_channel",
       "icache": "@tile0_fc_icache_channel",
       "fetch_bubble": 1,
@@ -1195,6 +1204,7 @@
       "fabric": "@fn_fabric",
       "image": "@fn_image",
       "vmem": "@VMEM",
+      "router": "@ROUTER",
       "dcache": "@tile1_fc_dcache_channel",
       "icache": "@tile1_fc_icache_channel",
       "fetch_bubble": 1,
@@ -1442,6 +1452,7 @@
       "fabric": "@fn_fabric",
       "image": "@fn_image",
       "vmem": "@VMEM",
+      "router": "@ROUTER",
       "dcache": "@tile2_fc_dcache_channel",
       "icache": "@tile2_fc_icache_channel",
       "fetch_bubble": 1,
@@ -1689,6 +1700,7 @@
       "fabric": "@fn_fabric",
       "image": "@fn_image",
       "vmem": "@VMEM",
+      "router": "@ROUTER",
       "dcache": "@tile3_fc_dcache_channel",
       "icache": "@tile3_fc_icache_channel",
       "fetch_bubble": 1,

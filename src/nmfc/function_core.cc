@@ -47,6 +47,7 @@
 #include "bandwidth.h"
 #include "channel.h"
 #include "modules.h"
+#include "nmfc/tile_router.h"
 #include "nmfc/function_core.h"
 #include "nmfc/function_fabric.h"
 #include "nmfc/function_image.h"
@@ -68,7 +69,8 @@ public:
   explicit function_core(champsim::modules::ModuleBuilder builder)
       : nmfc::function_core_module(builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), tile_(builder.get_parameter<std::size_t>("tile")),
         map_(nmfc::tile_map_from(builder)), fabric_(builder.get_parameter<nmfc::function_fabric_module*>("fabric")),
-        image_(builder.get_parameter<nmfc::function_image_module*>("image")), dcache_(builder.get_parameter<channel_type*>("dcache")),
+        image_(builder.get_parameter<nmfc::function_image_module*>("image")), router_(builder.get_parameter<nmfc::tile_router_module*>("router")),
+        dcache_(builder.get_parameter<channel_type*>("dcache")),
         icache_(builder.get_parameter<channel_type*>("icache")),
         issue_width_(builder.get_parameter<champsim::bandwidth::maximum_type>("issue_width", true, champsim::bandwidth::maximum_type{4})),
         fetch_latency_(nmfc::cycles_from(builder, "fetch_latency", 4)), fetch_bubble_(nmfc::cycles_from(builder, "fetch_bubble", 1)),
@@ -126,7 +128,7 @@ public:
     ctx.home_host = msg.home_host;
     ctx.body = msg.body;
     ctx.live_regs = msg.body->live_regs;
-    ctx.code_bias = bias_for(*msg.body, tile_);
+    ctx.code_bias = bias_for(msg.origin, *msg.body, tile_);
     ctx.ready.fill(true); // arguments are live on entry
     ctx.arrived = current_time;
     make_ready(slot, current_time);
@@ -142,7 +144,7 @@ public:
     const auto slot = take_slot();
     auto& ctx = contexts_[slot];
     ctx = incoming;
-    ctx.code_bias = bias_for(*incoming.body, tile_);
+    ctx.code_bias = bias_for(incoming.origin, *incoming.body, tile_);
     ctx.arrived = current_time;
     // Arriving cold: no fetched block, no translations. The cycles spent
     // re-establishing them are what the cold-start statistic counts.
@@ -300,9 +302,11 @@ private:
    * The copies sit on consecutive grains, so the offset is however many grains
    * separate the body's own tile from the one we want to run on.
    */
-  [[nodiscard]] std::uint64_t bias_for(const nmfc::function_body& body, std::size_t tile) const
+  [[nodiscard]] std::uint64_t bias_for(champsim::origin origin, const nmfc::function_body& body, std::size_t tile) const
   {
-    const auto base_tile = map_.tile_of_virtual(body.entry_pc_base);
+    // Which copy the body's own entry PC names. Under a router that can move
+    // code, this is a question about the current mapping, not a constant.
+    const auto base_tile = router_->owner_of(origin, body.entry_pc_base);
     const auto n = map_.num_tiles();
     return static_cast<std::uint64_t>((tile + n - base_tile) % n) * map_.grain();
   }
@@ -490,7 +494,7 @@ private:
 
     // A function larger than one grain spills onto the next tile's copy, so the
     // instruction stream itself can force a migration.
-    if (const auto ip_tile = map_.tile_of_virtual(eff_ip); ip_tile != tile_) {
+    if (const auto ip_tile = router_->owner_of(ctx.origin, champsim::address{eff_ip}); ip_tile != tile_) {
       return begin_migration(slot, ip_tile);
     }
 
@@ -670,7 +674,7 @@ private:
     // Every address this instruction touches must be local, or the context
     // belongs on another tile before it runs at all.
     for (std::size_t i = 0; i < ops; ++i) {
-      if (const auto target = map_.tile_of_virtual(instr.mem[i]); target != tile_) {
+      if (const auto target = router_->owner_of(ctx.origin, instr.mem[i]); target != tile_) {
         return begin_migration(slot, target);
       }
     }
@@ -816,7 +820,7 @@ private:
     }
     release_context_lock(ctx);
     ctx.prepare_for_migration();
-    ctx.code_bias = bias_for(*ctx.body, target);
+    ctx.code_bias = bias_for(ctx.origin, *ctx.body, target);
     migrating_.push_back(std::pair{slot, target});
     return true;
   }
@@ -885,6 +889,7 @@ private:
   nmfc::tile_map map_;
   nmfc::function_fabric_module* fabric_;
   nmfc::function_image_module* image_;
+  nmfc::tile_router_module* router_;
   channel_type* dcache_;
   channel_type* icache_;
   champsim::bandwidth::maximum_type issue_width_;

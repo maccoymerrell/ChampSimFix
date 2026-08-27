@@ -48,6 +48,7 @@
 
 #include "champsim.h"
 #include "modules.h"
+#include "nmfc/tile_router.h"
 #include "nmfc/nmfc_config.h"
 #include "nmfc/nmfc_vmem.h"
 #include "stat_report.h"
@@ -62,7 +63,8 @@ class nmfc_vmem : public champsim::modules::vmem_module, public nmfc::page_place
 {
 public:
   explicit nmfc_vmem(champsim::modules::ModuleBuilder builder)
-      : map_(nmfc::tile_map_from(builder)), dram_(builder.get_parameter<champsim::modules::memory_controller_module*>("dram")),
+      : map_(nmfc::tile_map_from(builder)), router_(builder.get_parameter<nmfc::tile_router_module*>("router")),
+        dram_(builder.get_parameter<champsim::modules::memory_controller_module*>("dram")),
         minor_fault_penalty_(builder.get_parameter<champsim::chrono::clock::duration>("minor_fault_penalty")),
         pt_levels_(builder.get_parameter<std::size_t>("page_table_levels")),
         pte_page_size_(builder.get_parameter<champsim::data::bytes>("page_table_page_size")),
@@ -125,11 +127,15 @@ public:
     // local. This is a partition, not a replication: the total page-table size
     // is unchanged.
     const auto raw = champsim::address{vaddr}.to<std::uint64_t>();
-    const auto tile = map_.tile_of_virtual(raw);
-    const champsim::address compacted{map_.compact_virtual(raw)};
+    const auto roots = router_->page_table_roots();
+    // With one root per channel the tile is known before the walk starts, so
+    // the table is partitioned and every walk is local. With a single root it
+    // cannot be: picking the root would require the answer the walk produces.
+    const auto tile = roots > 1 ? router_->owner_of(origin, champsim::address{raw}) : std::size_t{0};
+    const champsim::address compacted{roots > 1 ? map_.compact_virtual(raw) : raw};
 
     const champsim::dynamic_extent entry_extent{champsim::address::bits, shamt(level + 1)};
-    const auto key = std::tuple{origin.asid(), static_cast<std::uint32_t>(level * map_.num_tiles() + tile), champsim::address_slice{entry_extent, compacted}};
+    const auto key = std::tuple{origin.asid(), static_cast<std::uint32_t>(level * roots + tile), champsim::address_slice{entry_extent, compacted}};
 
     auto it = page_table_.find(key);
     bool fault = false;
@@ -274,7 +280,15 @@ private:
     auto it = nmfc_grains_.find(key);
     bool fault = false;
     if (it == std::end(nmfc_grains_)) {
-      it = nmfc_grains_.emplace(key, take_grain(hint.tile % map_.num_tiles())).first;
+      // Placement is the router's call, not the hint's. Under a congruent
+      // router the answer is forced by the virtual address and a hint that
+      // disagreed would put the data on one tile and send the invocation to
+      // another; under a physical router the hint is only a starting
+      // suggestion, and the router owns the balance decision.
+      const champsim::address va{vpage << log2_page_size_};
+      const auto tile = router_->placement_for(champsim::origin{asid, 0}, va);
+      (void)hint;
+      it = nmfc_grains_.emplace(key, take_grain(tile)).first;
       fault = true;
       ++nmfc_allocs_;
     }
@@ -347,6 +361,7 @@ private:
   }
 
   nmfc::tile_map map_;
+  nmfc::tile_router_module* router_;
   champsim::modules::memory_controller_module* dram_;
   champsim::chrono::clock::duration minor_fault_penalty_;
   std::size_t pt_levels_;

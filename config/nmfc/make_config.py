@@ -141,6 +141,16 @@ def build(args, nmfc_enabled):
         })
 
     # ---- the page allocator --------------------------------------------
+    # Declared before the vmem, the fabric and the function cores, all of which
+    # ask it the same question: which tile owns this address? It is the one
+    # place that decides, and the three models differ in *when* the answer is
+    # available -- before translation or only after it -- which is why they are
+    # separate models rather than a parameter.
+    children.append({
+        "_comment": "Who owns an address, and when that is known. See inc/nmfc/tile_router.h.",
+        "name": "ROUTER", "module": "tile_router", "model": args.router,
+    })
+
     children.append({
         "_comment": "Congruent allocation: a virtual grain gets a frame from the tile "
                     "its own address names, which is what lets a function core decide "
@@ -149,6 +159,7 @@ def build(args, nmfc_enabled):
         "page_table_page_size": {"bytes": "4Ki"}, "page_table_levels": 5,
         "minor_fault_penalty": {"time": "50000p"},
         "default_region": "standard",
+        "router": "@ROUTER",
         "dram": "@tile0_DRAM",
     })
 
@@ -173,6 +184,7 @@ def build(args, nmfc_enabled):
             "_comment": "Owns hop latency and the placement policy. Choosing a tile is "
                         "one add, because a function's copies sit on consecutive grains.",
             "name": "fn_fabric", "module": "function_fabric", "model": "FUNCTION_FABRIC",
+            "router": "@ROUTER",
             "clock_period": CLOCK,
             "hop_latency": 8, "queue_size": 128, "max_deliver": {"bandwidth": 4},
             "placement_policy": args.placement,
@@ -244,7 +256,7 @@ def build(args, nmfc_enabled):
             "clock_period": CLOCK, "tile": t,
             "num_contexts": args.contexts,
             "issue_width": {"bandwidth": 4},
-            "fabric": "@fn_fabric", "image": "@fn_image", "vmem": "@VMEM",
+            "fabric": "@fn_fabric", "image": "@fn_image", "vmem": "@VMEM", "router": "@ROUTER",
             "dcache": f"@tile{t}_fc_dcache_channel",
             "icache": f"@tile{t}_fc_icache_channel",
             "fetch_bubble": 1,
@@ -377,6 +389,9 @@ def main():
     parser.add_argument("--mode-bit", type=int, default=38)
     parser.add_argument("--llc-sets", type=int, default=2048)
     parser.add_argument("--placement", default="round_robin")
+    parser.add_argument("--router", default="CONGRUENT_ROUTER",
+                        choices=["CONGRUENT_ROUTER", "RELOCATION_ROUTER", "PHYSICAL_ROUTER"],
+                        help="when the owning tile is decided, relative to translation")
     parser.add_argument("--dram", choices=["default", "ramulator"], default="default")
     parser.add_argument("--mmu", action="store_true", default=True,
                         help="model function-core translation (default)")

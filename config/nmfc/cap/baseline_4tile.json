@@ -379,6 +379,12 @@
       ]
     },
     {
+      "_comment": "Who owns an address, and when that is known. See inc/nmfc/tile_router.h.",
+      "name": "ROUTER",
+      "module": "tile_router",
+      "model": "CONGRUENT_ROUTER"
+    },
+    {
       "_comment": "Congruent allocation: a virtual grain gets a frame from the tile its own address names, which is what lets a function core decide local-vs-migrate before translating.",
       "name": "VMEM",
       "module": "vmem",
@@ -391,6 +397,7 @@
         "time": "50000p"
       },
       "default_region": "standard",
+      "router": "@ROUTER",
       "dram": "@tile0_DRAM"
     },
     {
