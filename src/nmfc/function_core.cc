@@ -53,6 +53,7 @@
 #include "nmfc/nmfc_config.h"
 #include "nmfc/nmfc_hooks.h"
 #include "nmfc/nmfc_types.h"
+#include "nmfc/nmfc_vmem.h"
 #include "stat_report.h"
 
 namespace
@@ -70,7 +71,8 @@ public:
         icache_(builder.get_parameter<channel_type*>("icache")),
         issue_width_(builder.get_parameter<champsim::bandwidth::maximum_type>("issue_width", true, champsim::bandwidth::maximum_type{4})),
         fetch_latency_(nmfc::cycles_from(builder, "fetch_latency", 4)), fetch_bubble_(nmfc::cycles_from(builder, "fetch_bubble", 1)),
-        block_bits_(builder.get_parameter<unsigned>("log2_block_size", true, 6U))
+        block_bits_(builder.get_parameter<unsigned>("log2_block_size", true, 6U)),
+        page_bits_(builder.get_parameter<unsigned>("log2_page_size", true, 12U)), vmem_(builder.get_parameter<champsim::modules::vmem_module*>("vmem", true, nullptr))
   {
     const auto num_contexts = builder.get_parameter<std::size_t>("num_contexts", true, std::size_t{128});
     contexts_.resize(num_contexts);
@@ -455,6 +457,28 @@ private:
     return true;
   }
 
+  /**
+   * Virtual to physical, for the access itself.
+   *
+   * Routing already happened on the virtual address, so this never changes
+   * where the request goes -- congruence guarantees the frame is on this tile.
+   * What it does is put the request into the same physical address space the
+   * compute tiles' traffic arrives in, so one LLC slice serves both.
+   *
+   * The lookup is currently an oracle: correct addresses, no modeled latency
+   * beyond a page fault. Charging for the walk is what NMFC_MMU adds, and the
+   * per-context translation cache with it.
+   */
+  champsim::address translate(const nmfc::context& ctx, champsim::address vaddr, champsim::chrono::clock::duration& fault_penalty)
+  {
+    if (vmem_ == nullptr) {
+      return vaddr; // no paging configured: the virtual address is the physical one
+    }
+    auto [ppage, penalty] = vmem_->va_to_pa(ctx.origin, champsim::page_number{vaddr});
+    fault_penalty = std::max(fault_penalty, penalty);
+    return champsim::address{champsim::splice(ppage, champsim::page_offset{vaddr})};
+  }
+
   bool issue_memory(std::size_t slot, const nmfc::body_instr& instr)
   {
     auto& ctx = contexts_[slot];
@@ -493,12 +517,13 @@ private:
       ++atomics_;
     }
 
+    champsim::chrono::clock::duration fault_penalty{};
     for (std::size_t i = 0; i < ops; ++i) {
       const bool is_store = i >= instr.num_loads;
       champsim::request req;
       req.v_address = instr.mem[i];
-      req.address = instr.mem[i]; // untranslated: the data cache's TLB path resolves it
-      req.is_translated = false;
+      req.address = translate(ctx, instr.mem[i], fault_penalty);
+      req.is_translated = true;
       req.type = is_store ? access_type::WRITE : access_type::LOAD;
       req.response_requested = !is_store;
       req.origin = ctx.origin;
@@ -538,7 +563,7 @@ private:
 
     ++ctx.pc;
     ++instructions_;
-    make_ready(slot, current_time + clock_period);
+    make_ready(slot, current_time + clock_period + fault_penalty);
     return true;
   }
 
@@ -556,10 +581,11 @@ private:
       return false;
     }
 
+    champsim::chrono::clock::duration fault_penalty{};
     champsim::request req;
     req.v_address = champsim::address{eff_ip};
-    req.address = req.v_address;
-    req.is_translated = false;
+    req.address = translate(ctx, req.v_address, fault_penalty);
+    req.is_translated = true;
     req.type = access_type::LOAD;
     req.response_requested = true;
     req.origin = ctx.origin;
@@ -655,6 +681,8 @@ private:
   champsim::chrono::clock::duration fetch_latency_;
   champsim::chrono::clock::duration fetch_bubble_;
   unsigned block_bits_;
+  unsigned page_bits_;
+  champsim::modules::vmem_module* vmem_;
   std::array<champsim::chrono::clock::duration, 8> latency_{};
 
   std::vector<nmfc::context> contexts_;

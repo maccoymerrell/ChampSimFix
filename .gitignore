@@ -33,3 +33,4 @@ compile_commands.json
 
 # Third-party sources fetched by tools/nmfc/build_ramulator.sh
 ext/
+tools/nmfc/nmfc_gen

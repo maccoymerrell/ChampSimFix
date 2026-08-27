@@ -123,7 +123,10 @@ public:
     if (it == std::end(page_table_)) {
       const auto tile = map_.tile_of_virtual(champsim::address{vaddr}.to<std::uint64_t>());
       const auto frame = allocate_standard_frame_on(tile);
-      it = page_table_.emplace(key, champsim::address{champsim::page_number{frame}}).first;
+      // Stamped NMFC: the whole point of placing a page-table page on the tile
+      // that owns the addresses it describes is that walks stay local, and
+      // tile_of() only reads grain bits when the mode says NMFC.
+      it = page_table_.emplace(key, champsim::address{stamp(frame, nmfc::mapping_mode::NMFC)}).first;
       fault = true;
       ++pt_pages_;
     }
@@ -331,7 +334,9 @@ private:
   champsim::modules::memory_controller_module* dram_;
   champsim::chrono::clock::duration minor_fault_penalty_;
   std::size_t pt_levels_;
-  champsim::data::bytes pte_page_size_;
+  // In PTE units, not bytes: the level shift is lg2(entries per page), and
+  // reading it in bytes puts level 5 at bit 72 of a 64-bit address.
+  pte_entry pte_page_size_;
   unsigned page_size_;
   unsigned log2_page_size_;
   bool default_nmfc_;
