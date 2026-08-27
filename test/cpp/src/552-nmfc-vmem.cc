@@ -9,6 +9,7 @@
 #include "modules.h"
 #include "nmfc/nmfc_vmem.h"
 #include "nmfc/tile_map.h"
+#include "nmfc/tile_router.h"
 
 namespace
 {
@@ -52,7 +53,17 @@ struct rig {
                             .add_parameter("bytes", dram_bytes);
     auto* dram = champsim::modules::memory_controller_module::create_instance(dram_builder, static_cast<champsim::modules::environment_module*>(nullptr));
 
+    // The allocator asks the router where a grain belongs, so the rig has to
+    // supply one. Congruent is the routing rule these tests are about.
+    auto router_builder = builder_t{"router" + tag, "CONGRUENT_ROUTER"}
+                              .add_parameter("nmfc_num_tiles", std::size_t{TILES})
+                              .add_parameter("log2_block_size", BLOCK_BITS)
+                              .add_parameter("nmfc_grain_bits", GRAIN_BITS)
+                              .add_parameter("nmfc_mode_bit", MODE_BIT);
+    auto* router = nmfc::tile_router_module::create_instance(router_builder, static_cast<champsim::modules::environment_module*>(nullptr));
+
     auto vmem_builder = builder_t{"vmem" + tag, "NMFC_VMEM"}
+                            .add_parameter("router", router)
                             .add_parameter("nmfc_num_tiles", std::size_t{TILES})
                             .add_parameter("log2_block_size", BLOCK_BITS)
                             .add_parameter("nmfc_grain_bits", GRAIN_BITS)
@@ -217,4 +228,61 @@ TEST_CASE("Grain mappings are visible for a huge-page MMU entry")
   REQUIRE(mapped.has_value());
   // One entry covers the grain: the frame it names is where page 0 landed.
   REQUIRE((*mapped >> GRAIN_BITS) == (champsim::address{ppage}.to<std::uint64_t>() >> GRAIN_BITS));
+}
+
+TEST_CASE("A replicated grain has one copy per channel, addressable by formula")
+{
+  // The mechanism that lets the OS place an invocation: one virtual page, one
+  // physical copy per channel, and the tile chosen when the address is
+  // translated. Reserving a *congruent* frame set is what makes the copies
+  // addressable without a per-tile table -- they differ only in the tile-select
+  // field, so expand(compact(pa), t) converts a base to tile t's copy.
+  rig r{"_replicated"};
+  const auto map = the_map();
+
+  const std::uint64_t vgrain = 300;
+  const auto vpage = vpage_in(vgrain, 0);
+  r.placement->hint_placement(0, vpage.to<std::uint64_t>(), nmfc::placement_hint{nmfc::mapping_mode::NMFC, 0, /*replicated=*/true});
+
+  std::set<std::uint64_t> compacted;
+  std::set<std::uint64_t> frames;
+  for (std::size_t tile = 0; tile < TILES; ++tile) {
+    // page_mapping_on is what an MMU calls, and it names the asking tile.
+    const auto mapping = r.placement->page_mapping_on(champsim::origin{0, 0}, vpage.to<std::uint64_t>(), tile);
+    const champsim::address paddr{mapping};
+
+    // Each copy is on its own channel: that is what makes the choice a placement.
+    REQUIRE(map.is_nmfc(paddr));
+    REQUIRE(map.tile_of(paddr) == tile);
+
+    frames.insert(mapping);
+    compacted.insert(map.compact(mapping));
+  }
+
+  REQUIRE(frames.size() == TILES);   // genuinely distinct physical pages
+  REQUIRE(compacted.size() == 1);    // differing in the tile field and nothing else
+
+  // Which is exactly the statement that the conversion is a formula: any copy
+  // can be derived from any other, with no table consulted.
+  const auto base = *std::begin(frames);
+  for (std::size_t tile = 0; tile < TILES; ++tile) {
+    REQUIRE(map.expand(map.compact(base), tile) == r.placement->page_mapping_on(champsim::origin{0, 0}, vpage.to<std::uint64_t>(), tile));
+  }
+}
+
+TEST_CASE("An ordinary grain is not replicated: one virtual page, one frame")
+{
+  // The asymmetry that makes replication safe. Code is read-only, so N copies
+  // need no coherence; the data these functions chase is written, so it gets a
+  // single home and the tile that owns it is where the work has to go.
+  rig r{"_not_replicated"};
+  const std::uint64_t vgrain = 301;
+  const auto vpage = vpage_in(vgrain, 0);
+  r.placement->hint_placement(0, vpage.to<std::uint64_t>(), nmfc::placement_hint{nmfc::mapping_mode::NMFC, 2});
+
+  std::set<std::uint64_t> frames;
+  for (std::size_t tile = 0; tile < TILES; ++tile) {
+    frames.insert(r.placement->page_mapping_on(champsim::origin{0, 0}, vpage.to<std::uint64_t>(), tile));
+  }
+  REQUIRE(frames.size() == 1);
 }

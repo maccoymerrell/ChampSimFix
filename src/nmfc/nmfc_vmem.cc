@@ -184,7 +184,8 @@ public:
   {
     const auto vgrain = vaddr >> map_.grain_bits();
     if (auto rep = replicas_.find(std::pair{asid, vgrain}); rep != std::end(replicas_)) {
-      return (rep->second.at(tile % rep->second.size()) << map_.grain_bits()) | (std::uint64_t{1} << map_.mode_bit());
+      const auto base = (rep->second << map_.grain_bits()) | (std::uint64_t{1} << map_.mode_bit());
+      return map_.expand(map_.compact(base), tile % map_.num_tiles());
     }
     auto it = nmfc_grains_.find(std::pair{asid, vgrain});
     if (it == std::end(nmfc_grains_)) {
@@ -254,15 +255,15 @@ public:
   {
     auto it = replicas_.find(std::pair{asid, vgrain});
     if (it == std::end(replicas_)) {
-      std::vector<std::uint64_t> frames;
-      frames.reserve(map_.num_tiles());
-      for (std::size_t t = 0; t < map_.num_tiles(); ++t) {
-        frames.push_back(take_grain(t));
-      }
+      const auto base = take_congruent_set();
       replica_allocs_ += map_.num_tiles();
-      it = replicas_.emplace(std::pair{asid, vgrain}, std::move(frames)).first;
+      it = replicas_.emplace(std::pair{asid, vgrain}, base).first;
     }
-    return it->second.at(tile % it->second.size());
+    // The whole point of reserving a congruent set: copy t is the base with the
+    // tile-select field set to t, so converting a base physical address to a
+    // tile-specific one is expand(compact(pa), t) and needs no per-tile table.
+    const auto frame = it->second + (tile % map_.num_tiles());
+    return frame;
   }
 
   // ---- statistics ----
@@ -326,8 +327,10 @@ private:
     free_grains_.assign(map_.num_tiles(), {});
     // Leave the lowest grain unallocated: address 0 is a useful sentinel, and
     // the stock vmem reserves the bottom of memory for the same reason.
+    const auto n = map_.num_tiles();
+    total_sets_ = total_grains / n;
     for (std::uint64_t grain = 1; grain < total_grains; ++grain) {
-      free_grains_[grain % map_.num_tiles()].push_back(grain);
+      free_grains_[grain % n].push_back(grain);
     }
     if (total_grains <= 1) {
       fmt::print("[NMFC_VMEM] ERROR: DRAM holds {} grains of {} bytes; nothing to allocate\n", total_grains, map_.grain());
@@ -336,6 +339,37 @@ private:
   }
 
   /** Take a grain owned by `tile`, spilling to another tile if that list is dry. */
+  /**
+   * One free grain on every channel, sharing a compacted index.
+   *
+   * Grain g lives on tile g % N, so the set {kN .. kN+N-1} is exactly that --
+   * the copies then differ only in the tile-select field, which is what lets
+   * expand(compact(pa), t) name any copy without a table. Searched from the
+   * top, where allocation has not yet reached, so taking one costs nothing that
+   * ordinary allocation wanted.
+   */
+  std::uint64_t take_congruent_set()
+  {
+    const auto n = map_.num_tiles();
+    for (std::uint64_t k = total_sets_; k-- > 1;) {
+      bool whole_set_free = true;
+      for (std::size_t t = 0; t < n && whole_set_free; ++t) {
+        const auto& list = free_grains_[t];
+        whole_set_free = std::find(std::begin(list), std::end(list), k * n + t) != std::end(list);
+      }
+      if (!whole_set_free) {
+        continue;
+      }
+      for (std::size_t t = 0; t < n; ++t) {
+        auto& list = free_grains_[t];
+        list.erase(std::find(std::begin(list), std::end(list), k * n + t));
+      }
+      return k * n;
+    }
+    fmt::print("[NMFC_VMEM] ERROR: no congruent frame set left for a replicated page.\n");
+    std::exit(-1);
+  }
+
   std::uint64_t take_grain(std::size_t tile)
   {
     if (!free_grains_[tile].empty()) {
@@ -363,6 +397,15 @@ private:
                                                                                      nmfc::placement_hint hint)
   {
     const auto key = std::pair{asid, vgrain};
+    if (replicated_grains_.count(key) != 0) {
+      // Replicated: tile 0's copy is the canonical answer for a caller that did
+      // not say which tile is asking. Every other copy is one expand() away.
+      const bool first = replicas_.count(key) == 0;
+      const auto base = replica_for(asid, vgrain, 0);
+      const auto ppage = base * pages_per_grain_ + (vpage % pages_per_grain_);
+      return {stamp(ppage, nmfc::mapping_mode::NMFC), first ? minor_fault_penalty_ : champsim::chrono::clock::duration::zero()};
+    }
+
     auto it = nmfc_grains_.find(key);
     bool fault = false;
     if (it == std::end(nmfc_grains_)) {
@@ -474,7 +517,17 @@ private:
    * translation, and a migrated context re-translating its unchanged program
    * counter lands on its new tile's copy.
    */
-  std::map<std::pair<std::uint32_t, std::uint64_t>, std::vector<std::uint64_t>> replicas_;
+  std::map<std::pair<std::uint32_t, std::uint64_t>, std::uint64_t> replicas_;
+  /**
+   * Congruent frame sets held back for replication.
+   *
+   * Grain g lives on tile g % N, so {kN .. kN+N-1} is one frame on every
+   * channel sharing a single compacted index -- which is what makes the copies
+   * addressable by formula instead of by table. Reserved at populate time
+   * because a set has to be contiguous in that sense, and a general free list
+   * that has been picked over cannot promise one.
+   */
+  std::uint64_t total_sets_ = 0;
   std::set<std::pair<std::uint32_t, std::uint64_t>> replicated_grains_;
   std::uint64_t replica_allocs_ = 0;
   /** Set only for the duration of a replicated page's walk. */

@@ -11,6 +11,7 @@
 #include "nmfc/function_fabric.h"
 #include "nmfc/function_image.h"
 #include "nmfc/nmfc_types.h"
+#include "nmfc/tile_router.h"
 #include "nmfc/tile_map.h"
 
 namespace
@@ -87,6 +88,7 @@ struct rig {
   nmfc::function_core_module* core;
   champsim::modules::channel_module* dcache_channel;
   recording_host host;
+  nmfc::tile_router_module* router;
   std::uint32_t host_id;
 
   explicit rig(std::size_t tile, std::size_t num_contexts, const std::string& tag)
@@ -94,7 +96,12 @@ struct rig {
     auto image_builder = builder_t{"image" + tag, "FUNCTION_IMAGE_STORE"};
     image = nmfc::function_image_module::create_instance(image_builder, static_cast<champsim::modules::environment_module*>(nullptr));
 
-    auto fabric_builder = geometry(builder_t{"fabric" + tag, "FUNCTION_FABRIC"}).add_parameter("hop_latency", std::uint64_t{1});
+    // Both the fabric and the core ask the router which tile owns an address.
+    auto router_builder = geometry(builder_t{"router" + tag, "CONGRUENT_ROUTER"});
+    router = nmfc::tile_router_module::create_instance(router_builder, static_cast<champsim::modules::environment_module*>(nullptr));
+
+    auto fabric_builder =
+        geometry(builder_t{"fabric" + tag, "FUNCTION_FABRIC"}).add_parameter("hop_latency", std::uint64_t{1}).add_parameter("router", router);
     fabric = nmfc::function_fabric_module::create_instance(fabric_builder, static_cast<champsim::modules::environment_module*>(nullptr));
     host_id = fabric->attach_host(&host);
 
@@ -105,6 +112,7 @@ struct rig {
                             .add_parameter("num_contexts", num_contexts)
                             .add_parameter("fabric", fabric)
                             .add_parameter("image", image)
+                            .add_parameter("router", router)
                             .add_parameter("dcache", dcache_channel)
                             .add_parameter("icache", static_cast<champsim::modules::channel_module*>(nullptr))
                             .add_parameter("fetch_latency", std::uint64_t{1});
@@ -165,7 +173,7 @@ TEST_CASE("A function core runs an invocation to completion and returns it")
 
   nmfc::function_body body{};
   body.token = 42;
-  body.entry_pc_base = on_tile(0, 0x1000);
+  body.entry_pc = on_tile(0, 0x1000);
   body.live_regs = 2;
   body.instrs.push_back(load_from(on_tile(0, 0x8000), 1));
   body.instrs.push_back(alu(1, 2));
@@ -174,7 +182,7 @@ TEST_CASE("A function core runs an invocation to completion and returns it")
   nmfc::invocation_msg msg{};
   msg.token = 42;
   msg.home_host = r.host_id;
-  msg.entry_pc = body.entry_pc_base;
+  msg.entry_pc = body.entry_pc;
   msg.body = r.image->lookup(42);
 
   REQUIRE(r.core->accept(msg));
@@ -200,7 +208,7 @@ TEST_CASE("A context sleeps on a request rather than blocking the core")
 
   nmfc::function_body body{};
   body.token = 7;
-  body.entry_pc_base = on_tile(0, 0x1000);
+  body.entry_pc = on_tile(0, 0x1000);
   body.instrs.push_back(load_from(on_tile(0, 0x20000), 1));
   body.instrs.push_back(load_from(on_tile(0, 0x30000), 2)); // independent of r1
   body.instrs.push_back(alu(1, 3));                         // now r1 is needed
@@ -209,7 +217,7 @@ TEST_CASE("A context sleeps on a request rather than blocking the core")
   nmfc::invocation_msg msg{};
   msg.token = 7;
   msg.home_host = r.host_id;
-  msg.entry_pc = body.entry_pc_base;
+  msg.entry_pc = body.entry_pc;
   msg.body = r.image->lookup(7);
   REQUIRE(r.core->accept(msg));
 
@@ -230,7 +238,7 @@ TEST_CASE("A dependent load chain serializes, one request at a time")
 
   nmfc::function_body body{};
   body.token = 9;
-  body.entry_pc_base = on_tile(0, 0x1000);
+  body.entry_pc = on_tile(0, 0x1000);
   auto second = load_from(on_tile(0, 0x30000), 2);
   second.src_reg[0] = 1; // depends on the first load's result
   body.instrs.push_back(load_from(on_tile(0, 0x20000), 1));
@@ -240,7 +248,7 @@ TEST_CASE("A dependent load chain serializes, one request at a time")
   nmfc::invocation_msg msg{};
   msg.token = 9;
   msg.home_host = r.host_id;
-  msg.entry_pc = body.entry_pc_base;
+  msg.entry_pc = body.entry_pc;
   msg.body = r.image->lookup(9);
   REQUIRE(r.core->accept(msg));
 
@@ -264,7 +272,7 @@ TEST_CASE("Many serial contexts overlap into deep memory parallelism")
   for (std::uint64_t token = 0; token < CONTEXTS; ++token) {
     nmfc::function_body body{};
     body.token = token;
-    body.entry_pc_base = on_tile(0, 0x1000);
+    body.entry_pc = on_tile(0, 0x1000);
     // A three-hop dependent chain: MLP 1 within the invocation.
     auto hop2 = load_from(on_tile(0, 0x40000 + token * 256), 2);
     hop2.src_reg[0] = 1;
@@ -278,7 +286,7 @@ TEST_CASE("Many serial contexts overlap into deep memory parallelism")
     nmfc::invocation_msg msg{};
     msg.token = token;
     msg.home_host = r.host_id;
-    msg.entry_pc = body.entry_pc_base;
+    msg.entry_pc = body.entry_pc;
     msg.body = r.image->lookup(token);
     REQUIRE(r.core->accept(msg));
   }
@@ -301,7 +309,7 @@ TEST_CASE("A context migrates when its next address lives on another tile")
 
   nmfc::function_body body{};
   body.token = 11;
-  body.entry_pc_base = on_tile(0, 0x1000);
+  body.entry_pc = on_tile(0, 0x1000);
   body.instrs.push_back(load_from(on_tile(0, 0x8000), 1)); // local
   body.instrs.push_back(load_from(on_tile(2, 0x8000), 2)); // tile 2: must migrate
   r.image->publish(body);
@@ -309,7 +317,7 @@ TEST_CASE("A context migrates when its next address lives on another tile")
   nmfc::invocation_msg msg{};
   msg.token = 11;
   msg.home_host = r.host_id;
-  msg.entry_pc = body.entry_pc_base;
+  msg.entry_pc = body.entry_pc;
   msg.body = r.image->lookup(11);
   REQUIRE(r.core->accept(msg));
 
@@ -329,13 +337,13 @@ TEST_CASE("A full function core refuses work instead of dropping it")
 
   nmfc::function_body body{};
   body.token = 100;
-  body.entry_pc_base = on_tile(0, 0x1000);
+  body.entry_pc = on_tile(0, 0x1000);
   body.instrs.push_back(alu(0, 1));
   r.image->publish(body);
 
   nmfc::invocation_msg msg{};
   msg.home_host = r.host_id;
-  msg.entry_pc = body.entry_pc_base;
+  msg.entry_pc = body.entry_pc;
   msg.body = r.image->lookup(100);
 
   msg.token = 100;
@@ -367,7 +375,7 @@ TEST_CASE("Atomics on one block serialize without stranding the lock")
   for (std::uint64_t token = 1; token <= CONTEXTS; ++token) {
     nmfc::function_body body{};
     body.token = token;
-    body.entry_pc_base = on_tile(0, 0x1000);
+    body.entry_pc = on_tile(0, 0x1000);
     body.instrs.push_back(atomic_at(contended, 1));
     body.instrs.push_back(alu(1, 2));
     // A second atomic on the same block, from the same context: it must not
@@ -378,7 +386,7 @@ TEST_CASE("Atomics on one block serialize without stranding the lock")
     nmfc::invocation_msg msg{};
     msg.token = token;
     msg.home_host = r.host_id;
-    msg.entry_pc = body.entry_pc_base;
+    msg.entry_pc = body.entry_pc;
     msg.body = r.image->lookup(token);
     REQUIRE(r.core->accept(msg));
   }
@@ -403,7 +411,7 @@ TEST_CASE("A context that leaves mid-atomic does not take the lock with it")
   // First invocation: takes the lock, then leaves for another tile.
   nmfc::function_body leaver{};
   leaver.token = 1;
-  leaver.entry_pc_base = on_tile(0, 0x1000);
+  leaver.entry_pc = on_tile(0, 0x1000);
   leaver.instrs.push_back(atomic_at(contended, 1));
   leaver.instrs.push_back(load_from(on_tile(2, 0x8000), 2)); // remote: migrates
   r.image->publish(leaver);
@@ -411,7 +419,7 @@ TEST_CASE("A context that leaves mid-atomic does not take the lock with it")
   // Second: wants the same block afterwards.
   nmfc::function_body follower{};
   follower.token = 2;
-  follower.entry_pc_base = on_tile(0, 0x1000);
+  follower.entry_pc = on_tile(0, 0x1000);
   follower.instrs.push_back(atomic_at(contended, 1));
   r.image->publish(follower);
 
