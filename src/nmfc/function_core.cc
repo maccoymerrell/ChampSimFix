@@ -288,9 +288,26 @@ private:
     return slot;
   }
 
+  void release_lock(std::uint64_t block)
+  {
+    locked_blocks_.erase(block);
+  }
+
+  /** Give up any lock this context is holding. Safe to call when it holds none. */
+  void release_context_lock(nmfc::context& ctx)
+  {
+    if (ctx.holds_lock) {
+      release_lock(ctx.held_lock);
+      ctx.holds_lock = false;
+    }
+  }
+
   void release_slot(std::size_t slot)
   {
     auto& ctx = contexts_[slot];
+    // Belt and braces: a context must never take a lock out of the machine with
+    // it, however it happens to leave.
+    release_context_lock(ctx);
     residency_sum_ += static_cast<std::uint64_t>((current_time - ctx.arrived) / clock_period);
     ++residency_count_;
     ctx.reset();
@@ -365,12 +382,20 @@ private:
 
   void complete_op(const outstanding_op& op)
   {
+    // Release the lock first, and unconditionally. It belongs to the operation,
+    // not to the context: returning early on a departed context used to strand
+    // the block permanently, and every other context wanting it then spun
+    // forever on an atomic conflict.
+    if (op.holds_lock) {
+      release_lock(op.lock_block);
+    }
+
     auto& ctx = contexts_[op.slot];
     if (ctx.state == nmfc::ctx_state::FREE || ctx.token != op.token) {
       return; // the context left; this response has nothing to wake
     }
     if (op.holds_lock) {
-      locked_blocks_.erase(op.lock_block);
+      ctx.holds_lock = false;
     }
     if (ctx.pending_mem > 0) {
       --ctx.pending_mem;
@@ -621,12 +646,25 @@ private:
       }
     }
 
+    // Translate first, before anything is claimed. A translation miss blocks
+    // the context, and a lock taken before that point would be stranded: the
+    // context is not gone, so nothing releases it, and on retry it would find
+    // its own lock and spin forever.
+    std::array<std::uint64_t, nmfc::MAX_MEM_OPS> physical{};
+    for (std::size_t i = 0; i < ops; ++i) {
+      if (!resolve(slot, instr.mem[i].to<std::uint64_t>(), /*code=*/false, physical[i])) {
+        return false;
+      }
+    }
+
     // Atomics serialize per block. Because every access to this address range
     // converges on this one core, a local table is the whole mechanism.
     std::uint64_t lock_block = 0;
     if (instr.is_atomic) {
       lock_block = instr.mem[0].to<std::uint64_t>() >> block_bits_;
-      if (locked_blocks_.count(lock_block) != 0) {
+      // A lock this context already holds is not a conflict with itself.
+      const bool held_by_us = ctx.holds_lock && ctx.held_lock == lock_block;
+      if (!held_by_us && locked_blocks_.count(lock_block) != 0) {
         ready_.push_back(slot);
         ++atomic_conflicts_;
         return false;
@@ -643,16 +681,9 @@ private:
 
     if (instr.is_atomic) {
       locked_blocks_.insert(lock_block);
+      ctx.held_lock = lock_block;
+      ctx.holds_lock = true;
       ++atomics_;
-    }
-
-    // Every address must be translated before any of them issue, so a
-    // translation miss halfway through does not leave a half-issued instruction.
-    std::array<std::uint64_t, nmfc::MAX_MEM_OPS> physical{};
-    for (std::size_t i = 0; i < ops; ++i) {
-      if (!resolve(slot, instr.mem[i].to<std::uint64_t>(), /*code=*/false, physical[i])) {
-        return false;
-      }
     }
 
     for (std::size_t i = 0; i < ops; ++i) {
@@ -753,6 +784,7 @@ private:
       ctx.state = nmfc::ctx_state::BLOCKED;
       return false;
     }
+    release_context_lock(ctx);
     ctx.prepare_for_migration();
     ctx.code_bias = bias_for(*ctx.body, target);
     migrating_.push_back(std::pair{slot, target});

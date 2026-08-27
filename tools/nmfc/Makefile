@@ -12,3 +12,9 @@ clean:
 	$(RM) nmfc_gen
 
 .PHONY: all clean
+
+# The GAPBS-driven generator. Needs ext/gapbs (see README); OpenMP is off because
+# a trace must be a total order and two threads' bodies would interleave.
+GAPBS ?= ../../ext/gapbs/src
+gapbs_trace: gapbs_trace.cc gapbs_hooks.h ../../inc/nmfc/nmfc_trace.h
+	$(CXX) $(CXXFLAGS) -I$(GAPBS) -I../../inc/nmfc -o $@ gapbs_trace.cc

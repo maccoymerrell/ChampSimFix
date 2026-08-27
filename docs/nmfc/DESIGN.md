@@ -428,3 +428,51 @@ Where the leverage actually is, is the kind of thing the sweep exists to find.
 * **The workload is synthetic.** The GAP suite traces on this machine are real
   BFS/BC/PageRank and should be the validation target for the generator.
 * **One compute tile.** Multi-tile contention is unexercised.
+
+---
+
+## 14. Slicing: what one offloaded function should be
+
+The offload unit is a compiler decision, and it is not the same decision for
+every algorithm. Two forces pull against each other:
+
+* **Too fine** and the fabric dominates. A dispatch and a return cost a hop each
+  (~16 cycles at the current settings) plus a context slot; an invocation that
+  performs three memory accesses spends more time being delivered than working.
+* **Too coarse** and one invocation monopolises a context. A power-law hub with
+  100,000 edges becomes a single invocation that occupies one slot for its
+  entire duration while the remaining contexts sit idle — the machine has
+  hundreds of contexts precisely so that no one of them matters, and a hub
+  defeats that.
+
+So the target is: **enough memory operations to amortise the fabric round trip,
+capped so that no invocation exceeds a fair share of context residency.** The
+cap is what a skewed degree distribution forces; the floor is what a
+low-degree graph forces. Neither is a constant, which is why `--slice` is a
+knob and why the sweep has to cover both graph families.
+
+### Per algorithm
+
+| Kernel | Natural slice | Why, and what it costs |
+|---|---|---|
+| **BFS** (top-down) | one vertex's neighbour scan, **chunked by edge count** | Chunking is mandatory on power-law graphs and harmful on road graphs, where a degree-3 vertex does not fill a round trip. The neighbour claim is a real read-modify-write, so this is also the kernel that exercises the atomicity argument. |
+| **PageRank** (pull) | one vertex's gather | Chunking needs a *reduction*: partial sums must be combined somewhere, which the fire-and-forget path cannot express and which puts work back on the host. One vertex per invocation is the honest unit. |
+| **Connected components** (Afforest / Shiloach–Vishkin) | a chunk of **edges**, fire-and-forget | Hooking is `comp[u] = min(comp[u], comp[v])` — an atomic with no value the host consumes. `FLAG_NO_RETURN` frees the tracking slot at dispatch, so the host never blocks on it. The best fit for the architecture of any kernel here. |
+| **SSSP** (delta-stepping) | a chunk of the current bucket | Returns are needed: a relaxation can insert into a later bucket, and the host owns the bucket structure. |
+| **Betweenness centrality** | as BFS, in both phases | The backward accumulation depends on the completed forward sweep, so there is a barrier between them that the host must enforce. |
+| **Triangle counting** | one edge, intersecting two adjacency lists | The largest natural invocation here, and the worst case for siloing: it touches *two* vertices' neighbour lists, so it migrates unless both endpoints are co-located. A partitioner that co-locates edges rather than vertices would change this kernel's answer entirely. |
+
+### What the generator exposes
+
+`tools/nmfc/gapbs_trace` makes both decisions explicit rather than implicit:
+
+* `--slice vertex` — one invocation per vertex, whatever its degree.
+* `--slice edge-chunk --chunk N` — cap an invocation at N neighbours, so a hub
+  becomes many invocations instead of one long one.
+* `--partition stripe` — contiguous arrays, spread across every channel by page
+  interleaving. Good bandwidth, no locality.
+* `--partition block` — vertex v's row bounds, edge list and value all go to
+  tile `v·N/V`. Contiguous by construction, so it needs no graph reordering —
+  but it only *helps* to the extent the graph has locality in vertex id, which
+  is why road graphs and kronecker graphs should behave differently and why
+  both belong in the sweep.

@@ -1925,7 +1925,8 @@
       "module": "phase_controller",
       "model": "PHASE_CONTROLLER",
       "warmup_length": "$warmup_instructions",
-      "simulation_length": "$simulation_instructions"
+      "simulation_length": "$simulation_instructions",
+      "health_period": 2000000000
     }
   ]
 }

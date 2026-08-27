@@ -171,6 +171,13 @@ struct context {
   // statistics can separate time lost to translation from time lost to memory.
   bool awaiting_translation = false;
 
+  // The atomic lock this context currently holds, if any. An in-order context
+  // has at most one outstanding atomic, so one slot is enough -- and holding it
+  // here means the lock can be released when the context leaves, not only when
+  // its response arrives.
+  std::uint64_t held_lock = 0;
+  bool holds_lock = false;
+
   // Bookkeeping for the migration cold-start statistic.
   std::uint32_t migrations = 0;
 

@@ -322,9 +322,19 @@ def build(args, nmfc_enabled):
 
     children.append({"name": "heartbeat", "module": "listener", "model": "HEARTBEAT",
                      "frequency": 1000000})
-    children.append({"name": "phase_controller", "module": "phase_controller", "model": "PHASE_CONTROLLER",
-                     "warmup_length": "$warmup_instructions",
-                     "simulation_length": "$simulation_instructions"})
+    controller = {"name": "phase_controller", "module": "phase_controller", "model": "PHASE_CONTROLLER",
+                  "warmup_length": "$warmup_instructions",
+                  "simulation_length": "$simulation_instructions"}
+    if nmfc_enabled:
+        # Host instructions retired is the wrong liveness metric for this
+        # machine. When work is offloaded the host can retire almost nothing for
+        # a long stretch while the memory tiles are fully busy -- a single
+        # power-law hub becomes one very large invocation, and the default
+        # 10M-cycle health window reads that as a stall and aborts a run that is
+        # in fact progressing. Widened rather than removed: a genuinely wedged
+        # run should still be caught.
+        controller["health_period"] = 2000000000
+    children.append(controller)
 
     label = "NMFC" if nmfc_enabled else "baseline"
     return {

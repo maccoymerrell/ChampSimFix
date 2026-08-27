@@ -125,6 +125,17 @@ nmfc::body_instr load_from(champsim::address addr, std::uint8_t dst)
   return instr;
 }
 
+nmfc::body_instr atomic_at(champsim::address addr, std::uint8_t dst)
+{
+  nmfc::body_instr instr{};
+  instr.mem[0] = addr;
+  instr.num_loads = 1;
+  instr.dst_reg[0] = dst;
+  instr.cls = nmfc::op_class::LOAD;
+  instr.is_atomic = true;
+  return instr;
+}
+
 nmfc::body_instr alu(std::uint8_t src, std::uint8_t dst)
 {
   nmfc::body_instr instr{};
@@ -337,4 +348,87 @@ TEST_CASE("A full function core refuses work instead of dropping it")
   // core's ROB rather than an error to work around.
   msg.token = 102;
   REQUIRE_FALSE(r.core->accept(msg));
+}
+
+TEST_CASE("Atomics on one block serialize without stranding the lock")
+{
+  // Because every access to an address range converges on one function core,
+  // an atomic is a local lock rather than a coherence protocol. The hazard is
+  // not correctness of the exclusion but the bookkeeping around it: a lock that
+  // outlives the operation that took it strands the block, and every later
+  // context wanting it spins forever. This pins that it does not.
+  constexpr std::size_t CONTEXTS = 6;
+  rig r{0, CONTEXTS, "_atomic"};
+  fake_cache mem{r.dcache_channel, 15};
+  champsim::chrono::clock clock;
+
+  const auto contended = on_tile(0, 0x9000); // every invocation wants this block
+
+  for (std::uint64_t token = 1; token <= CONTEXTS; ++token) {
+    nmfc::function_body body{};
+    body.token = token;
+    body.entry_pc_base = on_tile(0, 0x1000);
+    body.instrs.push_back(atomic_at(contended, 1));
+    body.instrs.push_back(alu(1, 2));
+    // A second atomic on the same block, from the same context: it must not
+    // deadlock against the lock it just released.
+    body.instrs.push_back(atomic_at(contended, 3));
+    r.image->publish(body);
+
+    nmfc::invocation_msg msg{};
+    msg.token = token;
+    msg.home_host = r.host_id;
+    msg.entry_pc = body.entry_pc_base;
+    msg.body = r.image->lookup(token);
+    REQUIRE(r.core->accept(msg));
+  }
+
+  run(r, mem, clock, 4000);
+
+  REQUIRE(r.host.returned.size() == CONTEXTS);
+  REQUIRE(r.core->free_contexts() == CONTEXTS);
+}
+
+TEST_CASE("A context that leaves mid-atomic does not take the lock with it")
+{
+  // The migration path is the other way a context departs. If it carried its
+  // lock away, the block would be permanently claimed by a context that is no
+  // longer here.
+  rig r{0, 4, "_atomic_migrate"};
+  fake_cache mem{r.dcache_channel, 10};
+  champsim::chrono::clock clock;
+
+  const auto contended = on_tile(0, 0xA000);
+
+  // First invocation: takes the lock, then leaves for another tile.
+  nmfc::function_body leaver{};
+  leaver.token = 1;
+  leaver.entry_pc_base = on_tile(0, 0x1000);
+  leaver.instrs.push_back(atomic_at(contended, 1));
+  leaver.instrs.push_back(load_from(on_tile(2, 0x8000), 2)); // remote: migrates
+  r.image->publish(leaver);
+
+  // Second: wants the same block afterwards.
+  nmfc::function_body follower{};
+  follower.token = 2;
+  follower.entry_pc_base = on_tile(0, 0x1000);
+  follower.instrs.push_back(atomic_at(contended, 1));
+  r.image->publish(follower);
+
+  for (std::uint64_t token : {std::uint64_t{1}, std::uint64_t{2}}) {
+    nmfc::invocation_msg msg{};
+    msg.token = token;
+    msg.home_host = r.host_id;
+    msg.entry_pc = on_tile(0, 0x1000);
+    msg.body = r.image->lookup(token);
+    REQUIRE(r.core->accept(msg));
+  }
+
+  run(r, mem, clock, 2000);
+
+  // The follower must have run to completion; the leaver is off on tile 2,
+  // which this rig has no core for, so it simply left.
+  REQUIRE(r.host.returned.size() == 1);
+  REQUIRE(r.host.returned.front() == 2);
+  REQUIRE(r.core->free_contexts() == 4);
 }
