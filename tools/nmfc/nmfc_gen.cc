@@ -244,39 +244,120 @@ private:
 // ---- placement ------------------------------------------------------------
 
 /**
- * Where an array element lives, given the partitioning choice.
+ * A per-tile arena carved out of one virtual base.
  *
- * "stripe" is the natural layout: contiguous virtual addresses, which under
- * page-granularity interleaving already spread evenly over every channel.
+ * Under page-granularity interleaving, grain g belongs to tile g % tiles. So a
+ * tile's arena is the strided set of grains congruent to it, and allocating
+ * within that arena is how the placement pass puts a structure on a chosen
+ * channel. An allocation is never allowed to straddle a grain boundary, because
+ * the next grain in the same arena is `tiles` grains away rather than adjacent.
+ */
+class arena
+{
+public:
+  arena(std::uint64_t base, std::uint32_t tiles, unsigned grain_bits) : base_(base), tiles_(tiles), grain_bits_(grain_bits), cursor_(tiles, 0) {}
+
+  std::uint64_t allocate(std::uint32_t tile, std::uint64_t bytes)
+  {
+    const std::uint64_t grain = std::uint64_t{1} << grain_bits_;
+    auto& cursor = cursor_[tile];
+    if ((cursor % grain) + bytes > grain) {
+      cursor = ((cursor / grain) + 1) * grain; // keep the object inside one grain
+    }
+    const auto offset = cursor;
+    cursor += bytes;
+    return address_of(tile, offset);
+  }
+
+  [[nodiscard]] std::uint64_t address_of(std::uint32_t tile, std::uint64_t offset) const
+  {
+    const std::uint64_t grain = std::uint64_t{1} << grain_bits_;
+    return base_ + ((offset / grain) * tiles_ + tile) * grain + (offset % grain);
+  }
+
+  [[nodiscard]] std::uint64_t span() const
+  {
+    std::uint64_t high = 0;
+    for (std::uint32_t tile = 0; tile < tiles_; ++tile) {
+      high = std::max(high, address_of(tile, cursor_[tile]) + 1);
+    }
+    return high - base_;
+  }
+
+private:
+  std::uint64_t base_;
+  std::uint32_t tiles_;
+  unsigned grain_bits_;
+  std::vector<std::uint64_t> cursor_;
+};
+
+/**
+ * The placement pass: where every piece of the graph lives.
  *
- * "silo" is what the pseudo-compiler is for: vertex v's data is placed in the
- * grain belonging to v's partition, so a whole partition of the graph lives on
- * one tile and a traversal that stays inside it never migrates. The cost is
- * capacity balance, which is what the vmem's spill rate reports.
+ * "stripe" lays each array out contiguously. Page-granularity interleaving then
+ * spreads it evenly over every channel, which is what you want for bandwidth
+ * and exactly wrong for locality: a visit to one vertex touches a row pointer,
+ * a run of edges, and a scattered value, each on an unrelated tile.
+ *
+ * "silo" gives vertex v's whole footprint -- its row bounds, its edge list, and
+ * its value -- to tile v % tiles. Combined with a partitioned graph (see
+ * --locality) a visit then does nearly all of its work on one tile and never
+ * migrates. This is a 1D vertex partition, the same thing a distributed graph
+ * framework builds.
  */
 struct placement {
   const options& opt;
+  bool silo;
+  std::vector<std::uint64_t> row_bounds_addr; // where offsets[v], offsets[v+1] live
+  std::vector<std::uint64_t> row_edges_addr;  // where v's edge list starts
+  std::vector<std::uint64_t> value_addr;      // where values[v] lives
+  std::uint64_t offsets_span = 0;
+  std::uint64_t edges_span = 0;
+  std::uint64_t values_span = 0;
 
-  [[nodiscard]] std::uint64_t grain() const { return std::uint64_t{1} << opt.grain_bits; }
-
-  [[nodiscard]] std::uint64_t values_addr(std::uint32_t vertex) const
+  placement(const options& options_, const csr_graph& graph) : opt(options_), silo(options_.partition == "silo")
   {
-    if (opt.partition == "silo") {
-      const auto tile = vertex % opt.tiles;
-      const auto within = vertex / opt.tiles;
-      // Walk grains that belong to `tile`: those are the ones whose grain index
-      // is congruent to the base's index plus a multiple of the tile count.
-      const auto grain_index = (within * WORD) / grain();
-      const auto offset_in_grain = (within * WORD) % grain();
-      return VALUES_BASE + (grain_index * opt.tiles + tile) * grain() + offset_in_grain;
+    const auto vertices = opt.vertices;
+    row_bounds_addr.resize(vertices);
+    row_edges_addr.resize(vertices);
+    value_addr.resize(vertices);
+
+    if (!silo) {
+      for (std::uint64_t v = 0; v < vertices; ++v) {
+        row_bounds_addr[v] = OFFSETS_BASE + v * WORD;
+        row_edges_addr[v] = EDGES_BASE + graph.offsets[v] * 4;
+        value_addr[v] = VALUES_BASE + v * WORD;
+      }
+      offsets_span = (vertices + 1) * WORD;
+      edges_span = graph.edges.size() * 4;
+      values_span = vertices * WORD;
+      return;
     }
-    return VALUES_BASE + static_cast<std::uint64_t>(vertex) * WORD;
+
+    arena offsets{OFFSETS_BASE, opt.tiles, opt.grain_bits};
+    arena edges{EDGES_BASE, opt.tiles, opt.grain_bits};
+    arena values{VALUES_BASE, opt.tiles, opt.grain_bits};
+
+    for (std::uint64_t v = 0; v < vertices; ++v) {
+      const auto tile = static_cast<std::uint32_t>(v % opt.tiles);
+      // Both row bounds together: a partitioned framework keeps a local CSR per
+      // partition, so the pair a visit needs is one object.
+      row_bounds_addr[v] = offsets.allocate(tile, 2 * WORD);
+      const auto degree = graph.offsets[v + 1] - graph.offsets[v];
+      row_edges_addr[v] = edges.allocate(tile, std::max<std::uint64_t>(degree, 1) * 4);
+      value_addr[v] = values.allocate(tile, WORD);
+    }
+    offsets_span = offsets.span();
+    edges_span = edges.span();
+    values_span = values.span();
   }
 
-  [[nodiscard]] std::uint64_t offsets_addr(std::uint32_t vertex) const { return OFFSETS_BASE + static_cast<std::uint64_t>(vertex) * WORD; }
-  [[nodiscard]] std::uint64_t edges_addr(std::uint64_t index) const { return EDGES_BASE + index * 4; }
+  [[nodiscard]] std::uint64_t grain() const { return std::uint64_t{1} << opt.grain_bits; }
+  [[nodiscard]] std::uint64_t values_addr(std::uint32_t vertex) const { return value_addr[vertex]; }
+  [[nodiscard]] std::uint64_t offsets_addr(std::uint32_t vertex) const { return row_bounds_addr[vertex]; }
+  [[nodiscard]] std::uint64_t offsets_end_addr(std::uint32_t vertex) const { return row_bounds_addr[vertex] + (silo ? WORD : WORD); }
+  [[nodiscard]] std::uint64_t edges_addr(std::uint32_t vertex, std::uint64_t index_in_row) const { return row_edges_addr[vertex] + index_in_row * 4; }
 
-  /** The tile a virtual address names, under the NMFC layout. */
   [[nodiscard]] std::uint32_t tile_of(std::uint64_t vaddr) const { return static_cast<std::uint32_t>((vaddr >> opt.grain_bits) % opt.tiles); }
 };
 
@@ -320,7 +401,7 @@ std::vector<nmfc::record> visit_body(const csr_graph& graph, const placement& pl
 
   auto row_end = blank(nmfc::op::BODY, token);
   row_end.instr.ip = step();
-  row_end.instr.source_memory[0] = place.offsets_addr(vertex + 1);
+  row_end.instr.source_memory[0] = place.offsets_end_addr(vertex);
   row_end.op_class = static_cast<std::uint8_t>(nmfc::op_class::LOAD);
   set_srcs(row_end, {R_VERTEX});
   set_dsts(row_end, {R_ROW_END});
@@ -333,7 +414,7 @@ std::vector<nmfc::record> visit_body(const csr_graph& graph, const placement& pl
     // The neighbour id: sequential within the row, so these stream.
     auto edge = blank(nmfc::op::BODY, token);
     edge.instr.ip = step();
-    edge.instr.source_memory[0] = place.edges_addr(i);
+    edge.instr.source_memory[0] = place.edges_addr(vertex, i - begin);
     edge.op_class = static_cast<std::uint8_t>(nmfc::op_class::LOAD);
     set_srcs(edge, {R_ROW_BEGIN, R_INDEX});
     set_dsts(edge, {R_NEIGHBOUR});
@@ -428,10 +509,10 @@ int main(int argc, char** argv)
     }
   }
 
-  const placement place{opt};
   std::cerr << "building " << opt.graph << " graph: " << opt.vertices << " vertices, mean degree " << opt.degree << "\n";
   const auto graph = build_graph(opt);
   std::cerr << "  " << graph.edges.size() << " edges, locality " << opt.locality << ", partition " << opt.partition << "\n";
+  const placement place{opt, graph};
 
   trace_writer nmfc_out{opt.out_nmfc};
   nmfc_out.reserve_header();
@@ -444,9 +525,9 @@ int main(int argc, char** argv)
   // Declare the layout the placement pass chose. The simulator validates the
   // geometry in the header and refuses a trace placed for a different machine.
   emit_hints_for(nmfc_out, place, FUNC_CODE_BASE, place.grain() * opt.tiles, nmfc::region::NMFC);
-  emit_hints_for(nmfc_out, place, OFFSETS_BASE, (opt.vertices + 1) * WORD, nmfc::region::NMFC);
-  emit_hints_for(nmfc_out, place, EDGES_BASE, graph.edges.size() * 4, nmfc::region::NMFC);
-  emit_hints_for(nmfc_out, place, VALUES_BASE, opt.vertices * WORD * (opt.partition == "silo" ? opt.tiles : 1), nmfc::region::NMFC);
+  emit_hints_for(nmfc_out, place, OFFSETS_BASE, place.offsets_span, nmfc::region::NMFC);
+  emit_hints_for(nmfc_out, place, EDGES_BASE, place.edges_span, nmfc::region::NMFC);
+  emit_hints_for(nmfc_out, place, VALUES_BASE, place.values_span, nmfc::region::NMFC);
 
   std::mt19937_64 rng{opt.seed ^ 0x5DEECE66DULL};
   std::uniform_int_distribution<std::uint32_t> pick_root{0, static_cast<std::uint32_t>(opt.vertices - 1)};
