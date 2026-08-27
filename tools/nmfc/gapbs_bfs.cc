@@ -49,6 +49,7 @@
 
 // NMFC: the pseudo-compiler hooks.
 #include "gapbs_hooks.h"
+#include "partition.h"
 
 using namespace std;
 
@@ -61,7 +62,10 @@ struct nmfc_options {
   std::uint32_t tiles = 4;
   unsigned grain_bits = 21;
   std::string partition = "stripe";
+  unsigned partition_passes = 3; // restreaming passes for --partition mincut
   std::int64_t budget = 20000;   // stop tracing after this many invocations
+  bool relabelled = false;
+  nmfc::part::result<NodeID> plan{};
 };
 nmfc_options g_nmfc;
 std::vector<std::uint64_t> g_outstanding; // forked, not yet joined
@@ -233,7 +237,14 @@ pvector<NodeID> DOBFS(const Graph &g, NodeID source, int alpha = 15,
     const auto vertices = static_cast<std::uint64_t>(g.num_nodes());
     const auto tiles = g_nmfc.tiles;
     std::function<std::uint32_t(std::uint64_t)> by_vertex;
-    if (g_nmfc.partition == "block") {
+    if (g_nmfc.relabelled) {
+      const auto* const boundaries = &g_nmfc.plan.tile_begin;
+      by_vertex = [boundaries](std::uint64_t offset) {
+        const auto id = static_cast<std::int64_t>(offset / sizeof(NodeID));
+        const auto it = std::upper_bound(std::begin(*boundaries), std::end(*boundaries), id);
+        return static_cast<std::uint32_t>(std::distance(std::begin(*boundaries), it) - 1);
+      };
+    } else if (g_nmfc.partition == "block") {
       by_vertex = [vertices, tiles](std::uint64_t offset) {
         const auto vertex = offset / sizeof(NodeID);
         return static_cast<std::uint32_t>((vertex * tiles) / std::max<std::uint64_t>(vertices, 1));
@@ -295,7 +306,16 @@ void nmfc_declare_layout(const Graph& g)
   const auto vertices = static_cast<std::uint64_t>(g.num_nodes());
   const auto edges = static_cast<std::uint64_t>(g.num_edges_directed());
   const bool block = (g_nmfc.partition == "block");
+  const bool mincut = g_nmfc.relabelled;
   const auto tiles = g_nmfc.tiles;
+
+  // After relabelling each tile owns a contiguous id range, so "which tile owns
+  // this vertex" is a search over the boundaries rather than a division.
+  const auto* const boundaries = &g_nmfc.plan.tile_begin;
+  const auto tile_of_id = [boundaries](std::int64_t id) {
+    const auto it = std::upper_bound(std::begin(*boundaries), std::end(*boundaries), id);
+    return static_cast<std::uint32_t>(std::distance(std::begin(*boundaries), it) - 1);
+  };
 
   using owner_fn = std::function<std::uint32_t(std::uint64_t)>;
   const owner_fn none{};
@@ -313,11 +333,56 @@ void nmfc_declare_layout(const Graph& g)
     return static_cast<std::uint32_t>((edge * tiles) / std::max<std::uint64_t>(edges, 1));
   };
 
-  tracer.declare_region("out_index", g.nmfc_out_index(), (vertices + 1) * sizeof(NodeID*), block ? by_vertex : none);
-  tracer.declare_region("out_neighbors", g.nmfc_out_neighbors(), edges * sizeof(NodeID), block ? by_edge : none);
+  // A vertex's adjacency must live on the vertex's own tile, or scanning a
+  // neighbour list migrates before it has learned anything. Under relabelling
+  // the edge ranges are contiguous per tile, so the owner of an edge offset is
+  // the owner of the vertex whose list contains it.
+  const auto* const* new_index = g.nmfc_out_index();
+  const owner_fn by_owning_vertex = [new_index, vertices, tile_of_id](std::uint64_t offset) {
+    const auto edge = static_cast<std::int64_t>(offset / sizeof(NodeID));
+    const auto* target = new_index[0] + edge;
+    const auto it = std::upper_bound(new_index, new_index + vertices + 1, target);
+    return tile_of_id(std::distance(new_index, it) - 1);
+  };
+  const owner_fn by_new_vertex = [tile_of_id](std::uint64_t offset) { return tile_of_id(static_cast<std::int64_t>(offset / sizeof(NodeID*))); };
+  const owner_fn by_new_parent = [tile_of_id](std::uint64_t offset) { return tile_of_id(static_cast<std::int64_t>(offset / sizeof(NodeID))); };
+
+  tracer.declare_region("out_index", g.nmfc_out_index(), (vertices + 1) * sizeof(NodeID*), mincut ? by_new_vertex : (block ? by_vertex : none));
+  tracer.declare_region("out_neighbors", g.nmfc_out_neighbors(), edges * sizeof(NodeID), mincut ? by_owning_vertex : (block ? by_edge : none));
   (void)by_parent_slot;
   tracer.declare_region("code", reinterpret_cast<const void*>(nmfc::gapbs::FUNC_CODE_BASE),
                         (std::uint64_t{1} << g_nmfc.grain_bits) * tiles, none);
+}
+
+/**
+ * Rebuild the graph under a partition's relabelling.
+ *
+ * Isomorphic to the original -- BFS visits the same structure and returns the
+ * same tree -- but each tile's vertices now occupy a contiguous id range, so a
+ * block layout places them and a vertex's adjacency list sits with its own
+ * vertex. That is the whole point: the assignment becomes an address.
+ */
+Graph nmfc_relabel(const Graph& g, const nmfc::part::result<NodeID>& p)
+{
+  const auto n = g.num_nodes();
+  const auto m = g.num_edges_directed();
+  auto** index = new NodeID*[static_cast<std::size_t>(n) + 1];
+  auto* neighs = new NodeID[static_cast<std::size_t>(m)];
+
+  const auto* const* old_index = g.nmfc_out_index();
+  std::int64_t cursor = 0;
+  for (std::int64_t i = 0; i < n; ++i) {
+    index[i] = neighs + cursor;
+    const auto v = p.new_to_old[static_cast<std::size_t>(i)];
+    for (auto it = old_index[v]; it != old_index[v + 1]; ++it) {
+      neighs[cursor++] = p.old_to_new[static_cast<std::size_t>(*it)];
+    }
+    // Sorted adjacency keeps the sequential scan a function core does over a
+    // neighbour list actually sequential.
+    std::sort(index[i], neighs + cursor);
+  }
+  index[n] = neighs + cursor;
+  return Graph(n, index, neighs);
 }
 
 int main(int argc, char* argv[]) {
@@ -333,6 +398,7 @@ int main(int argc, char* argv[]) {
     else if (arg == "--tiles") { g_nmfc.tiles = static_cast<std::uint32_t>(std::stoul(next())); }
     else if (arg == "--grain-bits") { g_nmfc.grain_bits = static_cast<unsigned>(std::stoul(next())); }
     else if (arg == "--partition") { g_nmfc.partition = next(); }
+    else if (arg == "--partition-passes") { g_nmfc.partition_passes = static_cast<unsigned>(std::stoul(next())); }
     else if (arg == "--chunk") { g_nmfc.chunk = std::stoll(next()); }
     else if (arg == "--fork-window") { g_nmfc.fork_window = std::stoll(next()); }
     else if (arg == "--budget") { g_nmfc.budget = std::stoll(next()); }
@@ -346,14 +412,35 @@ int main(int argc, char* argv[]) {
   Graph g = b.MakeGraph();
   std::cerr << "nmfc: graph " << g.num_nodes() << " vertices, " << g.num_edges_directed() << " directed edges\n";
 
+  // NMFC: balanced minimum edge cut, then relabel so the cut is expressible as
+  // an address. Every cut edge is a potential migration, so this is the pass
+  // that decides how much the fabric has to carry.
+  NodeID source = cli.start_vertex();
+  if (source < 0) {
+    source = 0;
+    const auto* const* idx0 = g.nmfc_out_index();
+    while (source + 1 < g.num_nodes() && idx0[source + 1] == idx0[source]) {
+      ++source; // skip isolated vertices
+    }
+  }
+
+  if (g_nmfc.partition == "mincut") {
+    g_nmfc.plan = nmfc::part::build<NodeID>(g.nmfc_out_index(), g.num_nodes(), g_nmfc.tiles, g_nmfc.partition_passes);
+    g = nmfc_relabel(g, g_nmfc.plan);
+    g_nmfc.relabelled = true;
+    source = g_nmfc.plan.old_to_new[static_cast<std::size_t>(source)];
+  }
+
   auto& tracer = nmfc::gapbs::tracer::instance();       // NMFC
   tracer.open(out_nmfc, g_nmfc.tiles, g_nmfc.grain_bits);
   tracer.open_baseline(out_baseline);
   tracer.set_budget(g_nmfc.budget);
   nmfc_declare_layout(g); // parent is declared inside DOBFS, where it exists
 
-  SourcePicker<Graph> sp(g, cli.start_vertex());
-  DOBFS(g, sp.PickNext());
+  // The source must name the same *vertex* in both layouts, or the NMFC trace
+  // and its baseline describe different traversals and nothing compares.
+  std::cerr << "nmfc: bfs source " << source << " (degree " << g.out_degree(source) << ")\n";
+  DOBFS(g, source);
 
   nmfc_drain_joins();                                   // NMFC
   tracer.close();

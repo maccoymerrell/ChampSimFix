@@ -850,20 +850,28 @@ private:
   long push_migrations()
   {
     long progress = 0;
-    while (!migrating_.empty()) {
-      const auto [slot, target] = migrating_.front();
+    // Do not stop at the front. The fabric queues per destination, so a refusal
+    // says one target is congested, not that the fabric is. Stopping here would
+    // let a context bound for a full tile pin every context behind it that has
+    // somewhere to go -- and since each of those still holds its slot, this tile
+    // would fill up and stop running anything, which is how the whole machine
+    // seizes. This is the third of three stages that each needed the same fix:
+    // this deque, the fabric's queues, and the destination's context array.
+    for (auto it = std::begin(migrating_); it != std::end(migrating_);) {
+      const auto [slot, target] = *it;
       auto& ctx = contexts_[slot];
 
       nmfc::migration_msg msg{};
       msg.ctx = ctx;
       msg.target_tile = target;
       if (!fabric_->migrate(std::move(msg))) {
-        break;
+        ++it;
+        continue;
       }
       if (nmfc::hooks::migrate.active()) {
         nmfc::hooks::migrate.emit(ctx.token, tile_, target, ctx.migrations);
       }
-      migrating_.pop_front();
+      it = migrating_.erase(it);
       release_slot(slot);
       ++departed_;
       ++progress;
