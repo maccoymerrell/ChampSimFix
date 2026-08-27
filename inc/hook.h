@@ -170,39 +170,59 @@ class hook<void(Args...)> final : public hook_base
 public:
   explicit hook(std::string name) : hook_base(std::move(name)) {}
 
-  // True when anything is listening. Test this before building a payload that costs something to
-  // compute -- emit() short-circuits on its own, but only after its arguments have been evaluated.
-  [[nodiscard]] bool active() const { return !subscribers_.empty(); }
-
-  // Notify every subscriber. Emitting to nobody is a load and a branch.
+  // Notify every subscriber.
+  //
+  // An unobserved hook costs one load of a bool and a branch that predicts perfectly, so a hook may
+  // sit in a hot path and its emitters need not guard it. That flag is why: reaching through the
+  // subscriber list to ask whether it is empty is far more expensive than it looks when it happens
+  // every cycle, so the answer is kept beside the hook and maintained as subscriptions come and go.
   void emit(const Args&... args) const
   {
-    if (subscribers_.empty()) {
+    if (!listening_) {
       return;
     }
-    for (const auto& sub : subscribers_) {
-      sub.callback(args...);
-    }
+    dispatch(args...);
   }
+
+  // True when anything is listening. emit() already checks this; a caller needs it only to skip
+  // building a payload that is expensive in its own right.
+  [[nodiscard]] bool listening() const { return listening_; }
 
   // Attach a callback. The returned handle owns the subscription -- drop it and the callback stops.
   [[nodiscard]] subscription subscribe(callback_type callback)
   {
     const auto id = next_id_++;
     subscribers_.push_back(entry{id, std::move(callback)});
+    listening_ = true;
     return subscription{this, id};
   }
 
   [[nodiscard]] std::size_t subscriber_count() const override { return subscribers_.size(); }
-  void clear_subscribers() override { subscribers_.clear(); }
+  void clear_subscribers() override
+  {
+    subscribers_.clear();
+    listening_ = false;
+  }
 
 private:
+  // The whole fan-out, kept out of emit() so that emitting to nobody stays small enough to inline
+  // everywhere it appears.
+  void dispatch(const Args&... args) const
+  {
+    for (const auto& sub : subscribers_) {
+      sub.callback(args...);
+    }
+  }
+
   void unsubscribe(uint64_t id) override
   {
     subscribers_.erase(std::remove_if(std::begin(subscribers_), std::end(subscribers_), [id](const auto& sub) { return sub.id == id; }),
                        std::end(subscribers_));
+    listening_ = !subscribers_.empty();
   }
 
+  // Declared first, and a plain bool: this is what a hot emit site reads.
+  bool listening_ = false;
   std::vector<entry> subscribers_;
   uint64_t next_id_ = 0;
 };
