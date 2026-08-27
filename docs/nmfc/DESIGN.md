@@ -1,7 +1,7 @@
 # Near-Memory Function Core (NMFC) — Design
 
 **Base:** `ChampSimFix` @ `a2684f5c` (branch `nmfc`), cloned into `ChampSimArchWork/nmfc`.
-**Revision 5** — mapping mode becomes a physical address bit, stamped once at allocation; mixed page sizes; `NMFC_MMU` replaces two would-be forks. Supersedes revisions 1–4.
+**Revision 6** — §13 records what is actually built. Earlier:  mapping mode becomes a physical address bit, stamped once at allocation; mixed page sizes; `NMFC_MMU` replaces two would-be forks. Supersedes revisions 1–4.
 
 ---
 
@@ -357,3 +357,74 @@ Makefile      + one line: src_sources also globs src/nmfc/*.cc
 * **Address compaction must be exactly invertible, in both modes.** A unit test pins `expand(compact(x), tile_of(x)) == x` over a large address sample, for each mode.
 * **The function core could look artificially good.** It replays resolved control flow, so it never mispredicts. `FLAG_TAKEN_TARGET` plus a configurable fetch bubble is the honesty knob, with a sensitivity run.
 * **Warmup semantics.** Contexts drain across a phase boundary; the phase controller's progress unit stays host instructions retired.
+
+---
+
+## 13. As built
+
+Status as of the end of the first implementation pass. Everything below is on
+branch `nmfc`; the full ChampSim suite plus the NMFC tests is green at 753 test
+cases and 412,486 assertions.
+
+### Phase 1 — complete
+
+| Piece | Where | Notes |
+|---|---|---|
+| `tile_map` | `inc/nmfc/tile_map.h` | Address layout, mode bit, compaction. Invertibility pinned over 200k addresses in both modes. |
+| `INTERLEAVE_FABRIC` | `src/nmfc/interleave_fabric.cc` | Memory network, as a `channel` model. |
+| `TILE_PORT` | `src/nmfc/tile_port.cc` | Keeps both paths into a slice in one address space; asserts locality. |
+| `FUNCTION_FABRIC` | `src/nmfc/function_fabric.cc` | Three message classes, four placement policies. |
+| `FUNCTION_CORE` | `src/nmfc/function_core.cc` | Multi-context, in-order, non-speculative. |
+| `FUNCTION_IMAGE_STORE` | `src/nmfc/function_image.cc` | Bodies, with occupancy high-water. |
+| `NMFC_VMEM` | `src/nmfc/nmfc_vmem.cc` | Congruent allocation, mode stamping, spill. |
+| `NMFC_HOST_CORE` | `src/nmfc/nmfc_host_core.cc` | The one fork, with the FTU. |
+| `NMFC_PRODUCER` | `src/nmfc/nmfc_producer.cc` | Trace reader; enforces the geometry contract. |
+
+### Phase 2 — complete
+
+`RAMULATOR_MC` (`src/nmfc/ramulator_mc.cc`) drives a per-tile single-channel
+ramulator2 machine through its `External` frontend — current ramulator2 ships
+one, so no custom frontend was needed. Entirely opt-in: the file compiles to
+nothing without `NMFC_WITH_RAMULATOR`, and the Makefile block is guarded, so the
+default build needs nothing in `ext/`.
+
+Cross-check on the partitioned workload: **620,645** cycles against the built-in
+DRAM model's **646,546**, a 4% difference, with no clock mismatch at 417 ps
+versus DDR5-4800.
+
+### Phase 3 — generator and first results
+
+`tools/nmfc/nmfc_gen` builds a CSR graph and emits *both* traces from one
+traversal, so the two runs touch the same addresses in the same order.
+`--locality` controls what fraction of a vertex's neighbours share its
+partition; `--partition silo` gives vertex v's whole footprint to tile v % tiles
+through per-tile arenas.
+
+2M-vertex kron graph, mean degree 16, 8000 visits, 1 compute tile against 4
+memory tiles. Both traces run to end-of-trace, so total cycles is the
+comparable number — IPC is not, because the NMFC host stream is far shorter for
+the same work.
+
+| workload | NMFC cycles | baseline cycles | speedup | migrations/invocation |
+|---|---|---|---|---|
+| scattered | 679,452 | 3,386,272 | **4.98×** | 14.4 |
+| partitioned | 646,546 | 3,522,385 | **5.45×** | 1.4 |
+
+Two readings. The placement pass works — partitioning cut migration traffic by
+**10×**. And migration was *not* the bottleneck at this scale: removing 90% of it
+moved the speedup only from 4.98× to 5.45×, because with four tiles and an
+8-cycle hop the cost is dominated by memory latency rather than by the network.
+Where the leverage actually is, is the kind of thing the sweep exists to find.
+
+### Known gaps
+
+* **Function-core translation is an oracle.** Addresses are correct, but the
+  walk costs nothing. `ctx_xlat` and its clear-on-migration path exist and the
+  cold-start statistic is wired, but that number currently measures only the
+  cold instruction fetch. `NMFC_MMU` (§6) is what closes this, and until it does
+  the NMFC side is flattered by an unknown amount.
+* **`NMFC_MMU` and `NMFC_FLAT_VMEM` are unbuilt**, so mixed page sizes and the
+  per-context translation cache are unmeasured.
+* **The workload is synthetic.** The GAP suite traces on this machine are real
+  BFS/BC/PageRank and should be the validation target for the generator.
+* **One compute tile.** Multi-tile contention is unexercised.

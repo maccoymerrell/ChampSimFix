@@ -19,7 +19,22 @@ ifdef NMFC_RAMULATOR
 override CPPFLAGS += -DNMFC_WITH_RAMULATOR -isystem $(ROOT_DIR)/ext/ramulator2/src
 override LDFLAGS  += -L$(ROOT_DIR)/ext/ramulator2 -Wl,-rpath,$(ROOT_DIR)/ext/ramulator2
 override LDLIBS   += -lramulator
+nmfc_ramulator_state := on
+else
+nmfc_ramulator_state := off
 endif
+
+# Toggling the flag has to rebuild the model, or a stale object built with the
+# define gets linked into a target without the library and fails at link time.
+# The stamp records the current state and is a prerequisite of that object.
+.PHONY: nmfc_ramulator_stamp
+nmfc_ramulator_stamp:
+	@mkdir -p $(OBJ_ROOT)
+	@if [ "`cat $(OBJ_ROOT)/nmfc_ramulator.stamp 2>/dev/null`" != "$(nmfc_ramulator_state)" ]; then \
+	  echo "$(nmfc_ramulator_state)" > $(OBJ_ROOT)/nmfc_ramulator.stamp; \
+	fi
+$(OBJ_ROOT)/nmfc_ramulator.stamp: nmfc_ramulator_stamp ;
+$(OBJ_ROOT)/src/nmfc/ramulator_mc.o: $(OBJ_ROOT)/nmfc_ramulator.stamp
 
 # vcpkg integration
 TRIPLET_DIR = $(patsubst %/,%,$(firstword $(filter-out $(ROOT_DIR)/vcpkg_installed/vcpkg/, $(wildcard $(ROOT_DIR)/vcpkg_installed/*/))))
