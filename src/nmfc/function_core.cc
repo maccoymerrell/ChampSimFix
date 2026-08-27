@@ -654,21 +654,38 @@ private:
     const auto ops = instr.num_mem_ops();
 
     // Every address this instruction touches must be local, or the context
-    // belongs on another tile before it runs at all.
-    for (std::size_t i = 0; i < ops; ++i) {
-      if (const auto target = router_->owner_of(ctx.origin, instr.mem[i]); target != tile_) {
-        return begin_migration(slot, target);
+    // belongs on another tile before it runs at all. *When* that can be decided
+    // is the routing model: from the virtual address, before any translation,
+    // or only from the physical address it translates to.
+    const bool translate_first = router_->order() == nmfc::routing_order::TRANSLATE_FIRST;
+
+    if (!translate_first) {
+      for (std::size_t i = 0; i < ops; ++i) {
+        if (const auto target = router_->owner_of(ctx.origin, instr.mem[i]); target != tile_) {
+          return begin_migration(slot, target);
+        }
       }
     }
 
-    // Translate first, before anything is claimed. A translation miss blocks
-    // the context, and a lock taken before that point would be stranded: the
+    // Translate before anything is claimed. A translation miss blocks the
+    // context, and a lock taken before that point would be stranded: the
     // context is not gone, so nothing releases it, and on retry it would find
     // its own lock and spin forever.
     std::array<std::uint64_t, nmfc::MAX_MEM_OPS> physical{};
     for (std::size_t i = 0; i < ops; ++i) {
       if (!resolve(slot, instr.mem[i].to<std::uint64_t>(), /*code=*/false, physical[i])) {
         return false;
+      }
+    }
+
+    if (translate_first) {
+      // The translation just done is the one the access needed anyway; routing
+      // simply reads the answer out of it. A migration here discards it, which
+      // is the real cost of this model and what the cold-start statistic counts.
+      for (std::size_t i = 0; i < ops; ++i) {
+        if (const auto target = map_.tile_of(champsim::address{physical[i]}); target != tile_) {
+          return begin_migration(slot, target);
+        }
       }
     }
 

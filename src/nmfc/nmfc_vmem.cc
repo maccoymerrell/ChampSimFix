@@ -146,7 +146,11 @@ public:
     auto it = page_table_.find(key);
     bool fault = false;
     if (it == std::end(page_table_)) {
-      const auto frame = allocate_standard_frame_on(tile);
+      // The key says which root; this says which tile stores the page. With one
+      // root those are different questions, and putting every page-table page
+      // on tile 0 would make the table a hotspot the fabric then has to carry.
+      const auto pt_tile = roots > 1 ? tile : map_.tile_of_virtual(raw);
+      const auto frame = allocate_standard_frame_on(pt_tile);
       // Stamped NMFC: the whole point of placing a page-table page on the tile
       // that owns the addresses it describes is that walks stay local, and
       // tile_of() only reads grain bits when the mode says NMFC.

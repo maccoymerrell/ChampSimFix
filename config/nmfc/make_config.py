@@ -107,7 +107,15 @@ def build(args, nmfc_enabled):
             children.append(channel(f"tile{t}_LLC_fcD_channel", 64, 64, 0,
                                     comment=f"function core {t}'s data port into the slice"))
             children.append(channel(f"tile{t}_LLC_fcI_channel", 32, 0, 0))
-            if args.mmu:
+            if args.mmu and args.walk_routing == "fabric":
+                # A walk reference can come from any tile, so each slice needs an
+                # inbound port per requester. The function cores already sit on a
+                # network that reaches every slice; this is that same network,
+                # used for the page table rather than for data.
+                for requester in range(tiles):
+                    children.append(channel(f"tile{t}_LLC_mmu{requester}_channel", 32, 0, 0,
+                                            comment=f"walk references from tile {requester}'s MMU into tile {t}'s slice"))
+            if args.mmu and args.walk_routing == "local":
                 children.append(channel(f"tile{t}_LLC_mmu_channel", 32, 0, 0,
                                         comment=f"page-table walk references from tile {t}'s MMU"))
 
@@ -196,7 +204,10 @@ def build(args, nmfc_enabled):
         if nmfc_enabled:
             upper += [f"@tile{t}_LLC_fcD_channel", f"@tile{t}_LLC_fcI_channel"]
             if args.mmu:
-                upper.append(f"@tile{t}_LLC_mmu_channel")
+                if args.walk_routing == "fabric":
+                    upper += [f"@tile{t}_LLC_mmu{r}_channel" for r in range(tiles)]
+                else:
+                    upper.append(f"@tile{t}_LLC_mmu_channel")
         children.append(cache(
             f"tile{t}_LLC", args.llc_sets // tiles, 16,
             upper=upper, lower=f"@tile{t}_LLC_DRAM_channel",
@@ -211,7 +222,7 @@ def build(args, nmfc_enabled):
         # the interleave fabric does, so both paths tag a line identically, and
         # they assert that nothing foreign to this tile ever crosses them.
         ports = [("fcD", f"@tile{t}_LLC_fcD_channel"), ("fcI", f"@tile{t}_LLC_fcI_channel")]
-        if args.mmu:
+        if args.mmu and args.walk_routing == "local":
             ports.append(("mmu", f"@tile{t}_LLC_mmu_channel"))
         for kind, lower in ports:
             children.append({
@@ -226,13 +237,31 @@ def build(args, nmfc_enabled):
             # grain-sized array probed alongside it. Deliberately small -- at
             # graph scale the regime is mostly-miss whatever the size, and a
             # generous TLB would flatter the design rather than measure it.
+            if args.walk_routing == "fabric":
+                # One interleave fabric per requesting MMU, reaching every
+                # slice. Nothing new: the memory network already routes by the
+                # tile named in a physical address and compacts on the way
+                # down, which is exactly what a walk reference needs once the
+                # page table stops being partitioned per channel.
+                children.append({
+                    "_comment": f"tile {t}'s walk references, routed to whichever slice holds the PTE",
+                    "name": f"tile{t}_mmu_fabric", "module": "channel", "model": "INTERLEAVE_FABRIC",
+                    "clock_period": CLOCK,
+                    "tiles": [f"@tile{s}_LLC_mmu{t}_channel" for s in range(tiles)],
+                    "hop_latency": 4, "queue_size": 32, "max_forward": {"bandwidth": 4},
+                    "compact_tile_bits": True,
+                })
+
             children.append({
-                "_comment": f"tile {t}: dual-page-size MMU. Walk references go to this tile's "
-                            f"own slice, which congruent page-table placement makes local.",
+                "_comment": (f"tile {t}: dual-page-size MMU. Walk references go to this tile's own slice, "
+                             f"which congruent page-table placement makes local."
+                             if args.walk_routing == "local" else
+                             f"tile {t}: dual-page-size MMU. Walks route over the fabric, because a shared "
+                             f"page table puts a PTE on whichever tile its own address names."),
                 "name": f"tile{t}_mmu", "module": "channel", "model": "NMFC_MMU",
                 "clock_period": CLOCK,
                 "vmem": "@VMEM", "tile": t,
-                "lower_level": f"@tile{t}_mmu_port",
+                "lower_level": (f"@tile{t}_mmu_fabric" if args.walk_routing == "fabric" else f"@tile{t}_mmu_port"),
                 "small_sets": args.tlb_sets, "small_ways": 4,
                 "huge_sets": args.tlb_sets // 2, "huge_ways": 4,
                 "hit_latency": 1, "mshr_size": 32,
@@ -389,6 +418,8 @@ def main():
     parser.add_argument("--mode-bit", type=int, default=38)
     parser.add_argument("--llc-sets", type=int, default=2048)
     parser.add_argument("--placement", default="round_robin")
+    parser.add_argument("--walk-routing", default="local", choices=["local", "fabric"],
+                        help="page-table walks stay on the tile (partitioned table) or route over the fabric (shared table)")
     parser.add_argument("--router", default="CONGRUENT_ROUTER",
                         choices=["CONGRUENT_ROUTER", "RELOCATION_ROUTER", "PHYSICAL_ROUTER"],
                         help="when the owning tile is decided, relative to translation")
