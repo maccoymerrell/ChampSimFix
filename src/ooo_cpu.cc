@@ -726,9 +726,9 @@ long O3_CPU::retire_rob()
 
   auto retire_count = std::distance(retire_begin, retire_end);
   num_retired += retire_count;
-  // Report that we advanced, in instructions -- but only if something is listening: the cycle
-  // count below costs a division, and an unobserved hook should cost a branch.
-  if (retire_count > 0 && champsim::hooks::progress.active()) {
+  if (retire_count > 0) {
+    // We advanced: report it against ourselves as a packet_consumer, in instructions. Whether
+    // anything is listening is the hook's business, not ours.
     champsim::hooks::progress.emit(static_cast<const champsim::modules::packet_consumer&>(*this), static_cast<uint64_t>(num_retired),
                                    static_cast<uint64_t>(current_time.time_since_epoch() / clock_period));
   }

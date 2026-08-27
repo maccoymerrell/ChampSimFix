@@ -115,6 +115,21 @@ TEST_CASE("A moved-from subscription no longer owns the callback")
   REQUIRE(calls == 1);
 }
 
+TEST_CASE("A hook knows whether anyone is listening")
+{
+  REQUIRE_FALSE(counter_hook.listening());
+  {
+    auto sub = counter_hook.subscribe([](const int&) {});
+    REQUIRE(counter_hook.listening());
+    {
+      auto second = counter_hook.subscribe([](const int&) {});
+      REQUIRE(counter_hook.listening());
+    }
+    REQUIRE(counter_hook.listening()); // one remains
+  }
+  REQUIRE_FALSE(counter_hook.listening()); // the last one went away
+}
+
 TEST_CASE("Declared hooks are registered under their names")
 {
   const auto& hooks = champsim::hook_registry::hooks();

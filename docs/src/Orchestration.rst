@@ -285,10 +285,11 @@ file lists them, so a study can add its own without modifying the framework:
     // wherever the event happens
     champsim::hooks::my_event.emit(addr, hit);
 
-A hook with no listeners costs a branch, so one may sit in a hot path. If building the payload
-itself costs anything — a division, a lookup — guard the whole thing::
+A hook nobody is listening to costs a load and a branch, so one may sit in a hot path and you do
+not need to guard it -- ``emit`` is already the fast path. If building the payload is itself
+expensive, ``listening()`` lets you skip that too::
 
-    if (champsim::hooks::my_event.active()) {
+    if (champsim::hooks::my_event.listening()) {
       champsim::hooks::my_event.emit(addr, expensive_to_compute());
     }
 
