@@ -37,6 +37,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <numeric>
 #include <string>
 #include <unordered_map>
@@ -58,7 +59,8 @@ public:
       : nmfc::tile_router_module(builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), map_(nmfc::tile_map_from(builder)), epoch_(builder.get_parameter<std::uint64_t>("epoch_migrations", true, std::uint64_t{100000})),
         pull_threshold_(builder.get_parameter<std::uint64_t>("pull_threshold", true, std::uint64_t{16})),
         slack_(builder.get_parameter<double>("imbalance_slack", true, 1.25)),
-        initial_(builder.get_parameter<std::string>("placement", true, std::string{"round_robin"})), placed_(map_.num_tiles(), 0)
+        cooldown_cap_(builder.get_parameter<std::uint32_t>("cooldown_cap", true, std::uint32_t{64})),
+        initial_(builder.get_parameter<std::string>("placement", true, std::string{"round_robin"})), placed_(map_.num_tiles(), 0), load_(map_.num_tiles(), 0)
   {
   }
 
@@ -81,14 +83,23 @@ public:
     return tile;
   }
 
-  void note_migration(champsim::origin origin, champsim::address vaddr, std::size_t from, std::size_t /*to*/) override
+  void note_migration(champsim::origin origin, champsim::address vaddr, std::size_t from, std::size_t to) override
   {
     // Credit the tile that *wanted* the grain, not the one that has it.
-    auto& pull = pulls_[key_of(origin, vaddr)];
+    const auto key = key_of(origin, vaddr);
+    auto& pull = pulls_[key];
     if (pull.empty()) {
       pull.assign(map_.num_tiles(), 0);
     }
     ++pull[from];
+
+    // Load, as opposed to grain count. Balancing grains does not balance work:
+    // measured here, an even 112/135/93/104 grains produced context occupancies
+    // of 179/340/106/158, because on a power-law graph one hot grain carries
+    // more traffic than twenty cold ones. So the balance term weighs the
+    // traffic a tile is actually serving.
+    ++load_[to];
+    ++volume_[key];
 
     if (++observed_ % epoch_ == 0) {
       rebalance();
@@ -102,11 +113,19 @@ public:
     }
     out.line(fmt::format("{} MIGRATIONS OBSERVED: {} REMAPS: {} REFUSED FOR BALANCE: {}", NAME, observed_, remapped_, refused_for_balance_));
     out.line(fmt::format("{} GRAINS PER TILE: {}", NAME, fmt::join(placed_, " ")));
+    out.line(fmt::format("{} MIGRATION LOAD PER TILE: {}", NAME, fmt::join(load_, " ")));
+    const auto dominance = dominance_count_ == 0 ? 0.0 : dominance_sum_ / static_cast<double>(dominance_count_);
+    out.line(fmt::format("{} PULL DOMINANCE: {:.3f} (uniform would be {:.3f}) REMAPPED AGAIN: {} of {}", NAME, dominance, 1.0 / double(map_.num_tiles()),
+                         rethrashed_, remapped_));
+    out.line(fmt::format("{} HELD FOR CONFIRMATION: {}", NAME, unconfirmed_));
     auto json = out.json();
     json.add("migrations_observed", observed_);
     json.add("remaps", remapped_);
     json.add("refused_for_balance", refused_for_balance_);
     json.add("grains_per_tile", placed_);
+    json.add("migration_load_per_tile", load_);
+    json.add("pull_dominance", dominance);
+    json.add("remapped_again", rethrashed_);
   }
 
 private:
@@ -125,7 +144,7 @@ private:
       return;
     }
     const auto tiles = map_.num_tiles();
-    const auto total = std::max<std::uint64_t>(std::accumulate(std::begin(placed_), std::end(placed_), std::uint64_t{0}), 1);
+    const auto total = std::max<std::uint64_t>(std::accumulate(std::begin(load_), std::end(load_), std::uint64_t{0}), 1);
     const auto ceiling = static_cast<std::uint64_t>(slack_ * static_cast<double>(total) / static_cast<double>(tiles));
 
     for (auto& [key, pull] : pulls_) {
@@ -136,10 +155,38 @@ private:
       if (pull[best] < pull_threshold_) {
         continue; // not enough evidence to be worth a shootdown
       }
+
+      // How lopsided the evidence actually is. With N tiles, a grain that every
+      // tile wants equally scores 1/N and carries no information at all -- and
+      // a 2 MiB grain holds half a million vertices, so whether the pull is
+      // signal or noise is a question about granularity, not about the policy.
+      // Recorded rather than assumed, because a policy that acts on noise looks
+      // exactly like a policy that is working until you measure this.
+      const auto total_pull = std::accumulate(std::begin(pull), std::end(pull), std::uint64_t{0});
+      dominance_sum_ += static_cast<double>(pull[best]) / static_cast<double>(std::max<std::uint64_t>(total_pull, 1));
+      ++dominance_count_;
+
+      auto& st = state_[key];
+      if (st.cooldown > 0) {
+        // Recently moved. Let the consequences of that move settle before
+        // believing what the next epoch says about it.
+        --st.cooldown;
+        std::fill(std::begin(pull), std::end(pull), 0);
+        continue;
+      }
+      if (st.last_best != best) {
+        // First epoch to name this tile. Remember it and require a second one
+        // to agree: a single epoch's winner is the thing that oscillates.
+        st.last_best = best;
+        ++unconfirmed_;
+        std::fill(std::begin(pull), std::end(pull), 0);
+        continue;
+      }
       // The balance term. Without it this rule has one fixed point -- every
       // grain on whichever tile pulled hardest first -- and that is the
       // configuration a minimum cut already showed to be 2.3x slower.
-      if (placed_[best] >= ceiling) {
+      // Would this move push the destination past its share of the *traffic*?
+      if (load_[best] + volume_[key] >= ceiling) {
         ++refused_for_balance_;
         std::fill(std::begin(pull), std::end(pull), 0);
         continue;
@@ -149,6 +196,12 @@ private:
       if (placement_->remap_grain(asid, vgrain, best)) {
         ++remapped_;
         ++placed_[best];
+        // Each move buys a longer wait before the next, so a grain that cannot
+        // settle stops paying for shootdowns it will only undo.
+        st.cooldown = std::min<std::uint32_t>(1U << st.moves, cooldown_cap_);
+        if (++st.moves > 1) {
+          ++rethrashed_;
+        }
       }
       std::fill(std::begin(pull), std::end(pull), 0);
     }
@@ -158,8 +211,12 @@ private:
   std::uint64_t epoch_;
   std::uint64_t pull_threshold_;
   double slack_;
+  std::uint32_t cooldown_cap_;
   std::string initial_;
   std::vector<std::uint64_t> placed_;
+  /** Migrations served per tile, and per grain: the balance term's real units. */
+  std::vector<std::uint64_t> load_;
+  std::unordered_map<std::uint64_t, std::uint64_t> volume_;
   nmfc::page_placement_sink* placement_ = nullptr;
 
   std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> pulls_;
@@ -167,6 +224,31 @@ private:
   std::uint64_t observed_ = 0;
   std::uint64_t remapped_ = 0;
   std::uint64_t refused_for_balance_ = 0;
+  /**
+   * What a grain's evidence has said before, and whether it is allowed to move.
+   *
+   * The measurement that forced this: pull dominance is 0.772 against a uniform
+   * 0.250, so the evidence is emphatically not noise -- and yet 86% of remaps
+   * were moving a grain that had already been moved. Both are true because
+   * acting on the evidence changes it. Move a grain to the tile that kept
+   * coming for it and its consumers now run there; their other accesses pull
+   * them away, so next epoch the pull comes from somewhere else and the grain
+   * chases it. The policy was oscillating, not learning.
+   *
+   * Two standard remedies, and the reason NUMA page migration has both:
+   * confirm the evidence across epochs before acting, and make a grain that has
+   * already moved wait longer each time before it may move again.
+   */
+  struct grain_state {
+    std::size_t last_best = std::numeric_limits<std::size_t>::max();
+    std::uint32_t moves = 0;
+    std::uint32_t cooldown = 0;
+  };
+  std::unordered_map<std::uint64_t, grain_state> state_;
+  double dominance_sum_ = 0.0;
+  std::uint64_t dominance_count_ = 0;
+  std::uint64_t rethrashed_ = 0;
+  std::uint64_t unconfirmed_ = 0;
 };
 
 static nmfc::tile_router_module::register_module<adaptive_router> adaptive_router_reg("ADAPTIVE_ROUTER");
