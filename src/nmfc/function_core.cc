@@ -157,6 +157,7 @@ public:
   long operate() final
   {
     long progress = 0;
+    port_blocked_ = false;
     progress += drain_returns();
     progress += drain_translations();
     progress += wake_timers();
@@ -171,6 +172,9 @@ public:
     const auto occupied = static_cast<std::uint64_t>(contexts_.size() - free_slots_.size());
     occupancy_time_ += occupied * ((current_time - last_sample_) / clock_period);
     last_sample_ = current_time;
+    if (port_blocked_) {
+      ++port_busy_cycles_;
+    }
     return progress;
   }
 
@@ -192,7 +196,8 @@ public:
   {
     accepted_ = arrived_ = departed_ = completed_ = 0;
     instructions_ = loads_ = stores_ = atomics_ = fetches_ = 0;
-    scoreboard_stalls_ = port_stalls_ = atomic_conflicts_ = translation_stalls_ = 0;
+    scoreboard_stalls_ = port_retries_ = atomic_conflicts_ = translation_stalls_ = 0;
+    port_busy_cycles_ = 0;
     ctx_code_hits_ = ctx_code_misses_ = ctx_data_hits_ = ctx_data_misses_ = 0;
     occupancy_time_ = 0;
     phase_start_ = current_time;
@@ -224,8 +229,11 @@ public:
     out.line(fmt::format("{} INSTRUCTIONS: {} CYCLES: {} IPC: {:.4f}", NAME, instructions_, elapsed, ipc));
     out.line(fmt::format("{} LOADS: {} STORES: {} ATOMICS: {} FETCHES: {}", NAME, loads_, stores_, atomics_, fetches_));
     out.line(fmt::format("{} CONTEXT OCCUPANCY mean: {:.2f} peak: {} of {}", NAME, occupancy, peak_occupancy_, contexts_.size()));
-    out.line(fmt::format("{} MEAN RESIDENCY: {:.1f} cycles STALLS scoreboard: {} port: {} atomic: {}", NAME, residency, scoreboard_stalls_, port_stalls_,
-                         atomic_conflicts_));
+    // Retries are per context per cycle, so they scale with occupancy and do not
+    // compare to anything; the cycle count does, which is why it leads.
+    const auto port_pct = elapsed == 0 ? 0.0 : 100.0 * static_cast<double>(port_busy_cycles_) / static_cast<double>(elapsed);
+    out.line(fmt::format("{} MEAN RESIDENCY: {:.1f} cycles STALLS scoreboard: {} atomic: {}", NAME, residency, scoreboard_stalls_, atomic_conflicts_));
+    out.line(fmt::format("{} PORT BLOCKED: {} cycles ({:.1f}% of elapsed) over {} retries", NAME, port_busy_cycles_, port_pct, port_retries_));
     const auto cold_start = cold_start_count_ == 0 ? 0.0 : static_cast<double>(cold_start_cycles_) / static_cast<double>(cold_start_count_);
     out.line(fmt::format("{} MIGRATION COLD START: {} cycles over {} arrivals (mean {:.1f})", NAME, cold_start_cycles_, cold_start_count_, cold_start));
 
@@ -247,7 +255,8 @@ public:
     json.add("num_contexts", contexts_.size());
     json.add("mean_residency_cycles", residency);
     json.add("scoreboard_stalls", scoreboard_stalls_);
-    json.add("port_stalls", port_stalls_);
+    json.add("port_retries", port_retries_);
+    json.add("port_busy_cycles", port_busy_cycles_);
     json.add("atomic_conflicts", atomic_conflicts_);
     const auto code_total = ctx_code_hits_ + ctx_code_misses_;
     const auto data_total = ctx_data_hits_ + ctx_data_misses_;
@@ -489,7 +498,8 @@ private:
     if (const auto block = eff_ip >> block_bits_; !ctx.has_fetched || ctx.fetched_block != block) {
       if (!issue_fetch(slot, eff_ip)) {
         ready_.push_back(slot); // port busy; try again next cycle
-        ++port_stalls_;
+        ++port_retries_;
+        port_blocked_ = true;
         return false;
       }
       ctx.fetched_block = block;
@@ -591,7 +601,8 @@ private:
 
     if (!mmu_->request_translation(xlat_tag(slot, code), ctx.origin, champsim::address{vaddr})) {
       ready_.push_back(slot); // the MMU is full; retry next cycle
-      ++port_stalls_;
+      ++port_retries_;
+      port_blocked_ = true;
       return false;
     }
     ctx.awaiting_translation = true;
@@ -693,7 +704,8 @@ private:
     // resume state that nothing else in this model requires.
     if (dcache_->rq_occupancy() + ops > dcache_->rq_size()) {
       ready_.push_back(slot);
-      ++port_stalls_;
+      ++port_retries_;
+      port_blocked_ = true;
       return false;
     }
 
@@ -901,7 +913,9 @@ private:
   std::uint64_t atomics_ = 0;
   std::uint64_t fetches_ = 0;
   std::uint64_t scoreboard_stalls_ = 0;
-  std::uint64_t port_stalls_ = 0;
+  std::uint64_t port_retries_ = 0;
+  std::uint64_t port_busy_cycles_ = 0;
+  bool port_blocked_ = false;
   std::uint64_t atomic_conflicts_ = 0;
   std::uint64_t translation_stalls_ = 0;
   std::uint64_t ctx_code_hits_ = 0;

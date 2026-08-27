@@ -117,7 +117,7 @@ public:
    */
   void set_budget(std::uint64_t invocations) { budget_ = invocations; }
 
-  [[nodiscard]] bool enabled() const { return enabled_; }
+  [[nodiscard]] bool enabled() const { return enabled_ && !budget_spent_; }
   [[nodiscard]] std::uint64_t baseline_instructions() const { return baseline_count_; }
 
   /**
@@ -129,7 +129,7 @@ public:
    */
   void declare_region(const std::string& name, const void* base, std::uint64_t bytes, const std::function<std::uint32_t(std::uint64_t)>& owner)
   {
-    if (!enabled_) {
+    if (!enabled_ || budget_spent_) {
       return;
     }
     // Rebase into a layout we control. The kernel's *access pattern* is the
@@ -168,10 +168,11 @@ public:
         std::exit(1);
       }
 
-      for (std::uint64_t page = 0; page < grain && k * grain + page < bytes; page += (std::uint64_t{1} << page_bits_)) {
-        emit_hint((vaddr + page) >> page_bits_, tile);
-        ++hinted;
-      }
+      // One hint per grain, not per page. The allocator keys placement by
+      // grain, so the other 511 pages of a 2 MiB grain rewrite the same entry
+      // -- at kron-24 that was half a million redundant records in the trace.
+      emit_hint(vaddr >> page_bits_, tile);
+      ++hinted;
     }
 
     regions_.push_back(region_map{real, real + bytes, start, std::move(grain_va)});
@@ -205,7 +206,7 @@ public:
   /** One ordinary host instruction: loop overhead, frontier bookkeeping. */
   void host(const void* load_address = nullptr, unsigned char src = R_NONE, unsigned char dst = R_NONE, bool branch = false, bool taken = false)
   {
-    if (!enabled_) {
+    if (!enabled_ || budget_spent_) {
       return;
     }
     auto rec = blank(nmfc::op::HOST, 0);
@@ -229,11 +230,17 @@ public:
    */
   std::uint64_t begin_call(std::uint32_t func_id = 1, bool no_return = false, bool deferred_join = false)
   {
-    if (!enabled_) {
+    if (!enabled_ || budget_spent_) {
       return 0;
     }
     if (budget_ != 0 && calls_ >= budget_) {
-      return 0; // recording is done; the kernel carries on correctly
+      // Stop both streams here, so the NMFC trace and its baseline cover
+      // exactly the same work. The kernel carries on correctly, untraced.
+      if (!budget_spent_) {
+        budget_spent_ = true;
+        std::fprintf(stderr, "nmfc: budget of %lu invocations reached; recording stops here\n", budget_);
+      }
+      return 0;
     }
     const auto token = ++token_counter_;
     body_.clear();
@@ -471,6 +478,7 @@ private:
   std::uint64_t baseline_count_ = 0;
   std::string path_;
   bool enabled_ = false;
+  bool budget_spent_ = false;
   bool in_call_ = false;
 
   std::uint32_t tiles_ = 4;
