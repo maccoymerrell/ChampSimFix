@@ -194,6 +194,16 @@ private:
     case nmfc::op::CALL:
       handle_call(rec);
       return;
+    case nmfc::op::JOIN: {
+      // The join half of fork/join. It names the same aperture slot the call
+      // did, so the tracking unit recognises it as a second reference to a
+      // token already in flight without any extra encoding.
+      auto instr = rec.instr;
+      instr.source_memory[0] = aperture_base_ + (rec.token << block_bits_);
+      ready_.push_back(inflate(instr));
+      ++joins_;
+      return;
+    }
     case nmfc::op::BODY:
     case nmfc::op::RET:
     case nmfc::op::ATOMIC:
@@ -308,6 +318,7 @@ private:
 
   std::uint64_t calls_ = 0;
   std::uint64_t hints_ = 0;
+  std::uint64_t joins_ = 0;
 };
 
 static champsim::modules::instruction_producer::register_module<nmfc_producer> nmfc_producer_reg("NMFC_PRODUCER");

@@ -170,7 +170,7 @@ public:
    * Begin an invocation. Everything emitted until end_call is its body, which
    * is what makes the slicing decision explicit and movable.
    */
-  std::uint64_t begin_call(std::uint32_t func_id = 1, bool no_return = false)
+  std::uint64_t begin_call(std::uint32_t func_id = 1, bool no_return = false, bool deferred_join = false)
   {
     if (!enabled_) {
       return 0;
@@ -185,6 +185,9 @@ public:
     call_.func_id_ = func_id;
     if (no_return) {
       call_.flag_bits |= nmfc::FLAG_NO_RETURN;
+    }
+    if (deferred_join) {
+      call_.flag_bits |= nmfc::FLAG_DEFERRED_JOIN;
     }
     in_call_ = true;
     body_pc_ = FUNC_CODE_BASE;
@@ -248,6 +251,26 @@ public:
     ++calls_;
   }
 
+  /**
+   * Wait for a forked invocation.
+   *
+   * Emitted after however many calls the window holds, which is the point: the
+   * host forks a batch and only then blocks, so in-flight invocations are
+   * bounded by the tracking unit rather than by how far the reorder buffer can
+   * see past a blocking call.
+   */
+  void emit_join(std::uint64_t token)
+  {
+    if (!enabled_) {
+      return;
+    }
+    auto rec = blank(nmfc::op::JOIN, token);
+    rec.instr.ip = next_host_pc();
+    rec.instr.destination_registers[0] = R_ACC;
+    write(rec);
+    ++joins_;
+  }
+
   void close()
   {
     if (!enabled_) {
@@ -274,7 +297,7 @@ public:
       std::fprintf(stderr, "nmfc: wrote baseline -- %lu instructions\n", baseline_count_);
     }
     enabled_ = false;
-    std::fprintf(stderr, "nmfc: wrote %s -- %lu records, %lu invocations\n", path_.c_str(), records_, calls_);
+    std::fprintf(stderr, "nmfc: wrote %s -- %lu records, %lu invocations, %lu joins\n", path_.c_str(), records_, calls_, joins_);
   }
 
 private:
@@ -377,6 +400,7 @@ private:
   std::uint64_t token_counter_ = 0;
   std::uint64_t records_ = 0;
   std::uint64_t calls_ = 0;
+  std::uint64_t joins_ = 0;
 };
 
 } // namespace nmfc::gapbs

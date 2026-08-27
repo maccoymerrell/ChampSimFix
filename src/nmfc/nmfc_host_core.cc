@@ -132,6 +132,11 @@ void NMFC_HOST_CORE::end_phase(champsim::stat_report& out)
     const auto mean = ftu_cycles_ == 0 ? 0.0 : static_cast<double>(ftu_occupancy_sum_) / static_cast<double>(ftu_cycles_);
     out.line(fmt::format("{} OFFLOADS ISSUED: {} COMPLETED: {} FIRE-AND-FORGET: {}", NAME, offloads_issued_, offloads_completed_, offload_fire_and_forget_));
     out.line(fmt::format("{} FTU IN FLIGHT mean: {:.2f} peak: {} of {} DISPATCH STALLS: {}", NAME, mean, ftu_peak_, FTU.size(), offload_dispatch_stalls_));
+    if (offload_forks_ > 0) {
+      const auto free_joins = offload_joins_ == 0 ? 0.0 : 100.0 * static_cast<double>(offload_joins_already_home_) / static_cast<double>(offload_joins_);
+      out.line(fmt::format("{} FORK/JOIN forks: {} joins: {} already home at join: {} ({:.1f}%)", NAME, offload_forks_, offload_joins_,
+                           offload_joins_already_home_, free_joins));
+    }
 
     auto json = out.json();
     json.add("offloads_issued", offloads_issued_);
@@ -141,6 +146,9 @@ void NMFC_HOST_CORE::end_phase(champsim::stat_report& out)
     json.add("ftu_peak_in_flight", ftu_peak_);
     json.add("ftu_size", FTU.size());
     json.add("offload_dispatch_stalls", offload_dispatch_stalls_);
+    json.add("offload_forks", offload_forks_);
+    json.add("offload_joins", offload_joins_);
+    json.add("offload_joins_already_home", offload_joins_already_home_);
   }
 }
 
@@ -1096,6 +1104,8 @@ std::pair<champsim::address, bool> NMFC_HOST_CORE::impl_btb_prediction(champsim:
 // LCOV_EXCL_START Exclude the following function from LCOV
 void NMFC_HOST_CORE::print_deadlock()
 {
+  print_ftu_deadlock(); // NMFC: the tracking unit is part of this core's state
+
   fmt::print("DEADLOCK! CPU {} cycle {}\n", consumer_id(), current_time.time_since_epoch() / clock_period);
 
   auto instr_pack = [period = clock_period, this](const auto& entry) {
@@ -1183,12 +1193,65 @@ bool NMFC_CacheBus::issue_write(request_type data_packet)
 
 bool NMFC_HOST_CORE::offload_slots_available(const ooo_model_instr& instr) const
 {
-  const auto needed = std::count_if(std::begin(instr.source_memory), std::end(instr.source_memory), [this](auto addr) { return is_offload(addr); });
+  // A join references a token that already holds a slot, so it needs no new
+  // one. Counting it as if it did would stall dispatch on a full tracking unit
+  // precisely when the join that would drain it is the next thing to run --
+  // deadlocking the fork/join pattern this exists to enable.
+  long needed = 0;
+  for (auto addr : instr.source_memory) {
+    if (is_offload(addr) && find_token((addr.to<uint64_t>() - aperture_base_) >> nmfc_block_bits_) >= FTU.size()) {
+      ++needed;
+    }
+  }
   if (needed == 0) {
     return true;
   }
   const auto free_slots = std::count_if(std::begin(FTU), std::end(FTU), [](const auto& entry) { return !entry.has_value(); });
   return free_slots >= needed;
+}
+
+std::size_t NMFC_HOST_CORE::find_token(uint64_t token) const
+{
+  const auto it = std::find_if(std::begin(FTU), std::end(FTU), [token](const auto& entry) { return entry.has_value() && entry->token == token; });
+  return static_cast<std::size_t>(std::distance(std::begin(FTU), it));
+}
+
+void NMFC_HOST_CORE::satisfy_waiter(ftu_waiter& waiter)
+{
+  // The same bookkeeping LSQ_ENTRY::finish does for a load: the owning
+  // instruction is still resident, so its physical slot indexes in O(1).
+  if (!waiter.pending) {
+    return;
+  }
+  auto& owner = ROB.at_slot(waiter.rob_slot);
+  if (owner.instr_id == waiter.instr_id) {
+    ++owner.completed_mem_ops;
+    assert(owner.completed_mem_ops <= owner.num_mem_ops());
+    if (owner.executed && !owner.completed && owner.completed_mem_ops == owner.num_mem_ops()) {
+      candidate_set(mem_complete_candidates_, waiter.rob_slot);
+    }
+    complete_stage_clean_ = false;
+  }
+  waiter.pending = false;
+}
+
+void NMFC_HOST_CORE::retire_if_done(std::size_t idx)
+{
+  auto& slot = FTU.at(idx);
+  if (!slot.has_value()) {
+    return;
+  }
+  auto& entry = *slot;
+  if (entry.call.pending || entry.join.pending || !entry.returned) {
+    return;
+  }
+  // A forked invocation keeps its slot until its join has been seen: the result
+  // exists, but nothing has asked for it yet.
+  if (entry.deferred && !entry.join_seen) {
+    return;
+  }
+  slot.reset();
+  ++offloads_completed_;
 }
 
 void NMFC_HOST_CORE::allocate_offload(const ooo_model_instr& instr, std::size_t rob_slot, champsim::address addr)
@@ -1197,10 +1260,31 @@ void NMFC_HOST_CORE::allocate_offload(const ooo_model_instr& instr, std::size_t 
   // from an instruction back to the invocation it names.
   const auto token = (addr.to<uint64_t>() - aperture_base_) >> nmfc_block_bits_;
 
+  // A second reference to a token already in flight is the JOIN half of
+  // fork/join: the same aperture address, so no extra encoding is needed to
+  // tell them apart -- an entry already existing *is* the distinction.
+  if (const auto existing = find_token(token); existing < FTU.size()) {
+    auto& entry = *FTU[existing];
+    ++offload_joins_;
+    entry.join_seen = true;
+    entry.join = ftu_waiter{instr.instr_id, rob_slot, true};
+    if (entry.returned) {
+      // Already home: the fork bought the whole latency and the join is free.
+      ++offload_joins_already_home_;
+      satisfy_waiter(entry.join);
+    }
+    retire_if_done(existing);
+    return;
+  }
+
   auto slot = std::find_if(std::begin(FTU), std::end(FTU), [](const auto& entry) { return !entry.has_value(); });
   assert(slot != std::end(FTU)); // dispatch gated on availability above
 
-  slot->emplace(ftu_entry{token, instr.instr_id, rob_slot, instr.origin, false});
+  ftu_entry fresh{};
+  fresh.token = token;
+  fresh.origin = instr.origin;
+  fresh.call = ftu_waiter{instr.instr_id, rob_slot, true};
+  slot->emplace(fresh);
   ftu_dispatch_queue_.push_back(static_cast<std::size_t>(std::distance(std::begin(FTU), slot)));
   ++offloads_issued_;
 }
@@ -1234,6 +1318,7 @@ long NMFC_HOST_CORE::dispatch_offloads()
       break;
     }
     entry->dispatched = true;
+    entry->deferred = body->deferred_join();
     ftu_dispatch_queue_.pop_front();
     ++progress;
 
@@ -1241,7 +1326,22 @@ long NMFC_HOST_CORE::dispatch_offloads()
     // slot frees now rather than on a return that will never come.
     if (body->no_return()) {
       ++offload_fire_and_forget_;
-      complete_offload(idx);
+      satisfy_waiter(entry->call);
+      entry->returned = true; // nothing will come back, and nothing waits for it
+      entry->join_seen = true;
+      retire_if_done(idx);
+      continue;
+    }
+
+    // Fork: retire the call now and keep the entry alive for a later join.
+    // Without this the call sits at the head of the reorder buffer for the
+    // whole invocation, and in-flight offloads are capped by what fits behind
+    // it -- which is the opposite of what a machine with a thousand contexts
+    // wants.
+    if (entry->deferred) {
+      ++offload_forks_;
+      satisfy_waiter(entry->call);
+      retire_if_done(idx);
     }
   }
   return progress;
@@ -1249,33 +1349,46 @@ long NMFC_HOST_CORE::dispatch_offloads()
 
 void NMFC_HOST_CORE::complete_offload(std::size_t idx)
 {
-  auto& entry = FTU.at(idx);
-  if (!entry.has_value()) {
+  auto& slot = FTU.at(idx);
+  if (!slot.has_value()) {
     return;
   }
+  satisfy_waiter(slot->call);
+  satisfy_waiter(slot->join);
+  slot->returned = true;
+  slot->join_seen = true;
+  retire_if_done(idx);
+}
 
-  // Same bookkeeping LSQ_ENTRY::finish does for a load: the owning instruction
-  // is still resident, so its physical slot indexes in O(1).
-  auto& owner = ROB.at_slot(entry->rob_slot);
-  if (owner.instr_id == entry->instr_id) {
-    ++owner.completed_mem_ops;
-    assert(owner.completed_mem_ops <= owner.num_mem_ops());
-    if (owner.executed && !owner.completed && owner.completed_mem_ops == owner.num_mem_ops()) {
-      candidate_set(mem_complete_candidates_, entry->rob_slot);
+void NMFC_HOST_CORE::print_ftu_deadlock() const
+{
+  const auto occupied = std::count_if(std::begin(FTU), std::end(FTU), [](const auto& e) { return e.has_value(); });
+  fmt::print("[{}_FTU] occupied: {}/{} dispatch queue: {}\n", NAME, occupied, FTU.size(), ftu_dispatch_queue_.size());
+  std::size_t shown = 0;
+  for (std::size_t idx = 0; idx < FTU.size() && shown < 8; ++idx) {
+    if (FTU[idx].has_value()) {
+      const auto& e = *FTU[idx];
+      fmt::print("[{}_FTU]   slot {} token {} dispatched {} returned {} deferred {} join_seen {} call_pending {} join_pending {}\n", NAME, idx, e.token, e.dispatched, e.returned,
+                 e.deferred, e.join_seen, e.call.pending, e.join.pending);
+      ++shown;
     }
-    complete_stage_clean_ = false;
   }
-
-  entry.reset();
-  ++offloads_completed_;
 }
 
 void NMFC_HOST_CORE::accept_return(const nmfc::completion_msg& msg)
 {
-  auto it = std::find_if(std::begin(FTU), std::end(FTU), [&msg](const auto& entry) { return entry.has_value() && entry->token == msg.token; });
-  if (it != std::end(FTU)) {
-    complete_offload(static_cast<std::size_t>(std::distance(std::begin(FTU), it)));
+  const auto idx = find_token(msg.token);
+  if (idx >= FTU.size()) {
+    return;
   }
+  auto& entry = *FTU[idx];
+  entry.returned = true;
+
+  // A blocking call is satisfied by the return itself; a forked one was already
+  // satisfied at dispatch, so it is its join that is waiting here.
+  satisfy_waiter(entry.call);
+  satisfy_waiter(entry.join);
+  retire_if_done(idx);
 }
 
 // NMFC: the champsim::modules::core_module member definitions that follow here

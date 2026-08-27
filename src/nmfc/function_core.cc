@@ -163,8 +163,14 @@ public:
     progress += issue_cycle();
     progress += push_completions();
     progress += push_migrations();
-    occupancy_sum_ += static_cast<std::uint64_t>(contexts_.size() - free_slots_.size());
-    ++cycles_;
+
+    // Time-weighted, not per-call: operate() is skipped on idle cycles, so
+    // counting per call averages over busy cycles only and reports a machine
+    // far busier than it is. The elapsed span since the last sample covers
+    // whatever was skipped.
+    const auto occupied = static_cast<std::uint64_t>(contexts_.size() - free_slots_.size());
+    occupancy_time_ += occupied * ((current_time - last_sample_) / clock_period);
+    last_sample_ = current_time;
     return progress;
   }
 
@@ -188,8 +194,9 @@ public:
     instructions_ = loads_ = stores_ = atomics_ = fetches_ = 0;
     scoreboard_stalls_ = port_stalls_ = atomic_conflicts_ = translation_stalls_ = 0;
     ctx_code_hits_ = ctx_code_misses_ = ctx_data_hits_ = ctx_data_misses_ = 0;
-    occupancy_sum_ = 0;
-    cycles_ = 0;
+    occupancy_time_ = 0;
+    phase_start_ = current_time;
+    last_sample_ = current_time;
     peak_occupancy_ = contexts_.size() - free_slots_.size();
     residency_sum_ = 0;
     residency_count_ = 0;
@@ -202,11 +209,20 @@ public:
     if (accepted_ == 0 && arrived_ == 0) {
       return;
     }
-    const auto occupancy = cycles_ == 0 ? 0.0 : static_cast<double>(occupancy_sum_) / static_cast<double>(cycles_);
+    // Elapsed cycles, including the ones this core skipped: a function core
+    // that is idle is still part of the machine, and its idleness is the thing
+    // worth seeing.
+    const auto elapsed = static_cast<std::uint64_t>((current_time - phase_start_) / clock_period);
+    const auto occupancy = elapsed == 0 ? 0.0 : static_cast<double>(occupancy_time_) / static_cast<double>(elapsed);
     const auto residency = residency_count_ == 0 ? 0.0 : static_cast<double>(residency_sum_) / static_cast<double>(residency_count_);
+    const auto ipc = elapsed == 0 ? 0.0 : static_cast<double>(instructions_) / static_cast<double>(elapsed);
 
     out.line(fmt::format("{} TILE {} INVOCATIONS: {} MIGRATED IN: {} OUT: {} COMPLETED: {}", NAME, tile_, accepted_, arrived_, departed_, completed_));
-    out.line(fmt::format("{} INSTRUCTIONS: {} LOADS: {} STORES: {} ATOMICS: {} FETCHES: {}", NAME, instructions_, loads_, stores_, atomics_, fetches_));
+    // IPC from this core's own perspective. Reporting only the host's IPC
+    // describes a machine that is deliberately doing its work elsewhere, so
+    // every core that executes instructions reports its own rate.
+    out.line(fmt::format("{} INSTRUCTIONS: {} CYCLES: {} IPC: {:.4f}", NAME, instructions_, elapsed, ipc));
+    out.line(fmt::format("{} LOADS: {} STORES: {} ATOMICS: {} FETCHES: {}", NAME, loads_, stores_, atomics_, fetches_));
     out.line(fmt::format("{} CONTEXT OCCUPANCY mean: {:.2f} peak: {} of {}", NAME, occupancy, peak_occupancy_, contexts_.size()));
     out.line(fmt::format("{} MEAN RESIDENCY: {:.1f} cycles STALLS scoreboard: {} port: {} atomic: {}", NAME, residency, scoreboard_stalls_, port_stalls_,
                          atomic_conflicts_));
@@ -220,6 +236,8 @@ public:
     json.add("migrated_out", departed_);
     json.add("completed", completed_);
     json.add("instructions", instructions_);
+    json.add("cycles", elapsed);
+    json.add("ipc", ipc);
     json.add("loads", loads_);
     json.add("stores", stores_);
     json.add("atomics", atomics_);
@@ -890,8 +908,9 @@ private:
   std::uint64_t ctx_code_misses_ = 0;
   std::uint64_t ctx_data_hits_ = 0;
   std::uint64_t ctx_data_misses_ = 0;
-  std::uint64_t occupancy_sum_ = 0;
-  std::uint64_t cycles_ = 0;
+  std::uint64_t occupancy_time_ = 0;
+  champsim::chrono::clock::time_point phase_start_{};
+  champsim::chrono::clock::time_point last_sample_{};
   std::size_t peak_occupancy_ = 0;
   std::uint64_t residency_sum_ = 0;
   std::uint64_t residency_count_ = 0;

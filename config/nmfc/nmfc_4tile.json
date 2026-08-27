@@ -2104,7 +2104,7 @@
       ],
       "fabric": "@fn_fabric",
       "image": "@fn_image",
-      "ftu_size": 64
+      "ftu_size": 1024
     },
     {
       "name": "heartbeat",

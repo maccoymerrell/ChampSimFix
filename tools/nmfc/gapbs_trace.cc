@@ -163,6 +163,16 @@ struct options {
   std::string slice = "vertex";     // "vertex" | "edge-chunk"
   std::int64_t chunk = 32;          // neighbours per invocation under edge-chunk
   std::int64_t max_visits = 20000;
+  /**
+   * How many invocations to fork before joining them.
+   *
+   * 1 is the blocking call: fork and immediately wait, which caps in-flight
+   * work at what the reorder buffer holds past the call. Larger windows are
+   * the point of the architecture -- the host issues a batch and only then
+   * blocks, so the memory tiles have enough independent work to stay busy
+   * while some of it migrates.
+   */
+  std::int64_t fork_window = 1;
 };
 
 } // namespace
@@ -192,6 +202,8 @@ int main(int argc, char** argv)
       opt.slice = next();
     } else if (arg == "--chunk") {
       opt.chunk = std::stoll(next());
+    } else if (arg == "--fork-window") {
+      opt.fork_window = std::stoll(next());
     } else if (arg == "--visits") {
       opt.max_visits = std::stoll(next());
     } else {
@@ -270,6 +282,7 @@ int main(int argc, char** argv)
 
   std::int64_t visits = 0;
   std::int64_t invocations = 0;
+  std::vector<std::uint64_t> outstanding; // forked but not yet joined
 
   while (!frontier.empty() && visits < opt.max_visits) {
     for (const auto u : frontier) {
@@ -286,7 +299,8 @@ int main(int argc, char** argv)
         // Host side: take the next work item off the frontier, then offload.
         trace.host(reinterpret_cast<const void*>(place.values_addr(u)), hooks::R_VERTEX, hooks::R_VERTEX);
 
-        const auto token = trace.begin_call();
+        const bool forking = opt.fork_window > 1;
+        const auto token = trace.begin_call(1, /*no_return=*/false, /*deferred_join=*/forking);
         ++invocations;
 
         // The row bounds. Adjacent words, so the second usually hits the block
@@ -315,8 +329,28 @@ int main(int argc, char** argv)
           }
         }
         trace.end_call(token);
+
+        // Fork now; join once the window is full. A window of one is the
+        // blocking call, which is what makes it the control rather than a
+        // separate code path.
+        if (opt.fork_window > 1) {
+          outstanding.push_back(token);
+          if (static_cast<std::int64_t>(outstanding.size()) >= opt.fork_window) {
+            for (const auto pending : outstanding) {
+              trace.emit_join(pending);
+            }
+            outstanding.clear();
+          }
+        }
       }
     }
+    // Drain the window at the frontier boundary: the next level depends on this
+    // one, so the host has to wait here whatever the window size.
+    for (const auto pending : outstanding) {
+      trace.emit_join(pending);
+    }
+    outstanding.clear();
+
     frontier.swap(next_frontier);
     next_frontier.clear();
   }
@@ -324,6 +358,6 @@ int main(int argc, char** argv)
   trace.close();
 
   std::cerr << "nmfc: " << visits << " vertex visits, " << invocations << " invocations"
-            << " (slice=" << opt.slice << ", partition=" << opt.partition << ")\n";
+            << " (slice=" << opt.slice << ", partition=" << opt.partition << ", fork-window=" << opt.fork_window << ")\n";
   return 0;
 }

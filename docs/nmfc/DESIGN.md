@@ -476,3 +476,35 @@ knob and why the sweep has to cover both graph families.
   but it only *helps* to the extent the graph has locality in vertex id, which
   is why road graphs and kronecker graphs should behave differently and why
   both belong in the sweep.
+
+### What the first real GAPBS runs say
+
+kron-20, 1500 vertex visits, 4 tiles, translation modeled:
+
+| layout | slice | migrations | per invocation | context occupancy |
+|---|---|---|---|---|
+| stripe | vertex | 4,110,058 | ~3,015 | 15.3 / 256 |
+| block  | vertex | 4,126,307 | ~3,028 | 15.6 / 256 |
+
+**Block partitioning bought nothing.** That is not a defect in the placement
+pass; it is the pass being asked to do something it cannot. Partitioning the
+*layout* by vertex id only helps if the *graph* has locality in vertex id, and
+a kronecker graph's edges are essentially random with respect to it. The
+synthetic generator's `--locality` knob simulated a graph that had already been
+partitioned; GAPBS's kron has not been.
+
+So the honest conclusion is sharper than "siloing helps": **placement alone is
+not a strategy.** Getting value from it requires one of
+
+* **reordering the graph** so that partitions are contiguous in vertex id —
+  GAPBS ships relabelling, and a real partitioner (METIS, or Afforest-style
+  clustering) would be the serious version;
+* **a graph with natural locality**, which is exactly what the road networks in
+  the GAP suite are and why they belong in the sweep alongside kron and urand;
+* **or a different unit of placement entirely** — co-locating edges rather than
+  vertices, which is also what triangle counting would want.
+
+The 6% context occupancy in both rows is the other half of the story: with
+~3,000 hops per invocation the machine spends its time in the fabric rather
+than at memory, so almost nothing is resident. Migration is not a cost here, it
+is the workload.

@@ -86,6 +86,18 @@ enum class op : std::uint8_t {
    * owning function core, which is what makes atomicity local here.
    */
   ATOMIC = 5,
+  /**
+   * Wait for the invocation named by `token` to return.
+   *
+   * The join half of fork/join. A CALL flagged FLAG_DEFERRED_JOIN completes on
+   * the host the moment it is dispatched, so the host keeps issuing rather than
+   * stalling with the call at the head of its reorder buffer; the JOIN is where
+   * it actually waits. Separating the two is what lets one compute tile keep
+   * hundreds of invocations in flight, which is the whole premise -- a host
+   * that blocks at the call site can never have more outstanding than its
+   * reorder buffer will hold.
+   */
+  JOIN = 6,
 };
 
 /**
@@ -131,6 +143,13 @@ enum flags : std::uint8_t {
    * branch prediction for free.
    */
   FLAG_TAKEN_TARGET = 1U << 1,
+  /**
+   * Fork now, join later (CALL only). The call instruction retires as soon as
+   * the invocation is dispatched, and a later JOIN record blocks on the result.
+   * Without this the call is an ordinary load: correct, but it caps in-flight
+   * invocations at what the reorder buffer can hold past it.
+   */
+  FLAG_DEFERRED_JOIN = 1U << 2,
 };
 
 /**

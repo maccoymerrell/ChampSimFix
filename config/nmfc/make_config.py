@@ -317,7 +317,7 @@ def build(args, nmfc_enabled):
     if nmfc_enabled:
         core["fabric"] = "@fn_fabric"
         core["image"] = "@fn_image"
-        core["ftu_size"] = args.ftu_size
+        core["ftu_size"] = args.ftu_size if args.ftu_size > 0 else args.tiles * args.contexts
     children.append(core)
 
     children.append({"name": "heartbeat", "module": "listener", "model": "HEARTBEAT",
@@ -358,7 +358,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tiles", type=int, default=4)
     parser.add_argument("--contexts", type=int, default=256)
-    parser.add_argument("--ftu-size", type=int, default=64)
+    # The tracking unit is the ceiling on in-flight invocations for the whole
+    # machine, so by default it is sized to the total context count. Left at a
+    # small value it silently caps everything: a 1024-context machine with a
+    # 64-entry unit can never exceed 64 outstanding, and every occupancy number
+    # it reports describes the unit rather than the architecture.
+    parser.add_argument("--ftu-size", type=int, default=0,
+                        help="0 (default) sizes it to tiles x contexts")
     parser.add_argument("--grain-bits", type=int, default=21)
     parser.add_argument("--mode-bit", type=int, default=38)
     parser.add_argument("--llc-sets", type=int, default=2048)

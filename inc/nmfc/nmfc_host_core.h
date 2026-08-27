@@ -483,12 +483,28 @@ private:
   // when dispatch sees an address inside the offload aperture, and released
   // when the invocation returns -- or immediately at dispatch for a
   // fire-and-forget call, which is why those cost the host no tracking slot.
-  struct ftu_entry {
-    uint64_t token = 0;
+  /** One instruction waiting on an invocation. */
+  struct ftu_waiter {
     uint64_t instr_id = 0;
     std::size_t rob_slot = 0;
+    bool pending = false;
+  };
+
+  struct ftu_entry {
+    uint64_t token = 0;
     champsim::origin origin{};
     bool dispatched = false;
+    bool returned = false;  // the invocation came back
+    bool deferred = false;  // fork/join: the call retires at dispatch
+    bool join_seen = false; // a JOIN has been dispatched for this token
+
+    // TWO waiters, not one. The call and its join are separate instructions and
+    // can both be in the reorder buffer at once -- if the fabric back-pressures,
+    // calls sit undispatched while their joins arrive behind them. Collapsing
+    // them into a single waiter lets the join overwrite the call, and the call
+    // then never completes: it sits at the head of the reorder buffer forever.
+    ftu_waiter call{};
+    ftu_waiter join{};
   };
   std::vector<std::optional<ftu_entry>> FTU;
   std::deque<std::size_t> ftu_dispatch_queue_;
@@ -503,6 +519,9 @@ private:
   uint64_t offloads_completed_ = 0;
   uint64_t offload_dispatch_stalls_ = 0;
   uint64_t offload_fire_and_forget_ = 0;
+  uint64_t offload_forks_ = 0;
+  uint64_t offload_joins_ = 0;
+  uint64_t offload_joins_already_home_ = 0;
   uint64_t ftu_occupancy_sum_ = 0;
   uint64_t ftu_cycles_ = 0;
   std::size_t ftu_peak_ = 0;
@@ -511,13 +530,21 @@ private:
   [[nodiscard]] bool is_offload(champsim::address addr) const { return addr.to<uint64_t>() >= aperture_base_; }
 
   void allocate_offload(const ooo_model_instr& instr, std::size_t rob_slot, champsim::address addr);
+  /** Satisfy whatever instruction is waiting on this entry, and free it. */
   void complete_offload(std::size_t idx);
+  /** Mark the waiting instruction's memory op done without freeing the entry. */
+  void satisfy_waiter(ftu_waiter& waiter);
+  /** Free the entry once nothing is waiting on it and nothing more is coming. */
+  void retire_if_done(std::size_t idx);
+  /** Find the entry tracking a token, or FTU.size() if there is none. */
+  [[nodiscard]] std::size_t find_token(uint64_t token) const;
   long dispatch_offloads();
 
   /** Dispatch gate: an instruction that needs tracking slots waits for them. */
   [[nodiscard]] bool offload_slots_available(const ooo_model_instr& instr) const;
 
   void accept_return(const nmfc::completion_msg& msg) override;
+  void print_ftu_deadlock() const;
 
 public:
   bool is_warmup() const { return warmup_; }

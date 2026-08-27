@@ -73,6 +73,7 @@ struct function_body {
   std::vector<body_instr> instrs;
 
   [[nodiscard]] bool no_return() const { return (flag_bits & FLAG_NO_RETURN) != 0; }
+  [[nodiscard]] bool deferred_join() const { return (flag_bits & FLAG_DEFERRED_JOIN) != 0; }
 };
 
 /** What a context is doing right now. */
