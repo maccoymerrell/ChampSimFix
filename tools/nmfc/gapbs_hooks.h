@@ -107,6 +107,16 @@ public:
     }
   }
 
+  /**
+   * Stop emitting after this many invocations.
+   *
+   * A real kernel on a real graph runs far past what is worth simulating, and
+   * it has to keep running correctly afterwards or the traversal it traces is
+   * not the one the benchmark performs. So the budget stops the *recording*,
+   * not the kernel.
+   */
+  void set_budget(std::uint64_t invocations) { budget_ = invocations; }
+
   [[nodiscard]] bool enabled() const { return enabled_; }
   [[nodiscard]] std::uint64_t baseline_instructions() const { return baseline_count_; }
 
@@ -122,22 +132,69 @@ public:
     if (!enabled_) {
       return;
     }
-    const auto start = reinterpret_cast<std::uint64_t>(base);
+    // Rebase into a layout we control. The kernel's *access pattern* is the
+    // thing worth capturing; its addresses are wherever malloc and mmap happened
+    // to land, which is precisely what the placement pass exists to decide.
+    //
+    // Placement is expressed by *choosing the address*, not by hinting against
+    // it. A virtual address already names its tile, in the tile-select field the
+    // function core reads to decide local-vs-migrate before it ever translates.
+    // A hint that contradicted that field would put the data on one tile and
+    // send the invocation to another -- so a grain destined for tile t is given
+    // a virtual grain whose select field *is* t, and the hint then merely agrees.
+    const auto real = reinterpret_cast<std::uint64_t>(base);
     const std::uint64_t grain = std::uint64_t{1} << grain_bits_;
+    const auto num_grains = (bytes + grain - 1) / grain;
+    const auto start = next_region_base(bytes);
+
+    // Grains are handed out per tile, so a skewed partition simply leaves gaps
+    // in the other tiles' arenas rather than landing on the wrong one.
+    std::vector<std::uint64_t> grain_va(num_grains);
+    std::vector<std::uint64_t> next_slot(tiles_, 0);
     std::uint64_t hinted = 0;
 
-    for (std::uint64_t offset = 0; offset < bytes; offset += grain) {
-      const auto vaddr = start + offset;
-      const auto tile = owner ? (owner(offset) % tiles_) : natural_tile(vaddr);
-      for (std::uint64_t page = 0; page < grain; page += (std::uint64_t{1} << page_bits_)) {
-        if (offset + page >= bytes) {
-          break;
-        }
+    for (std::uint64_t k = 0; k < num_grains; ++k) {
+      const auto tile = owner ? (owner(k * grain) % tiles_) : static_cast<std::uint32_t>(k % tiles_);
+      const auto slot = next_slot[tile]++;
+      const auto vaddr = start + (slot * tiles_ + tile) * grain;
+      grain_va[k] = vaddr;
+
+      // The invariant this whole layout exists to hold. If it ever fails, the
+      // simulator would catch it later as a locality assertion inside a tile
+      // port, a long way from the cause.
+      if (natural_tile(vaddr) != tile) {
+        std::fprintf(stderr, "nmfc: FATAL: region %s grain %lu wants tile %u but address %#lx names tile %u\n", name.c_str(), k, tile, vaddr,
+                     natural_tile(vaddr));
+        std::exit(1);
+      }
+
+      for (std::uint64_t page = 0; page < grain && k * grain + page < bytes; page += (std::uint64_t{1} << page_bits_)) {
         emit_hint((vaddr + page) >> page_bits_, tile);
         ++hinted;
       }
     }
+
+    regions_.push_back(region_map{real, real + bytes, start, std::move(grain_va)});
     std::fprintf(stderr, "nmfc: region %-14s base %#018lx  %8.1f MiB  %lu page hints\n", name.c_str(), start, double(bytes) / (1024 * 1024), hinted);
+  }
+
+  /**
+   * Translate a real address into the simulated layout.
+   *
+   * Anything outside a declared region passes through: stack and scratch are
+   * not what the placement pass is about, and leaving them alone keeps their
+   * behaviour honest.
+   */
+  [[nodiscard]] std::uint64_t rebase(const void* address) const
+  {
+    const auto raw = reinterpret_cast<std::uint64_t>(address);
+    for (const auto& region : regions_) {
+      if (raw >= region.real_begin && raw < region.real_end) {
+        const auto delta = raw - region.real_begin;
+        return region.grain_va[delta >> grain_bits_] + (delta & ((std::uint64_t{1} << grain_bits_) - 1));
+      }
+    }
+    return raw;
   }
 
   /** The tile a virtual address already names, with no placement applied. */
@@ -156,7 +213,7 @@ public:
     rec.instr.is_branch = branch ? 1 : 0;
     rec.instr.branch_taken = taken ? 1 : 0;
     if (load_address != nullptr) {
-      rec.instr.source_memory[0] = reinterpret_cast<std::uint64_t>(load_address);
+      rec.instr.source_memory[0] = rebase(load_address);
     }
     rec.instr.source_registers[0] = src;
     rec.instr.destination_registers[0] = dst;
@@ -175,13 +232,16 @@ public:
     if (!enabled_) {
       return 0;
     }
+    if (budget_ != 0 && calls_ >= budget_) {
+      return 0; // recording is done; the kernel carries on correctly
+    }
     const auto token = ++token_counter_;
     body_.clear();
     call_ = blank(nmfc::op::CALL, token);
     call_.instr.ip = next_host_pc();
     call_.instr.source_registers[0] = R_VERTEX;
     call_.instr.destination_registers[0] = R_ACC;
-    call_.aux0 = FUNC_CODE_BASE;
+    call_.aux0 = code_base();
     call_.func_id_ = func_id;
     if (no_return) {
       call_.flag_bits |= nmfc::FLAG_NO_RETURN;
@@ -231,7 +291,7 @@ public:
   /** Close the invocation and write the call, its body, and its return. */
   void end_call(std::uint64_t token, std::uint8_t live_regs = R_ACC)
   {
-    if (!enabled_ || !in_call_ || token != call_.token) {
+    if (!enabled_ || !in_call_ || token == 0 || token != call_.token) {
       return;
     }
     call_.aux1 = nmfc::encode_call_aux1(call_.func_id_, static_cast<std::uint32_t>(body_.size()));
@@ -261,7 +321,7 @@ public:
    */
   void emit_join(std::uint64_t token)
   {
-    if (!enabled_) {
+    if (!enabled_ || token == 0) {
       return;
     }
     auto rec = blank(nmfc::op::JOIN, token);
@@ -325,9 +385,9 @@ private:
     rec.instr.ip = next_body_pc(loop_back);
     rec.op_class = static_cast<std::uint8_t>(store ? nmfc::op_class::STORE : nmfc::op_class::LOAD);
     if (store) {
-      rec.instr.destination_memory[0] = reinterpret_cast<std::uint64_t>(address);
+      rec.instr.destination_memory[0] = rebase(address);
     } else {
-      rec.instr.source_memory[0] = reinterpret_cast<std::uint64_t>(address);
+      rec.instr.source_memory[0] = rebase(address);
     }
     rec.instr.source_registers[0] = src;
     rec.instr.destination_registers[0] = dst;
@@ -377,8 +437,34 @@ private:
     }
     const auto here = body_pc_;
     body_pc_ += 4;
-    return here;
+    return rebase(reinterpret_cast<const void*>(here));
   }
+
+  /** Where the code region actually landed, for the call's entry PC. */
+  [[nodiscard]] std::uint64_t code_base() const { return rebase(reinterpret_cast<const void*>(FUNC_CODE_BASE)); }
+
+  /** One declared array, and where it lives in the simulated layout. */
+  struct region_map {
+    std::uint64_t real_begin;
+    std::uint64_t real_end;
+    std::uint64_t sim_base;
+    /** Where each source grain landed. Placement is expressed here, not in the hint. */
+    std::vector<std::uint64_t> grain_va;
+  };
+
+  /** Hand out grain-aligned simulated bases, one region after another. */
+  std::uint64_t next_region_base(std::uint64_t bytes)
+  {
+    const std::uint64_t grain = std::uint64_t{1} << grain_bits_;
+    const auto base = region_cursor_;
+    // Round up to a whole number of grains, and leave a grain of separation so
+    // two regions never share one.
+    region_cursor_ += ((bytes + grain - 1) / grain + 1) * grain * tiles_;
+    return base;
+  }
+
+  std::vector<region_map> regions_;
+  std::uint64_t region_cursor_ = 0x0000'2000'0000ULL;
 
   std::ofstream out_;
   std::ofstream baseline_;
@@ -401,6 +487,7 @@ private:
   std::uint64_t records_ = 0;
   std::uint64_t calls_ = 0;
   std::uint64_t joins_ = 0;
+  std::uint64_t budget_ = 0;
 };
 
 } // namespace nmfc::gapbs

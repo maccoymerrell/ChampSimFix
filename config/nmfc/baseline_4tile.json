@@ -8,6 +8,7 @@
   "nmfc_grain_bits": 21,
   "nmfc_mode_bit": 38,
   "nmfc_aperture_base": 70368744177664,
+  "nmfc_aperture_bytes": 4398046511104,
   "children": [
     {
       "name": "cpu0_cpu0_L1I_channel",

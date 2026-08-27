@@ -68,6 +68,7 @@ public:
       : path_(builder.get_parameter<std::string>("trace_file")), image_(builder.get_parameter<nmfc::function_image_module*>("image")),
         map_(nmfc::tile_map_from(builder)),
         aperture_base_(builder.get_parameter<std::uint64_t>("nmfc_aperture_base", true, std::uint64_t{1} << 46)),
+        aperture_bytes_(builder.get_parameter<std::uint64_t>("nmfc_aperture_bytes", true, std::uint64_t{1} << 42)),
         block_bits_(builder.get_parameter<unsigned>("log2_block_size", true, 6U)),
         page_bits_(builder.get_parameter<unsigned>("log2_page_size", true, 12U))
   {
@@ -153,6 +154,39 @@ private:
     }
   }
 
+  [[nodiscard]] bool in_aperture(std::uint64_t addr) const { return addr >= aperture_base_ && addr < aperture_base_ + aperture_bytes_; }
+
+  /**
+   * The offload aperture is a reserved window of virtual addresses, the way an
+   * MMIO range is: the host core gives them a meaning other than memory. A
+   * program must therefore not map there -- and in simulation the generator is
+   * the loader, so this is where that contract gets checked. Reading a program
+   * address as an invocation loses the access silently, which is exactly the
+   * kind of failure that produces a plausible-looking wrong number.
+   */
+  void check_outside_aperture(std::uint64_t addr, const char* what, std::uint64_t ip) const
+  {
+    if (addr != 0 && in_aperture(addr)) {
+      fmt::print("[NMFC_PRODUCER] ERROR: {} at ip {:#x} references {:#x}, inside the offload aperture [{:#x}, {:#x}).\n"
+                 "  The trace's address space overlaps a window the host core reserves for naming invocations,\n"
+                 "  so that access would be read as an offload. Relocate the region in the generator, or move\n"
+                 "  nmfc_aperture_base past the trace's addresses.\n",
+                 what, ip, addr, aperture_base_, aperture_base_ + aperture_bytes_);
+      std::exit(-1);
+    }
+  }
+
+  /** Check every address a record carries. */
+  void check_addresses(const nmfc::trace_instr& instr, const char* what) const
+  {
+    for (auto addr : instr.source_memory) {
+      check_outside_aperture(addr, what, instr.ip);
+    }
+    for (auto addr : instr.destination_memory) {
+      check_outside_aperture(addr, what, instr.ip);
+    }
+  }
+
   bool read_record(nmfc::record& rec)
   {
     stream_.read(reinterpret_cast<char*>(&rec), sizeof(rec));
@@ -189,6 +223,7 @@ private:
       apply_hint(rec);
       return;
     case nmfc::op::HOST:
+      check_addresses(rec.instr, "host instruction");
       ready_.push_back(inflate(rec.instr));
       return;
     case nmfc::op::CALL:
@@ -250,6 +285,7 @@ private:
         fmt::print("[NMFC_PRODUCER] ERROR: record kind {} interrupts the body of token {}; bodies must be contiguous\n", rec.kind, call.token);
         std::exit(-1);
       }
+      check_addresses(rec.instr, "function body instruction");
       body.instrs.push_back(to_body_instr(rec));
     }
 
@@ -259,6 +295,13 @@ private:
     }
 
     image_->publish(std::move(body));
+
+    if ((call.token << block_bits_) >= aperture_bytes_) {
+      fmt::print("[NMFC_PRODUCER] ERROR: token {} does not fit the {} byte offload aperture.\n"
+                 "  Raise nmfc_aperture_bytes; the window must be able to name every token the trace uses.\n",
+                 call.token, aperture_bytes_);
+      std::exit(-1);
+    }
 
     // The call becomes a load from the aperture slot that names this token, so
     // the host core's tracking unit recognises it with no change to the
@@ -308,6 +351,7 @@ private:
   nmfc::page_placement_sink* placement_ = nullptr;
   nmfc::tile_map map_;
   std::uint64_t aperture_base_;
+  std::uint64_t aperture_bytes_;
   unsigned block_bits_;
   unsigned page_bits_;
 

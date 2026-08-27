@@ -512,6 +512,7 @@ private:
   nmfc::function_fabric_module* fabric_ = nullptr;
   nmfc::function_image_module* image_ = nullptr;
   uint64_t aperture_base_ = 0;
+  uint64_t aperture_bytes_ = 0;
   unsigned nmfc_block_bits_ = 6;
   uint32_t host_id_ = 0;
 
@@ -526,8 +527,26 @@ private:
   uint64_t ftu_cycles_ = 0;
   std::size_t ftu_peak_ = 0;
 
-  /** True when this address names an offload rather than a load. */
-  [[nodiscard]] bool is_offload(champsim::address addr) const { return addr.to<uint64_t>() >= aperture_base_; }
+  /**
+   * True when this address names an offload rather than a load.
+   *
+   * The aperture is a reserved window of virtual addresses that name invocation
+   * tokens, exactly as an MMIO range names device registers. It is a property
+   * of the machine, not of the data: it places no bound on how large a graph
+   * can be, and nothing about translation depends on it. Its size bounds only
+   * how many distinct token ids can be named at once.
+   *
+   * A bounded range, not a bare >=: real programs map the heap at high
+   * addresses, and an unbounded test reads those ordinary loads as invocations
+   * -- a silently lost load rather than an error. The producer enforces the
+   * other half of that contract, refusing a trace whose own addresses land
+   * inside the window.
+   */
+  [[nodiscard]] bool is_offload(champsim::address addr) const
+  {
+    const auto raw = addr.to<uint64_t>();
+    return raw >= aperture_base_ && raw < aperture_base_ + aperture_bytes_;
+  }
 
   void allocate_offload(const ooo_model_instr& instr, std::size_t rob_slot, champsim::address addr);
   /** Satisfy whatever instruction is waiting on this entry, and free it. */
@@ -664,6 +683,7 @@ public:
     fabric_ = builder.get_parameter<nmfc::function_fabric_module*>("fabric");
     image_ = builder.get_parameter<nmfc::function_image_module*>("image");
     aperture_base_ = builder.get_parameter<uint64_t>("nmfc_aperture_base", true, uint64_t{1} << 46);
+    aperture_bytes_ = builder.get_parameter<uint64_t>("nmfc_aperture_bytes", true, uint64_t{1} << 42);
     nmfc_block_bits_ = builder.get_parameter<unsigned>("log2_block_size", true, 6U);
     FTU.resize(builder.get_parameter<std::size_t>("ftu_size", true, std::size_t{64}));
     host_id_ = fabric_->attach_host(this);

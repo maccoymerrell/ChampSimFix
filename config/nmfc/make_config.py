@@ -349,7 +349,15 @@ def build(args, nmfc_enabled):
         "nmfc_num_tiles": tiles,
         "nmfc_grain_bits": args.grain_bits,
         "nmfc_mode_bit": args.mode_bit,
+        # The offload aperture: a reserved window of virtual addresses that name
+        # invocation tokens, the way an MMIO range names device registers. It
+        # bounds nothing about the data -- graphs are as large as memory allows
+        # and translation is untouched -- only how many token ids can be named.
+        # It sits above the mode bit and above anything the generator emits, and
+        # the producer refuses a trace whose own addresses land inside it rather
+        # than reading them as invocations.
         "nmfc_aperture_base": 1 << 46,
+        "nmfc_aperture_bytes": 1 << 42,
         "children": children,
     }
 

@@ -18,3 +18,9 @@ clean:
 GAPBS ?= ../../ext/gapbs/src
 gapbs_trace: gapbs_trace.cc gapbs_hooks.h ../../inc/nmfc/nmfc_trace.h
 	$(CXX) $(CXXFLAGS) -I$(GAPBS) -I../../inc/nmfc -o $@ gapbs_trace.cc
+
+# GAPBS's own BFS with the hooks in it. Needs ext/gapbs patched by
+# tools/nmfc/build_gapbs.sh. OpenMP is enabled because the kernel uses it, but
+# run with OMP_NUM_THREADS=1: a trace is a total order.
+gapbs_bfs: gapbs_bfs.cc gapbs_hooks.h ../../inc/nmfc/nmfc_trace.h
+	$(CXX) $(CXXFLAGS) -fopenmp -I$(GAPBS) -I../../inc/nmfc -o $@ gapbs_bfs.cc

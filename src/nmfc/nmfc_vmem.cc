@@ -178,7 +178,10 @@ public:
   void begin_phase(bool /*warmup*/) override
   {
     nmfc_allocs_ = standard_allocs_ = spills_ = pt_pages_ = 0;
-    hints_received_ = 0;
+    // hints_received_ is deliberately not reset. Placement hints all arrive in
+    // the producer's first read, before the first instruction retires, so a
+    // per-phase count reports zero for every phase that matters -- a statistic
+    // that is always zero says nothing about whether placement was applied.
   }
 
   void end_phase(champsim::stat_report& out) override
@@ -195,7 +198,8 @@ public:
                                                 : static_cast<double>(*std::max_element(std::begin(free_by_tile), std::end(free_by_tile))
                                                                       - *std::min_element(std::begin(free_by_tile), std::end(free_by_tile)));
 
-    out.line(fmt::format("NMFC_VMEM ALLOCATIONS nmfc: {} standard: {} pt_pages: {} HINTS: {}", nmfc_allocs_, standard_allocs_, pt_pages_, hints_received_));
+    out.line(fmt::format("NMFC_VMEM ALLOCATIONS nmfc: {} standard: {} pt_pages: {} HINTS APPLIED (cumulative): {}", nmfc_allocs_, standard_allocs_,
+                         pt_pages_, hints_received_));
     out.line(fmt::format("NMFC_VMEM SPILLS: {} FREE GRAIN IMBALANCE: {:.0f}", spills_, imbalance));
 
     auto json = out.json();
