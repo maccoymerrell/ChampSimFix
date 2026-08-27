@@ -152,6 +152,24 @@ public:
     return mode | high | low;
   }
 
+  /**
+   * Remove the tile-select field from a *virtual* address.
+   *
+   * Channel t's page table covers exactly the virtual addresses whose frames
+   * come from channel t -- a partition of the address space, not a replication
+   * of it, so the total page-table size is unchanged. That set is strided, so
+   * the table is indexed by the address with the tile field taken out, which
+   * makes it dense and, more importantly, makes every page-table page cover
+   * only one tile's addresses. Without that, an upper-level page spans every
+   * tile and a walk cannot be local.
+   */
+  [[nodiscard]] constexpr std::uint64_t compact_virtual(std::uint64_t vaddr) const
+  {
+    const std::uint64_t low = vaddr & ((std::uint64_t{1} << grain_bits_) - 1);
+    const std::uint64_t high = (vaddr >> (grain_bits_ + tile_bits_)) << grain_bits_;
+    return high | low;
+  }
+
   /** Reinsert the tile-select field. Exactly inverts compact(). */
   [[nodiscard]] constexpr std::uint64_t expand(std::uint64_t compacted, std::size_t tile) const
   {

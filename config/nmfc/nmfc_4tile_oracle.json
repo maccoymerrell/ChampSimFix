@@ -217,19 +217,6 @@
       "match_offset_bits": false
     },
     {
-      "name": "tile0_LLC_mmu_channel",
-      "module": "channel",
-      "model": "DEFAULT_CHANNEL",
-      "rq_size": 32,
-      "wq_size": 0,
-      "pq_size": 0,
-      "offset_bits": {
-        "bits": "6"
-      },
-      "match_offset_bits": false,
-      "_comment": "page-table walk references from tile 0's MMU"
-    },
-    {
       "name": "fabric_tile1_channel",
       "module": "channel",
       "model": "DEFAULT_CHANNEL",
@@ -303,19 +290,6 @@
         "bits": "6"
       },
       "match_offset_bits": false
-    },
-    {
-      "name": "tile1_LLC_mmu_channel",
-      "module": "channel",
-      "model": "DEFAULT_CHANNEL",
-      "rq_size": 32,
-      "wq_size": 0,
-      "pq_size": 0,
-      "offset_bits": {
-        "bits": "6"
-      },
-      "match_offset_bits": false,
-      "_comment": "page-table walk references from tile 1's MMU"
     },
     {
       "name": "fabric_tile2_channel",
@@ -393,19 +367,6 @@
       "match_offset_bits": false
     },
     {
-      "name": "tile2_LLC_mmu_channel",
-      "module": "channel",
-      "model": "DEFAULT_CHANNEL",
-      "rq_size": 32,
-      "wq_size": 0,
-      "pq_size": 0,
-      "offset_bits": {
-        "bits": "6"
-      },
-      "match_offset_bits": false,
-      "_comment": "page-table walk references from tile 2's MMU"
-    },
-    {
       "name": "fabric_tile3_channel",
       "module": "channel",
       "model": "DEFAULT_CHANNEL",
@@ -479,19 +440,6 @@
         "bits": "6"
       },
       "match_offset_bits": false
-    },
-    {
-      "name": "tile3_LLC_mmu_channel",
-      "module": "channel",
-      "model": "DEFAULT_CHANNEL",
-      "rq_size": 32,
-      "wq_size": 0,
-      "pq_size": 0,
-      "offset_bits": {
-        "bits": "6"
-      },
-      "match_offset_bits": false,
-      "_comment": "page-table walk references from tile 3's MMU"
     },
     {
       "_comment": "memory tile 0 owns exactly one DRAM channel",
@@ -742,8 +690,7 @@
       "upper_levels": [
         "@fabric_tile0_channel",
         "@tile0_LLC_fcD_channel",
-        "@tile0_LLC_fcI_channel",
-        "@tile0_LLC_mmu_channel"
+        "@tile0_LLC_fcI_channel"
       ],
       "lower_level": "@tile0_LLC_DRAM_channel",
       "lower_translate": {
@@ -794,39 +741,6 @@
         "bandwidth": 4
       },
       "strict_locality": true
-    },
-    {
-      "name": "tile0_mmu_port",
-      "module": "channel",
-      "model": "TILE_PORT",
-      "clock_period": {
-        "time": "250p"
-      },
-      "tile": 0,
-      "lower": "@tile0_LLC_mmu_channel",
-      "latency": 1,
-      "queue_size": 32,
-      "max_forward": {
-        "bandwidth": 4
-      },
-      "strict_locality": true
-    },
-    {
-      "_comment": "tile 0: dual-page-size MMU. Walk references go to this tile's own slice, which congruent page-table placement makes local.",
-      "name": "tile0_mmu",
-      "module": "channel",
-      "model": "NMFC_MMU",
-      "clock_period": {
-        "time": "250p"
-      },
-      "vmem": "@VMEM",
-      "lower_level": "@tile0_mmu_port",
-      "small_sets": 32,
-      "small_ways": 4,
-      "huge_sets": 16,
-      "huge_ways": 4,
-      "hit_latency": 1,
-      "mshr_size": 32
     },
     {
       "name": "tile0_fc_dcache",
@@ -950,7 +864,6 @@
       "dcache": "@tile0_fc_dcache_channel",
       "icache": "@tile0_fc_icache_channel",
       "fetch_bubble": 1,
-      "mmu": "@tile0_mmu",
       "alu_latency": 1,
       "mul_latency": 3,
       "branch_latency": 1
@@ -989,8 +902,7 @@
       "upper_levels": [
         "@fabric_tile1_channel",
         "@tile1_LLC_fcD_channel",
-        "@tile1_LLC_fcI_channel",
-        "@tile1_LLC_mmu_channel"
+        "@tile1_LLC_fcI_channel"
       ],
       "lower_level": "@tile1_LLC_DRAM_channel",
       "lower_translate": {
@@ -1041,39 +953,6 @@
         "bandwidth": 4
       },
       "strict_locality": true
-    },
-    {
-      "name": "tile1_mmu_port",
-      "module": "channel",
-      "model": "TILE_PORT",
-      "clock_period": {
-        "time": "250p"
-      },
-      "tile": 1,
-      "lower": "@tile1_LLC_mmu_channel",
-      "latency": 1,
-      "queue_size": 32,
-      "max_forward": {
-        "bandwidth": 4
-      },
-      "strict_locality": true
-    },
-    {
-      "_comment": "tile 1: dual-page-size MMU. Walk references go to this tile's own slice, which congruent page-table placement makes local.",
-      "name": "tile1_mmu",
-      "module": "channel",
-      "model": "NMFC_MMU",
-      "clock_period": {
-        "time": "250p"
-      },
-      "vmem": "@VMEM",
-      "lower_level": "@tile1_mmu_port",
-      "small_sets": 32,
-      "small_ways": 4,
-      "huge_sets": 16,
-      "huge_ways": 4,
-      "hit_latency": 1,
-      "mshr_size": 32
     },
     {
       "name": "tile1_fc_dcache",
@@ -1197,7 +1076,6 @@
       "dcache": "@tile1_fc_dcache_channel",
       "icache": "@tile1_fc_icache_channel",
       "fetch_bubble": 1,
-      "mmu": "@tile1_mmu",
       "alu_latency": 1,
       "mul_latency": 3,
       "branch_latency": 1
@@ -1236,8 +1114,7 @@
       "upper_levels": [
         "@fabric_tile2_channel",
         "@tile2_LLC_fcD_channel",
-        "@tile2_LLC_fcI_channel",
-        "@tile2_LLC_mmu_channel"
+        "@tile2_LLC_fcI_channel"
       ],
       "lower_level": "@tile2_LLC_DRAM_channel",
       "lower_translate": {
@@ -1288,39 +1165,6 @@
         "bandwidth": 4
       },
       "strict_locality": true
-    },
-    {
-      "name": "tile2_mmu_port",
-      "module": "channel",
-      "model": "TILE_PORT",
-      "clock_period": {
-        "time": "250p"
-      },
-      "tile": 2,
-      "lower": "@tile2_LLC_mmu_channel",
-      "latency": 1,
-      "queue_size": 32,
-      "max_forward": {
-        "bandwidth": 4
-      },
-      "strict_locality": true
-    },
-    {
-      "_comment": "tile 2: dual-page-size MMU. Walk references go to this tile's own slice, which congruent page-table placement makes local.",
-      "name": "tile2_mmu",
-      "module": "channel",
-      "model": "NMFC_MMU",
-      "clock_period": {
-        "time": "250p"
-      },
-      "vmem": "@VMEM",
-      "lower_level": "@tile2_mmu_port",
-      "small_sets": 32,
-      "small_ways": 4,
-      "huge_sets": 16,
-      "huge_ways": 4,
-      "hit_latency": 1,
-      "mshr_size": 32
     },
     {
       "name": "tile2_fc_dcache",
@@ -1444,7 +1288,6 @@
       "dcache": "@tile2_fc_dcache_channel",
       "icache": "@tile2_fc_icache_channel",
       "fetch_bubble": 1,
-      "mmu": "@tile2_mmu",
       "alu_latency": 1,
       "mul_latency": 3,
       "branch_latency": 1
@@ -1483,8 +1326,7 @@
       "upper_levels": [
         "@fabric_tile3_channel",
         "@tile3_LLC_fcD_channel",
-        "@tile3_LLC_fcI_channel",
-        "@tile3_LLC_mmu_channel"
+        "@tile3_LLC_fcI_channel"
       ],
       "lower_level": "@tile3_LLC_DRAM_channel",
       "lower_translate": {
@@ -1535,39 +1377,6 @@
         "bandwidth": 4
       },
       "strict_locality": true
-    },
-    {
-      "name": "tile3_mmu_port",
-      "module": "channel",
-      "model": "TILE_PORT",
-      "clock_period": {
-        "time": "250p"
-      },
-      "tile": 3,
-      "lower": "@tile3_LLC_mmu_channel",
-      "latency": 1,
-      "queue_size": 32,
-      "max_forward": {
-        "bandwidth": 4
-      },
-      "strict_locality": true
-    },
-    {
-      "_comment": "tile 3: dual-page-size MMU. Walk references go to this tile's own slice, which congruent page-table placement makes local.",
-      "name": "tile3_mmu",
-      "module": "channel",
-      "model": "NMFC_MMU",
-      "clock_period": {
-        "time": "250p"
-      },
-      "vmem": "@VMEM",
-      "lower_level": "@tile3_mmu_port",
-      "small_sets": 32,
-      "small_ways": 4,
-      "huge_sets": 16,
-      "huge_ways": 4,
-      "hit_latency": 1,
-      "mshr_size": 32
     },
     {
       "name": "tile3_fc_dcache",
@@ -1691,7 +1500,6 @@
       "dcache": "@tile3_fc_dcache_channel",
       "icache": "@tile3_fc_icache_channel",
       "fetch_bubble": 1,
-      "mmu": "@tile3_mmu",
       "alu_latency": 1,
       "mul_latency": 3,
       "branch_latency": 1

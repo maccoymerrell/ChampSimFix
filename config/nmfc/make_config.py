@@ -107,6 +107,9 @@ def build(args, nmfc_enabled):
             children.append(channel(f"tile{t}_LLC_fcD_channel", 64, 64, 0,
                                     comment=f"function core {t}'s data port into the slice"))
             children.append(channel(f"tile{t}_LLC_fcI_channel", 32, 0, 0))
+            if args.mmu:
+                children.append(channel(f"tile{t}_LLC_mmu_channel", 32, 0, 0,
+                                        comment=f"page-table walk references from tile {t}'s MMU"))
 
     # ---- memory controllers, one channel each ---------------------------
     for t in range(tiles):
@@ -180,6 +183,8 @@ def build(args, nmfc_enabled):
         upper = [f"@fabric_tile{t}_channel"]
         if nmfc_enabled:
             upper += [f"@tile{t}_LLC_fcD_channel", f"@tile{t}_LLC_fcI_channel"]
+            if args.mmu:
+                upper.append(f"@tile{t}_LLC_mmu_channel")
         children.append(cache(
             f"tile{t}_LLC", args.llc_sets // tiles, 16,
             upper=upper, lower=f"@tile{t}_LLC_DRAM_channel",
@@ -193,12 +198,32 @@ def build(args, nmfc_enabled):
         # The tile's own ports into its slice. These compact the address the way
         # the interleave fabric does, so both paths tag a line identically, and
         # they assert that nothing foreign to this tile ever crosses them.
-        for kind, lower in [("fcD", f"@tile{t}_LLC_fcD_channel"), ("fcI", f"@tile{t}_LLC_fcI_channel")]:
+        ports = [("fcD", f"@tile{t}_LLC_fcD_channel"), ("fcI", f"@tile{t}_LLC_fcI_channel")]
+        if args.mmu:
+            ports.append(("mmu", f"@tile{t}_LLC_mmu_channel"))
+        for kind, lower in ports:
             children.append({
                 "name": f"tile{t}_{kind}_port", "module": "channel", "model": "TILE_PORT",
                 "clock_period": CLOCK, "tile": t, "lower": lower,
                 "latency": 1, "queue_size": 32, "max_forward": {"bandwidth": 4},
                 "strict_locality": True,
+            })
+
+        if args.mmu:
+            # Mixed page sizes in one module: a small array for 4 KiB pages and a
+            # grain-sized array probed alongside it. Deliberately small -- at
+            # graph scale the regime is mostly-miss whatever the size, and a
+            # generous TLB would flatter the design rather than measure it.
+            children.append({
+                "_comment": f"tile {t}: dual-page-size MMU. Walk references go to this tile's "
+                            f"own slice, which congruent page-table placement makes local.",
+                "name": f"tile{t}_mmu", "module": "channel", "model": "NMFC_MMU",
+                "clock_period": CLOCK,
+                "vmem": "@VMEM",
+                "lower_level": f"@tile{t}_mmu_port",
+                "small_sets": args.tlb_sets, "small_ways": 4,
+                "huge_sets": args.tlb_sets // 2, "huge_ways": 4,
+                "hit_latency": 1, "mshr_size": 32,
             })
 
         children.append(cache(
@@ -223,6 +248,7 @@ def build(args, nmfc_enabled):
             "dcache": f"@tile{t}_fc_dcache_channel",
             "icache": f"@tile{t}_fc_icache_channel",
             "fetch_bubble": 1,
+            **({"mmu": f"@tile{t}_mmu"} if args.mmu else {}),
             "alu_latency": 1, "mul_latency": 3, "branch_latency": 1,
         })
 
@@ -328,6 +354,11 @@ def main():
     parser.add_argument("--llc-sets", type=int, default=2048)
     parser.add_argument("--placement", default="round_robin")
     parser.add_argument("--dram", choices=["default", "ramulator"], default="default")
+    parser.add_argument("--mmu", action="store_true", default=True,
+                        help="model function-core translation (default)")
+    parser.add_argument("--no-mmu", dest="mmu", action="store_false",
+                        help="oracle translation instead: correct addresses, no modeled walk cost")
+    parser.add_argument("--tlb-sets", type=int, default=32)
     parser.add_argument("--ramulator-config", default="config/nmfc/ramulator/tile_ddr5.yaml")
     parser.add_argument("--tile-bytes", type=int, default=4 << 30)
     parser.add_argument("--out-dir", default="config/nmfc")
@@ -336,6 +367,7 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
     for enabled, name in [(True, "nmfc"), (False, "baseline")]:
         suffix = "" if args.dram == "default" else f"_{args.dram}"
+        suffix += "" if args.mmu else "_oracle"
         path = os.path.join(args.out_dir, f"{name}_{args.tiles}tile{suffix}.json")
         with open(path, "w") as handle:
             json.dump(build(args, enabled), handle, indent=2)

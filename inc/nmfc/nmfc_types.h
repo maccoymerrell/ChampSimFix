@@ -95,7 +95,12 @@ enum class ctx_state : std::uint8_t {
 struct ctx_translation {
   std::uint64_t vpage = 0;
   std::uint64_t ppage = 0;
+  /** log2 of the page size this resolved at: the two sizes coexist. */
+  unsigned shift = 12;
   bool valid = false;
+
+  [[nodiscard]] bool covers(std::uint64_t vaddr) const { return valid && (vaddr >> shift) == vpage; }
+  [[nodiscard]] std::uint64_t translate(std::uint64_t vaddr) const { return (ppage << shift) | (vaddr & ((std::uint64_t{1} << shift) - 1)); }
 };
 
 /** Per-context translation entries: the code page plus a few MRU data pages. */
@@ -162,6 +167,10 @@ struct context {
   // wakes when this reaches zero.
   std::uint8_t pending_mem = 0;
 
+  // Waiting on the MMU rather than on data. Kept apart from pending_mem so the
+  // statistics can separate time lost to translation from time lost to memory.
+  bool awaiting_translation = false;
+
   // Bookkeeping for the migration cold-start statistic.
   std::uint32_t migrations = 0;
 
@@ -177,6 +186,7 @@ struct context {
     has_fetched = false;
     fetched_block = 0;
     pending_mem = 0;
+    awaiting_translation = false;
     state = ctx_state::MIGRATING;
     ++migrations;
   }

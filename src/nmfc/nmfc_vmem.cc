@@ -84,9 +84,11 @@ public:
 
   [[nodiscard]] champsim::data::bits shamt(std::size_t level) const override { return extent(level).lower; }
 
+  // Taken on the compacted address, matching how get_pte_pa keys the table:
+  // the walker must index with the same address the table was built over.
   [[nodiscard]] uint64_t get_offset(champsim::address vaddr, std::size_t level) const override
   {
-    return champsim::address_slice{extent(level), vaddr}.to<uint64_t>();
+    return champsim::address_slice{extent(level), champsim::address{map_.compact_virtual(vaddr.to<std::uint64_t>())}}.to<uint64_t>();
   }
 
   [[nodiscard]] std::size_t available_ppages() const override
@@ -113,15 +115,25 @@ public:
 
   std::pair<champsim::address, champsim::chrono::clock::duration> get_pte_pa(champsim::origin origin, champsim::page_number vaddr, std::size_t level) override
   {
-    // Page-table pages are placed congruently with the addresses they describe,
-    // which is what makes a walk local: channel t's table lives on channel t.
+    // N roots, one per channel, over the compacted address space.
+    //
+    // Keying on the raw virtual address would put a level-1 page over 512
+    // consecutive pages spanning every tile, so it could live on only one of
+    // them and every other tile's walk through it would be remote. Compacting
+    // the tile field out first means channel t's table covers exactly channel
+    // t's addresses, so its pages can live on channel t and every walk is
+    // local. This is a partition, not a replication: the total page-table size
+    // is unchanged.
+    const auto raw = champsim::address{vaddr}.to<std::uint64_t>();
+    const auto tile = map_.tile_of_virtual(raw);
+    const champsim::address compacted{map_.compact_virtual(raw)};
+
     const champsim::dynamic_extent entry_extent{champsim::address::bits, shamt(level + 1)};
-    const auto key = std::tuple{origin.asid(), static_cast<std::uint32_t>(level), champsim::address_slice{entry_extent, vaddr}};
+    const auto key = std::tuple{origin.asid(), static_cast<std::uint32_t>(level * map_.num_tiles() + tile), champsim::address_slice{entry_extent, compacted}};
 
     auto it = page_table_.find(key);
     bool fault = false;
     if (it == std::end(page_table_)) {
-      const auto tile = map_.tile_of_virtual(champsim::address{vaddr}.to<std::uint64_t>());
       const auto frame = allocate_standard_frame_on(tile);
       // Stamped NMFC: the whole point of placing a page-table page on the tile
       // that owns the addresses it describes is that walks stay local, and
@@ -131,7 +143,7 @@ public:
       ++pt_pages_;
     }
 
-    const auto offset = get_offset(champsim::address{vaddr}, level);
+    const auto offset = get_offset(compacted, level);
     const champsim::dynamic_extent pte_extent{champsim::data::bits{champsim::lg2(pte_entry::byte_multiple)},
                                               static_cast<std::size_t>(champsim::lg2(pte_page_size_.count()))};
     const champsim::address paddr{champsim::splice(champsim::page_number{it->second}, champsim::address_slice{pte_extent, offset})};

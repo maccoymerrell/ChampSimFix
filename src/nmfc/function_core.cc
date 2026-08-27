@@ -54,6 +54,7 @@
 #include "nmfc/nmfc_hooks.h"
 #include "nmfc/nmfc_types.h"
 #include "nmfc/nmfc_vmem.h"
+#include "nmfc/translation_engine.h"
 #include "stat_report.h"
 
 namespace
@@ -90,6 +91,18 @@ public:
     latency_[idx(nmfc::op_class::BRANCH)] = nmfc::cycles_from(builder, "branch_latency", 1);
     latency_[idx(nmfc::op_class::LOAD)] = nmfc::cycles_from(builder, "alu_latency", 1);
     latency_[idx(nmfc::op_class::STORE)] = nmfc::cycles_from(builder, "alu_latency", 1);
+
+    // The MMU is a channel model, so it arrives as a channel reference and the
+    // translation service is reached by cast. Without one, translation falls
+    // back to an oracle: correct addresses, no modeled cost. That is an
+    // explicit modelling choice, so say so rather than let it pass silently.
+    if (auto* mmu_channel = builder.get_parameter<channel_type*>("mmu", true, nullptr); mmu_channel != nullptr) {
+      mmu_ = dynamic_cast<nmfc::translation_engine*>(mmu_channel);
+      if (mmu_ == nullptr) {
+        fmt::print("[{}] ERROR: the module wired as \"mmu\" does not provide translation; use NMFC_MMU\n", builder.get_name());
+        std::exit(-1);
+      }
+    }
 
     fabric_->attach_tile(tile_, this);
   }
@@ -145,6 +158,7 @@ public:
   {
     long progress = 0;
     progress += drain_returns();
+    progress += drain_translations();
     progress += wake_timers();
     progress += issue_cycle();
     progress += push_completions();
@@ -156,10 +170,15 @@ public:
 
   long poll_cycle() final
   {
-    // Work arrives by external push (the fabric delivering, a cache returning),
-    // so never skip more than one cycle.
+    // Work arrives by external push -- the fabric delivering, a cache
+    // returning, the MMU resolving -- so never skip more than one cycle, and
+    // every one of those sources has to appear here. A context blocked on
+    // translation is invisible to the queues below, so omitting the MMU makes
+    // the core declare itself idle and skip forever without ever draining the
+    // completion that would have woken it.
     const bool idle = ready_.empty() && timers_.empty() && done_.empty() && migrating_.empty() && std::empty(dcache_->get_returned())
-                      && (icache_ == nullptr || std::empty(icache_->get_returned()));
+                      && (icache_ == nullptr || std::empty(icache_->get_returned()))
+                      && (mmu_ == nullptr || mmu_->translation_completions().empty());
     return idle ? 1 : 0;
   }
 
@@ -167,7 +186,8 @@ public:
   {
     accepted_ = arrived_ = departed_ = completed_ = 0;
     instructions_ = loads_ = stores_ = atomics_ = fetches_ = 0;
-    scoreboard_stalls_ = port_stalls_ = atomic_conflicts_ = 0;
+    scoreboard_stalls_ = port_stalls_ = atomic_conflicts_ = translation_stalls_ = 0;
+    ctx_code_hits_ = ctx_code_misses_ = ctx_data_hits_ = ctx_data_misses_ = 0;
     occupancy_sum_ = 0;
     cycles_ = 0;
     peak_occupancy_ = contexts_.size() - free_slots_.size();
@@ -211,6 +231,22 @@ public:
     json.add("scoreboard_stalls", scoreboard_stalls_);
     json.add("port_stalls", port_stalls_);
     json.add("atomic_conflicts", atomic_conflicts_);
+    const auto code_total = ctx_code_hits_ + ctx_code_misses_;
+    const auto data_total = ctx_data_hits_ + ctx_data_misses_;
+    const auto code_rate = code_total == 0 ? 0.0 : 100.0 * static_cast<double>(ctx_code_hits_) / static_cast<double>(code_total);
+    const auto data_rate = data_total == 0 ? 0.0 : 100.0 * static_cast<double>(ctx_data_hits_) / static_cast<double>(data_total);
+    // The code figure is expected to be near zero and is not a defect: the
+    // fetch-block check already prevents a re-translation while a context stays
+    // in one instruction block, so the code entry is consulted about once per
+    // context arrival and is necessarily cold then. It is the data entries that
+    // carry the mechanism.
+    out.line(fmt::format("{} PER-CONTEXT TRANSLATION data: {:.1f}% of {} lookups (code: {:.1f}% of {}, ~1 per arrival) STALLS: {}", NAME, data_rate, data_total,
+                         code_rate, code_total, translation_stalls_));
+    json.add("ctx_xlat_code_hit_rate", code_rate);
+    json.add("ctx_xlat_code_lookups", code_total);
+    json.add("ctx_xlat_data_hit_rate", data_rate);
+    json.add("ctx_xlat_data_lookups", data_total);
+    json.add("translation_stalls", translation_stalls_);
     json.add("cold_start_cycles", cold_start_cycles_);
     json.add("cold_start_arrivals", cold_start_count_);
   }
@@ -457,6 +493,99 @@ private:
     return true;
   }
 
+  /** The context's own entries, which is where translation locality actually lives. */
+  const nmfc::ctx_translation* context_lookup(const nmfc::context& ctx, std::uint64_t vaddr, bool code) const
+  {
+    if (code) {
+      return ctx.xlat.code.covers(vaddr) ? &ctx.xlat.code : nullptr;
+    }
+    for (const auto& entry : ctx.xlat.data) {
+      if (entry.covers(vaddr)) {
+        return &entry;
+      }
+    }
+    return nullptr;
+  }
+
+  void context_fill(nmfc::context& ctx, bool code, const nmfc::translation_done& done)
+  {
+    const unsigned shift = done.huge ? map_.grain_bits() : page_bits_;
+    const nmfc::ctx_translation entry{done.vpage, done.ppage, shift, true};
+    if (code) {
+      ctx.xlat.code = entry;
+      return;
+    }
+    ctx.xlat.data[ctx.xlat.next_victim] = entry;
+    ctx.xlat.next_victim = static_cast<std::uint8_t>((ctx.xlat.next_victim + 1) % nmfc::MAX_CTX_DATA_XLAT);
+  }
+
+  /** Tag encoding for an outstanding translation: which context, and which half. */
+  static std::uint64_t xlat_tag(std::size_t slot, bool code) { return (static_cast<std::uint64_t>(slot) << 1) | (code ? 1U : 0U); }
+
+  /**
+   * Resolve an address for this context, or start resolving it.
+   *
+   * Returns true when the physical address is in hand. Returns false having
+   * blocked the context, which is the interesting case: a translation miss
+   * costs the same kind of sleep a data miss does, and the two are counted
+   * separately so the sweep can tell them apart.
+   */
+  bool resolve(std::size_t slot, std::uint64_t vaddr, bool code, std::uint64_t& physical)
+  {
+    auto& ctx = contexts_[slot];
+
+    if (const auto* entry = context_lookup(ctx, vaddr, code); entry != nullptr) {
+      (code ? ctx_code_hits_ : ctx_data_hits_)++;
+      physical = entry->translate(vaddr);
+      return true;
+    }
+    (code ? ctx_code_misses_ : ctx_data_misses_)++;
+
+    if (mmu_ == nullptr) {
+      physical = oracle_translate(ctx, champsim::address{vaddr}).to<std::uint64_t>();
+      return true;
+    }
+
+    if (!mmu_->request_translation(xlat_tag(slot, code), ctx.origin, champsim::address{vaddr})) {
+      ready_.push_back(slot); // the MMU is full; retry next cycle
+      ++port_stalls_;
+      return false;
+    }
+    ctx.awaiting_translation = true;
+    ctx.state = nmfc::ctx_state::BLOCKED;
+    ++translation_stalls_;
+    return false;
+  }
+
+  /** Wake whatever the MMU finished for us. */
+  long drain_translations()
+  {
+    if (mmu_ == nullptr) {
+      return 0;
+    }
+    long progress = 0;
+    auto& done_list = mmu_->translation_completions();
+    for (const auto& done : done_list) {
+      const auto slot = static_cast<std::size_t>(done.tag >> 1);
+      const bool code = (done.tag & 1U) != 0;
+      if (slot >= contexts_.size()) {
+        continue;
+      }
+      auto& ctx = contexts_[slot];
+      if (ctx.state == nmfc::ctx_state::FREE) {
+        continue; // the context left while its translation was in flight
+      }
+      context_fill(ctx, code, done);
+      if (ctx.awaiting_translation) {
+        ctx.awaiting_translation = false;
+        make_ready(slot, current_time);
+      }
+      ++progress;
+    }
+    done_list.clear();
+    return progress;
+  }
+
   /**
    * Virtual to physical, for the access itself.
    *
@@ -469,13 +598,13 @@ private:
    * beyond a page fault. Charging for the walk is what NMFC_MMU adds, and the
    * per-context translation cache with it.
    */
-  champsim::address translate(const nmfc::context& ctx, champsim::address vaddr, champsim::chrono::clock::duration& fault_penalty)
+  champsim::address oracle_translate(const nmfc::context& ctx, champsim::address vaddr)
   {
     if (vmem_ == nullptr) {
       return vaddr; // no paging configured: the virtual address is the physical one
     }
     auto [ppage, penalty] = vmem_->va_to_pa(ctx.origin, champsim::page_number{vaddr});
-    fault_penalty = std::max(fault_penalty, penalty);
+    (void)penalty;
     return champsim::address{champsim::splice(ppage, champsim::page_offset{vaddr})};
   }
 
@@ -517,12 +646,20 @@ private:
       ++atomics_;
     }
 
-    champsim::chrono::clock::duration fault_penalty{};
+    // Every address must be translated before any of them issue, so a
+    // translation miss halfway through does not leave a half-issued instruction.
+    std::array<std::uint64_t, nmfc::MAX_MEM_OPS> physical{};
+    for (std::size_t i = 0; i < ops; ++i) {
+      if (!resolve(slot, instr.mem[i].to<std::uint64_t>(), /*code=*/false, physical[i])) {
+        return false;
+      }
+    }
+
     for (std::size_t i = 0; i < ops; ++i) {
       const bool is_store = i >= instr.num_loads;
       champsim::request req;
       req.v_address = instr.mem[i];
-      req.address = translate(ctx, instr.mem[i], fault_penalty);
+      req.address = champsim::address{physical[i]};
       req.is_translated = true;
       req.type = is_store ? access_type::WRITE : access_type::LOAD;
       req.response_requested = !is_store;
@@ -563,7 +700,7 @@ private:
 
     ++ctx.pc;
     ++instructions_;
-    make_ready(slot, current_time + clock_period + fault_penalty);
+    make_ready(slot, current_time + clock_period);
     return true;
   }
 
@@ -581,10 +718,13 @@ private:
       return false;
     }
 
-    champsim::chrono::clock::duration fault_penalty{};
+    std::uint64_t physical = 0;
+    if (!resolve(slot, eff_ip, /*code=*/true, physical)) {
+      return true; // blocked on translation; the fetch happens when it lands
+    }
     champsim::request req;
     req.v_address = champsim::address{eff_ip};
-    req.address = translate(ctx, req.v_address, fault_penalty);
+    req.address = champsim::address{physical};
     req.is_translated = true;
     req.type = access_type::LOAD;
     req.response_requested = true;
@@ -683,6 +823,7 @@ private:
   unsigned block_bits_;
   unsigned page_bits_;
   champsim::modules::vmem_module* vmem_;
+  nmfc::translation_engine* mmu_ = nullptr;
   std::array<champsim::chrono::clock::duration, 8> latency_{};
 
   std::vector<nmfc::context> contexts_;
@@ -712,6 +853,11 @@ private:
   std::uint64_t scoreboard_stalls_ = 0;
   std::uint64_t port_stalls_ = 0;
   std::uint64_t atomic_conflicts_ = 0;
+  std::uint64_t translation_stalls_ = 0;
+  std::uint64_t ctx_code_hits_ = 0;
+  std::uint64_t ctx_code_misses_ = 0;
+  std::uint64_t ctx_data_hits_ = 0;
+  std::uint64_t ctx_data_misses_ = 0;
   std::uint64_t occupancy_sum_ = 0;
   std::uint64_t cycles_ = 0;
   std::size_t peak_occupancy_ = 0;
