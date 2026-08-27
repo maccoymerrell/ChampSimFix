@@ -30,3 +30,6 @@ compile_commands.json
 
 .vscode/
 **/.DS_Store
+
+# Third-party sources fetched by tools/nmfc/build_ramulator.sh
+ext/
