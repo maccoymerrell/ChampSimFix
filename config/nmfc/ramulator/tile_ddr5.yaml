@@ -1,0 +1,70 @@
+frontend:
+  impl: External
+  clock_ratio: 8
+memory_system:
+  impl: GenericDRAM
+  clock_ratio: 3
+  channel_mapper:
+    impl: CacheLineInterleave
+    interleave_bits: 0
+  controllers:
+    - impl: GenericDDR
+      wr_low_watermark: 0.2
+      wr_high_watermark: 0.8
+      read_buffer_size: 32
+      write_buffer_size: 32
+      priority_buffer_size: 1568
+      scheduler:
+        impl: FRFCFS
+      refresh_manager:
+        impl: AllBank
+        scatter_interval: 0
+        debug: false
+      row_policy:
+        impl: Open
+      addr_mapper:
+        impl: RoBaRaCoCh
+      dram:
+        impl: DDR5
+        org:
+          dq: 8
+          count: [1, 2, 8, 4, 65536, 1024]
+        timing: [4800, 8, 34, 34, 34, 77, 111, 72, 18, 32, 2, 8, 12, 8, 48, 8, 12, 6, 24, 48, 710, 9375, 2, 416]
+        command_cycles: [2, 1, 1, 2, 2, 2, 2, 1]
+        channel_width: 32
+        read_latency: 42
+        timing_constraints:
+          - [0, [0, 3, 4, 5, 6], [0, 1, 2, 3, 4, 5, 6, 7], 2]
+          - [0, [3, 5], [3, 5], 8]
+          - [0, [4, 6], [4, 6], 8]
+          - [1, [3, 5], [3, 5], 8]
+          - [1, [4, 6], [4, 6], 8]
+          - [1, [3, 5], [4, 6], 14]
+          - [1, [4, 6], [3, 5], 46]
+          - [1, [3, 5], [3, 4, 5, 6], 10, 1, true]
+          - [1, [4, 6], [3, 5], 8, 1, true]
+          - [1, [3], [2], 19]
+          - [1, [4], [2], 113]
+          - [1, [0], [0], 8]
+          - [1, [0], [0], 48, 4]
+          - [1, [0], [2], 78]
+          - [1, [2], [0], 33]
+          - [1, [1, 2], [1, 2], 2]
+          - [1, [0], [7], 112]
+          - [1, [1, 2], [7], 34]
+          - [1, [5], [7], 53]
+          - [1, [6], [7], 147]
+          - [1, [7], [0], 709]
+          - [1, [7], [2], 710]
+          - [2, [3, 5], [3, 5], 12]
+          - [2, [4, 6], [4, 6], 48]
+          - [2, [4, 6], [3, 5], 64]
+          - [2, [0], [0], 12]
+          - [3, [0], [0], 111]
+          - [3, [0], [3, 4, 5, 6], 34]
+          - [3, [0], [1], 78]
+          - [3, [1], [0], 33]
+          - [3, [3], [1], 19]
+          - [3, [4], [1], 113]
+          - [3, [5], [0], 52]
+          - [3, [6], [0], 146]

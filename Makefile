@@ -11,6 +11,16 @@ OBJ_ROOT := .csconfig
 DEP_ROOT := $(OBJ_ROOT)
 EXTERNAL_MODULE_DIR ?=
 
+# NMFC: ramulator2 is an optional backing memory model. Opt in with
+#   tools/nmfc/build_ramulator.sh && make NMFC_RAMULATOR=1
+# The default build needs nothing in ext/, and src/nmfc/ramulator_mc.cc compiles
+# to nothing without the define.
+ifdef NMFC_RAMULATOR
+override CPPFLAGS += -DNMFC_WITH_RAMULATOR -isystem $(ROOT_DIR)/ext/ramulator2/src
+override LDFLAGS  += -L$(ROOT_DIR)/ext/ramulator2 -Wl,-rpath,$(ROOT_DIR)/ext/ramulator2
+override LDLIBS   += -lramulator
+endif
+
 # vcpkg integration
 TRIPLET_DIR = $(patsubst %/,%,$(firstword $(filter-out $(ROOT_DIR)/vcpkg_installed/vcpkg/, $(wildcard $(ROOT_DIR)/vcpkg_installed/*/))))
 override LDFLAGS  += -L$(TRIPLET_DIR)/lib -L$(TRIPLET_DIR)/lib/manual-link

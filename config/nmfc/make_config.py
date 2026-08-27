@@ -110,6 +110,21 @@ def build(args, nmfc_enabled):
 
     # ---- memory controllers, one channel each ---------------------------
     for t in range(tiles):
+        if args.dram == "ramulator":
+            # Each tile drives its own single-channel ramulator2 machine. The
+            # address arriving here already had the tile-select field compacted
+            # out, which is exactly the dense space a one-channel controller
+            # wants. Needs: make NMFC_RAMULATOR=1
+            children.append({
+                "_comment": f"memory tile {t}: DRAM modeled by ramulator2",
+                "name": f"tile{t}_DRAM", "module": "memory_controller", "model": "RAMULATOR_MC",
+                "clock_period": {"time": f"{args.dram_period}p"},
+                "config": args.ramulator_config,
+                "size": args.tile_bytes,
+                "max_accept": {"bandwidth": 4},
+                "ul_channels": [f"@tile{t}_LLC_DRAM_channel"],
+            })
+            continue
         children.append({
             "_comment": f"memory tile {t} owns exactly one DRAM channel",
             "name": f"tile{t}_DRAM", "module": "memory_controller",
@@ -313,12 +328,18 @@ def main():
     parser.add_argument("--mode-bit", type=int, default=38)
     parser.add_argument("--llc-sets", type=int, default=2048)
     parser.add_argument("--placement", default="round_robin")
+    parser.add_argument("--dram", choices=["default", "ramulator"], default="default")
+    parser.add_argument("--ramulator-config", default="config/nmfc/ramulator/tile_ddr5.yaml")
+    parser.add_argument("--dram-period", type=int, default=417,
+                        help="picoseconds; must match the ramulator config's tCK")
+    parser.add_argument("--tile-bytes", type=int, default=4 << 30)
     parser.add_argument("--out-dir", default="config/nmfc")
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
     for enabled, name in [(True, "nmfc"), (False, "baseline")]:
-        path = os.path.join(args.out_dir, f"{name}_{args.tiles}tile.json")
+        suffix = "" if args.dram == "default" else f"_{args.dram}"
+        path = os.path.join(args.out_dir, f"{name}_{args.tiles}tile{suffix}.json")
         with open(path, "w") as handle:
             json.dump(build(args, enabled), handle, indent=2)
         print(f"wrote {path}")
