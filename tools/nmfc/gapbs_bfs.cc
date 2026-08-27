@@ -350,8 +350,9 @@ void nmfc_declare_layout(const Graph& g)
   tracer.declare_region("out_index", g.nmfc_out_index(), (vertices + 1) * sizeof(NodeID*), mincut ? by_new_vertex : (block ? by_vertex : none));
   tracer.declare_region("out_neighbors", g.nmfc_out_neighbors(), edges * sizeof(NodeID), mincut ? by_owning_vertex : (block ? by_edge : none));
   (void)by_parent_slot;
-  tracer.declare_region("code", reinterpret_cast<const void*>(nmfc::gapbs::FUNC_CODE_BASE),
-                        (std::uint64_t{1} << g_nmfc.grain_bits) * tiles, none);
+  // One grain, not one per tile: the OS aliases this virtual page to a copy on
+  // every channel, so there is nothing here for the compiler to lay out.
+  tracer.declare_code("code", reinterpret_cast<const void*>(nmfc::gapbs::FUNC_CODE_BASE), std::uint64_t{1} << g_nmfc.grain_bits);
 }
 
 /**

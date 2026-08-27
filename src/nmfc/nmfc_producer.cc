@@ -253,8 +253,11 @@ private:
       return; // no allocator wants hints; the layout is whatever the vmem does
     }
     const auto fields = nmfc::decode_page_hint(rec.aux1);
-    placement_->hint_placement(fields.asid, rec.aux0, nmfc::placement_hint{fields.reg == nmfc::region::NMFC ? nmfc::mapping_mode::NMFC : nmfc::mapping_mode::STANDARD,
-                                                                          fields.tile});
+    // CODE is NMFC mode plus replication: one virtual page, one physical copy
+    // per channel, with the tile chosen when the address is translated.
+    const bool replicated = fields.reg == nmfc::region::CODE;
+    const auto mode = (fields.reg == nmfc::region::STANDARD) ? nmfc::mapping_mode::STANDARD : nmfc::mapping_mode::NMFC;
+    placement_->hint_placement(fields.asid, rec.aux0, nmfc::placement_hint{mode, fields.tile, replicated});
     ++hints_;
   }
 
@@ -264,7 +267,7 @@ private:
     nmfc::function_body body{};
     body.token = call.token;
     body.func_id = nmfc::call_func_id(call.aux1);
-    body.entry_pc_base = champsim::address{call.aux0};
+    body.entry_pc = champsim::address{call.aux0};
     body.flag_bits = call.flag_bits;
 
     const auto expected = nmfc::call_body_length(call.aux1);

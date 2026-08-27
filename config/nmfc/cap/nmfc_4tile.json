@@ -829,6 +829,7 @@
         "time": "250p"
       },
       "vmem": "@VMEM",
+      "tile": 0,
       "lower_level": "@tile0_mmu_port",
       "small_sets": 32,
       "small_ways": 4,
@@ -1077,6 +1078,7 @@
         "time": "250p"
       },
       "vmem": "@VMEM",
+      "tile": 1,
       "lower_level": "@tile1_mmu_port",
       "small_sets": 32,
       "small_ways": 4,
@@ -1325,6 +1327,7 @@
         "time": "250p"
       },
       "vmem": "@VMEM",
+      "tile": 2,
       "lower_level": "@tile2_mmu_port",
       "small_sets": 32,
       "small_ways": 4,
@@ -1573,6 +1576,7 @@
         "time": "250p"
       },
       "vmem": "@VMEM",
+      "tile": 3,
       "lower_level": "@tile3_mmu_port",
       "small_sets": 32,
       "small_ways": 4,

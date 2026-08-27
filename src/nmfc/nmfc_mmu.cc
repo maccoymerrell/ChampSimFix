@@ -64,6 +64,7 @@ class nmfc_mmu : public champsim::modules::channel_module, public champsim::oper
 public:
   explicit nmfc_mmu(champsim::modules::ModuleBuilder builder)
       : champsim::operable(builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), map_(nmfc::tile_map_from(builder)),
+        tile_(builder.get_parameter<std::size_t>("tile")),
         vmem_(builder.get_parameter<champsim::modules::vmem_module*>("vmem")), lower_(builder.get_parameter<channel_type*>("lower_level", true, nullptr)),
         hit_latency_(nmfc::cycles_from(builder, "hit_latency", 1)), mshr_size_(builder.get_parameter<std::size_t>("mshr_size", true, std::size_t{16})),
         page_bits_(builder.get_parameter<unsigned>("log2_page_size", true, 12U)),
@@ -241,7 +242,7 @@ private:
   /** Whether this address resolves from a grain-sized mapping. */
   [[nodiscard]] bool is_huge(champsim::origin origin, std::uint64_t vaddr) const
   {
-    return placement_ != nullptr && placement_->grain_mapping(origin.asid(), vaddr).has_value();
+    return placement_ != nullptr && placement_->grain_mapping_on(origin.asid(), vaddr, tile_).has_value();
   }
 
   [[nodiscard]] std::uint64_t page_of(bool huge, std::uint64_t vaddr) const { return vaddr >> (huge ? map_.grain_bits() : page_bits_); }
@@ -321,7 +322,10 @@ private:
       // Real page-table addresses from the vmem, so the references land where
       // the page table actually is -- which for a memory tile means locally,
       // and TILE_PORT asserts it.
-      const auto [pte_address, penalty] = vmem_->get_pte_pa(walk.origin, champsim::page_number{champsim::address{walk.vaddr}}, walk.level);
+      // Asked as this tile: a replicated page's entry lives in this tile's own
+      // partition of the table, so the walk stays local like every other.
+      const auto [pte_address, penalty] = placement_->pte_address_on(walk.origin, champsim::address{walk.vaddr}.to<std::uint64_t>() >> page_bits_,
+                                                                    walk.level, tile_);
       (void)penalty;
 
       if (lower_ == nullptr) {
@@ -386,8 +390,13 @@ private:
       }
 
       // The mapping itself comes from the vmem; the walk above is what it cost.
-      const auto [ppage, fault] = vmem_->va_to_pa(walk.origin, champsim::page_number{champsim::address{walk.vaddr}});
-      const auto physical = champsim::address{ppage}.to<std::uint64_t>();
+      // Asked as this tile, so a replicated page resolves to the copy that
+      // lives here. This is the step where a migrated context, re-translating
+      // the program counter it never changed, picks up its new tile's code.
+      const auto physical = placement_ != nullptr
+                                ? placement_->page_mapping_on(walk.origin, champsim::address{walk.vaddr}.to<std::uint64_t>() >> page_bits_, tile_)
+                                : champsim::address{vmem_->va_to_pa(walk.origin, champsim::page_number{champsim::address{walk.vaddr}}).first}.to<std::uint64_t>();
+      const auto fault = champsim::chrono::clock::duration::zero();
       const auto ppn = physical >> (walk.huge ? map_.grain_bits() : page_bits_);
 
       (walk.huge ? huge_ : small_).fill(walk.origin.asid(), walk.vpn, ppn);
@@ -438,6 +447,9 @@ private:
   }
 
   nmfc::tile_map map_;
+  // Which tile this MMU serves. A replicated page translates to this tile's
+  // own copy, so the answer depends on who is asking -- and an MMU always knows.
+  std::size_t tile_;
   champsim::modules::vmem_module* vmem_;
   nmfc::page_placement_sink* placement_ = nullptr;
   channel_type* lower_;

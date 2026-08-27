@@ -404,13 +404,49 @@ private:
     body_.push_back(rec);
   }
 
-  void emit_hint(std::uint64_t vpage, std::uint32_t tile)
+  void emit_hint(std::uint64_t vpage, std::uint32_t tile, nmfc::region reg = nmfc::region::NMFC)
   {
     auto rec = blank(nmfc::op::PAGE_HINT, 0);
     rec.aux0 = vpage;
-    rec.aux1 = nmfc::encode_page_hint(0, nmfc::region::NMFC, tile);
+    rec.aux1 = nmfc::encode_page_hint(0, reg, tile);
     write(rec);
   }
+
+public:
+  /**
+   * Declare a region of read-only code.
+   *
+   * Unlike data, this is *one* virtual grain. The OS aliases it to one physical
+   * copy per channel, so there is no per-tile address for the compiler to
+   * choose and no bias for the dispatcher to add -- picking a tile is picking
+   * which copy a translation returns. That is also why an invocation's program
+   * counter is unchanged when it migrates: the same virtual address resolves to
+   * whatever copy lives on the tile it arrives at.
+   *
+   * Sound only because the pages are read-only; N writable copies would need
+   * coherence, which is exactly why the data these functions chase gets a
+   * single home instead.
+   */
+  void declare_code(const std::string& name, const void* base, std::uint64_t bytes)
+  {
+    if (!enabled_ || budget_spent_) {
+      return;
+    }
+    const auto real = reinterpret_cast<std::uint64_t>(base);
+    const std::uint64_t grain = std::uint64_t{1} << grain_bits_;
+    const auto num_grains = (bytes + grain - 1) / grain;
+    const auto start = next_region_base(bytes);
+
+    std::vector<std::uint64_t> grain_va(num_grains);
+    for (std::uint64_t k = 0; k < num_grains; ++k) {
+      grain_va[k] = start + k * grain;
+      emit_hint(grain_va[k] >> page_bits_, 0, nmfc::region::CODE);
+    }
+    regions_.push_back(region_map{real, real + bytes, start, std::move(grain_va)});
+    std::fprintf(stderr, "nmfc: region %-14s base %#018lx  %8.1f MiB  replicated on every channel\n", name.c_str(), start, double(bytes) / (1024 * 1024));
+  }
+
+private:
 
   void write(const nmfc::record& rec)
   {

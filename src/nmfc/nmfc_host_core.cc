@@ -1310,7 +1310,7 @@ long NMFC_HOST_CORE::dispatch_offloads()
     msg.token = entry->token;
     msg.origin = entry->origin;
     msg.home_host = host_id_;
-    msg.entry_pc = body->entry_pc_base;
+    msg.entry_pc = body->entry_pc;
     msg.body = body;
 
     if (!fabric_->dispatch(msg)) {

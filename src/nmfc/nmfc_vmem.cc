@@ -40,6 +40,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <set>
 #include <map>
 #include <optional>
 #include <string>
@@ -128,10 +129,15 @@ public:
     // is unchanged.
     const auto raw = champsim::address{vaddr}.to<std::uint64_t>();
     const auto roots = router_->page_table_roots();
+    const auto tile_override = pte_tile_override_;
     // With one root per channel the tile is known before the walk starts, so
     // the table is partitioned and every walk is local. With a single root it
     // cannot be: picking the root would require the answer the walk produces.
-    const auto tile = roots > 1 ? router_->owner_of(origin, champsim::address{raw}) : std::size_t{0};
+    // A replicated grain lives in every partition, so its entry is found
+    // through the asking tile's root rather than one derived from the address.
+    const auto tile = roots <= 1                    ? std::size_t{0}
+                      : tile_override.has_value()   ? *tile_override
+                                                    : router_->owner_of(origin, champsim::address{raw});
     const champsim::address compacted{roots > 1 ? map_.compact_virtual(raw) : raw};
 
     const champsim::dynamic_extent entry_extent{champsim::address::bits, shamt(level + 1)};
@@ -163,12 +169,23 @@ public:
   {
     const auto vgrain = vpage / pages_per_grain_;
     hints_[std::pair{asid, vgrain}] = hint;
+    if (hint.replicated) {
+      replicated_grains_.insert(std::pair{asid, vgrain});
+    }
     ++hints_received_;
   }
 
   [[nodiscard]] std::optional<std::uint64_t> grain_mapping(std::uint32_t asid, std::uint64_t vaddr) const override
   {
+    return grain_mapping_on(asid, vaddr, 0);
+  }
+
+  [[nodiscard]] std::optional<std::uint64_t> grain_mapping_on(std::uint32_t asid, std::uint64_t vaddr, std::size_t tile) const override
+  {
     const auto vgrain = vaddr >> map_.grain_bits();
+    if (auto rep = replicas_.find(std::pair{asid, vgrain}); rep != std::end(replicas_)) {
+      return (rep->second.at(tile % rep->second.size()) << map_.grain_bits()) | (std::uint64_t{1} << map_.mode_bit());
+    }
     auto it = nmfc_grains_.find(std::pair{asid, vgrain});
     if (it == std::end(nmfc_grains_)) {
       return std::nullopt;
@@ -177,6 +194,75 @@ public:
     // MMU entry built from this goes on to be routed and sliced by consumers
     // that read the mapping mode out of the address itself.
     return (it->second << map_.grain_bits()) | (std::uint64_t{1} << map_.mode_bit());
+  }
+
+  /** Page-granular translation as the MMU on `tile` sees it. */
+  /** get_pte_pa, but answered as `tile` -- see pte_address_on in the header. */
+  [[nodiscard]] std::pair<champsim::address, champsim::chrono::clock::duration> pte_address_on(champsim::origin origin, std::uint64_t vpage, std::size_t level,
+                                                                                                std::size_t tile) override
+  {
+    const auto vgrain = vpage / pages_per_grain_;
+    const bool replicated = replicated_grains_.count(std::pair{origin.asid(), vgrain}) != 0;
+    if (replicated) {
+      pte_tile_override_ = tile;
+    }
+    auto result = get_pte_pa(origin, champsim::page_number{champsim::address{vpage << log2_page_size_}}, level);
+    pte_tile_override_.reset();
+    return result;
+  }
+
+  [[nodiscard]] std::uint64_t page_mapping_on(champsim::origin origin, std::uint64_t vpage, std::size_t tile) override
+  {
+    const auto asid = origin.asid();
+    const auto vgrain = vpage / pages_per_grain_;
+    if (replicated_grains_.count(std::pair{asid, vgrain}) != 0) {
+      const auto grain = replica_for(asid, vgrain, tile);
+      return champsim::address{stamp(grain * pages_per_grain_ + (vpage % pages_per_grain_), nmfc::mapping_mode::NMFC)}.to<std::uint64_t>();
+    }
+    const auto va = champsim::address{vpage << log2_page_size_};
+    const auto pa = champsim::address{va_to_pa(origin, champsim::page_number{va}).first}.to<std::uint64_t>();
+
+    // Congruence, checked where it is established. A frame whose tile does not
+    // match the tile its own virtual address names sends the context to one
+    // place and its data to another, and the symptom -- a tile port refusing a
+    // foreign address -- surfaces far from this line.
+    if (router_->order() == nmfc::routing_order::VIRTUAL_FIRST) {
+      const auto want = router_->owner_of(origin, va);
+      if (const auto got = map_.tile_of(pa); got != want) {
+        const auto vgrain = vpage / pages_per_grain_;
+        const auto found = hints_.find(std::pair{origin.asid(), vgrain});
+        fmt::print("[NMFC_VMEM] ERROR: virtual page {:#x} names tile {} but was backed by frame {:#x} on tile {} (mode {}).\n"
+                   "  asid {} vgrain {}; {} hints held; hint for this grain: {}\n",
+                   vpage << log2_page_size_, want, pa, got, map_.is_nmfc(pa) ? "nmfc" : "standard", origin.asid(), vgrain, hints_.size(),
+                   found == std::end(hints_) ? std::string{"none"}
+                                             : fmt::format("tile {} mode {}", found->second.tile, found->second.mode == nmfc::mapping_mode::NMFC ? "nmfc" : "standard"));
+        std::exit(-1);
+      }
+    }
+    return pa;
+  }
+
+  /**
+   * This grain's copy on `tile`, allocating the whole set on first touch.
+   *
+   * All N copies are made together: a replicated grain that existed on only
+   * some channels would silently turn "choose a copy" back into "choose among
+   * the tiles that happen to have one", which is the compile-time layout this
+   * exists to replace.
+   */
+  std::uint64_t replica_for(std::uint32_t asid, std::uint64_t vgrain, std::size_t tile)
+  {
+    auto it = replicas_.find(std::pair{asid, vgrain});
+    if (it == std::end(replicas_)) {
+      std::vector<std::uint64_t> frames;
+      frames.reserve(map_.num_tiles());
+      for (std::size_t t = 0; t < map_.num_tiles(); ++t) {
+        frames.push_back(take_grain(t));
+      }
+      replica_allocs_ += map_.num_tiles();
+      it = replicas_.emplace(std::pair{asid, vgrain}, std::move(frames)).first;
+    }
+    return it->second.at(tile % it->second.size());
   }
 
   // ---- statistics ----
@@ -379,6 +465,20 @@ private:
   std::size_t standard_refill_tile_ = 0;
 
   std::map<std::pair<std::uint32_t, std::uint64_t>, std::uint64_t> nmfc_grains_;
+  /**
+   * Replicated grains: one virtual grain, one frame per channel.
+   *
+   * The same virtual address therefore translates differently depending on
+   * which tile asks -- which is the mechanism, not a wrinkle. Choosing a copy
+   * is choosing a tile, so the OS decides placement when it answers a
+   * translation, and a migrated context re-translating its unchanged program
+   * counter lands on its new tile's copy.
+   */
+  std::map<std::pair<std::uint32_t, std::uint64_t>, std::vector<std::uint64_t>> replicas_;
+  std::set<std::pair<std::uint32_t, std::uint64_t>> replicated_grains_;
+  std::uint64_t replica_allocs_ = 0;
+  /** Set only for the duration of a replicated page's walk. */
+  std::optional<std::size_t> pte_tile_override_;
   std::map<std::pair<std::uint32_t, std::uint64_t>, std::uint64_t> standard_pages_;
   std::map<std::pair<std::uint32_t, std::uint64_t>, nmfc::placement_hint> hints_;
   std::map<std::tuple<std::uint32_t, std::uint32_t, champsim::address_slice<champsim::dynamic_extent>>, champsim::address> page_table_;

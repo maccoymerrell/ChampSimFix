@@ -231,7 +231,7 @@ def build(args, nmfc_enabled):
                             f"own slice, which congruent page-table placement makes local.",
                 "name": f"tile{t}_mmu", "module": "channel", "model": "NMFC_MMU",
                 "clock_period": CLOCK,
-                "vmem": "@VMEM",
+                "vmem": "@VMEM", "tile": t,
                 "lower_level": f"@tile{t}_mmu_port",
                 "small_sets": args.tlb_sets, "small_ways": 4,
                 "huge_sets": args.tlb_sets // 2, "huge_ways": 4,

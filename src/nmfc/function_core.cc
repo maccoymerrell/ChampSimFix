@@ -128,7 +128,6 @@ public:
     ctx.home_host = msg.home_host;
     ctx.body = msg.body;
     ctx.live_regs = msg.body->live_regs;
-    ctx.code_bias = bias_for(msg.origin, *msg.body, tile_);
     ctx.ready.fill(true); // arguments are live on entry
     ctx.arrived = current_time;
     make_ready(slot, current_time);
@@ -144,7 +143,6 @@ public:
     const auto slot = take_slot();
     auto& ctx = contexts_[slot];
     ctx = incoming;
-    ctx.code_bias = bias_for(incoming.origin, *incoming.body, tile_);
     ctx.arrived = current_time;
     // Arriving cold: no fetched block, no translations. The cycles spent
     // re-establishing them are what the cold-start statistic counts.
@@ -295,21 +293,6 @@ public:
 
 private:
   static constexpr std::size_t idx(nmfc::op_class cls) { return static_cast<std::size_t>(cls); }
-
-  /**
-   * The bias that puts this body's code on `tile`.
-   *
-   * The copies sit on consecutive grains, so the offset is however many grains
-   * separate the body's own tile from the one we want to run on.
-   */
-  [[nodiscard]] std::uint64_t bias_for(champsim::origin origin, const nmfc::function_body& body, std::size_t tile) const
-  {
-    // Which copy the body's own entry PC names. Under a router that can move
-    // code, this is a question about the current mapping, not a constant.
-    const auto base_tile = router_->owner_of(origin, body.entry_pc_base);
-    const auto n = map_.num_tiles();
-    return static_cast<std::uint64_t>((tile + n - base_tile) % n) * map_.grain();
-  }
 
   std::size_t take_slot()
   {
@@ -490,13 +473,12 @@ private:
     }
 
     const auto& instr = body.instrs[ctx.pc];
-    const auto eff_ip = instr.ip.to<std::uint64_t>() + ctx.code_bias;
-
-    // A function larger than one grain spills onto the next tile's copy, so the
-    // instruction stream itself can force a migration.
-    if (const auto ip_tile = router_->owner_of(ctx.origin, champsim::address{eff_ip}); ip_tile != tile_) {
-      return begin_migration(slot, ip_tile);
-    }
+    // The instruction virtual address is the same on every tile: a function's
+    // code is one virtual page aliased to one physical copy per channel, so the
+    // local MMU resolves it to whatever copy lives here. A context therefore
+    // never migrates for an instruction fetch, and its program counter does not
+    // change when it moves -- there is no per-tile bias to apply.
+    const auto eff_ip = instr.ip.to<std::uint64_t>();
 
     // Instruction fetch, once per block. A tight loop pays this once.
     if (const auto block = eff_ip >> block_bits_; !ctx.has_fetched || ctx.fetched_block != block) {
@@ -729,7 +711,7 @@ private:
       req.type = is_store ? access_type::WRITE : access_type::LOAD;
       req.response_requested = !is_store;
       req.origin = ctx.origin;
-      req.ip = champsim::address{instr.ip.to<std::uint64_t>() + ctx.code_bias};
+      req.ip = instr.ip;
 
       const bool sent = is_store ? dcache_->add_wq(req) : dcache_->add_rq(req);
       if (!sent) {
@@ -820,7 +802,6 @@ private:
     }
     release_context_lock(ctx);
     ctx.prepare_for_migration();
-    ctx.code_bias = bias_for(ctx.origin, *ctx.body, target);
     migrating_.push_back(std::pair{slot, target});
     return true;
   }

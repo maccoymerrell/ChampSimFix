@@ -40,7 +40,7 @@ namespace nmfc
 {
 
 inline constexpr unsigned long long TRACE_MAGIC = 0x3143'5254'4346'4d4eULL; // "NMFCTRC1" little-endian
-inline constexpr std::uint32_t TRACE_VERSION = 1;
+inline constexpr std::uint32_t TRACE_VERSION = 2;
 
 // Must match champsim's trace_instruction.h. Duplicated (not included) so the
 // generator builds standalone; nmfc_types.h static_asserts that they agree.
@@ -113,6 +113,21 @@ enum class op : std::uint8_t {
 enum class region : std::uint8_t {
   STANDARD = 0,
   NMFC = 1,
+  /**
+   * NMFC mode, and *replicated on every channel*.
+   *
+   * One virtual address, N physical pages -- one per channel. Translating it
+   * is where the tile gets chosen: the OS hands back whichever copy it wants
+   * the invocation to run on, so initial placement is a translation-time
+   * decision by the address space's owner rather than a layout the compiler
+   * baked in.
+   *
+   * This is only sound because the pages are read-only. N writable copies
+   * would need a coherence protocol; N copies of code need nothing, which is
+   * exactly why function bodies can be aliased this way and the data they
+   * chase cannot.
+   */
+  CODE = 2,
 };
 
 /** Coarse operation class, for a config-driven execute-latency table. */

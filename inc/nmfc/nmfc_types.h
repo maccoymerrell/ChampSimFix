@@ -67,7 +67,9 @@ struct body_instr {
 struct function_body {
   std::uint64_t token = 0;
   std::uint32_t func_id = 0;
-  champsim::address entry_pc_base{}; // the dispatcher adds tile * grain to pick a copy
+  // One virtual address for every tile. The OS aliases it to one physical
+  // copy per channel, so translating it is what chooses the tile.
+  champsim::address entry_pc{};
   std::uint8_t live_regs = 0;        // words to carry home on return
   std::uint8_t flag_bits = 0;        // FLAG_NO_RETURN et al, from the CALL record
   std::vector<body_instr> instrs;
@@ -137,15 +139,6 @@ struct context {
   const function_body* body = nullptr;
   std::uint32_t pc = 0; // index into body->instrs
 
-  /**
-   * Added to every instruction address to select this tile's copy of the code.
-   *
-   * The copies sit on consecutive grains, so running on tile t means executing
-   * at ip + code_bias. This is also why a carried code translation would be
-   * worse than stale after a migration: the instruction's virtual address
-   * genuinely changes.
-   */
-  std::uint64_t code_bias = 0;
 
   /** When this context arrived on its current tile, for the residency statistic. */
   champsim::chrono::clock::time_point arrived{};

@@ -15,9 +15,14 @@
 #ifndef NMFC_VMEM_H
 #define NMFC_VMEM_H
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <utility>
 
+#include "address.h"
+#include "chrono.h"
+#include "origin.h"
 #include "nmfc/tile_map.h"
 
 namespace nmfc
@@ -27,6 +32,8 @@ namespace nmfc
 struct placement_hint {
   mapping_mode mode = mapping_mode::STANDARD;
   std::uint32_t tile = 0;
+  /** One copy per channel; the tile is chosen when the address is translated. */
+  bool replicated = false;
 };
 
 /**
@@ -47,6 +54,36 @@ struct page_placement_sink {
    * Lets an MMU hold one entry per grain instead of one per 4 KiB page.
    */
   [[nodiscard]] virtual std::optional<std::uint64_t> grain_mapping(std::uint32_t asid, std::uint64_t vaddr) const = 0;
+
+  /**
+   * The same, as seen from `tile`.
+   *
+   * A replicated grain has one physical copy per channel, so its translation
+   * is not a function of the virtual address alone -- it depends on who is
+   * asking. An MMU belongs to exactly one tile, so it always knows, and a
+   * context that migrates re-translates the *same* virtual address on arrival
+   * and gets its new tile's copy. That is why an invocation's program counter
+   * does not change when it moves.
+   *
+   * For everything else this is grain_mapping(): one address, one frame.
+   */
+  [[nodiscard]] virtual std::optional<std::uint64_t> grain_mapping_on(std::uint32_t asid, std::uint64_t vaddr, std::size_t tile) const = 0;
+
+  /** Page-granular translation as seen from `tile`, for the walk below the MMU. */
+  [[nodiscard]] virtual std::uint64_t page_mapping_on(champsim::origin origin, std::uint64_t vpage, std::size_t tile) = 0;
+
+  /**
+   * Where the page-table entry for this walk lives, asked as `tile`.
+   *
+   * An ordinary address sits in exactly one channel's partition of the table,
+   * so the root follows the address and the walk is local. A *replicated*
+   * address sits in every partition -- each channel has its own entry naming
+   * its own copy -- so the root has to follow the asker instead. Getting this
+   * wrong sends one tile walking through another tile's table, which a tile
+   * port catches as a locality violation a long way from the cause.
+   */
+  [[nodiscard]] virtual std::pair<champsim::address, champsim::chrono::clock::duration> pte_address_on(champsim::origin origin, std::uint64_t vpage,
+                                                                                                      std::size_t level, std::size_t tile) = 0;
 };
 
 } // namespace nmfc

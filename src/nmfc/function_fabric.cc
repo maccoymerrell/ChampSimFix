@@ -8,7 +8,7 @@
  * right, and it is why returns are drained before invocations every cycle.
  *
  * Placement lives here. Because a function's copies sit on consecutive grains,
- * choosing tile t means dispatching to entry_pc_base + t * grain, so the policy
+ * choosing tile t means translating the entry PC to tile t's copy, so the policy
  * costs one add on the dispatch path and can be as clever as we like.
  *
  * Parameters:
