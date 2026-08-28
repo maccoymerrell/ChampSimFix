@@ -129,12 +129,27 @@ void BranchOrNot(UINT32 taken)
   curr_instr.branch_taken = taken;
 }
 
+/*
+ * Registers and memory addresses are different widths, so they do not share a
+ * signature. They used to: one template took its value as UINT32 and served
+ * both, which silently truncated every effective address above 4 GiB to its
+ * low 32 bits. A heap under 4 GiB hides it completely; an mmap'd region at
+ * 0x7fff... does not, and the resulting addresses look entirely plausible.
+ */
 template <typename T>
-void WriteToSet(T* begin, T* end, UINT32 r)
+void WriteRegToSet(T* begin, T* end, UINT32 r)
 {
   auto set_end = std::find(begin, end, 0);
-  auto found_reg = std::find(begin, set_end, r); // check to see if this register is already in the list
-  *found_reg = r;
+  auto found = std::find(begin, set_end, r); // already in the list?
+  *found = r;
+}
+
+template <typename T>
+void WriteMemToSet(T* begin, T* end, ADDRINT addr)
+{
+  auto set_end = std::find(begin, end, 0);
+  auto found = std::find(begin, set_end, addr);
+  *found = addr;
 }
 
 VOID StartTracing(VOID* ip)
@@ -221,7 +236,7 @@ VOID Instruction(INS ins, VOID* v)
   UINT32 readRegCount = INS_MaxNumRRegs(ins);
   for (UINT32 i = 0; i < readRegCount; i++) {
     UINT32 regNum = INS_RegR(ins, i);
-    INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)WriteToSet<unsigned char>, IARG_PTR, curr_instr.source_registers, IARG_PTR,
+    INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)WriteRegToSet<unsigned char>, IARG_PTR, curr_instr.source_registers, IARG_PTR,
                    curr_instr.source_registers + NUM_INSTR_SOURCES, IARG_UINT32, regNum, IARG_END);
   }
 
@@ -229,7 +244,7 @@ VOID Instruction(INS ins, VOID* v)
   UINT32 writeRegCount = INS_MaxNumWRegs(ins);
   for (UINT32 i = 0; i < writeRegCount; i++) {
     UINT32 regNum = INS_RegW(ins, i);
-    INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)WriteToSet<unsigned char>, IARG_PTR, curr_instr.destination_registers, IARG_PTR,
+    INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)WriteRegToSet<unsigned char>, IARG_PTR, curr_instr.destination_registers, IARG_PTR,
                    curr_instr.destination_registers + NUM_INSTR_DESTINATIONS, IARG_UINT32, regNum, IARG_END);
   }
 
@@ -239,10 +254,10 @@ VOID Instruction(INS ins, VOID* v)
   // Iterate over each memory operand of the instruction.
   for (UINT32 memOp = 0; memOp < memOperands; memOp++) {
     if (INS_MemoryOperandIsRead(ins, memOp))
-      INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)WriteToSet<unsigned long long int>, IARG_PTR, curr_instr.source_memory, IARG_PTR,
+      INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)WriteMemToSet<unsigned long long int>, IARG_PTR, curr_instr.source_memory, IARG_PTR,
                      curr_instr.source_memory + NUM_INSTR_SOURCES, IARG_MEMORYOP_EA, memOp, IARG_END);
     if (INS_MemoryOperandIsWritten(ins, memOp))
-      INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)WriteToSet<unsigned long long int>, IARG_PTR, curr_instr.destination_memory, IARG_PTR,
+      INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)WriteMemToSet<unsigned long long int>, IARG_PTR, curr_instr.destination_memory, IARG_PTR,
                      curr_instr.destination_memory + NUM_INSTR_DESTINATIONS, IARG_MEMORYOP_EA, memOp, IARG_END);
   }
 

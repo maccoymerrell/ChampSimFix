@@ -35,127 +35,118 @@ __attribute__((noinline, used)) void __champsim_stop_trace(void) { asm volatile(
 }
 
 /**
- * Two functions, not one, because the work has two access patterns that want
- * different homes.
- *
- * nmfc_scan streams a vertex's neighbour list -- contiguous, sequential, and on
- * whichever tile owns that stretch of the edge array. It touches parent[] only
- * to compute which tile owns each neighbour's entry, and sorts the neighbours
- * into per-tile buckets.
- *
- * nmfc_claim takes a bucket whose entries all belong to one tile and does the
- * compare-and-swaps. Every address it touches is on its own tile by
- * construction, so it never migrates; its accesses are scattered within one
- * channel, which is what spreads them over that channel's banks.
- *
- * Splitting this way is the point: one function cannot be both a sequential
- * streamer and a local random-access loop, and asking it to be both is what
- * made the single-function version change tiles every few instructions.
- */
-
-/**
  * Geometry is compile-time, and that is a correctness requirement rather than
- * a tuning choice.
- *
- * Passed as runtime arguments, the tile count made the compiler emit a
- * hardware divide in the inner loop -- once per neighbour -- and pushed the
- * parameter list past the six registers the ABI passes in, so two arguments
- * arrived on the stack and three callee-saved registers were spilled to make
- * room. A function core has a regfile and no stack, so that function could not
- * have run on the machine it was written for. As constants the modulo is a
- * mask and the whole working set stays in registers.
+ * a tuning choice. Passed as runtime arguments it costs a hardware divide per
+ * neighbour and pushes the parameter list past the registers the ABI passes
+ * in, which puts arguments on a stack this machine does not have.
  */
 static constexpr uint32_t NMFC_GRAIN_BITS = 20;
 static constexpr uint32_t NMFC_TILES = 4;
-static constexpr int32_t NMFC_CAP = static_cast<int32_t>((std::size_t{1} << NMFC_GRAIN_BITS) / sizeof(NodeID));
 static_assert((NMFC_TILES & (NMFC_TILES - 1)) == 0, "tile count must be a power of two for the mask to be exact");
 
+/**
+ * One offloaded function: claim up to six vertices, all owned by one tile.
+ *
+ * The work arrives in registers. A fork carries a 512-bit vector that is the
+ * callee's entire register file, so an invocation can be handed its operands
+ * outright instead of being pointed at a buffer -- and a function that reads
+ * no buffer cannot be sitting on the wrong tile for it. Every address this
+ * touches is inside `parent`, on its own tile, so it never migrates.
+ *
+ * Six is the register budget, not a tuning constant. Live at the compare and
+ * swap: parent, u, three packed argument words, the result mask, the vertex
+ * and the value read back. That is eight, which is the whole register file.
+ * A fourth packed word would need nine and the function would be rejected.
+ *
+ * Returns a bitmask of which of the six were claimed, so the caller knows what
+ * to put in the next frontier without reading anything back from memory.
+ */
+/** One claim, always inlined: the helper exists for legibility, not as a call. */
+static inline __attribute__((always_inline)) uint32_t claim_one(NodeID* parent, NodeID u, NodeID v, uint32_t bit)
+{
+  if (v < 0) {
+    return 0; // an unused slot in a short group
+  }
+  const NodeID curr = parent[v];
+  return (curr < 0 && compare_and_swap(parent[v], curr, u)) ? bit : 0;
+}
+
+NMFC_FUNCTION
+uint32_t nmfc_claim6(NodeID* parent, NodeID u, uint64_t a, uint64_t b, uint64_t c)
+{
+  // Unrolled so each packed word dies as soon as it is consumed. Written as a
+  // loop over an index instead, the compiler kept all three live across every
+  // iteration, needed a ninth register and built a stack frame to spill into --
+  // on a machine that has no stack.
+  uint32_t got = 0;
+  got |= claim_one(parent, u, static_cast<NodeID>(a & 0xffffffffULL), 1u << 0);
+  got |= claim_one(parent, u, static_cast<NodeID>(a >> 32), 1u << 1);
+  got |= claim_one(parent, u, static_cast<NodeID>(b & 0xffffffffULL), 1u << 2);
+  got |= claim_one(parent, u, static_cast<NodeID>(b >> 32), 1u << 3);
+  got |= claim_one(parent, u, static_cast<NodeID>(c & 0xffffffffULL), 1u << 4);
+  got |= claim_one(parent, u, static_cast<NodeID>(c >> 32), 1u << 5);
+  return got;
+}
+
 /** Which tile owns an address, under the congruent mapping the simulator uses. */
-static inline uint32_t nmfc_tile_of(const void* p)
+static inline uint32_t tile_of(const void* p)
 {
   return static_cast<uint32_t>((reinterpret_cast<uintptr_t>(p) >> NMFC_GRAIN_BITS) & (NMFC_TILES - 1));
 }
 
-/**
- * Sort u's neighbours into per-tile buckets by the tile owning parent[v].
- * `bucket` is `tiles` lanes of `cap` entries; `count` is per-lane occupancy.
- */
-NMFC_FUNCTION
-const NodeID* nmfc_scan(const NodeID* first, const NodeID* last, const NodeID* parent, NodeID* const* lane)
-{
-  for (const NodeID* p = first; p != last; ++p) {
-    const NodeID v = *p;
-    NodeID* l = lane[nmfc_tile_of(&parent[v])];
-    const NodeID n = *l; // a lane carries its own occupancy in its first word
-    if (n == NMFC_CAP - 1) {
-      return p; // this lane is full; the caller drains and resumes here
-    }
-    l[n + 1] = v;
-    *l = n + 1;
-  }
-  return last;
-}
+static constexpr int GROUP = 6;
 
 /**
- * Claim every vertex in one bucket, compacting the winners to its front and
- * returning the new end.
+ * The host walks the frontier and the edge lists itself.
  *
- * The shape of this signature is a register budget, not a style choice. A
- * function core holds eight registers and no stack. Five arguments plus a
- * separate output buffer needed nine live values; so did returning a count,
- * because the base pointer had to stay live purely to subtract from. Handing
- * back the end pointer lets the base die at the top of the loop and the
- * caller do the subtraction, which is host work.
- *
- * All of `parent` touched here lives on this function's own tile, so this
- * loop does not migrate.
+ * That is deliberate: the scan is sequential and prefetchable, which is what an
+ * out-of-order core with a memory hierarchy is already good at. What it is bad
+ * at is the scattered read-modify-write on parent[], and that is the part that
+ * goes near the memory. Grouping by owning tile is a shift and a mask per
+ * neighbour, and the groups are dispatched as they fill.
  */
-NMFC_FUNCTION
-NodeID* nmfc_claim(NodeID* bucket, int32_t n, NodeID* parent, NodeID u)
-{
-  NodeID* w = bucket;
-  for (NodeID* p = bucket, *e = bucket + n; p != e; ++p) {
-    const NodeID v = *p;
-    NodeID& slot = parent[v];
-    const NodeID curr = slot;
-    if (curr < 0 && compare_and_swap(slot, curr, u)) {
-      *w++ = v;
-    }
-  }
-  return w;
-}
-
-static int64_t TDStepOffloaded(const Graph& g, NodeID* parent, SlidingQueue<NodeID>& queue, NodeID* const* lane)
+static int64_t TDStepOffloaded(const Graph& g, NodeID* parent, SlidingQueue<NodeID>& queue)
 {
   int64_t scout_count = 0;
   QueueBuffer<NodeID> lqueue(queue);
+  NodeID stage[NMFC_TILES][GROUP];
+  int32_t n[NMFC_TILES];
+
   for (auto q_iter = queue.begin(); q_iter < queue.end(); q_iter++) {
     const NodeID u = *q_iter;
-    auto neigh = g.out_neigh(u);
-    const NodeID* first = neigh.begin();
-    const NodeID* last = neigh.end();
+    for (uint32_t t = 0; t < NMFC_TILES; ++t) {
+      n[t] = 0;
+    }
 
-    // Drain in passes so a full lane never costs a neighbour. A vertex with
-    // more neighbours on one tile than a bucket holds takes several passes;
-    // nothing is dropped.
-    const NodeID* p = first;
-    while (p != last) {
-      for (uint32_t t = 0; t < NMFC_TILES; ++t) {
-        *lane[t] = 0;
+    const auto flush = [&](uint32_t t) {
+      for (int i = n[t]; i < GROUP; ++i) {
+        stage[t][i] = -1; // unused slots
       }
-      // Producer: streams the edge list, sorts neighbours by owning tile.
-      p = nmfc_scan(p, last, parent, lane);
-      // Consumers: one per tile, each entirely local to that tile.
-      for (uint32_t t = 0; t < NMFC_TILES; ++t) {
-        const int32_t n = *lane[t];
-        if (n == 0) {
-          continue;
+      const auto pack = [&](int i) {
+        return (static_cast<uint64_t>(static_cast<uint32_t>(stage[t][i + 1])) << 32) | static_cast<uint32_t>(stage[t][i]);
+      };
+      const uint32_t got = nmfc_claim6(parent, u, pack(0), pack(2), pack(4));
+      for (int i = 0; i < GROUP; ++i) {
+        if ((got & (1u << i)) != 0) {
+          lqueue.push_back(stage[t][i]);
+          scout_count += g.out_degree(stage[t][i]);
         }
-        const int32_t got = static_cast<int32_t>(nmfc_claim(lane[t] + 1, n, parent, u) - (lane[t] + 1));
-        for (int32_t i = 0; i < got; ++i) {
-          lqueue.push_back(lane[t][1 + i]);
-          scout_count += g.out_degree(lane[t][1 + i]);
-        }
+      }
+      n[t] = 0;
+    };
+
+    auto neigh = g.out_neigh(u);
+    for (const NodeID* p = neigh.begin(); p != neigh.end(); ++p) {
+      const NodeID v = *p;
+      const uint32_t t = tile_of(&parent[v]);
+      stage[t][n[t]++] = v;
+      if (n[t] == GROUP) {
+        flush(t);
+      }
+    }
+    for (uint32_t t = 0; t < NMFC_TILES; ++t) {
+      if (n[t] != 0) {
+        flush(t);
       }
     }
   }
@@ -226,45 +217,17 @@ static NodeID* DOBFS(const Graph& g, NodeID source, uint32_t grain_bits, uint32_
   queue.push_back(source);
   queue.slide_window();
 
-  // The consumer reads its bucket and updates parent entries. Both must be on
-  // its own tile or it ping-pongs once per element -- which is what the first
-  // version of this split did, changing tile every five instructions despite
-  // being written to never migrate. So each lane is placed on the tile it
-  // serves: one grain per lane, ordered so lane t lands on tile t.
   const std::size_t grain = std::size_t{1} << NMFC_GRAIN_BITS;
-  NodeID* bucket_base = nullptr;
-  NodeID* claimed_base = nullptr;
-  if (posix_memalign(reinterpret_cast<void**>(&bucket_base), grain, grain * tiles) != 0 ||
-      posix_memalign(reinterpret_cast<void**>(&claimed_base), grain, grain * tiles) != 0) {
-    std::fprintf(stderr, "nmfc: cannot allocate tile-local scratch\n");
-    std::exit(1);
-  }
-  // Lane order is rotated so that lane t is the grain whose tile number is t.
-  std::vector<NodeID*> lane(tiles), out(tiles);
-  const uint32_t bucket_home = nmfc_tile_of(bucket_base);
-  const uint32_t claimed_home = nmfc_tile_of(claimed_base);
-  for (uint32_t t = 0; t < tiles; ++t) {
-    lane[t] = bucket_base + static_cast<std::size_t>((t - bucket_home + tiles) % tiles) * (grain / sizeof(NodeID));
-    out[t] = claimed_base + static_cast<std::size_t>((t - claimed_home + tiles) % tiles) * (grain / sizeof(NodeID));
-  }
-  std::vector<int32_t> count(tiles);
 
   write_manifest(manifest, {
     {"index", (const void*)g.nmfc_out_index(), (static_cast<std::size_t>(g.num_nodes()) + 1) * sizeof(void*)},
     {"neighbors", (const void*)g.nmfc_out_neighbors(), static_cast<std::size_t>(g.num_edges_directed()) * sizeof(NodeID)},
     {"parent", parent, static_cast<std::size_t>(g.num_nodes()) * sizeof(NodeID)},
-    {"bucket", bucket_base, grain * tiles},
-    {"claimed", claimed_base, grain * tiles},
-    // The lane table itself is memory the function reads: it holds the pointer
-    // to each bucket. Leaving it out of the manifest made the annotation pass
-    // refuse the trace, which is the behaviour we want from it.
-    {"lanetab", lane.data(), lane.size() * sizeof(NodeID*)},
-    {"outtab", out.data(), out.size() * sizeof(NodeID*)},
   });
 
   __champsim_start_trace();
   while (!queue.empty()) {
-    TDStepOffloaded(g, parent, queue, lane.data());
+    TDStepOffloaded(g, parent, queue);
     queue.slide_window();
   }
   __champsim_stop_trace();
