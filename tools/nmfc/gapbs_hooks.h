@@ -233,7 +233,12 @@ public:
     if (!enabled_ || budget_spent_) {
       return 0;
     }
-    if (budget_ != 0 && calls_ >= budget_) {
+    // A spawned definition is not work the budget should pay for: it is part of
+    // the invocation that spawns it, and it is only reached if that invocation
+    // runs. Counting definitions spent the whole budget defining claims -- 98,573
+    // of 100,000 records -- leaving 1,427 scans to spawn them and the rest
+    // published but unreachable, which reads at the end as work that never ran.
+    if (!spawned && budget_ != 0 && calls_ >= budget_) {
       // Stop both streams here, so the NMFC trace and its baseline cover
       // exactly the same work. The kernel carries on correctly, untraced.
       if (!budget_spent_) {
@@ -342,7 +347,14 @@ public:
     write(ret);
 
     in_call_ = false;
-    ++calls_;
+    // Definitions are not dispatched work, so they do not spend the budget and
+    // are not counted as invocations. Counting them made the budget stop the
+    // trace after defining claims that nothing would ever reach.
+    if ((call_.flag_bits & nmfc::FLAG_SPAWNED) == 0) {
+      ++calls_;
+    } else {
+      ++definitions_;
+    }
   }
 
   /**
@@ -391,7 +403,8 @@ public:
       std::fprintf(stderr, "nmfc: wrote baseline -- %lu instructions\n", baseline_count_);
     }
     enabled_ = false;
-    std::fprintf(stderr, "nmfc: wrote %s -- %lu records, %lu invocations, %lu joins\n", path_.c_str(), records_, calls_, joins_);
+    std::fprintf(stderr, "nmfc: wrote %s -- %lu records, %lu invocations (%lu spawned definitions), %lu joins\n", path_.c_str(), records_, calls_,
+                 definitions_, joins_);
   }
 
 private:
@@ -557,6 +570,7 @@ private:
   std::uint64_t token_counter_ = 0;
   std::uint64_t records_ = 0;
   std::uint64_t calls_ = 0;
+  std::uint64_t definitions_ = 0;
   std::uint64_t joins_ = 0;
   std::uint64_t budget_ = 0;
 };

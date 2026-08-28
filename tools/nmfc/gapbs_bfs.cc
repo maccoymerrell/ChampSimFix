@@ -149,7 +149,7 @@ int64_t TDStep(const Graph &g, pvector<NodeID> &parent,
         }
       }
 
-      std::uint64_t token = T.begin_call(1, spawning, !spawning && g_nmfc.fork_window > 1);
+      std::uint64_t token = T.begin_call(1, /*no_return=*/false, g_nmfc.fork_window > 1);
       T.body_load(&g.nmfc_out_index()[u], R::R_ROW_BEGIN, R::R_VERTEX);
       T.body_load(&g.nmfc_out_index()[u + 1], R::R_ROW_END, R::R_VERTEX);
       const NodeID* edge_base = g.out_neigh(u).begin();
@@ -182,13 +182,13 @@ int64_t TDStep(const Graph &g, pvector<NodeID> &parent,
         // a compiler splitting a loop hoists them, and re-reading them would
         // charge the model for work it would not do.
         if (++in_chunk >= per_call && edge_index < degree) {
-          nmfc_finish(token, spawning);
+          nmfc_finish(token);
           T.host(&(*q_iter), R::R_VERTEX, R::R_VERTEX);
-          token = T.begin_call(1, spawning, !spawning && g_nmfc.fork_window > 1);
+          token = T.begin_call(1, /*no_return=*/false, g_nmfc.fork_window > 1);
           in_chunk = 0;
         }
       }
-      nmfc_finish(token, spawning);                    // NMFC
+      nmfc_finish(token);                    // NMFC
     }
     lqueue.flush();
   }

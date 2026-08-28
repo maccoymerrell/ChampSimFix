@@ -77,6 +77,19 @@ struct function_image_store : public nmfc::function_image_module, public champsi
       return; // nothing happened here; publish no statistics
     }
     out.line(fmt::format("{} BODIES PUBLISHED: {} RETIRED: {} LIVE AT END: {} HIGH WATER: {}", NAME, published_, retired_, bodies_.size(), high_water_));
+
+    // A phase that ends with most of its work still in flight has not measured
+    // that work, and every rate derived from it is wrong in the flattering
+    // direction. This happened: a top-level invocation marked fire-and-forget
+    // let the host run off the end of its own instruction stream, 3,051 of
+    // 45,285 spawns had executed when the trace ended, and the result read as a
+    // 207x speedup. The number was already in this line; it needed to be an
+    // accusation rather than a statistic.
+    if (bodies_.size() > 100 && bodies_.size() * 4 > published_) {
+      out.line(fmt::format("{} WARNING: {} of {} published bodies never ran. The measured region ended with work still in flight, "
+                           "so any throughput computed from it counts work that was not done.",
+                           NAME, bodies_.size(), published_));
+    }
     auto json = out.json();
     json.add("published", published_);
     json.add("retired", retired_);
