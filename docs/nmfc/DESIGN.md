@@ -433,6 +433,63 @@ Where the leverage actually is, is the kind of thing the sweep exists to find.
 
 ## 14. Slicing: what one offloaded function should be
 
+> **Corrected by measurement.** Everything below the next subsection was written
+> assuming an offloaded function is a *slice of a bulk-parallel loop* that
+> returns to the host. Every row of the table that follows makes that
+> assumption, and it is the wrong one. It is kept because the forces it
+> describes are real, but the decomposition it recommends is not.
+
+### 14.0 The shape matters more than the placement
+
+A slice of a loop has to *chase*: it walks a row, then reaches for a neighbour's
+value, and that value is on whichever tile owns the neighbour. So the context
+migrates, once per edge, and migration becomes the mechanism rather than the
+exception -- measured at 0.38 migrations per instruction, which is to say three
+quarters of all work was a context moving itself.
+
+The alternative is to split along the boundary the data already has, and to let
+a function *spawn* a function rather than return work to the host:
+
+* `expand(v)` touches v's row bounds and v's edge list -- all of it v's own, so
+  all of it local -- and spawns one `touch(u)` per neighbour.
+* `touch(u)` reads and updates u's value: one access, on u's tile, dispatched
+  there by the fabric.
+
+Neither function ever needs an address it does not own, so neither migrates. The
+work still crosses the machine; it crosses as a token rather than as a context.
+On the synthetic control, against the same trace's host-only baseline:
+
+| shape | placement | cycles | migrations | per instruction | vs baseline |
+|---|---|---|---|---|---|
+| chase | scattered | 3,835,161 | 582,687 | 0.384 | — |
+| chase | **oracle** | 3,436,574 | 29,875 | 0.020 | — |
+| **spawn** | scattered | **1,087,161** | **27,721** | **0.0152** | **12.6x** |
+
+The spawn decomposition under a *scattered* placement beats the chase
+decomposition under the *oracle* placement. And on a graph with no locality at
+all -- the case a placement policy provably cannot help -- spawn gets 0.0130
+migrations per instruction and 11.8x, against chase's 0.365 and 4.03x.
+
+Two conclusions follow, and they reorder the rest of this document:
+
+1. **Locality is not the first-order concern it appeared to be.** Every
+   placement result here -- the offline minimum cut, the adaptive policy, the
+   R-NUCA classification -- was addressing a problem the decomposition created.
+   With the right shape, migrations are rare whatever the graph looks like, and
+   there is correspondingly little for a placement policy to do: the adaptive
+   router reports zero remaps on the spawn traces because there is no co-access
+   evidence left to act on.
+
+2. **Migration is a fallback, not a mechanism.** It is what a function does when
+   it must carry accumulated state somewhere. Reaching for a remote address is
+   not that case, and a decomposition that makes it that case is wrong.
+
+The forces below still apply *within* a function -- a spawn costs a fabric hop
+like a call does, so `touch` must be worth dispatching -- but the question they
+answer is "how big is one function", not "how do I cut up this loop".
+
+### 14.1 The original framing (superseded)
+
 The offload unit is a compiler decision, and it is not the same decision for
 every algorithm. Two forces pull against each other:
 
