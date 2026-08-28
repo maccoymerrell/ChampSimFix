@@ -182,6 +182,14 @@ public:
 
   bool remap_grain(std::uint32_t asid, std::uint64_t vgrain, std::size_t tile) override
   {
+    // Moving a page is only meaningful where the tile is a property of the
+    // *frame*. Under congruent routing the virtual address names the tile, so
+    // relocating the frame would leave the address pointing at one tile and the
+    // data on another -- the precise failure a tile port catches, manufactured
+    // deliberately. Refuse it here, where the reason is legible.
+    if (router_->order() == nmfc::routing_order::VIRTUAL_FIRST) {
+      return false;
+    }
     const auto key = std::pair{asid, vgrain};
     if (replicated_grains_.count(key) != 0) {
       return false; // every tile already has a copy; there is nothing to move
@@ -258,7 +266,11 @@ public:
     // match the tile its own virtual address names sends the context to one
     // place and its data to another, and the symptom -- a tile port refusing a
     // foreign address -- surfaces far from this line.
-    if (router_->order() == nmfc::routing_order::VIRTUAL_FIRST) {
+    // NMFC-mode pages only. A STANDARD page is block-interleaved across every
+    // channel on purpose -- that is what the mode means -- so its tile is not
+    // its address's grain field and never was. Asserting congruence over both
+    // regions confuses "the layout I chose" with "the invariant I rely on".
+    if (router_->order() == nmfc::routing_order::VIRTUAL_FIRST && map_.is_nmfc(pa)) {
       const auto want = router_->owner_of(origin, va);
       if (const auto got = map_.tile_of(pa); got != want) {
         const auto vgrain = vpage / pages_per_grain_;

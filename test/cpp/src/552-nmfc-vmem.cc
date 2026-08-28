@@ -46,7 +46,8 @@ struct rig {
   champsim::modules::vmem_module* vmem;
   nmfc::page_placement_sink* placement;
 
-  explicit rig(const std::string& tag, std::uint64_t dram_bytes = 512ULL * 1024 * 1024, const std::string& default_region = "standard")
+  explicit rig(const std::string& tag, std::uint64_t dram_bytes = 512ULL * 1024 * 1024, const std::string& default_region = "standard",
+               const std::string& router_model = "CONGRUENT_ROUTER")
   {
     auto dram_builder = builder_t{"dram" + tag, "SIZED_DRAM_552"}
                             .add_parameter("clock_period", champsim::chrono::picoseconds{1000})
@@ -55,7 +56,7 @@ struct rig {
 
     // The allocator asks the router where a grain belongs, so the rig has to
     // supply one. Congruent is the routing rule these tests are about.
-    auto router_builder = builder_t{"router" + tag, "CONGRUENT_ROUTER"}
+    auto router_builder = builder_t{"router" + tag, router_model}
                               .add_parameter("clock_period", champsim::chrono::picoseconds{1000})
                               .add_parameter("nmfc_num_tiles", std::size_t{TILES})
                               .add_parameter("log2_block_size", BLOCK_BITS)
@@ -286,4 +287,108 @@ TEST_CASE("An ordinary grain is not replicated: one virtual page, one frame")
     frames.insert(r.placement->page_mapping_on(champsim::origin{0, 0}, vpage.to<std::uint64_t>(), tile));
   }
   REQUIRE(frames.size() == 1);
+}
+
+TEST_CASE("Remapping moves a grain and says so, and never silently relabels one")
+{
+  // Moving a page is the one operation that can invalidate a translation
+  // something else is still holding. If it changed a mapping without recording
+  // it, every cached translation for that grain would keep resolving to a frame
+  // that is no longer the page -- reads would land on another page's data and
+  // the simulation would still run, which is the worst possible failure.
+  // A physical router, because that is the only setting in which moving a page
+  // means anything: under congruence the address names the tile.
+  rig r{"_remap", 512ULL * 1024 * 1024, "standard", "PHYSICAL_ROUTER"};
+  const auto map = the_map();
+  const std::uint64_t vgrain = 400;
+  const auto vpage = vpage_in(vgrain, 0);
+
+  r.placement->hint_placement(0, vpage.to<std::uint64_t>(), nmfc::placement_hint{nmfc::mapping_mode::NMFC, 1});
+  const auto before = r.placement->page_mapping_on(champsim::origin{0, 0}, vpage.to<std::uint64_t>(), 0);
+  const auto home = map.tile_of(champsim::address{before});
+
+  const auto gen_before = r.placement->mapping_generation();
+  const auto logged_before = r.placement->remap_log().size();
+
+  const auto target = (home + 1) % TILES;
+  REQUIRE(r.placement->remap_grain(0, vgrain, target));
+
+  const auto after = r.placement->page_mapping_on(champsim::origin{0, 0}, vpage.to<std::uint64_t>(), 0);
+  REQUIRE(map.tile_of(champsim::address{after}) == target); // it really moved
+  REQUIRE(after != before);                            // to a different frame
+
+  // And it is discoverable: anything holding the old answer can find out.
+  REQUIRE(r.placement->mapping_generation() != gen_before);
+  REQUIRE(r.placement->remap_log().size() == logged_before + 1);
+  REQUIRE(r.placement->remap_log().back() == std::pair<std::uint32_t, std::uint64_t>{0, vgrain});
+}
+
+TEST_CASE("A remap that cannot be honoured is refused rather than half-done")
+{
+  rig r{"_remap_refuse", 512ULL * 1024 * 1024, "standard", "PHYSICAL_ROUTER"};
+  const std::uint64_t vgrain = 401;
+  const auto vpage = vpage_in(vgrain, 0);
+
+  // Never touched: there is no mapping to move.
+  REQUIRE_FALSE(r.placement->remap_grain(0, vgrain, 2));
+
+  // Established, but asked to move where it already is.
+  r.placement->hint_placement(0, vpage.to<std::uint64_t>(), nmfc::placement_hint{nmfc::mapping_mode::NMFC, 2});
+  const auto home = r.placement->page_mapping_on(champsim::origin{0, 0}, vpage.to<std::uint64_t>(), 0);
+  REQUIRE_FALSE(r.placement->remap_grain(0, vgrain, the_map().tile_of(champsim::address{home})));
+
+  // Replicated pages have a copy everywhere already, so there is nothing to move.
+  const std::uint64_t code_grain = 402;
+  const auto code_page = vpage_in(code_grain, 0);
+  r.placement->hint_placement(0, code_page.to<std::uint64_t>(), nmfc::placement_hint{nmfc::mapping_mode::NMFC, 0, /*replicated=*/true});
+  (void)r.placement->page_mapping_on(champsim::origin{0, 0}, code_page.to<std::uint64_t>(), 0);
+  REQUIRE_FALSE(r.placement->remap_grain(0, code_grain, 1));
+}
+
+TEST_CASE("Translation is stable: the same virtual page keeps the same frame")
+{
+  // Nothing may move under a caller that did not ask for it. A translation that
+  // drifted on its own would teleport data with no remap to point at.
+  rig r{"_stable"};
+  const auto vpage = vpage_in(403, 0);
+  r.placement->hint_placement(0, vpage.to<std::uint64_t>(), nmfc::placement_hint{nmfc::mapping_mode::NMFC, 2});
+
+  const auto first = r.placement->page_mapping_on(champsim::origin{0, 0}, vpage.to<std::uint64_t>(), 0);
+  for (int i = 0; i < 50; ++i) {
+    // Interleave other traffic, so any shared cursor or accidental mutation
+    // would have a chance to shift it.
+    (void)r.placement->page_mapping_on(champsim::origin{0, 0}, vpage_in(500 + i, 0).to<std::uint64_t>(), i % TILES);
+    REQUIRE(r.placement->page_mapping_on(champsim::origin{0, 0}, vpage.to<std::uint64_t>(), 0) == first);
+  }
+}
+
+TEST_CASE("Distinct virtual pages never share a physical frame")
+{
+  // Two virtual pages resolving to one frame is aliasing that nothing declared,
+  // and it would make every data-dependent result meaningless while leaving the
+  // timing plausible.
+  rig r{"_no_alias"};
+  std::set<std::uint64_t> frames;
+  constexpr std::uint64_t COUNT = 60;
+  for (std::uint64_t i = 0; i < COUNT; ++i) {
+    const auto vpage = vpage_in(600 + i, 0);
+    r.placement->hint_placement(0, vpage.to<std::uint64_t>(), nmfc::placement_hint{nmfc::mapping_mode::NMFC, static_cast<std::uint32_t>(i % TILES)});
+    frames.insert(r.placement->page_mapping_on(champsim::origin{0, 0}, vpage.to<std::uint64_t>(), 0));
+  }
+  REQUIRE(frames.size() == COUNT);
+}
+
+TEST_CASE("A congruent router refuses to let a page move at all")
+{
+  // Under congruence the virtual address names the tile, so relocating a frame
+  // would put the data somewhere the address does not point. The allocator must
+  // refuse rather than comply and leave a tile port to discover it later.
+  rig r{"_remap_congruent"};
+  const auto vpage = vpage_in(404, 0);
+  r.placement->hint_placement(0, vpage.to<std::uint64_t>(), nmfc::placement_hint{nmfc::mapping_mode::NMFC, 0});
+  const auto home = r.placement->page_mapping_on(champsim::origin{0, 0}, vpage.to<std::uint64_t>(), 0);
+  for (std::size_t t = 0; t < TILES; ++t) {
+    REQUIRE_FALSE(r.placement->remap_grain(0, 404, t));
+  }
+  REQUIRE(r.placement->page_mapping_on(champsim::origin{0, 0}, vpage.to<std::uint64_t>(), 0) == home);
 }
