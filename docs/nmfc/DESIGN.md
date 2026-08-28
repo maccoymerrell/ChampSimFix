@@ -470,6 +470,20 @@ decomposition under the *oracle* placement. And on a graph with no locality at
 all -- the case a placement policy provably cannot help -- spawn gets 0.0130
 migrations per instruction and 11.8x, against chase's 0.365 and 4.03x.
 
+The real kernel says the same thing. GAP BFS on kron-24, same graph, same
+source, same budget, both runs verified to have finished the work they were
+given:
+
+| shape | baseline | cycles | vs baseline | migrations | per instruction |
+|---|---|---|---|---|---|
+| chase | 11,460,114 | 2,142,594 | 5.35x | 924,095 | 0.7428 |
+| **spawn** | 11,969,338 | **1,934,783** | **6.19x** | **2,890** | **0.0015** |
+
+Three hundred and twenty times fewer migrations. The cycle gain is smaller than
+the synthetic control's because at this occupancy the real kernel is not
+migration-bound -- but the mechanism the placement chapters exist to manage has
+essentially stopped happening.
+
 Two conclusions follow, and they reorder the rest of this document:
 
 1. **Locality is not the first-order concern it appeared to be.** Every
