@@ -862,7 +862,17 @@ private:
     // A migration is evidence, not only a cost: it says a context on this tile
     // needed an address that lives on another. A policy that can move pages
     // gets to act on that; one that cannot ignores it.
-    router_->note_migration(ctx.origin, ctx.last_route_address, tile_, target);
+    //
+    // Except the first. An invocation is dispatched to a tile chosen by a
+    // placement policy that has not seen its data, so its opening migration
+    // reports where dispatch put it and nothing else -- uniform noise, credited
+    // as though it were locality. Measured on a workload of disjoint clusters,
+    // where every grain has exactly one true consumer, including the first hop
+    // pulled mean pull dominance down to 0.670 and classified two thirds of the
+    // grains as shared.
+    if (ctx.migrations > 0) {
+      router_->note_migration(ctx.origin, ctx.last_route_address, tile_, target, ctx.token);
+    }
     release_context_lock(ctx);
     ctx.prepare_for_migration();
     migrating_.push_back(std::pair{slot, target});

@@ -32,6 +32,7 @@
 #include <fmt/core.h>
 
 #include "nmfc/nmfc_config.h"
+#include "nmfc/nmfc_vmem.h"
 #include "nmfc/tile_map.h"
 #include "nmfc/tile_router.h"
 
@@ -49,12 +50,26 @@ public:
   [[nodiscard]] nmfc::routing_order order() const override { return nmfc::routing_order::TRANSLATE_FIRST; }
 
   /**
-   * There is no answer from the virtual address alone -- that is the whole
-   * point of this model. Callers that route must translate; callers that only
-   * want a hint (a dispatch heuristic, say) get the address's natural tile,
-   * which is a guess and is documented as one.
+   * Where this address actually lives right now.
+   *
+   * A context that routes must still translate -- this cannot substitute for
+   * that. What it is for is *dispatch*: a migration says the function and the
+   * address it wanted belong on the same tile, and that can be satisfied by
+   * moving the page or by starting the function somewhere else. Answering with
+   * the address's natural tile, as this used to, sends an invocation to a tile
+   * chosen by an address bit rather than by where its data is, and the pull
+   * evidence the other half of the policy collects is then just a record of
+   * where dispatch happened to guess.
    */
-  [[nodiscard]] std::size_t owner_of(champsim::origin /*origin*/, champsim::address vaddr) const override { return map_.tile_of_virtual(vaddr); }
+  [[nodiscard]] std::size_t owner_of(champsim::origin origin, champsim::address vaddr) const override
+  {
+    if (placement_ != nullptr) {
+      if (const auto home = placement_->grain_mapping_on(origin.asid(), vaddr.to<std::uint64_t>(), 0); home.has_value()) {
+        return map_.tile_of(*home);
+      }
+    }
+    return map_.tile_of_virtual(vaddr); // not yet backed; the natural tile is as good a guess as any
+  }
 
   /**
    * Where a newly faulted grain is backed. Free, unlike under congruence, and
@@ -80,8 +95,11 @@ public:
   /** One. Choosing a per-channel root would require the answer the walk produces. */
   [[nodiscard]] std::size_t page_table_roots() const override { return 1; }
 
+  void attach_placement(nmfc::page_placement_sink* placement) override { placement_ = placement; }
+
 private:
   nmfc::tile_map map_;
+  nmfc::page_placement_sink* placement_ = nullptr;
   std::string policy_;
   std::size_t next_tile_ = 0;
 };

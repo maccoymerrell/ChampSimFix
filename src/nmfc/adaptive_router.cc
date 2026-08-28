@@ -83,7 +83,7 @@ public:
     return tile;
   }
 
-  void note_migration(champsim::origin origin, champsim::address vaddr, std::size_t from, std::size_t to) override
+  void note_migration(champsim::origin origin, champsim::address vaddr, std::size_t from, std::size_t to, std::uint64_t /*token*/) override
   {
     // Credit the tile that *wanted* the grain, not the one that has it.
     const auto key = key_of(origin, vaddr);

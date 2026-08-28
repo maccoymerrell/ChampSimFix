@@ -524,7 +524,9 @@ int main(int argc, char** argv)
 
   // Declare the layout the placement pass chose. The simulator validates the
   // geometry in the header and refuses a trace placed for a different machine.
-  emit_hints_for(nmfc_out, place, FUNC_CODE_BASE, place.grain() * opt.tiles, nmfc::region::NMFC);
+  // One grain, region CODE: the OS aliases it to a copy on every channel and
+  // picks one when it translates, so there is no per-tile code address here.
+  emit_hints_for(nmfc_out, place, FUNC_CODE_BASE, place.grain(), nmfc::region::CODE);
   emit_hints_for(nmfc_out, place, OFFSETS_BASE, place.offsets_span, nmfc::region::NMFC);
   emit_hints_for(nmfc_out, place, EDGES_BASE, place.edges_span, nmfc::region::NMFC);
   emit_hints_for(nmfc_out, place, VALUES_BASE, place.values_span, nmfc::region::NMFC);

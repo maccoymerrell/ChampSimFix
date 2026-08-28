@@ -83,7 +83,7 @@ public:
     return tile;
   }
 
-  void note_migration(champsim::origin origin, champsim::address vaddr, std::size_t from, std::size_t to) override
+  void note_migration(champsim::origin origin, champsim::address vaddr, std::size_t from, std::size_t to, std::uint64_t token) override
   {
     const auto key = key_of(origin, vaddr);
     auto& g = grains_[key];
@@ -92,6 +92,22 @@ public:
     }
     ++g.pull[from];
     ++load_[to];
+
+    // The migration says this address and the address the context came for
+    // belong together. That is a constraint between two grains, not a direction
+    // to drag one of them: union them, and place the component.
+    //
+    // Placing grains one at a time cannot escape a random start. A cluster's
+    // grains scattered over N tiles pull uniformly from all N, so the dominant
+    // puller is noise until a majority already sits on one tile -- scattered is
+    // a stable equilibrium. Measured: dominance 0.718 and 20 of 345 grains ever
+    // moved, against an oracle 19.5x better. A component moves as a unit, which
+    // is the symmetry break.
+    auto& previous = previous_grain_[token];
+    if (previous != 0 && previous != key) {
+      unite(previous, key);
+    }
+    previous = key;
     ++window_[to];
 
     if (++observed_ % epoch_ == 0) {
@@ -106,8 +122,8 @@ public:
     }
     const auto dominance = classified_ == 0 ? 0.0 : dominance_sum_ / static_cast<double>(classified_);
     out.line(fmt::format("{} MIGRATIONS OBSERVED: {} GRAINS CLASSIFIED: {} private: {} shared: {}", NAME, observed_, classified_, private_seen_, shared_seen_));
-    out.line(fmt::format("{} CO-LOCATIONS: {} WITHHELD imbalance: {} sharing: {} evidence: {}", NAME, remapped_, withheld_imbalance_, withheld_shared_,
-                         withheld_evidence_));
+    out.line(fmt::format("{} GRAINS REMAPPED: {} COMPONENTS seen: {} placed: {} too-large: {} withheld-imbalance: {}", NAME, remapped_, components_seen_,
+                         components_placed_, components_too_large_, withheld_imbalance_));
     out.line(fmt::format("{} MEAN PULL DOMINANCE: {:.3f} (uniform {:.3f}) PEAK WINDOWED IMBALANCE: {:.2f} TILE LOAD: {}", NAME, dominance,
                          1.0 / double(map_.num_tiles()), peak_imbalance_, fmt::join(load_, " ")));
 
@@ -127,6 +143,28 @@ private:
     std::uint32_t moves = 0;
     std::uint32_t cooldown = 0;
   };
+
+  /** Union-find over grains that migrations have linked. */
+  std::uint64_t find(std::uint64_t x)
+  {
+    auto it = parent_.find(x);
+    if (it == std::end(parent_) || it->second == x) {
+      parent_[x] = x;
+      return x;
+    }
+    const auto root = find(it->second);
+    parent_[x] = root; // path compression
+    return root;
+  }
+
+  void unite(std::uint64_t a, std::uint64_t b)
+  {
+    const auto ra = find(a);
+    const auto rb = find(b);
+    if (ra != rb) {
+      parent_[rb] = ra;
+    }
+  }
 
   [[nodiscard]] std::uint64_t key_of(champsim::origin origin, champsim::address vaddr) const
   {
@@ -158,67 +196,62 @@ private:
     if (placement_ == nullptr) {
       return;
     }
-    // Co-location concentrates by construction, so it is withheld whenever the
-    // machine is already carrying an uneven load. This is the gate the previous
-    // policy lacked, and the reason it could turn an adversarial workload into
-    // a catastrophic one rather than merely failing to help.
-    const auto observed_imbalance = imbalance();
-    const bool may_colocate = observed_imbalance <= imbalance_threshold_;
-    peak_imbalance_ = std::max(peak_imbalance_, observed_imbalance);
+    const auto tiles = map_.num_tiles();
+
+    // Gather the components migrations have formed, and how heavy each is.
+    std::unordered_map<std::uint64_t, std::vector<std::uint64_t>> components;
+    std::unordered_map<std::uint64_t, std::vector<std::uint64_t>> component_pull;
+    for (auto& [key, g] : grains_) {
+      const auto root = find(key);
+      components[root].push_back(key);
+      auto& cp = component_pull[root];
+      if (cp.empty()) {
+        cp.assign(tiles, 0);
+      }
+      for (std::size_t t = 0; t < tiles && t < g.pull.size(); ++t) {
+        cp[t] += g.pull[t];
+      }
+    }
+
+    const auto total_load = std::max<std::uint64_t>(std::accumulate(std::begin(window_), std::end(window_), std::uint64_t{0}), 1);
+    const auto share = static_cast<double>(total_load) / static_cast<double>(tiles);
+
+    for (auto& [root, members] : components) {
+      ++components_seen_;
+      // A component larger than a tile's fair share of the data is not a hot
+      // set, it is the whole working set: on a graph where everything touches
+      // everything the co-access graph is fully connected, and collapsing it
+      // onto one tile is exactly the failure an offline minimum cut already
+      // demonstrated. Leave it interleaved.
+      if (members.size() > (grains_.size() + tiles - 1) / tiles) {
+        ++components_too_large_;
+        continue;
+      }
+
+      const auto& cp = component_pull[root];
+      const auto best = static_cast<std::size_t>(std::distance(std::begin(cp), std::max_element(std::begin(cp), std::end(cp))));
+      const auto pull_total = std::accumulate(std::begin(cp), std::end(cp), std::uint64_t{0});
+      if (pull_total < pull_threshold_) {
+        continue;
+      }
+      // Balance, in the units that matter: would this component push the
+      // destination past a fair share of the traffic actually being served?
+      if (static_cast<double>(window_[best]) > slack_ * share) {
+        ++withheld_imbalance_;
+        continue;
+      }
+
+      for (const auto key : members) {
+        const auto asid = static_cast<std::uint32_t>(key >> 48);
+        const auto vgrain = key & ((std::uint64_t{1} << 48) - 1);
+        if (placement_->remap_grain(asid, vgrain, best)) {
+          ++remapped_;
+        }
+      }
+      ++components_placed_;
+    }
 
     for (auto& [key, g] : grains_) {
-      if (g.pull.empty()) {
-        continue;
-      }
-      const auto total = std::accumulate(std::begin(g.pull), std::end(g.pull), std::uint64_t{0});
-      if (total == 0) {
-        continue;
-      }
-      const auto best = static_cast<std::size_t>(std::distance(std::begin(g.pull), std::max_element(std::begin(g.pull), std::end(g.pull))));
-      const auto share = static_cast<double>(g.pull[best]) / static_cast<double>(total);
-
-      dominance_sum_ += share;
-      ++classified_;
-
-      // R-NUCA's classification. Shared data is interleaved and left alone:
-      // a grain three other tiles still want does not become local by being
-      // moved, it just moves whose migration it is.
-      if (share < private_threshold_) {
-        ++shared_seen_;
-        ++withheld_shared_;
-        std::fill(std::begin(g.pull), std::end(g.pull), 0);
-        continue;
-      }
-      ++private_seen_;
-
-      if (!may_colocate) {
-        ++withheld_imbalance_;
-        std::fill(std::begin(g.pull), std::end(g.pull), 0);
-        continue;
-      }
-      if (g.pull[best] < pull_threshold_) {
-        ++withheld_evidence_;
-        std::fill(std::begin(g.pull), std::end(g.pull), 0);
-        continue;
-      }
-      if (g.cooldown > 0) {
-        --g.cooldown;
-        std::fill(std::begin(g.pull), std::end(g.pull), 0);
-        continue;
-      }
-      if (g.last_best != best) {
-        g.last_best = best;
-        std::fill(std::begin(g.pull), std::end(g.pull), 0);
-        continue;
-      }
-
-      const auto asid = static_cast<std::uint32_t>(key >> 48);
-      const auto vgrain = key & ((std::uint64_t{1} << 48) - 1);
-      if (placement_->remap_grain(asid, vgrain, best)) {
-        ++remapped_;
-        g.cooldown = std::min<std::uint32_t>(1U << g.moves, cooldown_cap_);
-        ++g.moves;
-      }
       std::fill(std::begin(g.pull), std::end(g.pull), 0);
     }
     std::fill(std::begin(window_), std::end(window_), 0);
@@ -246,6 +279,13 @@ private:
   std::uint64_t withheld_shared_ = 0;
   std::uint64_t withheld_evidence_ = 0;
   double dominance_sum_ = 0.0;
+  std::unordered_map<std::uint64_t, std::uint64_t> parent_;
+  /** Per invocation: the last grain it migrated for. Co-access is its relation. */
+  std::unordered_map<std::uint64_t, std::uint64_t> previous_grain_;
+  std::uint64_t components_seen_ = 0;
+  std::uint64_t components_placed_ = 0;
+  std::uint64_t components_too_large_ = 0;
+  double slack_ = 1.25;
   double peak_imbalance_ = 1.0;
 };
 

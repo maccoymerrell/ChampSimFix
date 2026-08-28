@@ -43,6 +43,7 @@
 #define NMFC_TILE_ROUTER_H
 
 #include <cstddef>
+#include <cstdint>
 
 #include "address.h"
 #include "modules.h"
@@ -107,8 +108,16 @@ struct tile_router_module : public champsim::modules::module_base<tile_router_mo
   // needed an address that lives on `to`. Policies that act on that evidence
   // implement these; the static routers ignore them.
 
-  /** A context on `from` had to move to `to` in order to reach `vaddr`. */
-  virtual void note_migration(champsim::origin /*origin*/, champsim::address /*vaddr*/, std::size_t /*from*/, std::size_t /*to*/) {}
+  /**
+   * A context on `from` had to move to `to` in order to reach `vaddr`.
+   *
+   * `token` identifies the invocation, and it is not optional detail: the
+   * co-access relation a migration implies holds between addresses touched by
+   * *the same* invocation. Uniting whatever two grains happened to migrate
+   * consecutively anywhere in the machine merges everything into one component
+   * and says nothing.
+   */
+  virtual void note_migration(champsim::origin /*origin*/, champsim::address /*vaddr*/, std::size_t /*from*/, std::size_t /*to*/, std::uint64_t /*token*/) {}
 
   /**
    * The allocator introduces itself.
