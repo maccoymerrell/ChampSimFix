@@ -695,3 +695,57 @@ their ratios was circular. Only the sampled breakdown underneath them, and
 the causal test of changing the suspected resource, actually attributed
 anything.
 
+
+## 16. Sizing the tile: capacity first, concurrency second
+
+Section 15 found that request admission gates the machine. Sweeping the
+tile's data path shows admission is the *second* lever, and a smaller one.
+
+The tile as configured holds 512KB of LLC slice, 32KB of data cache and 4KB
+of instruction cache -- about 548KB against a kron-2^20 CSR of hundreds of
+megabytes. Every measurement taken in that configuration is dominated by
+capacity misses.
+
+| fc_dcache | cycles | vs today | L1 hit | port refused | DRAM reads |
+|---|---|---|---|---|---|
+| 32KB lat2 mshr64 (today) | 2,792,466 | -- | 11.0% | 82.3% | 596,951 |
+| 32KB lat2 mshr512 rq512 | 2,606,914 | -6.6% | 13.6% | 26.5% | 595,164 |
+| 128KB lat4 | 2,700,520 | -3.3% | 46.6% | 81.1% | 597,697 |
+| 512KB lat8 | 2,696,857 | -3.4% | 52.0% | 81.2% | 589,569 |
+| 2MB lat14 | 2,085,151 | -25.3% | 63.7% | 79.7% | 451,375 |
+| 2MB lat14 mshr512 rq512 | 2,024,762 | -27.5% | 63.6% | 25.8% | 450,006 |
+| 8MB lat18 | 1,770,470 | -36.6% | 71.0% | 78.5% | 361,203 |
+
+Three things fall out.
+
+**Capacity and concurrency are substitutes, not complements.** Widening the
+queues is worth 6.6% at 32KB and only 2.2% at 2MB: fewer misses means less
+to admit. Chasing admission alone leaves most of the gain on the table.
+
+**The capacity curve is sharply non-linear.** 128KB and 512KB quadruple the
+hit rate and buy 3%, because those hits were coming from the LLC anyway --
+DRAM traffic does not move. Only past 2MB does the tile start capturing
+what was going to DRAM, and traffic falls 24%, then 39% at 8MB.
+
+**The level does not matter; the total does.** 8MB placed at the L1 and 8MB
+placed in the LLC slice land within 1.5% of each other (1,770,470 vs
+1,744,780). Placing it at the L1 reduces the LLC slice to a 0.2% hit rate --
+512KB of dead silicon. Capacity belongs in the LLC slice, which is also
+where it is physically defensible: a memory-side cache per channel, the role
+Infinity Cache and HBM-as-cache already play.
+
+So the tile wants a large LLC slice, a small data cache, and enough
+outstanding-miss concurrency to keep the channel fed -- in that order.
+Concurrency should come from banking rather than from a monolithic
+structure: 8 banks of today's 64 entries reaches the point where the memory
+controller binds, without a 512-entry CAM that does not exist in silicon.
+
+Dropping the data cache entirely is contraindicated by the same data: the
+gradient at this level points toward more capacity, not less. A small cache
+in front of a large slice is fine, because the slice does the work.
+
+**Consequence for every prior measurement.** Results before this were taken
+at 548KB of tile capacity and 64-entry admission -- capacity-starved and
+admission-starved at once. Comparisons of placement policy, address mapping
+or decomposition shape made in that regime were measuring the hierarchy, not
+the policy, and need re-taking.
