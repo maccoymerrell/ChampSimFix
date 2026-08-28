@@ -196,6 +196,7 @@ public:
   void begin_phase(bool /*warmup*/) override
   {
     accepted_ = arrived_ = departed_ = completed_ = 0;
+    spawned_ = spawn_stalls_ = 0;
     instructions_ = loads_ = stores_ = atomics_ = fetches_ = 0;
     scoreboard_stalls_ = port_retries_ = atomic_conflicts_ = translation_stalls_ = 0;
     port_busy_cycles_ = 0;
@@ -228,7 +229,8 @@ public:
     // describes a machine that is deliberately doing its work elsewhere, so
     // every core that executes instructions reports its own rate.
     out.line(fmt::format("{} INSTRUCTIONS: {} CYCLES: {} IPC: {:.4f}", NAME, instructions_, elapsed, ipc));
-    out.line(fmt::format("{} LOADS: {} STORES: {} ATOMICS: {} FETCHES: {}", NAME, loads_, stores_, atomics_, fetches_));
+    out.line(fmt::format("{} LOADS: {} STORES: {} ATOMICS: {} FETCHES: {} SPAWNED: {} (stalls {})", NAME, loads_, stores_, atomics_, fetches_, spawned_,
+                         spawn_stalls_));
     out.line(fmt::format("{} CONTEXT OCCUPANCY mean: {:.2f} peak: {} of {}", NAME, occupancy, peak_occupancy_, contexts_.size()));
     // Retries are per context per cycle, so they scale with occupancy and do not
     // compare to anything; the cycle count does, which is why it leads.
@@ -256,6 +258,7 @@ public:
     json.add("num_contexts", contexts_.size());
     json.add("mean_residency_cycles", residency);
     json.add("scoreboard_stalls", scoreboard_stalls_);
+    json.add("spawned", spawned_);
     json.add("port_retries", port_retries_);
     json.add("port_busy_cycles", port_busy_cycles_);
     json.add("atomic_conflicts", atomic_conflicts_);
@@ -512,6 +515,10 @@ private:
       }
     }
 
+    if (instr.is_spawn) {
+      return issue_spawn(slot, instr);
+    }
+
     if (instr.num_mem_ops() > 0) {
       return issue_memory(slot, instr);
     }
@@ -686,6 +693,54 @@ private:
     auto [ppage, penalty] = vmem_->va_to_pa(ctx.origin, champsim::page_number{vaddr});
     (void)penalty;
     return champsim::address{champsim::splice(ppage, champsim::page_offset{vaddr})};
+  }
+
+  /**
+   * Start another invocation from inside this one.
+   *
+   * The alternative to migrating. A context that needs an address on another
+   * tile can carry itself there -- taking its registers, its scoreboard and a
+   * cold restart with it -- or it can send a token and carry on. When the work
+   * at the far end is short, sending the work is strictly cheaper, and the
+   * fabric's placement policy puts it on the tile that owns the address rather
+   * than the tile that happened to ask.
+   *
+   * It is also what takes the host off the critical path: an invocation that
+   * discovers work creates it here instead of returning it to be re-dispatched,
+   * so the in-flight count stops being bounded by what one compute tile can
+   * issue between barriers.
+   */
+  bool issue_spawn(std::size_t slot, const nmfc::body_instr& instr)
+  {
+    auto& ctx = contexts_[slot];
+    const auto* body = image_->lookup(instr.spawn_token);
+    if (body == nullptr) {
+      fmt::print("[{}] ERROR: token {} spawns {}, which was never defined in the trace\n", NAME, ctx.token, instr.spawn_token);
+      std::exit(-1);
+    }
+
+    nmfc::invocation_msg msg{};
+    msg.token = instr.spawn_token;
+    msg.origin = ctx.origin;
+    msg.home_host = ctx.home_host;
+    msg.body = body;
+    msg.entry_pc = body->entry_pc;
+    if (!fabric_->dispatch(msg)) {
+      ready_.push_back(slot); // the fabric is full; try again next cycle
+      ++spawn_stalls_;
+      return false;
+    }
+
+    ++spawned_;
+    for (const auto reg : instr.dst_reg) {
+      if (reg != 0) {
+        ctx.ready[reg - 1] = true;
+      }
+    }
+    ++ctx.pc;
+    ++instructions_;
+    make_ready(slot, current_time + latency_[idx(instr.cls)]);
+    return true;
   }
 
   bool issue_memory(std::size_t slot, const nmfc::body_instr& instr)
@@ -981,6 +1036,8 @@ private:
   std::uint64_t atomics_ = 0;
   std::uint64_t fetches_ = 0;
   std::uint64_t scoreboard_stalls_ = 0;
+  std::uint64_t spawned_ = 0;
+  std::uint64_t spawn_stalls_ = 0;
   std::uint64_t port_retries_ = 0;
   std::uint64_t port_busy_cycles_ = 0;
   bool port_blocked_ = false;

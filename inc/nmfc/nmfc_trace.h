@@ -40,7 +40,7 @@ namespace nmfc
 {
 
 inline constexpr unsigned long long TRACE_MAGIC = 0x3143'5254'4346'4d4eULL; // "NMFCTRC1" little-endian
-inline constexpr std::uint32_t TRACE_VERSION = 2;
+inline constexpr std::uint32_t TRACE_VERSION = 3;
 
 // Must match champsim's trace_instruction.h. Duplicated (not included) so the
 // generator builds standalone; nmfc_types.h static_asserts that they agree.
@@ -98,6 +98,20 @@ enum class op : std::uint8_t {
    * reorder buffer will hold.
    */
   JOIN = 6,
+  /**
+   * Create another invocation, from inside a function body.
+   *   aux0 = the token of the invocation to start
+   *
+   * The point of the architecture, and the thing a host-driven decomposition
+   * cannot express. When a function needs an address on another tile it has two
+   * options: carry itself there, or send work there. Migration moves a context
+   * and everything it has accumulated; a spawn moves a token. If the work at
+   * the far end is short -- a compare-and-swap on one word, say -- sending the
+   * work is strictly better, and it is also what removes the host from the
+   * critical path of a traversal: a function that discovers new work creates it
+   * in place instead of returning it to be re-dispatched.
+   */
+  SPAWN = 7,
 };
 
 /**
@@ -165,6 +179,16 @@ enum flags : std::uint8_t {
    * invocations at what the reorder buffer can hold past it.
    */
   FLAG_DEFERRED_JOIN = 1U << 2,
+  /**
+   * This CALL defines a body without dispatching it (CALL only).
+   *
+   * The invocation exists in the trace so its body can be published, but the
+   * host does not start it -- a SPAWN elsewhere does. Without this the reader
+   * would emit a host instruction for work the host never issued, and the
+   * host's instruction count would include work that by construction never
+   * touched it.
+   */
+  FLAG_SPAWNED = 1U << 3,
 };
 
 /**

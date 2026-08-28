@@ -71,7 +71,23 @@ public:
   }
 
   [[nodiscard]] nmfc::routing_order order() const override { return nmfc::routing_order::TRANSLATE_FIRST; }
-  [[nodiscard]] std::size_t owner_of(champsim::origin /*origin*/, champsim::address vaddr) const override { return map_.tile_of_virtual(vaddr); }
+  /**
+   * Where this address actually lives right now.
+   *
+   * Dispatch reads this to decide where to start an invocation. Answering with
+   * the address's natural tile instead sends work to a tile chosen by an
+   * address bit rather than by where the data is -- which, under a silo'd
+   * layout where those differ, cost 13x the migrations for no other reason.
+   */
+  [[nodiscard]] std::size_t owner_of(champsim::origin origin, champsim::address vaddr) const override
+  {
+    if (placement_ != nullptr) {
+      if (const auto home = placement_->grain_mapping_on(origin.asid(), vaddr.to<std::uint64_t>(), 0); home.has_value()) {
+        return map_.tile_of(*home);
+      }
+    }
+    return map_.tile_of_virtual(vaddr); // not yet backed
+  }
   [[nodiscard]] std::size_t page_table_roots() const override { return 1; }
   void attach_placement(nmfc::page_placement_sink* placement) override { placement_ = placement; }
 

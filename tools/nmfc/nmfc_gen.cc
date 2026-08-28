@@ -92,6 +92,8 @@ struct options {
   unsigned block_bits = 6;
   std::string graph = "kron";
   std::string partition = "stripe"; // "stripe" | "silo"
+  std::string shape = "chase";      // "chase" = one context walks and migrates; "spawn" = send work instead
+
   double locality = 0.0;            // fraction of edges kept inside a partition
   std::uint64_t seed = 1;
   bool no_return = false;
@@ -466,6 +468,112 @@ std::vector<nmfc::record> visit_body(const csr_graph& graph, const placement& pl
   return body;
 }
 
+/**
+ * The same traversal, decomposed the way the architecture wants it.
+ *
+ * `visit_body` above is one invocation that walks a row and then chases each
+ * neighbour's value -- and the neighbour's value is on whatever tile owns that
+ * neighbour, so the context migrates once per edge. That is a decomposition of
+ * a parallel loop, and it makes migration the mechanism rather than the
+ * exception: measured at 0.38 migrations per instruction.
+ *
+ * Split instead along the boundary the data already has:
+ *
+ *   expand(v)  reads v's row bounds and v's edge list -- all of it v's own, so
+ *              all of it local -- and for each neighbour *spawns* touch(u).
+ *   touch(u)   reads and updates u's value. One access, on u's tile, and the
+ *              fabric dispatches it there.
+ *
+ * Neither function ever needs an address it does not own, so neither migrates.
+ * The work still crosses the machine; it crosses as a token instead of as a
+ * context.
+ */
+std::vector<nmfc::record> touch_body(const placement& place, std::uint32_t vertex, std::uint64_t token)
+{
+  std::vector<nmfc::record> body;
+  std::uint64_t pc = FUNC_CODE_BASE;
+  const auto step = [&pc]() { const auto here = pc; pc += 4; return here; };
+
+  auto value = blank(nmfc::op::ATOMIC, token);
+  value.instr.ip = step();
+  value.instr.source_memory[0] = place.values_addr(vertex);
+  value.instr.destination_memory[0] = place.values_addr(vertex);
+  value.op_class = static_cast<std::uint8_t>(nmfc::op_class::LOAD);
+  set_srcs(value, {R_VERTEX});
+  set_dsts(value, {R_VALUE});
+  body.push_back(value);
+
+  auto combine = blank(nmfc::op::BODY, token);
+  combine.instr.ip = step();
+  combine.op_class = static_cast<std::uint8_t>(nmfc::op_class::ALU);
+  set_srcs(combine, {R_VALUE, R_ACC});
+  set_dsts(combine, {R_ACC});
+  body.push_back(combine);
+
+  return body;
+}
+
+/** expand(v): v's own row and edges, then one spawn per neighbour. */
+std::vector<nmfc::record> expand_body(const csr_graph& graph, const placement& place, std::uint32_t vertex, std::uint64_t token,
+                                      const std::vector<std::uint64_t>& spawn_tokens, std::uint64_t max_neighbours)
+{
+  std::vector<nmfc::record> body;
+  std::uint64_t pc = FUNC_CODE_BASE;
+  const auto step = [&pc]() { const auto here = pc; pc += 4; return here; };
+
+  auto row_begin = blank(nmfc::op::BODY, token);
+  row_begin.instr.ip = step();
+  row_begin.instr.source_memory[0] = place.offsets_addr(vertex);
+  row_begin.op_class = static_cast<std::uint8_t>(nmfc::op_class::LOAD);
+  set_srcs(row_begin, {R_VERTEX});
+  set_dsts(row_begin, {R_ROW_BEGIN});
+  body.push_back(row_begin);
+
+  auto row_end = blank(nmfc::op::BODY, token);
+  row_end.instr.ip = step();
+  row_end.instr.source_memory[0] = place.offsets_end_addr(vertex);
+  row_end.op_class = static_cast<std::uint8_t>(nmfc::op_class::LOAD);
+  set_srcs(row_end, {R_VERTEX});
+  set_dsts(row_end, {R_ROW_END});
+  body.push_back(row_end);
+
+  const auto begin = graph.offsets[vertex];
+  const auto end = std::min(graph.offsets[vertex + 1], begin + max_neighbours);
+
+  for (auto i = begin; i < end; ++i) {
+    auto edge = blank(nmfc::op::BODY, token);
+    edge.instr.ip = step();
+    edge.instr.source_memory[0] = place.edges_addr(vertex, i - begin);
+    edge.op_class = static_cast<std::uint8_t>(nmfc::op_class::LOAD);
+    set_srcs(edge, {R_ROW_BEGIN, R_INDEX});
+    set_dsts(edge, {R_NEIGHBOUR});
+    body.push_back(edge);
+
+    // Send the work to the neighbour rather than going there.
+    auto spawn = blank(nmfc::op::SPAWN, token);
+    spawn.instr.ip = step();
+    spawn.aux0 = spawn_tokens[static_cast<std::size_t>(i - begin)];
+    spawn.op_class = static_cast<std::uint8_t>(nmfc::op_class::ALU);
+    set_srcs(spawn, {R_NEIGHBOUR});
+    body.push_back(spawn);
+
+    auto advance = blank(nmfc::op::BODY, token);
+    advance.instr.ip = step();
+    advance.instr.is_branch = 1;
+    advance.instr.branch_taken = (i + 1 < end) ? 1 : 0;
+    advance.op_class = static_cast<std::uint8_t>(nmfc::op_class::BRANCH);
+    set_srcs(advance, {R_INDEX, R_ROW_END});
+    set_dsts(advance, {R_INDEX});
+    if (i + 1 < end) {
+      advance.flag_bits |= nmfc::FLAG_TAKEN_TARGET;
+      pc = FUNC_CODE_BASE + 8;
+    }
+    body.push_back(advance);
+  }
+
+  return body;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -490,6 +598,8 @@ int main(int argc, char** argv)
       opt.grain_bits = static_cast<unsigned>(std::stoul(next()));
     } else if (arg == "--graph") {
       opt.graph = next();
+    } else if (arg == "--shape") {
+      opt.shape = next();
     } else if (arg == "--partition") {
       opt.partition = next();
     } else if (arg == "--locality") {
@@ -538,10 +648,44 @@ int main(int argc, char** argv)
   std::uint64_t baseline_instrs = 0;
   const auto host_step = [&host_pc]() { const auto here = host_pc; host_pc += 4; if (host_pc > HOST_CODE_BASE + 0x1000) { host_pc = HOST_CODE_BASE; } return here; };
 
+  std::uint64_t next_token = 0;
   for (std::uint64_t n = 0; n < opt.roots; ++n) {
     const auto vertex = pick_root(rng);
-    const auto token = n + 1; // token 0 means "not an invocation"
-    auto body = visit_body(graph, place, vertex, token, /*max_neighbours=*/32);
+    const auto token = ++next_token; // token 0 means "not an invocation"
+
+    std::vector<nmfc::record> body;
+    if (opt.shape == "spawn") {
+      // Define every spawned invocation before the one that spawns it: the
+      // reader publishes a body when it reads the call that defines it, and a
+      // spawn of something not yet published is a trace that cannot be run.
+      const auto begin = graph.offsets[vertex];
+      const auto end = std::min(graph.offsets[vertex + 1], begin + std::uint64_t{32});
+      std::vector<std::uint64_t> spawn_tokens;
+      for (auto i = begin; i < end; ++i) {
+        const auto child = ++next_token;
+        spawn_tokens.push_back(child);
+        auto child_body = touch_body(place, graph.edges[i], child);
+
+        auto def = blank(nmfc::op::CALL, child);
+        def.instr.ip = host_step();
+        def.aux0 = FUNC_CODE_BASE;
+        def.aux1 = nmfc::encode_call_aux1(/*func_id=*/2, static_cast<std::uint32_t>(child_body.size()));
+        def.flag_bits |= nmfc::FLAG_SPAWNED | nmfc::FLAG_NO_RETURN;
+        nmfc_out.write(def);
+        for (const auto& rec : child_body) {
+          nmfc_out.write(rec);
+          baseline.write(reinterpret_cast<const char*>(&rec.instr), sizeof(rec.instr));
+          ++baseline_instrs;
+        }
+        auto child_ret = blank(nmfc::op::RET, child);
+        child_ret.instr.ip = host_step();
+        child_ret.aux0 = R_ACC;
+        nmfc_out.write(child_ret);
+      }
+      body = expand_body(graph, place, vertex, token, spawn_tokens, /*max_neighbours=*/32);
+    } else {
+      body = visit_body(graph, place, vertex, token, /*max_neighbours=*/32);
+    }
 
     // --- host stream: pull the next vertex off the frontier, then offload ---
     auto frontier = blank(nmfc::op::HOST, 0);
