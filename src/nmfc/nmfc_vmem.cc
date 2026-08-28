@@ -214,6 +214,13 @@ public:
 
   [[nodiscard]] const std::vector<std::pair<std::uint32_t, std::uint64_t>>& remap_log() const override { return remap_log_; }
 
+  [[nodiscard]] bool is_grain_mapped(std::uint32_t asid, std::uint64_t vaddr) const override
+  {
+    // The hint, not the allocation: it says what the page is, and it is there
+    // before the page is ever touched.
+    return hint_for(asid, vaddr >> map_.grain_bits()).mode == nmfc::mapping_mode::NMFC;
+  }
+
   [[nodiscard]] std::optional<std::uint64_t> grain_mapping(std::uint32_t asid, std::uint64_t vaddr) const override
   {
     return grain_mapping_on(asid, vaddr, 0);

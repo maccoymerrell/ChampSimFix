@@ -99,6 +99,18 @@ struct page_placement_sink {
    */
   [[nodiscard]] virtual std::optional<std::uint64_t> grain_mapping_on(std::uint32_t asid, std::uint64_t vaddr, std::size_t tile) const = 0;
 
+  /**
+   * Whether this address will resolve from a grain-sized mapping.
+   *
+   * Asked *before* a frame exists, which is the point: an MMU has to know what
+   * page size it is walking for before it starts, and "is a grain mapping
+   * established" is a different question that is false on every first touch.
+   * Answering with the latter makes the first access to a grain walk as a small
+   * page, fill the small array with an entry nothing will reuse, and every
+   * access after it walk again as a huge one -- two walks per grain, for good.
+   */
+  [[nodiscard]] virtual bool is_grain_mapped(std::uint32_t asid, std::uint64_t vaddr) const = 0;
+
   /** Page-granular translation as seen from `tile`, for the walk below the MMU. */
   [[nodiscard]] virtual std::uint64_t page_mapping_on(champsim::origin origin, std::uint64_t vpage, std::size_t tile) = 0;
 

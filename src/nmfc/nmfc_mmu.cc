@@ -285,10 +285,18 @@ private:
     std::vector<requester> waiting;
   };
 
-  /** Whether this address resolves from a grain-sized mapping. */
+  /**
+   * Whether this address resolves from a grain-sized mapping.
+   *
+   * Asked of the placement hint rather than of the allocation. A frame does not
+   * exist on first touch, so asking whether one does answers "no" for every
+   * page the first time it is seen -- which walked it as a small page, cached
+   * that in the small array, and then walked it again as a huge one on the very
+   * next access, permanently.
+   */
   [[nodiscard]] bool is_huge(champsim::origin origin, std::uint64_t vaddr) const
   {
-    return placement_ != nullptr && placement_->grain_mapping_on(origin.asid(), vaddr, tile_).has_value();
+    return placement_ != nullptr && placement_->is_grain_mapped(origin.asid(), vaddr);
   }
 
   [[nodiscard]] std::uint64_t page_of(bool huge, std::uint64_t vaddr) const { return vaddr >> (huge ? map_.grain_bits() : page_bits_); }
