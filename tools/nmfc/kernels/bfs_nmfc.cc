@@ -81,40 +81,46 @@ static inline uint32_t nmfc_tile_of(const void* p)
  * `bucket` is `tiles` lanes of `cap` entries; `count` is per-lane occupancy.
  */
 NMFC_FUNCTION
-const NodeID* nmfc_scan(const NodeID* first, const NodeID* last, const NodeID* parent, NodeID* const* lane, int32_t* count)
+const NodeID* nmfc_scan(const NodeID* first, const NodeID* last, const NodeID* parent, NodeID* const* lane)
 {
   for (const NodeID* p = first; p != last; ++p) {
     const NodeID v = *p;
-    const uint32_t t = nmfc_tile_of(&parent[v]);
-    int32_t& n = count[t];
-    if (n == NMFC_CAP) {
+    NodeID* l = lane[nmfc_tile_of(&parent[v])];
+    const NodeID n = *l; // a lane carries its own occupancy in its first word
+    if (n == NMFC_CAP - 1) {
       return p; // this lane is full; the caller drains and resumes here
     }
-    lane[t][n] = v;
-    ++n;
+    l[n + 1] = v;
+    *l = n + 1;
   }
   return last;
 }
 
 /**
- * Claim every vertex in one bucket. All of `parent` touched here lives on this
- * function's own tile, so this loop does not migrate.
+ * Claim every vertex in one bucket, compacting the winners to its front.
+ *
+ * Four arguments, not five, and the result overwrites the input rather than
+ * going to a second buffer. That is a register-budget decision: a function
+ * core has eight registers and no stack, and five arguments plus a return
+ * value plus the loop's temporaries needed nine. All of `parent` touched here
+ * lives on this function's own tile, so this loop does not migrate.
  */
 NMFC_FUNCTION
-int32_t nmfc_claim(const NodeID* bucket, int32_t n, NodeID* parent, NodeID u, NodeID* claimed)
+int32_t nmfc_claim(NodeID* bucket, int32_t n, NodeID* parent, NodeID u)
 {
-  int32_t got = 0;
-  for (int32_t i = 0; i < n; ++i) {
-    const NodeID v = bucket[i];
-    const NodeID curr = parent[v];
-    if (curr < 0 && compare_and_swap(parent[v], curr, u)) {
-      claimed[got++] = v;
+  NodeID* w = bucket;
+  for (NodeID* p = bucket, *e = bucket + n; p != e; ++p) {
+    const NodeID v = *p;
+    NodeID& slot = parent[v];
+    const NodeID curr = slot;
+    if (curr < 0 && compare_and_swap(slot, curr, u)) {
+      *w++ = v;
     }
   }
-  return got;
+  return static_cast<int32_t>(w - bucket);
 }
 
-static int64_t TDStepOffloaded(const Graph& g, NodeID* parent, SlidingQueue<NodeID>& queue, NodeID* const* lane, int32_t* count, NodeID* const* out)
+static int64_t TDStepOffloaded(const Graph& g, NodeID* parent, SlidingQueue<NodeID>& queue, NodeID* const* lane)
 {
   int64_t scout_count = 0;
   QueueBuffer<NodeID> lqueue(queue);
@@ -130,19 +136,20 @@ static int64_t TDStepOffloaded(const Graph& g, NodeID* parent, SlidingQueue<Node
     const NodeID* p = first;
     while (p != last) {
       for (uint32_t t = 0; t < NMFC_TILES; ++t) {
-        count[t] = 0;
+        *lane[t] = 0;
       }
       // Producer: streams the edge list, sorts neighbours by owning tile.
-      p = nmfc_scan(p, last, parent, lane, count);
+      p = nmfc_scan(p, last, parent, lane);
       // Consumers: one per tile, each entirely local to that tile.
       for (uint32_t t = 0; t < NMFC_TILES; ++t) {
-        if (count[t] == 0) {
+        const int32_t n = *lane[t];
+        if (n == 0) {
           continue;
         }
-        const int32_t got = nmfc_claim(lane[t], count[t], parent, u, out[t]);
+        const int32_t got = nmfc_claim(lane[t] + 1, n, parent, u);
         for (int32_t i = 0; i < got; ++i) {
-          lqueue.push_back(out[t][i]);
-          scout_count += g.out_degree(out[t][i]);
+          lqueue.push_back(lane[t][1 + i]);
+          scout_count += g.out_degree(lane[t][1 + i]);
         }
       }
     }
@@ -247,7 +254,7 @@ static NodeID* DOBFS(const Graph& g, NodeID source, uint32_t grain_bits, uint32_
 
   __champsim_start_trace();
   while (!queue.empty()) {
-    TDStepOffloaded(g, parent, queue, lane.data(), count.data(), out.data());
+    TDStepOffloaded(g, parent, queue, lane.data());
     queue.slide_window();
   }
   __champsim_stop_trace();
