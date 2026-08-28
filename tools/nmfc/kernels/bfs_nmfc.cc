@@ -255,6 +255,11 @@ static NodeID* DOBFS(const Graph& g, NodeID source, uint32_t grain_bits, uint32_
     {"parent", parent, static_cast<std::size_t>(g.num_nodes()) * sizeof(NodeID)},
     {"bucket", bucket_base, grain * tiles},
     {"claimed", claimed_base, grain * tiles},
+    // The lane table itself is memory the function reads: it holds the pointer
+    // to each bucket. Leaving it out of the manifest made the annotation pass
+    // refuse the trace, which is the behaviour we want from it.
+    {"lanetab", lane.data(), lane.size() * sizeof(NodeID*)},
+    {"outtab", out.data(), out.size() * sizeof(NodeID*)},
   });
 
   __champsim_start_trace();

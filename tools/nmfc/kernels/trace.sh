@@ -29,6 +29,11 @@ readelf -sW "$OUT/bfs_nmfc" | awk '$4=="FUNC" && $8 ~ /^_Z[0-9]+nmfc_/ {printf "
 # the source said so.
 objdump -d --no-show-raw-insn "$OUT/bfs_nmfc" | awk '/^ *[0-9a-f]+:.*lock/ {gsub(":","",$1); print $1}' > "$OUT/atomics.txt"
 
+# Return sites, likewise from the disassembly. Pin does not mark ret as a
+# branch, and this machine's return is not a stack pop, so the annotation pass
+# has to know which instruction is the return in order to drop the pop.
+objdump -d --no-show-raw-insn "$OUT/bfs_nmfc" | awk '/^ *[0-9a-f]+:[ \t]+ret/ {gsub(":","",$1); print $1}' > "$OUT/rets.txt"
+
 export OMP_NUM_THREADS=1
 setarch -R "$PIN_ROOT/pin" -t "$TRACER" \
   -o "$OUT/trace.champsimtrace" -t ${NMFC_TRACE_INSTRS:-200000000} \
@@ -38,5 +43,6 @@ setarch -R "$PIN_ROOT/pin" -t "$TRACER" \
 echo "--- captured in $OUT ---"
 wc -l < "$OUT/symbols.txt" | xargs echo "  offloadable functions:"
 wc -l < "$OUT/atomics.txt" | xargs echo "  atomic sites:"
+wc -l < "$OUT/rets.txt" | xargs echo "  return sites:"
 wc -l < "$OUT/regions.txt" | xargs echo "  regions:"
 ls -la "$OUT/trace.champsimtrace" | awk '{print "  trace bytes:", $5}'
