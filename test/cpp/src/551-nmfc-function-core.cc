@@ -728,3 +728,103 @@ TEST_CASE("A spawned invocation goes to the tile that owns its address, not the 
   }
   REQUIRE(r.host.returned.size() == 1); // the parent, and only the parent
 }
+
+TEST_CASE("A context waiting on a held block is parked, not left spinning")
+{
+  // A context that cannot take a contended block used to be pushed back onto
+  // the ready queue and retried every cycle. The issue loop examines at most as
+  // many entries as were queued when the cycle began, so a queue full of
+  // retrying contexts spends its examination budget on contexts that cannot
+  // issue. Parking on the block and waking on release is the fix, and its
+  // hazard is the opposite of spinning: a wakeup that never arrives strands the
+  // context forever.
+  //
+  // Every path that can drop a wakeup is exercised here at once. Each body
+  // leaves a load in flight when it reaches the atomic, so a memory response
+  // wakes contexts that are already parked -- they must not queue themselves
+  // twice, and the release they were passed over for must move to the next
+  // waiter. Slots are refilled as they free, so a queued waiter's slot is
+  // reused by a later invocation while the queue still names it, which the
+  // recorded token has to catch.
+  constexpr std::size_t CONTEXTS = 8;
+  constexpr std::uint64_t INVOCATIONS = 24;
+  rig r{0, CONTEXTS, "_park"};
+  fake_cache mem{r.dcache_channel, 30}; // slow enough that the queue builds up
+  champsim::chrono::clock clock;
+
+  const auto contended = on_tile(0, 0x9000); // one block every invocation wants
+
+  for (std::uint64_t token = 1; token <= INVOCATIONS; ++token) {
+    nmfc::function_body body{};
+    body.token = token;
+    body.entry_pc = on_tile(0, 0x1000);
+    body.live_regs = 4;
+    // A private load first: it is still outstanding when the atomic parks, so
+    // its response wakes a parked context.
+    body.instrs.push_back(load_from(on_tile(0, 0x20000 + token * 64), 1));
+    body.instrs.push_back(atomic_at(contended, 2));
+    body.instrs.push_back(alu(2, 3));
+    r.image->publish(body);
+  }
+
+  std::uint64_t next = 1;
+  for (int cycle = 0; cycle < 20000; ++cycle) {
+    while (next <= INVOCATIONS && r.core->free_contexts() > 0) {
+      nmfc::invocation_msg msg{};
+      msg.token = next;
+      msg.home_host = r.host_id;
+      msg.entry_pc = on_tile(0, 0x1000);
+      msg.body = r.image->lookup(next);
+      if (!r.core->accept(msg)) {
+        break;
+      }
+      ++next;
+    }
+    clock.tick(champsim::chrono::picoseconds{250});
+    mem.step();
+    r.core->operate_on(clock);
+    r.fabric->operate_on(clock);
+  }
+
+  // Nothing stranded: every invocation was woken, ran and gave its slot back.
+  REQUIRE(next == INVOCATIONS + 1);
+  REQUIRE(r.host.returned.size() == INVOCATIONS);
+  REQUIRE(r.core->free_contexts() == CONTEXTS);
+}
+
+TEST_CASE("A parked context is woken even when the block's holder never returns")
+{
+  // The holder of a block can leave before its response lands -- it completes,
+  // or it migrates. The lock is released on its behalf, and that release is the
+  // only thing standing between the contexts queued behind it and a permanent
+  // stall. Draining the queue in that path is what this pins.
+  constexpr std::size_t CONTEXTS = 4;
+  rig r{0, CONTEXTS, "_park_orphan"};
+  fake_cache mem{r.dcache_channel, 25};
+  champsim::chrono::clock clock;
+
+  const auto contended = on_tile(0, 0x9000);
+
+  for (std::uint64_t token = 1; token <= CONTEXTS; ++token) {
+    nmfc::function_body body{};
+    body.token = token;
+    body.entry_pc = on_tile(0, 0x1000);
+    body.live_regs = 2;
+    body.instrs.push_back(atomic_at(contended, 1));
+    r.image->publish(body);
+
+    nmfc::invocation_msg msg{};
+    msg.token = token;
+    msg.home_host = r.host_id;
+    msg.entry_pc = on_tile(0, 0x1000);
+    msg.body = r.image->lookup(token);
+    REQUIRE(r.core->accept(msg));
+  }
+
+  // The body ends on the atomic, so each holder retires the moment its response
+  // lands -- the release always runs for a context that is already gone.
+  run(r, mem, clock, 6000);
+
+  REQUIRE(r.host.returned.size() == CONTEXTS);
+  REQUIRE(r.core->free_contexts() == CONTEXTS);
+}

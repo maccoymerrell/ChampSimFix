@@ -40,6 +40,7 @@
 #include <deque>
 #include <map>
 #include <unordered_map>
+#include <utility>
 #include <unordered_set>
 #include <vector>
 #include <fmt/core.h>
@@ -160,6 +161,7 @@ public:
     long progress = 0;
     port_blocked_ = false;
     progress += drain_returns();
+    progress += drain_releases();
     progress += drain_translations();
     progress += wake_timers();
     progress += issue_cycle();
@@ -199,6 +201,7 @@ public:
     spawned_ = spawn_stalls_ = 0;
     instructions_ = loads_ = stores_ = atomics_ = fetches_ = 0;
     scoreboard_stalls_ = port_retries_ = atomic_conflicts_ = translation_stalls_ = 0;
+    atomic_wait_cycles_ = atomic_forwards_ = 0;
     port_busy_cycles_ = 0;
     ctx_code_hits_ = ctx_code_misses_ = ctx_data_hits_ = ctx_data_misses_ = 0;
     occupancy_time_ = 0;
@@ -236,6 +239,8 @@ public:
     // compare to anything; the cycle count does, which is why it leads.
     const auto port_pct = elapsed == 0 ? 0.0 : 100.0 * static_cast<double>(port_busy_cycles_) / static_cast<double>(elapsed);
     out.line(fmt::format("{} MEAN RESIDENCY: {:.1f} cycles STALLS scoreboard: {} atomic: {}", NAME, residency, scoreboard_stalls_, atomic_conflicts_));
+    out.line(fmt::format("{} ATOMIC WAIT: {} context-cycles over {} waits, {} of {} updates took a forwarded value", NAME, atomic_wait_cycles_,
+                         atomic_conflicts_, atomic_forwards_, atomics_));
     out.line(fmt::format("{} PORT BLOCKED: {} cycles ({:.1f}% of elapsed) over {} retries", NAME, port_busy_cycles_, port_pct, port_retries_));
     const auto cold_start = cold_start_count_ == 0 ? 0.0 : static_cast<double>(cold_start_cycles_) / static_cast<double>(cold_start_count_);
     out.line(fmt::format("{} MIGRATION COLD START: {} cycles over {} arrivals (mean {:.1f})", NAME, cold_start_cycles_, cold_start_count_, cold_start));
@@ -262,6 +267,8 @@ public:
     json.add("port_retries", port_retries_);
     json.add("port_busy_cycles", port_busy_cycles_);
     json.add("atomic_conflicts", atomic_conflicts_);
+    json.add("atomic_wait_cycles", atomic_wait_cycles_);
+    json.add("atomic_forwards", atomic_forwards_);
     const auto code_total = ctx_code_hits_ + ctx_code_misses_;
     const auto data_total = ctx_data_hits_ + ctx_data_misses_;
     const auto code_rate = code_total == 0 ? 0.0 : 100.0 * static_cast<double>(ctx_code_hits_) / static_cast<double>(code_total);
@@ -308,7 +315,83 @@ private:
 
   void release_lock(std::uint64_t block)
   {
+    // Hand the address straight to the next waiter rather than freeing it. The
+    // value that just arrived is still authoritative -- no other agent can
+    // reach this block -- so the waiter inherits both the lock and the data,
+    // and never issues a fetch of its own. Ownership passes without the lock
+    // ever being free, which is also what keeps the forwarded value correct:
+    // no third context can slip in and change the address in between.
+    if (hand_off(block)) {
+      return;
+    }
     locked_blocks_.erase(block);
+  }
+
+  /** Pass a held address to the next context queued on it. */
+  bool hand_off(std::uint64_t block)
+  {
+    auto it = lock_waiters_.find(block);
+    if (it == lock_waiters_.end()) {
+      return false;
+    }
+    auto& queue = it->second;
+    bool handed = false;
+    while (!queue.empty()) {
+      const auto [slot, token, parked_at] = queue.front();
+      queue.pop_front();
+      auto& ctx = contexts_[slot];
+      if (ctx.token != token) {
+        continue; // the slot was reused; this entry names an invocation that left
+      }
+      atomic_wait_cycles_ += static_cast<std::uint64_t>((current_time - parked_at) / clock_period);
+      ctx.waiting_lock = false;
+      if (ctx.state != nmfc::ctx_state::BLOCKED) {
+        continue; // a memory response already woke it; it will ask again
+      }
+      ctx.held_lock = block;
+      ctx.holds_lock = true;
+      ctx.forwarded_lock = block;
+      ctx.has_forwarded_value = true;
+      make_ready(slot, current_time);
+      handed = true;
+      break;
+    }
+    if (queue.empty()) {
+      lock_waiters_.erase(it);
+    }
+    return handed;
+  }
+
+  /** Give up an address a forwarded update finished with. */
+  long drain_releases()
+  {
+    long progress = 0;
+    for (auto it = releases_.begin(); it != releases_.end();) {
+      if (it->at > current_time) {
+        ++it;
+        continue;
+      }
+      auto& ctx = contexts_[it->slot];
+      if (ctx.token == it->token && ctx.holds_lock && ctx.held_lock == it->key) {
+        ctx.holds_lock = false;
+      }
+      const auto key = it->key;
+      it = releases_.erase(it);
+      release_lock(key);
+      ++progress;
+    }
+    return progress;
+  }
+
+  /** Block a context until the holder of `block` releases it. */
+  void park_on_lock(std::size_t slot, nmfc::context& ctx, std::uint64_t block)
+  {
+    ctx.state = nmfc::ctx_state::BLOCKED;
+    if (ctx.waiting_lock) {
+      return; // a memory response woke it while parked; its entry is still queued
+    }
+    ctx.waiting_lock = true;
+    lock_waiters_[block].push_back(lock_waiter{slot, ctx.token, current_time});
   }
 
   /** Give up any lock this context is holding. Safe to call when it holds none. */
@@ -786,18 +869,57 @@ private:
       }
     }
 
-    // Atomics serialize per block. Because every access to this address range
+    // Atomics serialize per address. Because every access to this range
     // converges on this one core, a local table is the whole mechanism.
     std::uint64_t lock_block = 0;
+    bool forwarded = false;
     if (instr.is_atomic) {
-      lock_block = instr.mem[0].to<std::uint64_t>() >> block_bits_;
+      // Lock the operand, not the line it sits in. An atomic updates one word,
+      // and two atomics on different words are independent even when they
+      // share a line -- there is no coherence to preserve, because the block
+      // lives on exactly one tile and is touched by exactly one core. Locking
+      // the whole line instead made a line's worth of unrelated counters
+      // contend for a critical section that spans a memory round trip, which
+      // is what a graph kernel's parent array looks like.
+      lock_block = instr.mem[0].to<std::uint64_t>();
       // A lock this context already holds is not a conflict with itself.
       const bool held_by_us = ctx.holds_lock && ctx.held_lock == lock_block;
-      if (!held_by_us && locked_blocks_.count(lock_block) != 0) {
-        ready_.push_back(slot);
+      forwarded = ctx.has_forwarded_value && ctx.forwarded_lock == lock_block;
+      if (!held_by_us && !forwarded && locked_blocks_.count(lock_block) != 0) {
+        // Park rather than re-queue to retry. A retrying context still costs an
+        // examination slot every cycle, and the issue loop examines at most as
+        // many entries as were queued when the cycle began -- so a ready queue
+        // filled with contexts spinning on one hot block spends the whole
+        // examination budget on contexts that cannot issue and leaves issue
+        // width unused. That makes contention superlinear rather than merely
+        // serial: the more contexts converge on a block at once, the less work
+        // the core does per cycle. Waking on release keeps the ready queue to
+        // contexts that can actually make progress.
+        park_on_lock(slot, ctx, lock_block);
         ++atomic_conflicts_;
         return false;
       }
+    }
+
+    if (forwarded) {
+      // The unit holds the line and the value that came back with it, so this
+      // update is an ALU operation on data already in hand. This is the whole
+      // point of doing atomics at the memory: a queue of updates to one
+      // address costs one fetch and then one ALU pass each, not a round trip
+      // apiece.
+      ctx.has_forwarded_value = false;
+      ++atomics_;
+      ++atomic_forwards_;
+      for (const auto reg : instr.dst_reg) {
+        if (reg != 0) {
+          ctx.ready[reg - 1] = true;
+        }
+      }
+      ++ctx.pc;
+      const auto done_at = current_time + latency_[idx(nmfc::op_class::ALU)];
+      releases_.push_back(pending_release{done_at, lock_block, slot, ctx.token});
+      make_ready(slot, done_at);
+      return true;
     }
 
     // All or nothing: a partially issued instruction would need per-operation
@@ -1020,6 +1142,32 @@ private:
 
   std::unordered_map<std::uint64_t, std::vector<outstanding_op>> outstanding_;
   std::unordered_set<std::uint64_t> locked_blocks_;
+
+  // Contexts parked on a held block, in arrival order, each tagged with the
+  // invocation that queued it so a reused slot is not mistaken for a waiter.
+  struct lock_waiter {
+    std::size_t slot;
+    std::uint64_t token;
+    champsim::chrono::clock::time_point parked_at;
+  };
+  std::unordered_map<std::uint64_t, std::deque<lock_waiter>> lock_waiters_;
+
+  struct pending_release {
+    champsim::chrono::clock::time_point at;
+    std::uint64_t key;
+    std::size_t slot;
+    std::uint64_t token;
+  };
+  // Addresses held by a forwarded update, which has no memory response to
+  // release them on.
+  std::vector<pending_release> releases_;
+  std::uint64_t atomic_forwards_ = 0;
+
+  // Cycles contexts actually spent stopped on a contended block. The conflict
+  // counter cannot answer this: while blocked contexts were re-queued it
+  // counted one per retry per cycle, and now that they park it counts one per
+  // wait. Neither is a duration, so neither can be compared across the two.
+  std::uint64_t atomic_wait_cycles_ = 0;
 
   // Slots that arrived by migration and have not yet issued a real instruction.
   // The cycles between arrival and that first issue are what a dropped

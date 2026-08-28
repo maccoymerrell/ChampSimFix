@@ -179,6 +179,19 @@ struct context {
   std::uint64_t held_lock = 0;
   bool holds_lock = false;
 
+  // Parked on an atomic lock another context holds, waiting to be woken when
+  // that lock is released. Tracked so a context is never queued on a block
+  // twice: a memory response can wake a parked context, which then re-parks
+  // while its original entry is still on the block's queue.
+  bool waiting_lock = false;
+
+  // The atomic unit handed this context the block directly, along with the
+  // value already in hand. Its update needs no fetch of its own: nothing can
+  // have changed the address in between, because ownership passed straight
+  // from the previous holder without the lock ever becoming free.
+  std::uint64_t forwarded_lock = 0;
+  bool has_forwarded_value = false;
+
   // Bookkeeping for the migration cold-start statistic.
   std::uint32_t migrations = 0;
 
@@ -195,6 +208,8 @@ struct context {
     fetched_block = 0;
     pending_mem = 0;
     awaiting_translation = false;
+    waiting_lock = false;
+    has_forwarded_value = false;
     state = ctx_state::MIGRATING;
     ++migrations;
   }
