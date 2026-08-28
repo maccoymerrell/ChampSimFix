@@ -71,6 +71,16 @@ namespace
 
 /** What a ramulator config implies about the machine it describes. */
 struct dram_geometry {
+  /** Channels inside this one instance. Each memory tile owns exactly one instance. */
+  std::uint64_t channels_in_instance = 0;
+  /** Ranks x bank groups x banks: everything addressable under a channel above the row. */
+  std::uint64_t banks_per_channel = 0;
+  std::uint64_t rows_per_bank = 0;
+  std::uint64_t columns = 0;
+  std::uint64_t channel_width_bytes = 0;
+  std::uint64_t row_bytes = 0;
+  /** One channel's worth. An instance holds channels_in_instance of these. */
+  std::uint64_t channel_capacity_bytes = 0;
   champsim::chrono::picoseconds tCK{};
   int tx_bytes = 0;
 };
@@ -103,6 +113,49 @@ dram_geometry probe_geometry(const std::string& config_path)
   geometry.tCK = champsim::chrono::picoseconds{static_cast<std::intmax_t>(static_cast<double>(tCK_ns) * 1000.0 + 0.5)};
   geometry.tx_bytes = probe->get_tx_bytes();
 
+  // The device organisation, so the tagging granularity can be derived from the
+  // DRAM rather than set beside it and left to drift. §5.2's threshold is
+  //
+  //     G = row_bytes_per_channel x banks_per_channel x num_channels
+  //
+  // and it is not decoration: it is the size at which a tagged unit owns whole
+  // rows, which is the only reason two units in different mapping modes cannot
+  // contend for the same bank and column slots. Set it too small and the modes
+  // interfere; too large and neither owns a row, so the row locality the NMFC
+  // mapping exists to create is not there at all.
+  //
+  // The org is [channel, ...banks..., row, column] for every standard here, so
+  // the levels between the channel and the row are what "banks per channel"
+  // means, whatever a given DRAM calls them.
+  const auto controllers = config["memory_system"]["controllers"];
+  if (controllers.is_sequence() && !controllers.seq().empty()) {
+    const auto dram = controllers.seq().front()["dram"];
+    const auto org = dram["org"]["count"].as<std::vector<int>>();
+    if (org.size() >= 4) {
+      // org is [channel, rank, ...bankgroup/bank..., row, column].
+      geometry.channels_in_instance = static_cast<std::uint64_t>(org.front());
+      geometry.rows_per_bank = static_cast<std::uint64_t>(org[org.size() - 2]);
+      geometry.columns = static_cast<std::uint64_t>(org.back());
+      geometry.channel_width_bytes = static_cast<std::uint64_t>(dram["channel_width"].as<int>()) / 8;
+
+      // Everything between the channel and the row: ranks, bank groups and
+      // banks. All of it is addressable under the channel, so all of it counts.
+      geometry.banks_per_channel = 1;
+      for (std::size_t i = 1; i + 2 < org.size(); ++i) {
+        geometry.banks_per_channel *= static_cast<std::uint64_t>(org[i]);
+      }
+
+      // A row holds one column entry per column *address*, and the address
+      // mapper reduces the column field by the internal prefetch while shifting
+      // the address down by the transaction size -- so the prefetch cancels and
+      // a row is simply its columns times the channel width. Using the
+      // transaction size here instead counts the burst twice, which is how a
+      // 4 KiB row was reported as 64 KiB.
+      geometry.row_bytes = geometry.columns * geometry.channel_width_bytes;
+      geometry.channel_capacity_bytes = geometry.banks_per_channel * geometry.rows_per_bank * geometry.row_bytes;
+    }
+  }
+
   return cache.emplace(config_path, geometry).first->second;
 }
 
@@ -112,6 +165,31 @@ dram_geometry probe_geometry(const std::string& config_path)
  * Called from the base-class initialiser, which is why it is a free function
  * taking the builder rather than a member.
  */
+/**
+ * How large this channel is, according to the device.
+ *
+ * Not a parameter. ramulator2 owns the organisation, so it owns the capacity
+ * that follows from it, and a second number in a second file is only an
+ * opportunity for the two to disagree -- which they did, by four times.
+ */
+std::uint64_t resolve_size(const champsim::modules::ModuleBuilder& builder)
+{
+  const auto geometry = probe_geometry(builder.get_parameter<std::string>("config"));
+  const auto configured = builder.get_parameter<std::uint64_t>("size", true, std::uint64_t{0});
+  const auto instance_capacity = geometry.channels_in_instance * geometry.channel_capacity_bytes;
+  if (instance_capacity == 0) {
+    return configured; // an org this did not recognise; fall back rather than invent
+  }
+  if (configured != 0 && configured != instance_capacity) {
+    fmt::print("[RAMULATOR_MC] ERROR: size is {} bytes but this DRAM holds {}.\n"
+               "  The allocator asks this controller how much memory exists, so a smaller answer strands capacity and a\n"
+               "  larger one hands out frames nothing backs. Omit size: the device decides.\n",
+               configured, instance_capacity);
+    std::exit(-1);
+  }
+  return instance_capacity;
+}
+
 champsim::chrono::picoseconds resolve_period(const champsim::modules::ModuleBuilder& builder)
 {
   const auto geometry = probe_geometry(builder.get_parameter<std::string>("config"));
@@ -139,7 +217,7 @@ class ramulator_mc : public champsim::modules::memory_controller_module
 public:
   explicit ramulator_mc(champsim::modules::ModuleBuilder builder)
       : champsim::modules::memory_controller_module(resolve_period(builder)), queues_(builder.get_parameter<std::vector<channel_type*>>("ul_channels")),
-        config_path_(builder.get_parameter<std::string>("config")), size_bytes_(builder.get_parameter<std::uint64_t>("size", true, std::uint64_t{4} << 30)),
+        config_path_(builder.get_parameter<std::string>("config")), size_bytes_(resolve_size(builder)),
         max_accept_(builder.get_parameter<champsim::bandwidth::maximum_type>("max_accept", true, champsim::bandwidth::maximum_type{4})),
         block_bytes_(builder.get_parameter<unsigned>("block_size", true, 64U))
   {
@@ -159,15 +237,55 @@ public:
     // is a correctness requirement, not an optimisation.
     transactions_per_block_ = (block_bytes_ + static_cast<unsigned>(tx_bytes_) - 1) / static_cast<unsigned>(tx_bytes_);
 
+    check_geometry(builder);
   }
 
-  void initialize() final
+  /**
+   * The DRAM decides the tagging granularity, not the configuration file beside
+   * it.
+   *
+   * One instance per channel is the arrangement: channel selection happens in
+   * the interleave fabric above, so a controller that thought it owned several
+   * channels would be decoding a field that is no longer in the address it
+   * receives.
+   *
+   * And the grain has to be the size at which a tagged unit owns whole rows, or
+   * §5.2's argument for per-unit mode tagging does not hold -- two units in
+   * different modes would contend for the same bank and column slots. Deriving
+   * it here means the two cannot drift apart, which they had: the grain was set
+   * from the doc's DDR5 worked example while the modelled device was a different
+   * shape entirely.
+   */
+  void check_geometry(const champsim::modules::ModuleBuilder& builder) const
   {
-    // Printed here rather than in the constructor: NAME is stamped by the
-    // module factory afterwards, so a constructor-time message is anonymous.
-    fmt::print("[{}] {}: tCK {} ps, {} B transactions, {} per {} B block\n", NAME, config_path_, clock_period.count(), tx_bytes_, transactions_per_block_,
-               block_bytes_);
+    const auto g = probe_geometry(config_path_);
+    if (g.channels_in_instance == 0 || g.banks_per_channel == 0 || g.row_bytes == 0) {
+      return; // an org this did not recognise; say nothing rather than guess
+    }
+
+    // Total channels in the machine, which is what the siloing granularity is
+    // defined against: every memory tile owns one instance, and an instance may
+    // own more than one channel.
+    const auto tiles = builder.get_parameter<std::size_t>("nmfc_num_tiles", true, std::size_t{1});
+    const auto total_channels = g.channels_in_instance * tiles;
+
+    // §5.2. A STANDARD unit spreads over every channel and takes one row index
+    // across all banks on each; an NMFC unit sits on one channel and takes that
+    // many row indices. Both come to the same size, and that size is the only
+    // one at which the two modes cannot contend for the same bank and column.
+    const auto required = g.row_bytes * g.banks_per_channel * total_channels;
+
+    const auto grain_bits = builder.get_parameter<unsigned>("nmfc_grain_bits", true, 0U);
+    if (grain_bits != 0 && (std::uint64_t{1} << grain_bits) != required) {
+      fmt::print("[{}] ERROR: nmfc_grain_bits is {} ({} bytes) but this DRAM requires {}.\n"
+                 "  row_bytes {} x banks_per_channel {} x total_channels {} ({} per instance x {} tiles).\n"
+                 "  Below it the two mapping modes contend for the same rows; above it neither owns one.\n",
+                 NAME, grain_bits, std::uint64_t{1} << grain_bits, required, g.row_bytes, g.banks_per_channel, total_channels, g.channels_in_instance,
+                 tiles);
+      std::exit(-1);
+    }
   }
+
 
   long operate() final
   {

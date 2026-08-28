@@ -17,6 +17,9 @@ with it at construction rather than it holding forward references.
 """
 
 import argparse
+import os
+import re
+import io
 import json
 import os
 
@@ -141,8 +144,7 @@ def build(args, nmfc_enabled):
             children.append({
                 "_comment": f"memory tile {t}: DRAM modeled by ramulator2",
                 "name": f"tile{t}_DRAM", "module": "memory_controller", "model": "RAMULATOR_MC",
-                "config": args.ramulator_config,
-                "size": args.tile_bytes,
+                "config": per_tile_ramulator_config(args.ramulator_config, t),
                 "max_accept": {"bandwidth": 4},
                 "ul_channels": [f"@tile{t}_LLC_DRAM_channel"],
             })
@@ -419,6 +421,69 @@ def build(args, nmfc_enabled):
     }
 
 
+def derive_geometry(ramulator_config, tiles):
+    """Read the DRAM geometry off the device, so there is one source for it.
+
+    Hierarchy: channel -> rank -> bankgroup -> bank -> row -> column. Rows and
+    columns are unique per bank, banks per bankgroup, bankgroups per rank, ranks
+    per channel. Everything between the channel and the row is addressable under
+    that channel, so ranks, bank groups and banks all count toward
+    banks_per_channel.
+
+    A row holds one entry per column address. ramulator's address mapper reduces
+    the column field by the internal prefetch while shifting the address down by
+    the transaction size, so the prefetch cancels and a row is simply its columns
+    times the channel width. Multiplying columns by the transaction size instead
+    counts the burst twice.
+
+    Each memory tile owns exactly one ramulator2 instance. An instance may own
+    more than one channel internally, so the machine's channel count is
+    channels_in_instance * tiles, and the total physical address space is the sum
+    of every instance's capacity.
+
+    The grain is defined against that total channel count: a STANDARD unit
+    spreads over every channel and takes one row index across all banks on each,
+    while an NMFC unit sits on one channel and takes that many row indices. They
+    come to the same size, and it is the only size at which the two modes cannot
+    contend for the same bank and column slots.
+    """
+    text = io.open(ramulator_config, encoding="utf-8").read()
+    org = [int(x) for x in re.search(r"count:\s*\[([^\]]+)\]", text).group(1).split(",")]
+    channel_width_bytes = int(re.search(r"channel_width:\s*(\d+)", text).group(1)) // 8
+
+    channels_in_instance, rows_per_bank, columns = org[0], org[-2], org[-1]
+    banks_per_channel = 1
+    for level in org[1:-2]:
+        banks_per_channel *= level
+
+    row_bytes = columns * channel_width_bytes
+    channel_capacity = banks_per_channel * rows_per_bank * row_bytes
+    total_channels = channels_in_instance * tiles
+    grain = row_bytes * banks_per_channel * total_channels
+
+    bits = grain.bit_length() - 1
+    if (1 << bits) != grain:
+        raise SystemExit(f"derived grain {grain} is not a power of two; check {ramulator_config}")
+    return {
+        "grain_bits": bits, "grain": grain, "row_bytes": row_bytes,
+        "banks_per_channel": banks_per_channel, "rows_per_bank": rows_per_bank,
+        "channels_in_instance": channels_in_instance, "total_channels": total_channels,
+        "channel_capacity": channel_capacity,
+        "instance_capacity": channels_in_instance * channel_capacity,
+    }
+
+
+def per_tile_ramulator_config(base_config, tile):
+    """One config file per memory tile, because each runs its own instance."""
+    text = io.open(base_config, encoding="utf-8").read()
+    out_dir = os.path.join(os.path.dirname(base_config), "per_tile")
+    os.makedirs(out_dir, exist_ok=True)
+    stem = os.path.splitext(os.path.basename(base_config))[0]
+    path = os.path.join(out_dir, f"{stem}_tile{tile}.yaml")
+    io.open(path, "w", encoding="utf-8").write(text)
+    return path
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tiles", type=int, default=4)
@@ -430,7 +495,8 @@ def main():
     # it reports describes the unit rather than the architecture.
     parser.add_argument("--ftu-size", type=int, default=0,
                         help="0 (default) sizes it to tiles x contexts")
-    parser.add_argument("--grain-bits", type=int, default=21)
+    parser.add_argument("--grain-bits", type=int, default=0,
+                        help="derived from the DRAM under --dram ramulator; giving a contradicting value is refused")
     parser.add_argument("--mode-bit", type=int, default=38)
     parser.add_argument("--llc-sets", type=int, default=2048)
     parser.add_argument("--placement", default="round_robin")
@@ -449,6 +515,24 @@ def main():
     parser.add_argument("--tile-bytes", type=int, default=4 << 30)
     parser.add_argument("--out-dir", default="config/nmfc")
     args = parser.parse_args()
+
+    if args.dram == "ramulator":
+        g = derive_geometry(args.ramulator_config, args.tiles)
+        if args.grain_bits not in (0, g["grain_bits"]):
+            raise SystemExit(
+                f"--grain-bits {args.grain_bits} contradicts the DRAM, which requires {g['grain_bits']} "
+                f"({g['grain']} bytes = row_bytes {g['row_bytes']} x banks_per_channel {g['banks_per_channel']} "
+                f"x total_channels {g['total_channels']}). Omit it: the device decides.")
+        args.grain_bits = g["grain_bits"]
+        args.tile_bytes = g["instance_capacity"]
+        print(f"geometry from {args.ramulator_config}")
+        print(f"  per channel: banks_per_channel {g['banks_per_channel']} (ranks x bankgroups x banks) "
+              f"x rows_per_bank {g['rows_per_bank']} x row_bytes {g['row_bytes']} = {g['channel_capacity'] >> 30} GiB")
+        print(f"  channels_in_instance {g['channels_in_instance']}, one instance per tile, tiles {args.tiles} "
+              f"-> total_channels {g['total_channels']}, {(g['instance_capacity'] * args.tiles) >> 30} GiB total")
+        print(f"  grain = row_bytes x banks_per_channel x total_channels = {g['grain']} bytes ({g['grain_bits']} bits)")
+    elif args.grain_bits == 0:
+        args.grain_bits = 21
 
     os.makedirs(args.out_dir, exist_ok=True)
     for enabled, name in [(True, "nmfc"), (False, "baseline")]:
