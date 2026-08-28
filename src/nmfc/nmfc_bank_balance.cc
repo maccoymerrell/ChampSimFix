@@ -19,6 +19,8 @@
  * Registered from this tree rather than the vendored clone, which is not tracked.
  */
 
+#ifdef NMFC_WITH_RAMULATOR
+
 #include <algorithm>
 #include <cstdint>
 #include <numeric>
@@ -120,3 +122,5 @@ private:
 };
 
 } // namespace Ramulator
+
+#endif // NMFC_WITH_RAMULATOR

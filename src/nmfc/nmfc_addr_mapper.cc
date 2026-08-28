@@ -57,6 +57,8 @@
  *   hash_banks   fold row bits into the bank and bank-group indices (default true)
  */
 
+#ifdef NMFC_WITH_RAMULATOR
+
 #include <algorithm>
 #include <stdexcept>
 #include <vector>
@@ -201,3 +203,5 @@ class NMFCMinimalist : public IAddrMapper, public AddrMapperBase
 };
 
 } // namespace Ramulator
+
+#endif // NMFC_WITH_RAMULATOR
