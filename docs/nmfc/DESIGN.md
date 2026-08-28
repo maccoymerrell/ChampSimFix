@@ -176,6 +176,48 @@ Back-pressure chains end to end: no free context → the fabric's inbound queue 
 
 ---
 
+## 4.1 What fits in a function
+
+The vector operand is the whole of a function's state, and it travels in both
+directions: 512 bits go in with the fork, and the same 512 bits come back on
+completion. Register *positions* carry no meaning across that boundary — the
+join knows how to read what it gets — so a function is free to use its eight
+words however it likes.
+
+That gives an admission test for a candidate function, and it is measurable
+rather than a matter of taste.
+
+**Count peak simultaneous liveness, not registers touched.** A function may
+name nine registers over its lifetime while never holding more than eight live
+values at once; a compiler with eight registers would allocate it without
+spilling. Counting distinct registers instead reported 17 and 21 for the two
+BFS kernels, which is an artifact of the tracer recording partial-width views
+as separate ids -- `rax`, `eax` and `al` are three ids for one register.
+
+**A register that is never read does not count.** It holds nothing the join
+will consume.
+
+**Exclude the program counter, the stack pointer and the flags.** The PC is
+carried beside the regfile, not in it; this machine has no stack, so a
+function that genuinely needs one cannot run here; flags are internal to an
+instruction's execution.
+
+Then the rule is simple. If peak liveness exceeds the regfile, the function is
+rejected -- unless the excess is an artifact of how it was written, in which
+case it is rewritten. `nmfc_claim` needed nine because it kept its base
+pointer live purely to compute `w - base` at the end; returning the end
+pointer and letting the caller subtract made it eight, and the caller's
+subtraction is host work that the trace already accounts for. Both BFS kernels
+now sit at exactly eight.
+
+One caveat worth keeping in view: on x86-64 `lock cmpxchg` pins its comparand
+in `rax`, which is also the return register, so a compare-and-swap costs a
+register the algorithm did not ask for. Whether that pressure is real depends
+on whether the modelled ISA has the same constraint. It is a property of the
+host the traces are collected on, not of the machine being designed.
+
+---
+
 ## 5. Address space, mapping mode, and translation
 
 ### 5.1 One virtual address space, split restrictively

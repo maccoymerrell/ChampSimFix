@@ -97,16 +97,21 @@ const NodeID* nmfc_scan(const NodeID* first, const NodeID* last, const NodeID* p
 }
 
 /**
- * Claim every vertex in one bucket, compacting the winners to its front.
+ * Claim every vertex in one bucket, compacting the winners to its front and
+ * returning the new end.
  *
- * Four arguments, not five, and the result overwrites the input rather than
- * going to a second buffer. That is a register-budget decision: a function
- * core has eight registers and no stack, and five arguments plus a return
- * value plus the loop's temporaries needed nine. All of `parent` touched here
- * lives on this function's own tile, so this loop does not migrate.
+ * The shape of this signature is a register budget, not a style choice. A
+ * function core holds eight registers and no stack. Five arguments plus a
+ * separate output buffer needed nine live values; so did returning a count,
+ * because the base pointer had to stay live purely to subtract from. Handing
+ * back the end pointer lets the base die at the top of the loop and the
+ * caller do the subtraction, which is host work.
+ *
+ * All of `parent` touched here lives on this function's own tile, so this
+ * loop does not migrate.
  */
 NMFC_FUNCTION
-int32_t nmfc_claim(NodeID* bucket, int32_t n, NodeID* parent, NodeID u)
+NodeID* nmfc_claim(NodeID* bucket, int32_t n, NodeID* parent, NodeID u)
 {
   NodeID* w = bucket;
   for (NodeID* p = bucket, *e = bucket + n; p != e; ++p) {
@@ -117,7 +122,7 @@ int32_t nmfc_claim(NodeID* bucket, int32_t n, NodeID* parent, NodeID u)
       *w++ = v;
     }
   }
-  return static_cast<int32_t>(w - bucket);
+  return w;
 }
 
 static int64_t TDStepOffloaded(const Graph& g, NodeID* parent, SlidingQueue<NodeID>& queue, NodeID* const* lane)
@@ -146,7 +151,7 @@ static int64_t TDStepOffloaded(const Graph& g, NodeID* parent, SlidingQueue<Node
         if (n == 0) {
           continue;
         }
-        const int32_t got = nmfc_claim(lane[t] + 1, n, parent, u);
+        const int32_t got = static_cast<int32_t>(nmfc_claim(lane[t] + 1, n, parent, u) - (lane[t] + 1));
         for (int32_t i = 0; i < got; ++i) {
           lqueue.push_back(lane[t][1 + i]);
           scout_count += g.out_degree(lane[t][1 + i]);
