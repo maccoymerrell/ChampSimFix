@@ -34,7 +34,11 @@ nmfc_ramulator_stamp:
 	  echo "$(nmfc_ramulator_state)" > $(OBJ_ROOT)/nmfc_ramulator.stamp; \
 	fi
 $(OBJ_ROOT)/nmfc_ramulator.stamp: nmfc_ramulator_stamp ;
-$(OBJ_ROOT)/src/nmfc/ramulator_mc.o: $(OBJ_ROOT)/nmfc_ramulator.stamp
+# Every source that compiles away when the option is off, or make will keep an
+# object built under the other setting and the module it defines simply will not
+# be registered -- which surfaces as "implementation is not registered" at run
+# time, a long way from the stale object that caused it.
+$(OBJ_ROOT)/src/nmfc/ramulator_mc.o $(OBJ_ROOT)/src/nmfc/nmfc_addr_mapper.o $(OBJ_ROOT)/src/nmfc/nmfc_bank_balance.o: $(OBJ_ROOT)/nmfc_ramulator.stamp
 
 # vcpkg integration
 TRIPLET_DIR = $(patsubst %/,%,$(firstword $(filter-out $(ROOT_DIR)/vcpkg_installed/vcpkg/, $(wildcard $(ROOT_DIR)/vcpkg_installed/*/))))
