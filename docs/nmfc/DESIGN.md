@@ -616,3 +616,63 @@ The 6% context occupancy in both rows is the other half of the story: with
 ~3,000 hops per invocation the machine spends its time in the fabric rather
 than at memory, so almost nothing is resident. Migration is not a cost here, it
 is the workload.
+
+## 15. What sets the run time, and what does not
+
+Fixing a defect that made the MMU walk every grain twice made the machine
+6.8% *slower*. Chasing that down produced a model of where the time goes,
+and the answer is not any of the three places it was looked for first.
+
+Run time is predicted, within 1.3% across every configuration measured, by
+
+    cycles = invocations x mean_residency / achieved_concurrency
+
+| run | residency | concurrency | cycles | predicted |
+|---|---|---|---|---|
+| before the MMU fix | 7,621 | 1,863 | 2,641,521 | 2,625,074 (-0.6%) |
+| after it           | 7,931 | 1,868 | 2,755,198 | 2,729,674 (-0.9%) |
+| after the atomic work | 8,068 | 1,881 | 2,792,466 | 2,756,861 (-1.3%) |
+
+A context occupies its slot for about 8,000 cycles while executing a
+handful of instructions, so residency is almost entirely waiting on
+memory. Context slots are the scarce resource, and concurrency is what the
+four tiles actually hold at once -- 1,881 of 4,096, because occupancy is
+uneven (tile0 averages 635, tile2 averages 331). The fabric refuses
+delivery into a full tile, which is what stalls the host: 2.6M refusals on
+arrival, against 0 cycles of the host's own dispatch being blocked.
+
+The system is therefore past saturation on memory. Removing a delay
+anywhere upstream does not shift the bottleneck to the next component; it
+lets contexts reach their next memory access sooner, which lengthens the
+memory queues, which raises residency, which raises run time. Concurrency
+barely moves (1,863 -> 1,881) while residency climbs (7,621 -> 8,068), and
+the product tracks the measured cycles. Every "improvement" below made the
+workload slightly slower for exactly this reason, and each is still correct
+and worth keeping.
+
+Three things were wrongly blamed along the way, all worth recording because
+each looked convincing:
+
+- **DRAM.** Row-buffer hit rate does fall (9.09% -> 8.66%) and correlates
+  with cycles. But activates rise only 0.35% against 6.8% more cycles, so
+  the DRAM did the same work; and cycles/activate is derived from cycles,
+  so ranking runs by it is circular.
+- **Atomic spinning.** Real, and fixed: blocked contexts were retried every
+  cycle instead of parking. Eliminating it changed run time by +1.1%.
+- **Atomic contention.** Also real, also fixed: locking a 64-byte line for a
+  4-byte update made a line's worth of `parent[]` entries contend, and each
+  grant re-fetched. Waiting fell from 10,798,437 context-cycles to
+  1,465,999 -- and run time did not improve, because that waiting was 0.21%
+  of total residency. Comparing it against tile-cycles rather than
+  context-cycles overstates it by the 1024 contexts a tile holds.
+
+The lever that remains is residency and the imbalance in concurrency, not
+any per-component stall. That also means end-to-end cycles on this workload
+carry roughly +-5% of sensitivity to timing-neutral changes, so a
+performance claim needs the residency and concurrency terms reported beside
+it rather than cycles alone.
+
+Two loose ends this exposed: `ftu_size` in the tile configs is read by
+nothing -- the FTU is a fixed-size array, so the key silently does nothing
+-- and the fabric retries delivery 331M times to record 2.6M refusals,
+which is a counter worth making cheaper before it is trusted.
