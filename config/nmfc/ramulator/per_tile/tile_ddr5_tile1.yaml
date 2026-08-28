@@ -22,6 +22,8 @@ memory_system:
         debug: false
       row_policy:
         impl: Open
+      controller_plugins:
+        - impl: NMFCBankBalance
       addr_mapper:
         impl: RoBaRaCoCh
       dram:

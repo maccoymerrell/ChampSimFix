@@ -21,9 +21,12 @@ memory_system:
         scatter_interval: 0
         debug: false
       row_policy:
-        impl: Open
+        impl: ClosedCAP
+        cap: 4
       addr_mapper:
-        impl: RoBaRaCoCh
+        impl: NMFCMinimalist
+        gang_size: 4
+        hash_banks: true
       dram:
         impl: HBM3
         org:

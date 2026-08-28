@@ -341,6 +341,22 @@ public:
 
     // ramulator2 knows far more about what happened than this adapter does, so
     // hand its own statistics through verbatim rather than paraphrasing them.
+    //
+    // Both calls below were missing, and their absence was silent. print_stats
+    // only reaches the memory system's own implementation, so component
+    // statistics were stale, and finalize -- which is what every controller
+    // plugin reports from -- never ran at all. A plugin could be configured,
+    // constructed, and asked about every issued command, and produce no output
+    // whatsoever, which is exactly what happened the first time one was added.
+    //
+    // update_stats_recursive is the one that matters here: print_stats only
+    // reaches the memory system's own implementation, so without it every
+    // component statistic is whatever it was when last computed. finalize is
+    // deliberately not called -- this adapter is driven per phase, and the first
+    // phase to end is the warmup, so anything reported from finalize would
+    // describe a one-instruction run.
+    memory_system_->update_stats_recursive();
+
     std::ostringstream captured;
     memory_system_->print_stats(captured);
     std::istringstream lines{captured.str()};
@@ -489,6 +505,7 @@ private:
   std::vector<channel_type*> queues_;
   std::string config_path_;
   std::uint64_t size_bytes_;
+  bool finalized_ = false;
   champsim::bandwidth::maximum_type max_accept_;
   unsigned block_bytes_;
 
