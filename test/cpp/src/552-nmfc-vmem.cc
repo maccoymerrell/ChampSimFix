@@ -445,3 +445,51 @@ TEST_CASE("Global physical addresses map injectively onto channel-local ones")
   INFO("distinct global blocks: " << claimed.size() << ", collisions: " << collisions);
   REQUIRE(collisions == 0);
 }
+
+TEST_CASE("Channel-local space is covered densely, with nothing stranded")
+{
+  // Aliasing is one failure; the other is capacity that no virtual address can
+  // ever reach. A transform that skipped part of each channel's space would
+  // quietly shrink the machine -- the simulation would run, the DRAM would look
+  // smaller than configured, and nothing would say so.
+  rig r{"_coverage"};
+  const auto map = the_map();
+  const auto grain = std::uint64_t{1} << GRAIN_BITS;
+  const auto chunk = grain / TILES; // one channel's share of one grain
+
+  const auto local_chunks_touched = [&](bool nmfc, std::uint64_t first_vgrain, std::uint64_t count) {
+    std::map<std::size_t, std::set<std::uint64_t>> per_tile;
+    for (std::uint64_t i = 0; i < count; ++i) {
+      const auto vpage = vpage_in(first_vgrain + i, 0);
+      if (nmfc) {
+        r.placement->hint_placement(0, vpage.to<std::uint64_t>(), nmfc::placement_hint{nmfc::mapping_mode::NMFC, static_cast<std::uint32_t>(i % TILES)});
+      }
+      // Touch every page of the grain so the whole unit is exercised.
+      for (std::uint64_t page = 0; page < (grain >> LOG2_PAGE); ++page) {
+        const auto p = vpage_in(first_vgrain + i, page);
+        const auto pa = champsim::address{r.vmem->va_to_pa(champsim::origin{0, 0}, p).first}.to<std::uint64_t>();
+        per_tile[map.tile_of(pa)].insert(map.strip_mode(map.compact(pa)) / chunk);
+      }
+    }
+    return per_tile;
+  };
+
+  // One group's worth of NMFC grains: N grains, one per channel, each taking N
+  // chunks on its own channel -- so every channel ends up with the same N chunks.
+  const auto nmfc = local_chunks_touched(/*nmfc=*/true, 1000, TILES);
+  REQUIRE(nmfc.size() == TILES); // every channel is reached
+  std::set<std::uint64_t> first;
+  for (const auto& [tile, chunks] : nmfc) {
+    REQUIRE(chunks.size() == TILES); // N chunks each, contiguous by construction
+    if (first.empty()) {
+      first = chunks;
+    }
+    REQUIRE(chunks == first); // the group occupies the same chunks on every channel
+  }
+
+  // And the chunks it occupies form an unbroken run: no stranded space inside.
+  const auto lo = *std::begin(first);
+  for (std::uint64_t i = 0; i < TILES; ++i) {
+    REQUIRE(first.count(lo + i) == 1);
+  }
+}

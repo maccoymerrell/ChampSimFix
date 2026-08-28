@@ -168,6 +168,17 @@
       "match_offset_bits": false
     },
     {
+      "_comment": "tile 0: drop the mapping-mode tag on the way into the memory controller",
+      "name": "tile0_mode_port",
+      "module": "channel",
+      "model": "DRAM_MODE_PORT",
+      "lower": "@tile0_LLC_DRAM_channel",
+      "nmfc_num_tiles": 4,
+      "log2_block_size": 6,
+      "nmfc_grain_bits": 21,
+      "nmfc_mode_bit": 38
+    },
+    {
       "name": "tile0_fc_dcache_channel",
       "module": "channel",
       "model": "DEFAULT_CHANNEL",
@@ -293,6 +304,17 @@
         "bits": "6"
       },
       "match_offset_bits": false
+    },
+    {
+      "_comment": "tile 1: drop the mapping-mode tag on the way into the memory controller",
+      "name": "tile1_mode_port",
+      "module": "channel",
+      "model": "DRAM_MODE_PORT",
+      "lower": "@tile1_LLC_DRAM_channel",
+      "nmfc_num_tiles": 4,
+      "log2_block_size": 6,
+      "nmfc_grain_bits": 21,
+      "nmfc_mode_bit": 38
     },
     {
       "name": "tile1_fc_dcache_channel",
@@ -422,6 +444,17 @@
       "match_offset_bits": false
     },
     {
+      "_comment": "tile 2: drop the mapping-mode tag on the way into the memory controller",
+      "name": "tile2_mode_port",
+      "module": "channel",
+      "model": "DRAM_MODE_PORT",
+      "lower": "@tile2_LLC_DRAM_channel",
+      "nmfc_num_tiles": 4,
+      "log2_block_size": 6,
+      "nmfc_grain_bits": 21,
+      "nmfc_mode_bit": 38
+    },
+    {
       "name": "tile2_fc_dcache_channel",
       "module": "channel",
       "model": "DEFAULT_CHANNEL",
@@ -547,6 +580,17 @@
         "bits": "6"
       },
       "match_offset_bits": false
+    },
+    {
+      "_comment": "tile 3: drop the mapping-mode tag on the way into the memory controller",
+      "name": "tile3_mode_port",
+      "module": "channel",
+      "model": "DRAM_MODE_PORT",
+      "lower": "@tile3_LLC_DRAM_channel",
+      "nmfc_num_tiles": 4,
+      "log2_block_size": 6,
+      "nmfc_grain_bits": 21,
+      "nmfc_mode_bit": 38
     },
     {
       "name": "tile3_fc_dcache_channel",
@@ -916,7 +960,7 @@
         "@tile0_LLC_mmu2_channel",
         "@tile0_LLC_mmu3_channel"
       ],
-      "lower_level": "@tile0_LLC_DRAM_channel",
+      "lower_level": "@tile0_mode_port",
       "lower_translate": {
         "null": "channel"
       },
@@ -1173,7 +1217,7 @@
         "@tile1_LLC_mmu2_channel",
         "@tile1_LLC_mmu3_channel"
       ],
-      "lower_level": "@tile1_LLC_DRAM_channel",
+      "lower_level": "@tile1_mode_port",
       "lower_translate": {
         "null": "channel"
       },
@@ -1430,7 +1474,7 @@
         "@tile2_LLC_mmu2_channel",
         "@tile2_LLC_mmu3_channel"
       ],
-      "lower_level": "@tile2_LLC_DRAM_channel",
+      "lower_level": "@tile2_mode_port",
       "lower_translate": {
         "null": "channel"
       },
@@ -1687,7 +1731,7 @@
         "@tile3_LLC_mmu2_channel",
         "@tile3_LLC_mmu3_channel"
       ],
-      "lower_level": "@tile3_LLC_DRAM_channel",
+      "lower_level": "@tile3_mode_port",
       "lower_translate": {
         "null": "channel"
       },

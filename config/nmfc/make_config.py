@@ -101,6 +101,18 @@ def build(args, nmfc_enabled):
                                 comment=f"compute tile -> memory tile {t}"))
         children.append(channel(f"tile{t}_LLC_DRAM_channel", 64, 64, 64))
         if nmfc_enabled:
+            # The mapping-mode tag is information for routing and for cache
+            # tagging, and it sits above every field a DRAM address mapping has.
+            # Stripping it here is what makes the address handed to the memory
+            # controller a valid physical address for that channel's own space.
+            children.append({
+                "_comment": f"tile {t}: drop the mapping-mode tag on the way into the memory controller",
+                "name": f"tile{t}_mode_port", "module": "channel", "model": "DRAM_MODE_PORT",
+                "lower": f"@tile{t}_LLC_DRAM_channel",
+                "nmfc_num_tiles": tiles, "log2_block_size": 6,
+                "nmfc_grain_bits": args.grain_bits, "nmfc_mode_bit": args.mode_bit,
+            })
+        if nmfc_enabled:
             children.append(channel(f"tile{t}_fc_dcache_channel", 64, 64, 0,
                                     comment=f"function core {t} -> its data cache"))
             children.append(channel(f"tile{t}_fc_icache_channel", 32, 0, 0))
@@ -210,7 +222,7 @@ def build(args, nmfc_enabled):
                     upper.append(f"@tile{t}_LLC_mmu_channel")
         children.append(cache(
             f"tile{t}_LLC", args.llc_sets // tiles, 16,
-            upper=upper, lower=f"@tile{t}_LLC_DRAM_channel",
+            upper=upper, lower=(f"@tile{t}_mode_port" if nmfc_enabled else f"@tile{t}_LLC_DRAM_channel"),
             hit=20, fill=20, mshr=64, pq=32,
             comment=f"LLC slice owned by memory tile {t}; indexed on the compacted address",
         ))
