@@ -617,62 +617,81 @@ The 6% context occupancy in both rows is the other half of the story: with
 than at memory, so almost nothing is resident. Migration is not a cost here, it
 is the workload.
 
-## 15. What sets the run time, and what does not
+## 15. What sets the run time: memory admission, not any of the obvious things
 
-Fixing a defect that made the MMU walk every grain twice made the machine
-6.8% *slower*. Chasing that down produced a model of where the time goes,
-and the answer is not any of the three places it was looked for first.
+A defect that made the MMU walk every grain twice was fixed, and the machine
+got 3.77% *slower*. Attributing that took five wrong answers, and the right
+one is a structural mismatch: **each tile runs up to 1024 contexts against a
+64-entry L1 data request queue.**
 
-Run time is predicted, within 1.3% across every configuration measured, by
+Sampling where a resident context's cycles actually go settles it. 82% of
+them are spent in the ready queue having failed to issue, and splitting the
+retry counter shows why:
 
-    cycles = invocations x mean_residency / achieved_concurrency
+| bucket | share of resident context-cycles |
+|---|---|
+| ready, but the data port refused it | 81.3 - 83.8% |
+| waiting on memory (blocked) | 16.1 - 18.4% |
+| execution latency | 0.0% |
+| translation | 0.1 - 0.2% |
+| atomic lock | 0.0% |
+| migration | 0.0% |
 
-| run | residency | concurrency | cycles | predicted |
-|---|---|---|---|---|
-| before the MMU fix | 7,621 | 1,863 | 2,641,521 | 2,625,074 (-0.6%) |
-| after it           | 7,931 | 1,868 | 2,755,198 | 2,729,674 (-0.9%) |
-| after the atomic work | 8,068 | 1,881 | 2,792,466 | 2,756,861 (-1.3%) |
+Instruction-fetch retries are exactly zero; every one of the 3.95 billion
+retries is `dcache_->rq_occupancy() + ops > dcache_->rq_size()`. The core is
+not short of issue bandwidth (it retires 0.21-0.36 ops/cycle against a width
+of 4) and does not head-of-line block -- `port_blocked_` feeds a statistic,
+nothing more. It simply has nowhere to put the request.
 
-A context occupies its slot for about 8,000 cycles while executing a
-handful of instructions, so residency is almost entirely waiting on
-memory. Context slots are the scarce resource, and concurrency is what the
-four tiles actually hold at once -- 1,881 of 4,096, because occupancy is
-uneven (tile0 averages 635, tile2 averages 331). The fabric refuses
-delivery into a full tile, which is what stalls the host: 2.6M refusals on
-arrival, against 0 cycles of the host's own dispatch being blocked.
+Widening that queue 8x is the causal test:
 
-The system is therefore past saturation on memory. Removing a delay
-anywhere upstream does not shift the bottleneck to the next component; it
-lets contexts reach their next memory access sooner, which lengthens the
-memory queues, which raises residency, which raises run time. Concurrency
-barely moves (1,863 -> 1,881) while residency climbs (7,621 -> 8,068), and
-the product tracks the measured cycles. Every "improvement" below made the
-workload slightly slower for exactly this reason, and each is still correct
-and worth keeping.
+| | cycles | data retries | port-refused share |
+|---|---|---|---|
+| rq = 64 | 2,792,466 | 3,952,205,189 | 83.8% |
+| rq = 512 | 2,606,914 | 848,821,225 | 24.2% |
 
-Three things were wrongly blamed along the way, all worth recording because
-each looked convincing:
+and the anomaly inverts with it:
 
-- **DRAM.** Row-buffer hit rate does fall (9.09% -> 8.66%) and correlates
-  with cycles. But activates rise only 0.35% against 6.8% more cycles, so
-  the DRAM did the same work; and cycles/activate is derived from cycles,
-  so ranking runs by it is circular.
-- **Atomic spinning.** Real, and fixed: blocked contexts were retried every
-  cycle instead of parking. Eliminating it changed run time by +1.1%.
-- **Atomic contention.** Also real, also fixed: locking a 64-byte line for a
-  4-byte update made a line's worth of `parent[]` entries contend, and each
-  grant re-fetched. Waiting fell from 10,798,437 context-cycles to
-  1,465,999 -- and run time did not improve, because that waiting was 0.21%
-  of total residency. Comparing it against tile-cycles rather than
+| | pre-fix | fixed | gap |
+|---|---|---|---|
+| rq = 64 | 2,691,129 | 2,792,466 | +3.77% |
+| rq = 512 | 2,659,636 | 2,606,914 | **-1.98%** |
+
+So the MMU fix is worth about 2%, as a 72% cut in page walks should be. The
+regression was the saturated port converting a latency reduction into
+arrival pressure it could not absorb.
+
+**This invalidates comparisons taken in the saturated regime.** Every number
+measured before this was taken at rq=64, where the binding constraint was
+request admission rather than anything the experiment varied. Results that
+compare placement policies, mappings, or decomposition shapes need re-taking
+with the port sized to the context count, or they are measuring the queue.
+
+Five things were wrongly blamed on the way, each recorded because each was
+measured and believed:
+
+- **DRAM.** Row-buffer hit rate falls (9.09% -> 8.66%) and correlates with
+  cycles, but activates rise 0.35% against 6.8% more cycles, so the DRAM did
+  the same work. Ranking runs by cycles/activate is circular -- the numerator
+  is the thing being explained.
+- **Atomic spinning.** Real and fixed: blocked contexts were retried every
+  cycle instead of parking. Worth +1.1%, in the wrong direction.
+- **Atomic contention.** Real and fixed: a 64-byte lock for a 4-byte update
+  made a line of `parent[]` contend, and each grant re-fetched. Waiting fell
+  from 10,798,437 context-cycles to 1,465,999, and nothing moved -- it was
+  0.21% of residency. Comparing it against tile-cycles rather than
   context-cycles overstates it by the 1024 contexts a tile holds.
+- **Tile imbalance.** Occupancy spread triples (11% -> 33%), which looks
+  damning, but every tile still needs the same time to within 0.5%:
+  occupancy and residency co-vary exactly, so no tile is a critical path.
+- **The core scheduler.** Round-robin does give a context one issue slot per
+  N/4 cycles, but the width sits 90% idle and fetch retries are zero, so
+  contexts are not queued behind each other -- they are queued behind memory.
 
-The lever that remains is residency and the imbalance in concurrency, not
-any per-component stall. That also means end-to-end cycles on this workload
-carry roughly +-5% of sensitivity to timing-neutral changes, so a
-performance claim needs the residency and concurrency terms reported beside
-it rather than cycles alone.
+The methodological lesson is the one that cost the most time: residency,
+occupancy and throughput are one measurement in three units, tied by Little's
+law. None can explain a change in the others, and every argument built on
+their ratios was circular. Only the sampled breakdown underneath them, and
+the causal test of changing the suspected resource, actually attributed
+anything.
 
-Two loose ends this exposed: `ftu_size` in the tile configs is read by
-nothing -- the FTU is a fixed-size array, so the key silently does nothing
--- and the fabric retries delivery 331M times to record 2.6M refusals,
-which is a counter worth making cheaper before it is trusted.

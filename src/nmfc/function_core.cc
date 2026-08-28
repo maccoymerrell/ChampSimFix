@@ -156,8 +156,55 @@ public:
 
   // ---- the cycle ----
 
+  /**
+   * Where a resident context's cycles actually go.
+   *
+   * Residency, occupancy and throughput are tied to each other by Little's
+   * law, so none of the three can explain a change in the other two -- they
+   * are one measurement in three units. Attributing a change needs the
+   * breakdown underneath them, and sampling gets it for a cost that does not
+   * scale with context count: one pass every sample_period_ cycles, rather
+   * than an accumulator on every state transition.
+   */
+  void sample_waits()
+  {
+    for (const auto& ctx : contexts_) {
+      if (ctx.state == nmfc::ctx_state::FREE) {
+        continue;
+      }
+      ++wait_resident_;
+      if (ctx.state == nmfc::ctx_state::MIGRATING) {
+        ++wait_migration_;
+      } else if (ctx.waiting_lock) {
+        ++wait_lock_;
+      } else if (ctx.awaiting_translation) {
+        ++wait_translation_;
+      } else if (ctx.pending_mem > 0 && ctx.state == nmfc::ctx_state::BLOCKED) {
+        ++wait_memory_;
+      } else if (ctx.state == nmfc::ctx_state::BLOCKED) {
+        ++wait_blocked_other_;
+      } else if (ctx.state == nmfc::ctx_state::READY) {
+        // READY covers two very different things. A context waiting out the
+        // latency of the instruction it just issued sits in the timer queue
+        // with a wake time in the future -- that is execution, not queueing.
+        // Only a context whose wake time has passed is actually queued behind
+        // issue width. Counting them together hides which of the two grows.
+        if (ctx.wake_time > current_time) {
+          ++wait_latency_;
+        } else {
+          ++wait_issue_;
+        }
+      } else {
+        ++wait_running_;
+      }
+    }
+  }
+
   long operate() final
   {
+    if (sample_period_ != 0 && (sample_tick_++ % sample_period_) == 0) {
+      sample_waits();
+    }
     long progress = 0;
     port_blocked_ = false;
     progress += drain_returns();
@@ -201,7 +248,9 @@ public:
     spawned_ = spawn_stalls_ = 0;
     instructions_ = loads_ = stores_ = atomics_ = fetches_ = 0;
     scoreboard_stalls_ = port_retries_ = atomic_conflicts_ = translation_stalls_ = 0;
-    atomic_wait_cycles_ = atomic_forwards_ = 0;
+    atomic_wait_cycles_ = atomic_forwards_ = fetch_retries_ = data_retries_ = 0;
+    wait_resident_ = wait_memory_ = wait_translation_ = wait_lock_ = 0;
+    wait_issue_ = wait_migration_ = wait_blocked_other_ = wait_running_ = wait_latency_ = 0;
     port_busy_cycles_ = 0;
     ctx_code_hits_ = ctx_code_misses_ = ctx_data_hits_ = ctx_data_misses_ = 0;
     occupancy_time_ = 0;
@@ -241,6 +290,12 @@ public:
     out.line(fmt::format("{} MEAN RESIDENCY: {:.1f} cycles STALLS scoreboard: {} atomic: {}", NAME, residency, scoreboard_stalls_, atomic_conflicts_));
     out.line(fmt::format("{} ATOMIC WAIT: {} context-cycles over {} waits, {} of {} updates took a forwarded value", NAME, atomic_wait_cycles_,
                          atomic_conflicts_, atomic_forwards_, atomics_));
+    out.line(fmt::format("{} PORT RETRIES fetch: {} data: {}", NAME, fetch_retries_, data_retries_));
+    const auto share = [&](std::uint64_t n) { return wait_resident_ == 0 ? 0.0 : 100.0 * static_cast<double>(n) / static_cast<double>(wait_resident_); };
+    out.line(fmt::format("{} RESIDENCY SPLIT memory: {:.1f}% issue-queue: {:.1f}% exec-latency: {:.1f}% translation: {:.1f}% lock: {:.1f}% "
+                         "migration: {:.1f}% other-blocked: {:.1f}% running: {:.1f}% (of {} samples)",
+                         NAME, share(wait_memory_), share(wait_issue_), share(wait_latency_), share(wait_translation_), share(wait_lock_),
+                         share(wait_migration_), share(wait_blocked_other_), share(wait_running_), wait_resident_));
     out.line(fmt::format("{} PORT BLOCKED: {} cycles ({:.1f}% of elapsed) over {} retries", NAME, port_busy_cycles_, port_pct, port_retries_));
     const auto cold_start = cold_start_count_ == 0 ? 0.0 : static_cast<double>(cold_start_cycles_) / static_cast<double>(cold_start_count_);
     out.line(fmt::format("{} MIGRATION COLD START: {} cycles over {} arrivals (mean {:.1f})", NAME, cold_start_cycles_, cold_start_count_, cold_start));
@@ -269,6 +324,13 @@ public:
     json.add("atomic_conflicts", atomic_conflicts_);
     json.add("atomic_wait_cycles", atomic_wait_cycles_);
     json.add("atomic_forwards", atomic_forwards_);
+    json.add("resident_samples", wait_resident_);
+    json.add("wait_memory", wait_memory_);
+    json.add("wait_issue_queue", wait_issue_);
+    json.add("wait_exec_latency", wait_latency_);
+    json.add("wait_translation", wait_translation_);
+    json.add("wait_lock", wait_lock_);
+    json.add("wait_migration", wait_migration_);
     const auto code_total = ctx_code_hits_ + ctx_code_misses_;
     const auto data_total = ctx_data_hits_ + ctx_data_misses_;
     const auto code_rate = code_total == 0 ? 0.0 : 100.0 * static_cast<double>(ctx_code_hits_) / static_cast<double>(code_total);
@@ -572,6 +634,7 @@ private:
       if (!issue_fetch(slot, eff_ip)) {
         ready_.push_back(slot); // port busy; try again next cycle
         ++port_retries_;
+        ++fetch_retries_;
         port_blocked_ = true;
         return false;
       }
@@ -927,6 +990,7 @@ private:
     if (dcache_->rq_occupancy() + ops > dcache_->rq_size()) {
       ready_.push_back(slot);
       ++port_retries_;
+      ++data_retries_;
       port_blocked_ = true;
       return false;
     }
@@ -1162,6 +1226,21 @@ private:
   // release them on.
   std::vector<pending_release> releases_;
   std::uint64_t atomic_forwards_ = 0;
+
+  // Sampled residency breakdown; see sample_waits().
+  std::uint64_t sample_tick_ = 0;
+  std::uint64_t sample_period_ = 64;
+  std::uint64_t wait_resident_ = 0;
+  std::uint64_t wait_memory_ = 0;
+  std::uint64_t wait_translation_ = 0;
+  std::uint64_t wait_lock_ = 0;
+  std::uint64_t wait_issue_ = 0;
+  std::uint64_t wait_latency_ = 0;
+  std::uint64_t fetch_retries_ = 0;
+  std::uint64_t data_retries_ = 0;
+  std::uint64_t wait_migration_ = 0;
+  std::uint64_t wait_blocked_other_ = 0;
+  std::uint64_t wait_running_ = 0;
 
   // Cycles contexts actually spent stopped on a contended block. The conflict
   // counter cannot answer this: while blocked contexts were re-queued it
