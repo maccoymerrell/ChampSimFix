@@ -5,6 +5,36 @@
 
 ---
 
+## 0. Does it do the thing?
+
+The premise is that a workload with high thread parallelism and MLP about one
+per thread leaves memory bandwidth on the floor, and that a function core
+time-multiplexing many stackless invocations can pick it up. That is a claim
+about *bandwidth utilisation*, not about speedup, and it went unmeasured for a
+long time in favour of numbers that were easier to produce.
+
+GAP BFS on kron-24. DDR5-3200, 64-bit, four channels; a channel retires 0.1002
+64-byte lines per 4 GHz core cycle, so the machine's ceiling is 0.4006.
+
+| configuration | cycles | DRAM requests | lines/cycle | of peak |
+|---|---|---|---|---|
+| host only | 11,969,338 | 655,684 | 0.0548 | **13.7%** |
+| NMFC, chase decomposition | 2,142,594 | 595,509 | 0.2779 | 69.4% |
+| NMFC, spawn decomposition | 1,934,783 | 595,772 | 0.3079 | **76.9%** |
+
+An out-of-order core with a 352-entry reorder buffer extracts 13.7% of the
+available bandwidth from this workload. The memory tiles extract 76.9% of it,
+doing the same work against the same memory system. That ratio is the
+architecture; the 6.19x cycle speedup is a consequence of it.
+
+The remaining 23% is the honest open question, and §14.0 covers what has been
+ruled out: it is not migration, which the spawn decomposition reduced to 0.0015
+per instruction, and it is not the fabric queues, the cache ports or the
+tracking unit, each of which reported itself the bottleneck and none of which
+was.
+
+---
+
 ## 1. What we are modeling
 
 Supercompute workloads with abundant *thread* parallelism but near-zero *memory-level* parallelism per thread: graph traversal, pointer chasing, sparse indexing. With a fixed thread count and MLP ≈ 1, bandwidth sits idle and compute sits idle. GPUs don't help — the kernels themselves are serial.

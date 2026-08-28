@@ -1,0 +1,2333 @@
+{
+  "_description": "NMFC: one compute tile and 4 memory tiles, each owning an LLC slice and one DRAM channel, with a 4096-context function core",
+  "environment": "ENVIRONMENT",
+  "block_size": 64,
+  "page_size": 4096,
+  "num_cores": 1,
+  "nmfc_num_tiles": 4,
+  "nmfc_grain_bits": 21,
+  "nmfc_mode_bit": 38,
+  "nmfc_aperture_base": 70368744177664,
+  "nmfc_aperture_bytes": 4398046511104,
+  "children": [
+    {
+      "name": "cpu0_cpu0_L1I_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 32,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": true
+    },
+    {
+      "name": "cpu0_cpu0_L1D_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 8,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": true
+    },
+    {
+      "name": "cpu0_L1I_cpu0_L2C_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 32,
+      "pq_size": 16,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "cpu0_L1D_cpu0_L2C_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 32,
+      "pq_size": 16,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "cpu0_L1D_cpu0_DTLB_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 16,
+      "wq_size": 16,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "12"
+      },
+      "match_offset_bits": true
+    },
+    {
+      "name": "cpu0_L1I_cpu0_ITLB_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 16,
+      "wq_size": 16,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "12"
+      },
+      "match_offset_bits": true
+    },
+    {
+      "name": "cpu0_DTLB_cpu0_STLB_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 32,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "12"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "cpu0_ITLB_cpu0_STLB_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 32,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "12"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "cpu0_L2C_cpu0_STLB_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 32,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "12"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "cpu0_STLB_cpu0_PTW_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 16,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "12"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "cpu0_PTW_cpu0_L1D_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 8,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": true
+    },
+    {
+      "name": "fabric_tile0_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 64,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "compute tile -> memory tile 0"
+    },
+    {
+      "name": "tile0_LLC_DRAM_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 64,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "tile0_fc_dcache_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "function core 0 -> its data cache"
+    },
+    {
+      "name": "tile0_fc_icache_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "tile0_LLC_fcD_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "function core 0's data port into the slice"
+    },
+    {
+      "name": "tile0_LLC_fcI_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "tile0_LLC_mmu0_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 0's MMU into tile 0's slice"
+    },
+    {
+      "name": "tile0_LLC_mmu1_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 1's MMU into tile 0's slice"
+    },
+    {
+      "name": "tile0_LLC_mmu2_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 2's MMU into tile 0's slice"
+    },
+    {
+      "name": "tile0_LLC_mmu3_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 3's MMU into tile 0's slice"
+    },
+    {
+      "name": "fabric_tile1_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 64,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "compute tile -> memory tile 1"
+    },
+    {
+      "name": "tile1_LLC_DRAM_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 64,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "tile1_fc_dcache_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "function core 1 -> its data cache"
+    },
+    {
+      "name": "tile1_fc_icache_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "tile1_LLC_fcD_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "function core 1's data port into the slice"
+    },
+    {
+      "name": "tile1_LLC_fcI_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "tile1_LLC_mmu0_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 0's MMU into tile 1's slice"
+    },
+    {
+      "name": "tile1_LLC_mmu1_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 1's MMU into tile 1's slice"
+    },
+    {
+      "name": "tile1_LLC_mmu2_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 2's MMU into tile 1's slice"
+    },
+    {
+      "name": "tile1_LLC_mmu3_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 3's MMU into tile 1's slice"
+    },
+    {
+      "name": "fabric_tile2_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 64,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "compute tile -> memory tile 2"
+    },
+    {
+      "name": "tile2_LLC_DRAM_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 64,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "tile2_fc_dcache_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "function core 2 -> its data cache"
+    },
+    {
+      "name": "tile2_fc_icache_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "tile2_LLC_fcD_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "function core 2's data port into the slice"
+    },
+    {
+      "name": "tile2_LLC_fcI_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "tile2_LLC_mmu0_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 0's MMU into tile 2's slice"
+    },
+    {
+      "name": "tile2_LLC_mmu1_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 1's MMU into tile 2's slice"
+    },
+    {
+      "name": "tile2_LLC_mmu2_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 2's MMU into tile 2's slice"
+    },
+    {
+      "name": "tile2_LLC_mmu3_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 3's MMU into tile 2's slice"
+    },
+    {
+      "name": "fabric_tile3_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 64,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "compute tile -> memory tile 3"
+    },
+    {
+      "name": "tile3_LLC_DRAM_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 64,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "tile3_fc_dcache_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "function core 3 -> its data cache"
+    },
+    {
+      "name": "tile3_fc_icache_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "tile3_LLC_fcD_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 64,
+      "wq_size": 64,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "function core 3's data port into the slice"
+    },
+    {
+      "name": "tile3_LLC_fcI_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false
+    },
+    {
+      "name": "tile3_LLC_mmu0_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 0's MMU into tile 3's slice"
+    },
+    {
+      "name": "tile3_LLC_mmu1_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 1's MMU into tile 3's slice"
+    },
+    {
+      "name": "tile3_LLC_mmu2_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 2's MMU into tile 3's slice"
+    },
+    {
+      "name": "tile3_LLC_mmu3_channel",
+      "module": "channel",
+      "model": "DEFAULT_CHANNEL",
+      "rq_size": 32,
+      "wq_size": 0,
+      "pq_size": 0,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "match_offset_bits": false,
+      "_comment": "walk references from tile 3's MMU into tile 3's slice"
+    },
+    {
+      "_comment": "memory tile 0 owns exactly one DRAM channel",
+      "name": "tile0_DRAM",
+      "module": "memory_controller",
+      "model": "DEFAULT_MEMORY_CONTROLLER",
+      "dbus_period": {
+        "time": "312p"
+      },
+      "mc_period": {
+        "time": "625p"
+      },
+      "n_rp": 24,
+      "n_rcd": 24,
+      "n_cas": 24,
+      "n_ras": 52,
+      "refresh_period": {
+        "time": "32000u"
+      },
+      "refreshes_per_period": 8192,
+      "rq_size": 64,
+      "wq_size": 64,
+      "channels": 1,
+      "channel_width": {
+        "bytes": "8"
+      },
+      "rows": 65536,
+      "columns": 1024,
+      "ranks": 1,
+      "bankgroups": 8,
+      "banks": 4,
+      "ul_channels": [
+        "@tile0_LLC_DRAM_channel"
+      ]
+    },
+    {
+      "_comment": "memory tile 1 owns exactly one DRAM channel",
+      "name": "tile1_DRAM",
+      "module": "memory_controller",
+      "model": "DEFAULT_MEMORY_CONTROLLER",
+      "dbus_period": {
+        "time": "312p"
+      },
+      "mc_period": {
+        "time": "625p"
+      },
+      "n_rp": 24,
+      "n_rcd": 24,
+      "n_cas": 24,
+      "n_ras": 52,
+      "refresh_period": {
+        "time": "32000u"
+      },
+      "refreshes_per_period": 8192,
+      "rq_size": 64,
+      "wq_size": 64,
+      "channels": 1,
+      "channel_width": {
+        "bytes": "8"
+      },
+      "rows": 65536,
+      "columns": 1024,
+      "ranks": 1,
+      "bankgroups": 8,
+      "banks": 4,
+      "ul_channels": [
+        "@tile1_LLC_DRAM_channel"
+      ]
+    },
+    {
+      "_comment": "memory tile 2 owns exactly one DRAM channel",
+      "name": "tile2_DRAM",
+      "module": "memory_controller",
+      "model": "DEFAULT_MEMORY_CONTROLLER",
+      "dbus_period": {
+        "time": "312p"
+      },
+      "mc_period": {
+        "time": "625p"
+      },
+      "n_rp": 24,
+      "n_rcd": 24,
+      "n_cas": 24,
+      "n_ras": 52,
+      "refresh_period": {
+        "time": "32000u"
+      },
+      "refreshes_per_period": 8192,
+      "rq_size": 64,
+      "wq_size": 64,
+      "channels": 1,
+      "channel_width": {
+        "bytes": "8"
+      },
+      "rows": 65536,
+      "columns": 1024,
+      "ranks": 1,
+      "bankgroups": 8,
+      "banks": 4,
+      "ul_channels": [
+        "@tile2_LLC_DRAM_channel"
+      ]
+    },
+    {
+      "_comment": "memory tile 3 owns exactly one DRAM channel",
+      "name": "tile3_DRAM",
+      "module": "memory_controller",
+      "model": "DEFAULT_MEMORY_CONTROLLER",
+      "dbus_period": {
+        "time": "312p"
+      },
+      "mc_period": {
+        "time": "625p"
+      },
+      "n_rp": 24,
+      "n_rcd": 24,
+      "n_cas": 24,
+      "n_ras": 52,
+      "refresh_period": {
+        "time": "32000u"
+      },
+      "refreshes_per_period": 8192,
+      "rq_size": 64,
+      "wq_size": 64,
+      "channels": 1,
+      "channel_width": {
+        "bytes": "8"
+      },
+      "rows": 65536,
+      "columns": 1024,
+      "ranks": 1,
+      "bankgroups": 8,
+      "banks": 4,
+      "ul_channels": [
+        "@tile3_LLC_DRAM_channel"
+      ]
+    },
+    {
+      "_comment": "Who owns an address, and when that is known. See inc/nmfc/tile_router.h.",
+      "name": "ROUTER",
+      "module": "tile_router",
+      "model": "PHYSICAL_ROUTER",
+      "clock_period": {
+        "time": "250p"
+      }
+    },
+    {
+      "_comment": "Congruent allocation: a virtual grain gets a frame from the tile its own address names, which is what lets a function core decide local-vs-migrate before translating.",
+      "name": "VMEM",
+      "module": "vmem",
+      "model": "NMFC_VMEM",
+      "page_table_page_size": {
+        "bytes": "4Ki"
+      },
+      "page_table_levels": 5,
+      "minor_fault_penalty": {
+        "time": "50000p"
+      },
+      "default_region": "standard",
+      "router": "@ROUTER",
+      "dram": "@tile0_DRAM"
+    },
+    {
+      "name": "cpu0_PTW",
+      "module": "page_table_walker",
+      "model": "DEFAULT_PTW",
+      "clock_period": {
+        "time": "250p"
+      },
+      "mshr_size": 5,
+      "latency": 0,
+      "max_tag_check": {
+        "bandwidth": 2
+      },
+      "max_fill": {
+        "bandwidth": 2
+      },
+      "upper_levels": [
+        "@cpu0_STLB_cpu0_PTW_channel"
+      ],
+      "lower_level": "@cpu0_PTW_cpu0_L1D_channel",
+      "vmem": "@VMEM",
+      "pscl_dims": [
+        [
+          5,
+          1,
+          2
+        ],
+        [
+          4,
+          1,
+          4
+        ],
+        [
+          3,
+          2,
+          4
+        ],
+        [
+          2,
+          4,
+          8
+        ]
+      ]
+    },
+    {
+      "name": "fn_image",
+      "module": "function_image",
+      "model": "FUNCTION_IMAGE_STORE",
+      "soft_capacity": 65536
+    },
+    {
+      "_comment": "Owns hop latency and the placement policy. Choosing a tile is one add, because a function's copies sit on consecutive grains.",
+      "name": "fn_fabric",
+      "module": "function_fabric",
+      "model": "FUNCTION_FABRIC",
+      "router": "@ROUTER",
+      "clock_period": {
+        "time": "250p"
+      },
+      "hop_latency": 8,
+      "queue_size": 128,
+      "max_deliver": {
+        "bandwidth": 4
+      },
+      "placement_policy": "first_touch"
+    },
+    {
+      "name": "tile0_LLC",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 512,
+      "num_ways": 16,
+      "pq_size": 32,
+      "mshr_size": 64,
+      "hit_latency": 20,
+      "fill_latency": 20,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@fabric_tile0_channel",
+        "@tile0_LLC_fcD_channel",
+        "@tile0_LLC_fcI_channel",
+        "@tile0_LLC_mmu0_channel",
+        "@tile0_LLC_mmu1_channel",
+        "@tile0_LLC_mmu2_channel",
+        "@tile0_LLC_mmu3_channel"
+      ],
+      "lower_level": "@tile0_LLC_DRAM_channel",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "tile0_LLC_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "tile0_LLC_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ],
+      "_comment": "LLC slice owned by memory tile 0; indexed on the compacted address"
+    },
+    {
+      "name": "tile0_fcD_port",
+      "module": "channel",
+      "model": "TILE_PORT",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tile": 0,
+      "lower": "@tile0_LLC_fcD_channel",
+      "latency": 1,
+      "queue_size": 32,
+      "max_forward": {
+        "bandwidth": 4
+      },
+      "strict_locality": true
+    },
+    {
+      "name": "tile0_fcI_port",
+      "module": "channel",
+      "model": "TILE_PORT",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tile": 0,
+      "lower": "@tile0_LLC_fcI_channel",
+      "latency": 1,
+      "queue_size": 32,
+      "max_forward": {
+        "bandwidth": 4
+      },
+      "strict_locality": true
+    },
+    {
+      "_comment": "tile 0's walk references, routed to whichever slice holds the PTE",
+      "name": "tile0_mmu_fabric",
+      "module": "channel",
+      "model": "INTERLEAVE_FABRIC",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tiles": [
+        "@tile0_LLC_mmu0_channel",
+        "@tile1_LLC_mmu0_channel",
+        "@tile2_LLC_mmu0_channel",
+        "@tile3_LLC_mmu0_channel"
+      ],
+      "hop_latency": 4,
+      "queue_size": 32,
+      "max_forward": {
+        "bandwidth": 4
+      },
+      "compact_tile_bits": true
+    },
+    {
+      "_comment": "tile 0: dual-page-size MMU. Walks route over the fabric, because a shared page table puts a PTE on whichever tile its own address names.",
+      "name": "tile0_mmu",
+      "module": "channel",
+      "model": "NMFC_MMU",
+      "clock_period": {
+        "time": "250p"
+      },
+      "vmem": "@VMEM",
+      "tile": 0,
+      "lower_level": "@tile0_mmu_fabric",
+      "small_sets": 32,
+      "small_ways": 4,
+      "huge_sets": 16,
+      "huge_ways": 4,
+      "hit_latency": 1,
+      "mshr_size": 32
+    },
+    {
+      "name": "tile0_fc_dcache",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 64,
+      "num_ways": 8,
+      "pq_size": 0,
+      "mshr_size": 64,
+      "hit_latency": 2,
+      "fill_latency": 2,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@tile0_fc_dcache_channel"
+      ],
+      "lower_level": "@tile0_fcD_port",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "tile0_fc_dcache_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "tile0_fc_dcache_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ],
+      "_comment": "small and close: the LLC tag check is expensive and these kernels have tight working sets"
+    },
+    {
+      "name": "tile0_fc_icache",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 16,
+      "num_ways": 4,
+      "pq_size": 0,
+      "mshr_size": 8,
+      "hit_latency": 2,
+      "fill_latency": 2,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@tile0_fc_icache_channel"
+      ],
+      "lower_level": "@tile0_fcI_port",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "tile0_fc_icache_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "tile0_fc_icache_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ]
+    },
+    {
+      "_comment": "multi-context, in-order, non-speculative near-memory engine on tile 0",
+      "name": "tile0_fc",
+      "module": "function_core",
+      "model": "FUNCTION_CORE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tile": 0,
+      "num_contexts": 4096,
+      "issue_width": {
+        "bandwidth": 4
+      },
+      "fabric": "@fn_fabric",
+      "image": "@fn_image",
+      "vmem": "@VMEM",
+      "router": "@ROUTER",
+      "dcache": "@tile0_fc_dcache_channel",
+      "icache": "@tile0_fc_icache_channel",
+      "fetch_bubble": 1,
+      "mmu": "@tile0_mmu",
+      "alu_latency": 1,
+      "mul_latency": 3,
+      "branch_latency": 1
+    },
+    {
+      "name": "tile1_LLC",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 512,
+      "num_ways": 16,
+      "pq_size": 32,
+      "mshr_size": 64,
+      "hit_latency": 20,
+      "fill_latency": 20,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@fabric_tile1_channel",
+        "@tile1_LLC_fcD_channel",
+        "@tile1_LLC_fcI_channel",
+        "@tile1_LLC_mmu0_channel",
+        "@tile1_LLC_mmu1_channel",
+        "@tile1_LLC_mmu2_channel",
+        "@tile1_LLC_mmu3_channel"
+      ],
+      "lower_level": "@tile1_LLC_DRAM_channel",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "tile1_LLC_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "tile1_LLC_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ],
+      "_comment": "LLC slice owned by memory tile 1; indexed on the compacted address"
+    },
+    {
+      "name": "tile1_fcD_port",
+      "module": "channel",
+      "model": "TILE_PORT",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tile": 1,
+      "lower": "@tile1_LLC_fcD_channel",
+      "latency": 1,
+      "queue_size": 32,
+      "max_forward": {
+        "bandwidth": 4
+      },
+      "strict_locality": true
+    },
+    {
+      "name": "tile1_fcI_port",
+      "module": "channel",
+      "model": "TILE_PORT",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tile": 1,
+      "lower": "@tile1_LLC_fcI_channel",
+      "latency": 1,
+      "queue_size": 32,
+      "max_forward": {
+        "bandwidth": 4
+      },
+      "strict_locality": true
+    },
+    {
+      "_comment": "tile 1's walk references, routed to whichever slice holds the PTE",
+      "name": "tile1_mmu_fabric",
+      "module": "channel",
+      "model": "INTERLEAVE_FABRIC",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tiles": [
+        "@tile0_LLC_mmu1_channel",
+        "@tile1_LLC_mmu1_channel",
+        "@tile2_LLC_mmu1_channel",
+        "@tile3_LLC_mmu1_channel"
+      ],
+      "hop_latency": 4,
+      "queue_size": 32,
+      "max_forward": {
+        "bandwidth": 4
+      },
+      "compact_tile_bits": true
+    },
+    {
+      "_comment": "tile 1: dual-page-size MMU. Walks route over the fabric, because a shared page table puts a PTE on whichever tile its own address names.",
+      "name": "tile1_mmu",
+      "module": "channel",
+      "model": "NMFC_MMU",
+      "clock_period": {
+        "time": "250p"
+      },
+      "vmem": "@VMEM",
+      "tile": 1,
+      "lower_level": "@tile1_mmu_fabric",
+      "small_sets": 32,
+      "small_ways": 4,
+      "huge_sets": 16,
+      "huge_ways": 4,
+      "hit_latency": 1,
+      "mshr_size": 32
+    },
+    {
+      "name": "tile1_fc_dcache",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 64,
+      "num_ways": 8,
+      "pq_size": 0,
+      "mshr_size": 64,
+      "hit_latency": 2,
+      "fill_latency": 2,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@tile1_fc_dcache_channel"
+      ],
+      "lower_level": "@tile1_fcD_port",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "tile1_fc_dcache_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "tile1_fc_dcache_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ],
+      "_comment": "small and close: the LLC tag check is expensive and these kernels have tight working sets"
+    },
+    {
+      "name": "tile1_fc_icache",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 16,
+      "num_ways": 4,
+      "pq_size": 0,
+      "mshr_size": 8,
+      "hit_latency": 2,
+      "fill_latency": 2,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@tile1_fc_icache_channel"
+      ],
+      "lower_level": "@tile1_fcI_port",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "tile1_fc_icache_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "tile1_fc_icache_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ]
+    },
+    {
+      "_comment": "multi-context, in-order, non-speculative near-memory engine on tile 1",
+      "name": "tile1_fc",
+      "module": "function_core",
+      "model": "FUNCTION_CORE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tile": 1,
+      "num_contexts": 4096,
+      "issue_width": {
+        "bandwidth": 4
+      },
+      "fabric": "@fn_fabric",
+      "image": "@fn_image",
+      "vmem": "@VMEM",
+      "router": "@ROUTER",
+      "dcache": "@tile1_fc_dcache_channel",
+      "icache": "@tile1_fc_icache_channel",
+      "fetch_bubble": 1,
+      "mmu": "@tile1_mmu",
+      "alu_latency": 1,
+      "mul_latency": 3,
+      "branch_latency": 1
+    },
+    {
+      "name": "tile2_LLC",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 512,
+      "num_ways": 16,
+      "pq_size": 32,
+      "mshr_size": 64,
+      "hit_latency": 20,
+      "fill_latency": 20,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@fabric_tile2_channel",
+        "@tile2_LLC_fcD_channel",
+        "@tile2_LLC_fcI_channel",
+        "@tile2_LLC_mmu0_channel",
+        "@tile2_LLC_mmu1_channel",
+        "@tile2_LLC_mmu2_channel",
+        "@tile2_LLC_mmu3_channel"
+      ],
+      "lower_level": "@tile2_LLC_DRAM_channel",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "tile2_LLC_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "tile2_LLC_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ],
+      "_comment": "LLC slice owned by memory tile 2; indexed on the compacted address"
+    },
+    {
+      "name": "tile2_fcD_port",
+      "module": "channel",
+      "model": "TILE_PORT",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tile": 2,
+      "lower": "@tile2_LLC_fcD_channel",
+      "latency": 1,
+      "queue_size": 32,
+      "max_forward": {
+        "bandwidth": 4
+      },
+      "strict_locality": true
+    },
+    {
+      "name": "tile2_fcI_port",
+      "module": "channel",
+      "model": "TILE_PORT",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tile": 2,
+      "lower": "@tile2_LLC_fcI_channel",
+      "latency": 1,
+      "queue_size": 32,
+      "max_forward": {
+        "bandwidth": 4
+      },
+      "strict_locality": true
+    },
+    {
+      "_comment": "tile 2's walk references, routed to whichever slice holds the PTE",
+      "name": "tile2_mmu_fabric",
+      "module": "channel",
+      "model": "INTERLEAVE_FABRIC",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tiles": [
+        "@tile0_LLC_mmu2_channel",
+        "@tile1_LLC_mmu2_channel",
+        "@tile2_LLC_mmu2_channel",
+        "@tile3_LLC_mmu2_channel"
+      ],
+      "hop_latency": 4,
+      "queue_size": 32,
+      "max_forward": {
+        "bandwidth": 4
+      },
+      "compact_tile_bits": true
+    },
+    {
+      "_comment": "tile 2: dual-page-size MMU. Walks route over the fabric, because a shared page table puts a PTE on whichever tile its own address names.",
+      "name": "tile2_mmu",
+      "module": "channel",
+      "model": "NMFC_MMU",
+      "clock_period": {
+        "time": "250p"
+      },
+      "vmem": "@VMEM",
+      "tile": 2,
+      "lower_level": "@tile2_mmu_fabric",
+      "small_sets": 32,
+      "small_ways": 4,
+      "huge_sets": 16,
+      "huge_ways": 4,
+      "hit_latency": 1,
+      "mshr_size": 32
+    },
+    {
+      "name": "tile2_fc_dcache",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 64,
+      "num_ways": 8,
+      "pq_size": 0,
+      "mshr_size": 64,
+      "hit_latency": 2,
+      "fill_latency": 2,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@tile2_fc_dcache_channel"
+      ],
+      "lower_level": "@tile2_fcD_port",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "tile2_fc_dcache_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "tile2_fc_dcache_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ],
+      "_comment": "small and close: the LLC tag check is expensive and these kernels have tight working sets"
+    },
+    {
+      "name": "tile2_fc_icache",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 16,
+      "num_ways": 4,
+      "pq_size": 0,
+      "mshr_size": 8,
+      "hit_latency": 2,
+      "fill_latency": 2,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@tile2_fc_icache_channel"
+      ],
+      "lower_level": "@tile2_fcI_port",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "tile2_fc_icache_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "tile2_fc_icache_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ]
+    },
+    {
+      "_comment": "multi-context, in-order, non-speculative near-memory engine on tile 2",
+      "name": "tile2_fc",
+      "module": "function_core",
+      "model": "FUNCTION_CORE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tile": 2,
+      "num_contexts": 4096,
+      "issue_width": {
+        "bandwidth": 4
+      },
+      "fabric": "@fn_fabric",
+      "image": "@fn_image",
+      "vmem": "@VMEM",
+      "router": "@ROUTER",
+      "dcache": "@tile2_fc_dcache_channel",
+      "icache": "@tile2_fc_icache_channel",
+      "fetch_bubble": 1,
+      "mmu": "@tile2_mmu",
+      "alu_latency": 1,
+      "mul_latency": 3,
+      "branch_latency": 1
+    },
+    {
+      "name": "tile3_LLC",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 512,
+      "num_ways": 16,
+      "pq_size": 32,
+      "mshr_size": 64,
+      "hit_latency": 20,
+      "fill_latency": 20,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@fabric_tile3_channel",
+        "@tile3_LLC_fcD_channel",
+        "@tile3_LLC_fcI_channel",
+        "@tile3_LLC_mmu0_channel",
+        "@tile3_LLC_mmu1_channel",
+        "@tile3_LLC_mmu2_channel",
+        "@tile3_LLC_mmu3_channel"
+      ],
+      "lower_level": "@tile3_LLC_DRAM_channel",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "tile3_LLC_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "tile3_LLC_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ],
+      "_comment": "LLC slice owned by memory tile 3; indexed on the compacted address"
+    },
+    {
+      "name": "tile3_fcD_port",
+      "module": "channel",
+      "model": "TILE_PORT",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tile": 3,
+      "lower": "@tile3_LLC_fcD_channel",
+      "latency": 1,
+      "queue_size": 32,
+      "max_forward": {
+        "bandwidth": 4
+      },
+      "strict_locality": true
+    },
+    {
+      "name": "tile3_fcI_port",
+      "module": "channel",
+      "model": "TILE_PORT",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tile": 3,
+      "lower": "@tile3_LLC_fcI_channel",
+      "latency": 1,
+      "queue_size": 32,
+      "max_forward": {
+        "bandwidth": 4
+      },
+      "strict_locality": true
+    },
+    {
+      "_comment": "tile 3's walk references, routed to whichever slice holds the PTE",
+      "name": "tile3_mmu_fabric",
+      "module": "channel",
+      "model": "INTERLEAVE_FABRIC",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tiles": [
+        "@tile0_LLC_mmu3_channel",
+        "@tile1_LLC_mmu3_channel",
+        "@tile2_LLC_mmu3_channel",
+        "@tile3_LLC_mmu3_channel"
+      ],
+      "hop_latency": 4,
+      "queue_size": 32,
+      "max_forward": {
+        "bandwidth": 4
+      },
+      "compact_tile_bits": true
+    },
+    {
+      "_comment": "tile 3: dual-page-size MMU. Walks route over the fabric, because a shared page table puts a PTE on whichever tile its own address names.",
+      "name": "tile3_mmu",
+      "module": "channel",
+      "model": "NMFC_MMU",
+      "clock_period": {
+        "time": "250p"
+      },
+      "vmem": "@VMEM",
+      "tile": 3,
+      "lower_level": "@tile3_mmu_fabric",
+      "small_sets": 32,
+      "small_ways": 4,
+      "huge_sets": 16,
+      "huge_ways": 4,
+      "hit_latency": 1,
+      "mshr_size": 32
+    },
+    {
+      "name": "tile3_fc_dcache",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 64,
+      "num_ways": 8,
+      "pq_size": 0,
+      "mshr_size": 64,
+      "hit_latency": 2,
+      "fill_latency": 2,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@tile3_fc_dcache_channel"
+      ],
+      "lower_level": "@tile3_fcD_port",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "tile3_fc_dcache_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "tile3_fc_dcache_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ],
+      "_comment": "small and close: the LLC tag check is expensive and these kernels have tight working sets"
+    },
+    {
+      "name": "tile3_fc_icache",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 16,
+      "num_ways": 4,
+      "pq_size": 0,
+      "mshr_size": 8,
+      "hit_latency": 2,
+      "fill_latency": 2,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@tile3_fc_icache_channel"
+      ],
+      "lower_level": "@tile3_fcI_port",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "tile3_fc_icache_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "tile3_fc_icache_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ]
+    },
+    {
+      "_comment": "multi-context, in-order, non-speculative near-memory engine on tile 3",
+      "name": "tile3_fc",
+      "module": "function_core",
+      "model": "FUNCTION_CORE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tile": 3,
+      "num_contexts": 4096,
+      "issue_width": {
+        "bandwidth": 4
+      },
+      "fabric": "@fn_fabric",
+      "image": "@fn_image",
+      "vmem": "@VMEM",
+      "router": "@ROUTER",
+      "dcache": "@tile3_fc_dcache_channel",
+      "icache": "@tile3_fc_icache_channel",
+      "fetch_bubble": 1,
+      "mmu": "@tile3_mmu",
+      "alu_latency": 1,
+      "mul_latency": 3,
+      "branch_latency": 1
+    },
+    {
+      "_comment": "Routes an L2C miss to the slice owning the address, and compacts the tile-select field so each slice uses all of its sets.",
+      "name": "cpu0_fabric",
+      "module": "channel",
+      "model": "INTERLEAVE_FABRIC",
+      "clock_period": {
+        "time": "250p"
+      },
+      "tiles": [
+        "@fabric_tile0_channel",
+        "@fabric_tile1_channel",
+        "@fabric_tile2_channel",
+        "@fabric_tile3_channel"
+      ],
+      "hop_latency": 4,
+      "queue_size": 64,
+      "max_forward": {
+        "bandwidth": 4
+      },
+      "compact_tile_bits": true
+    },
+    {
+      "name": "cpu0_DTLB",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 16,
+      "num_ways": 4,
+      "pq_size": 0,
+      "mshr_size": 8,
+      "hit_latency": 1,
+      "fill_latency": 1,
+      "offset_bits": {
+        "bits": "12"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@cpu0_L1D_cpu0_DTLB_channel"
+      ],
+      "lower_level": "@cpu0_DTLB_cpu0_STLB_channel",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "cpu0_DTLB_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "cpu0_DTLB_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ]
+    },
+    {
+      "name": "cpu0_ITLB",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 16,
+      "num_ways": 4,
+      "pq_size": 0,
+      "mshr_size": 8,
+      "hit_latency": 1,
+      "fill_latency": 1,
+      "offset_bits": {
+        "bits": "12"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": true,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@cpu0_L1I_cpu0_ITLB_channel"
+      ],
+      "lower_level": "@cpu0_ITLB_cpu0_STLB_channel",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "cpu0_ITLB_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "cpu0_ITLB_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ]
+    },
+    {
+      "name": "cpu0_L1D",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 64,
+      "num_ways": 12,
+      "pq_size": 8,
+      "mshr_size": 16,
+      "hit_latency": 2,
+      "fill_latency": 3,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": true,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@cpu0_PTW_cpu0_L1D_channel",
+        "@cpu0_cpu0_L1D_channel"
+      ],
+      "lower_level": "@cpu0_L1D_cpu0_L2C_channel",
+      "lower_translate": "@cpu0_L1D_cpu0_DTLB_channel",
+      "children": [
+        {
+          "name": "cpu0_L1D_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "cpu0_L1D_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ]
+    },
+    {
+      "name": "cpu0_L1I",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 64,
+      "num_ways": 8,
+      "pq_size": 32,
+      "mshr_size": 8,
+      "hit_latency": 2,
+      "fill_latency": 2,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": true,
+      "virtual_prefetch": true,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@cpu0_cpu0_L1I_channel"
+      ],
+      "lower_level": "@cpu0_L1I_cpu0_L2C_channel",
+      "lower_translate": "@cpu0_L1I_cpu0_ITLB_channel",
+      "children": [
+        {
+          "name": "cpu0_L1I_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "cpu0_L1I_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ]
+    },
+    {
+      "name": "cpu0_L2C",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 1024,
+      "num_ways": 8,
+      "pq_size": 16,
+      "mshr_size": 32,
+      "hit_latency": 10,
+      "fill_latency": 10,
+      "offset_bits": {
+        "bits": "6"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@cpu0_L1D_cpu0_L2C_channel",
+        "@cpu0_L1I_cpu0_L2C_channel"
+      ],
+      "lower_level": "@cpu0_fabric",
+      "lower_translate": "@cpu0_L2C_cpu0_STLB_channel",
+      "children": [
+        {
+          "name": "cpu0_L2C_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "cpu0_L2C_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ]
+    },
+    {
+      "name": "cpu0_STLB",
+      "module": "cache",
+      "model": "DEFAULT_CACHE",
+      "clock_period": {
+        "time": "250p"
+      },
+      "num_sets": 128,
+      "num_ways": 12,
+      "pq_size": 0,
+      "mshr_size": 16,
+      "hit_latency": 8,
+      "fill_latency": 8,
+      "offset_bits": {
+        "bits": "12"
+      },
+      "max_tag_bandwidth": {
+        "bandwidth": 2
+      },
+      "max_fill_bandwidth": {
+        "bandwidth": 2
+      },
+      "prefetch_as_load": false,
+      "match_offset_bits": false,
+      "virtual_prefetch": false,
+      "pref_activate_mask": {
+        "access_types": [
+          "LOAD",
+          "PREFETCH"
+        ]
+      },
+      "upper_levels": [
+        "@cpu0_DTLB_cpu0_STLB_channel",
+        "@cpu0_ITLB_cpu0_STLB_channel",
+        "@cpu0_L2C_cpu0_STLB_channel"
+      ],
+      "lower_level": "@cpu0_STLB_cpu0_PTW_channel",
+      "lower_translate": {
+        "null": "channel"
+      },
+      "children": [
+        {
+          "name": "cpu0_STLB_prefetcher",
+          "module": "prefetcher",
+          "model": "no"
+        },
+        {
+          "name": "cpu0_STLB_replacement",
+          "module": "replacement",
+          "model": "lru"
+        }
+      ]
+    },
+    {
+      "name": "cpu0",
+      "module": "core",
+      "model": "NMFC_HOST_CORE",
+      "clock_period": {
+        "frequency": "4G"
+      },
+      "dib_set": 32,
+      "dib_way": 8,
+      "dib_window": 16,
+      "dib_hit_buffer_size": 32,
+      "dib_inorder_width": {
+        "bandwidth": 5
+      },
+      "dib_hit_latency": 1,
+      "ifetch_buffer_size": 64,
+      "decode_buffer_size": 32,
+      "dispatch_buffer_size": 32,
+      "register_file_size": 128,
+      "rob_size": 352,
+      "lq_size": 128,
+      "sq_size": 72,
+      "fetch_width": {
+        "bandwidth": 6
+      },
+      "decode_width": {
+        "bandwidth": 6
+      },
+      "dispatch_width": {
+        "bandwidth": 6
+      },
+      "execute_width": {
+        "bandwidth": 4
+      },
+      "lq_width": {
+        "bandwidth": 2
+      },
+      "sq_width": {
+        "bandwidth": 2
+      },
+      "retire_width": {
+        "bandwidth": 5
+      },
+      "schedule_width": {
+        "bandwidth": 128
+      },
+      "mispredict_penalty": 1,
+      "decode_latency": 1,
+      "dispatch_latency": 1,
+      "schedule_latency": 0,
+      "execute_latency": 0,
+      "l1i": "@cpu0_L1I",
+      "l1i_bandwidth": {
+        "bandwidth": 2
+      },
+      "l1d_bandwidth": {
+        "bandwidth": 2
+      },
+      "fetch_queues": "@cpu0_cpu0_L1I_channel",
+      "data_queues": "@cpu0_cpu0_L1D_channel",
+      "children": [
+        {
+          "name": "cpu0_bp",
+          "module": "branch_predictor",
+          "model": "hashed_perceptron"
+        },
+        {
+          "name": "cpu0_btb",
+          "module": "btb",
+          "model": "basic_btb"
+        },
+        {
+          "name": "cpu0_trace",
+          "module": "instruction_producer",
+          "model": "NMFC_PRODUCER",
+          "trace_file": "$trace0",
+          "ftu_size": 16384,
+          "repeat": false,
+          "image": "@fn_image",
+          "vmem": "@VMEM"
+        }
+      ],
+      "fabric": "@fn_fabric",
+      "image": "@fn_image",
+      "ftu_size": 16384
+    },
+    {
+      "name": "heartbeat",
+      "module": "listener",
+      "model": "HEARTBEAT",
+      "frequency": 1000000
+    },
+    {
+      "name": "phase_controller",
+      "module": "phase_controller",
+      "model": "PHASE_CONTROLLER",
+      "warmup_length": "$warmup_instructions",
+      "simulation_length": "$simulation_instructions",
+      "health_period": 2000000000
+    }
+  ]
+}
