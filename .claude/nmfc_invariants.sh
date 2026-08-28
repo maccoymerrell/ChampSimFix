@@ -30,5 +30,11 @@ NMFC invariants (docs/nmfc/DESIGN.md §0) -- settled, do not re-derive:
     first-touch are not substitutes.
  7. The function core has a register file and NO STACK. A function that spills
     cannot run. Check the disassembly, not the source.
+ 8. The WORKLOAD COMPUTES NO TILES (§4.2). It issues work; the OS places it;
+    the policy moves BOTH ends -- data used together is gathered, and functions
+    migrate to their data -- and partitions them evenly. Sorting work by
+    tile_of() in the kernel bakes in a layout and tests the allocator instead
+    of the architecture. Grain-granular NUCA is a tile SWAP, not a fresh
+    allocation; prefer a duplication policy over sub-grain swaps.
 Before adding a mechanism, check whether the design already names one.
 EOF

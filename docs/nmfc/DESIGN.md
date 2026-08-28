@@ -261,6 +261,46 @@ host the traces are collected on, not of the machine being designed.
 
 ---
 
+## 4.2 Placement policies: what moves, and who decides
+
+Several policies are under test. They are not variations on one idea; they
+differ in *what is allowed to move*, and the workload must not assume any of
+them.
+
+**The OS's standing job, under every policy.** Initial placement; the page
+tables; duplicate mappings; and remap support. That is the mechanism the
+policies are built on, and it does not change between them.
+
+**A policy where the vmem places by address.** Supported, and it must keep
+working -- under congruence the virtual address names the tile and placement
+is exact. It is not the one we are trying to show off, and a workload written
+around it has assumed the answer: sorting work by `tile_of(&x)` in the program
+is the compiler baking in a layout, which §5 rules out. Under the physical
+routers the virtual address names no tile and that sort means nothing.
+
+**The policy we care about: both ends move.** Data used together is migrated
+onto the same tile, *and* functions migrate to their data. Source and sink are
+both moveable, and the job is to partition them evenly across the tiles rather
+than to pile either onto one. A policy that moves only one end can always be
+defeated by the other.
+
+**Grain-granular NUCA is a swap, not an allocation.** When a whole grain is the
+unit, moving one is closer to a tile swap -- exchange which channel backs it --
+than to allocating a fresh page and copying. That is cheaper and it is why the
+grain is the unit.
+
+**Sub-grain swaps are viable and sometimes necessary**, for structures that
+must be present on every channel. But the same effect is better had from a
+*duplication* policy in NUCA, which reaches it without the bookkeeping a
+partial swap drags in. Prefer duplication; keep the swap as the fallback it is.
+
+**What this means for a workload.** It computes no tiles. It issues work, the
+OS places it, the policy moves both ends, and the migrations are the evidence
+the policy runs on. A kernel that sorts by tile is testing the allocator, not
+the architecture.
+
+---
+
 ## 5. Address space, mapping mode, and translation
 
 ### 5.1 One virtual address space, split restrictively
