@@ -97,13 +97,30 @@ static inline uint32_t tile_of(const void* p)
 static constexpr int GROUP = 6;
 
 /**
+ * How many invocations the host tries to keep outstanding.
+ *
+ * A fork does not wait; a join does. Written as `got = claim(...)` with the
+ * result used on the next line, the two collapse and the machine holds exactly
+ * one invocation while having room for a thousand. Issuing a window of
+ * independent calls first and consuming their results afterwards is what lets
+ * the reorder buffer carry several at once.
+ */
+static constexpr int WINDOW = 64;
+
+struct pending_group {
+  NodeID u;
+  uint64_t a, b, c;
+  NodeID v[GROUP];
+};
+
+/**
  * The host walks the frontier and the edge lists itself.
  *
- * That is deliberate: the scan is sequential and prefetchable, which is what an
- * out-of-order core with a memory hierarchy is already good at. What it is bad
- * at is the scattered read-modify-write on parent[], and that is the part that
- * goes near the memory. Grouping by owning tile is a shift and a mask per
- * neighbour, and the groups are dispatched as they fill.
+ * That is deliberate: the scan is sequential and prefetchable, which an
+ * out-of-order core with a memory hierarchy already handles well. What it
+ * handles badly is the scattered read-modify-write on parent[], and that is
+ * what goes near the memory. Grouping by owning tile is a shift and a mask per
+ * neighbour.
  */
 static int64_t TDStepOffloaded(const Graph& g, NodeID* parent, SlidingQueue<NodeID>& queue)
 {
@@ -111,45 +128,66 @@ static int64_t TDStepOffloaded(const Graph& g, NodeID* parent, SlidingQueue<Node
   QueueBuffer<NodeID> lqueue(queue);
   NodeID stage[NMFC_TILES][GROUP];
   int32_t n[NMFC_TILES];
+  pending_group win[WINDOW];
+  uint32_t res[WINDOW];
+  int nw = 0;
+
+  const auto drain = [&]() {
+    // Issue first, consume second. Nothing in this loop depends on the result
+    // of the previous call, so they can all be in flight together.
+    for (int i = 0; i < nw; ++i) {
+      res[i] = nmfc_claim6(parent, win[i].u, win[i].a, win[i].b, win[i].c);
+    }
+    for (int i = 0; i < nw; ++i) {
+      for (int k = 0; k < GROUP; ++k) {
+        if ((res[i] & (1u << k)) != 0) {
+          lqueue.push_back(win[i].v[k]);
+          scout_count += g.out_degree(win[i].v[k]);
+        }
+      }
+    }
+    nw = 0;
+  };
+
+  const auto submit = [&](uint32_t t, NodeID u) {
+    pending_group& gp = win[nw];
+    gp.u = u;
+    for (int i = 0; i < GROUP; ++i) {
+      gp.v[i] = (i < n[t]) ? stage[t][i] : -1;
+    }
+    const auto pack = [&](int i) {
+      return (static_cast<uint64_t>(static_cast<uint32_t>(gp.v[i + 1])) << 32) | static_cast<uint32_t>(gp.v[i]);
+    };
+    gp.a = pack(0);
+    gp.b = pack(2);
+    gp.c = pack(4);
+    n[t] = 0;
+    if (++nw == WINDOW) {
+      drain();
+    }
+  };
 
   for (auto q_iter = queue.begin(); q_iter < queue.end(); q_iter++) {
     const NodeID u = *q_iter;
     for (uint32_t t = 0; t < NMFC_TILES; ++t) {
       n[t] = 0;
     }
-
-    const auto flush = [&](uint32_t t) {
-      for (int i = n[t]; i < GROUP; ++i) {
-        stage[t][i] = -1; // unused slots
-      }
-      const auto pack = [&](int i) {
-        return (static_cast<uint64_t>(static_cast<uint32_t>(stage[t][i + 1])) << 32) | static_cast<uint32_t>(stage[t][i]);
-      };
-      const uint32_t got = nmfc_claim6(parent, u, pack(0), pack(2), pack(4));
-      for (int i = 0; i < GROUP; ++i) {
-        if ((got & (1u << i)) != 0) {
-          lqueue.push_back(stage[t][i]);
-          scout_count += g.out_degree(stage[t][i]);
-        }
-      }
-      n[t] = 0;
-    };
-
     auto neigh = g.out_neigh(u);
     for (const NodeID* p = neigh.begin(); p != neigh.end(); ++p) {
       const NodeID v = *p;
       const uint32_t t = tile_of(&parent[v]);
       stage[t][n[t]++] = v;
       if (n[t] == GROUP) {
-        flush(t);
+        submit(t, u);
       }
     }
     for (uint32_t t = 0; t < NMFC_TILES; ++t) {
       if (n[t] != 0) {
-        flush(t);
+        submit(t, u);
       }
     }
   }
+  drain();
   lqueue.flush();
   return scout_count;
 }

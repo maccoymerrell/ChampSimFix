@@ -163,16 +163,39 @@ std::set<std::uint64_t> load_atomics(const options& opt)
 }
 
 /** Pin register id -> canonical register, with the ones the machine has no file for removed. */
-std::unordered_map<std::uint32_t, std::uint32_t> load_regmap(const options& opt)
+std::unordered_map<std::uint32_t, std::uint32_t> load_regmap(const options& opt, std::uint32_t& result_reg)
 {
   std::ifstream in(opt.regmap);
   if (!in) {
     die("cannot open regmap file " + opt.regmap);
   }
   std::unordered_map<std::uint32_t, std::uint32_t> canon;
-  std::uint32_t id = 0, full = 0;
-  std::string name, full_name;
-  while (in >> id >> full >> name >> full_name) {
+  result_reg = 0;
+  // Line-wise, because some register names contain spaces -- Pin writes
+  // "*UNKNOWN REG 2*" for gaps in the enumeration, and reading token by token
+  // walks the stream out of alignment from there on, silently.
+  std::string line;
+  while (std::getline(in, line)) {
+    std::vector<std::string> field;
+    std::size_t at = 0;
+    while (at < line.size()) {
+      const auto begin = line.find_first_not_of(" \t", at);
+      if (begin == std::string::npos) {
+        break;
+      }
+      const auto end = line.find_first_of(" \t", begin);
+      field.push_back(line.substr(begin, end == std::string::npos ? std::string::npos : end - begin));
+      at = (end == std::string::npos) ? line.size() : end;
+    }
+    if (field.size() < 4) {
+      continue;
+    }
+    const std::uint32_t id = static_cast<std::uint32_t>(std::stoul(field[0]));
+    const std::uint32_t full = static_cast<std::uint32_t>(std::stoul(field[1]));
+    const std::string& full_name = field.back();
+    if (full_name == "rax") {
+      result_reg = full; // where a function's return value arrives
+    }
     // The program counter travels beside the register file, this machine has no
     // stack, and flags are internal to an instruction. None is regfile state.
     if (full_name == "rip" || full_name == "rsp" || full_name == "rflags" || full_name == "*invalid*") {
@@ -215,7 +238,11 @@ int main(int argc, char** argv)
   options ret_opt = opt;
   ret_opt.atomics = opt.rets;
   const auto ret_pcs = load_atomics(ret_opt);
-  const auto canon = load_regmap(opt);
+  std::uint32_t result_reg = 0;
+  const auto canon = load_regmap(opt, result_reg);
+  if (result_reg == 0) {
+    die("the register map does not name a return register");
+  }
 
   // The code the functions occupy is itself a region: one virtual page,
   // replicated per channel, with the tile chosen when it is translated.
@@ -317,7 +344,8 @@ int main(int argc, char** argv)
   bool have_pending = false;
   std::uint64_t token = 0;
   std::unordered_map<std::uint32_t, std::uint8_t> slot;
-  std::uint64_t dropped_stack = 0, n_bodies = 0, n_atomics = 0;
+  std::uint64_t dropped_stack = 0, n_bodies = 0, n_atomics = 0, n_joins = 0;
+  std::uint64_t awaiting = 0; // token whose result has not been consumed yet
 
   const auto reg_slot = [&](unsigned char raw_reg) -> unsigned char {
     if (raw_reg == 0) {
@@ -355,6 +383,7 @@ int main(int argc, char** argv)
     body.clear();
     have_call = false;
     ++n_bodies;
+    awaiting = token; // the next instruction to read the result register joins it
   };
 
   input_instr raw{};
@@ -375,6 +404,10 @@ int main(int argc, char** argv)
         call_rec = pending;
         have_pending = false;
         call_rec.kind = static_cast<std::uint8_t>(nmfc::op::CALL);
+        // A fork does not wait; the join does. Without this the two collapse
+        // into one blocking instruction and the machine holds a single
+        // invocation however much room it has.
+        call_rec.flag_bits |= nmfc::FLAG_DEFERRED_JOIN;
         call_rec.token = ++token;
         const auto entry = remap(fn->start);
         if (!entry) {
@@ -463,6 +496,20 @@ int main(int argc, char** argv)
         put(pending);
       }
       rec.kind = static_cast<std::uint8_t>(nmfc::op::HOST);
+      if (awaiting != 0) {
+        // The join is a real instruction: whichever one first reads the value
+        // the invocation produced. Nothing is synthesised for it.
+        for (const auto r : raw.source_registers) {
+          const auto it = canon.find(r);
+          if (it != canon.end() && it->second == result_reg) {
+            rec.kind = static_cast<std::uint8_t>(nmfc::op::JOIN);
+            rec.token = awaiting;
+            awaiting = 0;
+            ++n_joins;
+            break;
+          }
+        }
+      }
       pending = rec;
       have_pending = true;
     }
@@ -480,7 +527,8 @@ int main(int argc, char** argv)
   out.write(reinterpret_cast<const char*>(&hdr), sizeof(hdr));
   out.close();
 
-  std::fprintf(stderr, "[annotate] read %lu instructions -> %lu records, %lu invocations, %lu atomics\n", n_in, n_records, n_calls, n_atomics);
+  std::fprintf(stderr, "[annotate] read %lu instructions -> %lu records, %lu invocations, %lu joins, %lu atomics\n", n_in, n_records, n_calls,
+               n_joins, n_atomics);
   if (dropped_stack != 0) {
     std::fprintf(stderr, "[annotate] dropped %lu stack accesses from returns (this machine has no stack)\n", dropped_stack);
   }
