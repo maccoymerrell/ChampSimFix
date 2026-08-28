@@ -1,6 +1,49 @@
 # Near-Memory Function Core (NMFC) — Design
 
 **Base:** `ChampSimFix` @ `a2684f5c` (branch `nmfc`), cloned into `ChampSimArchWork/nmfc`.
+## 0. Invariants
+
+These are settled. They are not re-derived, not traded away for a passing
+measurement, and not rediscovered by hitting an assertion. Read this section
+before changing anything in `src/nmfc/`.
+
+1. **An offload is an instruction.** `FORK rPC, v512` takes a general register
+   holding the callee's entry PC and a 512-bit vector register that *is* the
+   callee's register file. `JOIN v512` retrieves it. The offload aperture is
+   how that gets written into a fixed ChampSim trace record; it is a file
+   format, not a mechanism. See §4.
+
+2. **512 bits in, the same 512 bits out.** The whole register file returns.
+   Register positions carry no meaning across the boundary. A function needing
+   more live values than the file holds cannot be offloaded. See §4.1.
+
+3. **Every channel translates locally, under every routing order.** N roots
+   means the table is *partitioned*; one root means it is *duplicated*, one
+   copy per channel, using the replicated page type -- the same one function
+   code uses. A single table on one channel reached over the fabric is a bug,
+   and routing the walks is not the fix. See §5.
+
+4. **Placement is a translation-time decision by the address space's owner.**
+   The virtual address is translated to physical before it crosses the fabric,
+   and the physical copy handed back names the tile. This is what makes load
+   balancing a run-time decision rather than a layout the compiler baked in.
+   Nothing may consult data the invocation has not touched yet.
+
+5. **Migration is expected, and it is evidence.** The failure mode is
+   frequency, not occurrence: roughly one per thousand instructions is fine,
+   and each costs 72 bytes on the fabric. A migration says either the function
+   or the page was in the wrong place, and the routing policy is supposed to
+   act on that.
+
+6. **Physical placement without a NUCA/NUMA policy is not the design.**
+   Working sets are moved together while access stays balanced across tiles.
+   Round-robin, least-loaded and first-touch are not substitutes for it.
+
+7. **The function core has a register file and no stack.** A function that
+   spills cannot run. Check the disassembly, not the source.
+
+---
+
 **Revision 6** — §13 records what is actually built. Earlier:  mapping mode becomes a physical address bit, stamped once at allocation; mixed page sizes; `NMFC_MMU` replaces two would-be forks. Supersedes revisions 1–4.
 
 ---
@@ -234,6 +277,25 @@ This is [Utopia](https://arxiv.org/pdf/2211.12205)'s restrictive/flexible split 
 1. **Routing never waits on translation.** Local-vs-migrate is decided on the VA the context already holds.
 2. **Translation never causes a migration.** The frame is on the tile already running the context, so a walk is always local.
 3. **No hard partition is visible to software.** A contiguous virtual allocation automatically stripes across every channel. *Siloing* means deliberately choosing VAs with matching tile bits — an allocator choice, not a limit on allocation size.
+
+**Every channel walks locally, under every routing order.** This is not
+negotiable and it is not a property of the congruent router: it is why the
+design is worth simulating. Two mechanisms deliver it, and which one applies
+depends only on how many roots the routing policy needs.
+
+* **N roots (VIRTUAL_FIRST).** The table is *partitioned*: channel *t* holds
+  exactly the entries for addresses channel *t* owns. Total page-table
+  footprint is unchanged.
+* **One root (TRANSLATE_FIRST).** The table is *duplicated*, one copy per
+  channel, and the asking tile walks its own copy. Footprint is N times
+  larger. That is the price, and it is worth paying.
+
+What must never happen is the single table living on one channel while the
+others reach it over the fabric. That turns translation into a routing cost,
+puts walk traffic on the interconnect for no architectural reason, and leaves
+three channels in four unable to translate without leaving home. If a
+configuration appears to require `--walk-routing fabric`, the page table has
+not been duplicated and that is the bug -- routing the walks is not the fix.
 
 Channel *t*'s page table covers exactly `{ va : tile_of(va) == t }` — a **partition, not a replication**, so total PTE count is unchanged. That set is strided, so each channel indexes its table by the compacted VA:
 
