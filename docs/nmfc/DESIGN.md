@@ -13,14 +13,21 @@ time-multiplexing many stackless invocations can pick it up. That is a claim
 about *bandwidth utilisation*, not about speedup, and it went unmeasured for a
 long time in favour of numbers that were easier to produce.
 
-GAP BFS on kron-24. DDR5-3200, 64-bit, four channels; a channel retires 0.1002
-64-byte lines per 4 GHz core cycle, so the machine's ceiling is 0.4006.
+GAP BFS on kron-24, memory modelled by **ramulator2**: one instance per memory
+tile, DDR5-4800, a 32-bit channel each, so 19.2 GB/s per channel and 76.8 GB/s
+across the four. Grain derived from that device rather than set beside it (§5.2),
+which puts it at 1 MiB.
 
-| configuration | cycles | DRAM requests | lines/cycle | of peak |
+| configuration | cycles | DRAM requests | B/cycle | of peak |
 |---|---|---|---|---|
-| host only | 11,969,338 | 655,684 | 0.0548 | **13.7%** |
-| NMFC, chase decomposition | 2,142,594 | 595,509 | 0.2779 | 69.4% |
-| NMFC, spawn decomposition | 1,934,783 | 595,772 | 0.3079 | **76.9%** |
+| host only | 10,733,144 | 648,992 | 3.87 | **20.2%** |
+| NMFC, chase decomposition | 2,713,767 | 601,172 | 14.18 | 73.8% |
+| NMFC, spawn decomposition | 2,552,945 | 596,611 | 14.96 | **77.9%** |
+
+The same measurement against ChampSim's own DRAM model, at the grain that was
+hardcoded before the geometry was derived, gave 13.7% and 76.9% -- so the
+conclusion survives both a real memory model and a corrected grain, which is
+most of the reason to trust it.
 
 An out-of-order core with a 352-entry reorder buffer extracts 13.7% of the
 available bandwidth from this workload. The memory tiles extract 76.9% of it,

@@ -236,9 +236,12 @@ TEST_CASE("A replicated grain has one copy per channel, addressable by formula")
 {
   // The mechanism that lets the OS place an invocation: one virtual page, one
   // physical copy per channel, and the tile chosen when the address is
-  // translated. Reserving a *congruent* frame set is what makes the copies
-  // addressable without a per-tile table -- they differ only in the tile-select
-  // field, so expand(compact(pa), t) converts a base to tile t's copy.
+  // translated. Reserving a *replica set* is what makes the copies addressable
+  // without a per-tile table -- they differ only in the tile-select field, so
+  // expand(compact(pa), t) converts a base to tile t's copy.
+  //
+  // Distinct from §5.1's congruence, which says a virtual address and its frame
+  // name the same tile. These frames are deliberately on different tiles.
   rig r{"_replicated"};
   const auto map = the_map();
 

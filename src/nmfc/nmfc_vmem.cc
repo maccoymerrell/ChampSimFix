@@ -298,13 +298,13 @@ public:
   {
     auto it = replicas_.find(std::pair{asid, vgrain});
     if (it == std::end(replicas_)) {
-      const auto base = take_congruent_set();
+      const auto base = take_replica_set();
       replica_allocs_ += map_.num_tiles();
       it = replicas_.emplace(std::pair{asid, vgrain}, base).first;
     }
-    // The whole point of reserving a congruent set: copy t is the base with the
-    // tile-select field set to t, so converting a base physical address to a
-    // tile-specific one is expand(compact(pa), t) and needs no per-tile table.
+    // The whole point of a replica set: copy t is the base with the tile-select
+    // field set to t, so converting a base physical address to a tile-specific
+    // one is expand(compact(pa), t) and needs no per-tile table.
     const auto frame = it->second + (tile % map_.num_tiles());
     return frame;
   }
@@ -395,11 +395,19 @@ private:
   }
 
   /** Take a grain owned by `tile`, spilling to another tile if that list is dry. */
-  std::uint64_t take_congruent_set()
+  /**
+   * A frame on every channel for one replicated page.
+   *
+   * This is a *group*: an aligned run of N grains, one per channel, sharing a
+   * compacted index -- the same unit the two mapping modes agree on, so
+   * replication needs no separate search.
+   *
+   * Not to be confused with §5.1's congruence, which is the entirely different
+   * property that a virtual address and its frame name the same tile. These
+   * frames are deliberately on *different* tiles; they hold the same bytes.
+   */
+  std::uint64_t take_replica_set()
   {
-    // A congruent set *is* a group: an aligned run of N grains, one per channel,
-    // sharing a compacted index. That is the same unit the two mapping modes
-    // agree on, so replication needs no separate search -- it needs a group.
     if (free_groups_.empty()) {
       fmt::print("[NMFC_VMEM] ERROR: no free grain group left for a replicated page.\n");
       std::exit(-1);
