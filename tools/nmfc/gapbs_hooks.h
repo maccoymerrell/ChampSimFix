@@ -228,7 +228,7 @@ public:
    * Begin an invocation. Everything emitted until end_call is its body, which
    * is what makes the slicing decision explicit and movable.
    */
-  std::uint64_t begin_call(std::uint32_t func_id = 1, bool no_return = false, bool deferred_join = false)
+  std::uint64_t begin_call(std::uint32_t func_id = 1, bool no_return = false, bool deferred_join = false, bool spawned = false)
   {
     if (!enabled_ || budget_spent_) {
       return 0;
@@ -253,6 +253,11 @@ public:
     if (no_return) {
       call_.flag_bits |= nmfc::FLAG_NO_RETURN;
     }
+    if (spawned) {
+      // Defined here, started by a SPAWN inside another function. The host
+      // never issues it, so it costs the compute tile no instruction.
+      call_.flag_bits |= nmfc::FLAG_SPAWNED;
+    }
     if (deferred_join) {
       call_.flag_bits |= nmfc::FLAG_DEFERRED_JOIN;
     }
@@ -273,6 +278,28 @@ public:
    * the same block. BFS's parent[] compare-and-swap is exactly this, and it is
    * the case the design's atomicity claim is about.
    */
+  /**
+   * Start another invocation from inside this one.
+   *
+   * The alternative to reaching for a remote address. A function that needs
+   * work done somewhere else sends a token there rather than carrying itself,
+   * and the fabric dispatches it to the tile that owns the address.
+   */
+  void body_spawn(std::uint64_t token, std::uint64_t child, unsigned char src = R_NONE)
+  {
+    if (!enabled_ || budget_spent_ || !in_call_ || token == 0 || token != call_.token) {
+      return;
+    }
+    auto rec = blank(nmfc::op::SPAWN, token);
+    rec.instr.ip = next_body_pc(false);
+    rec.aux0 = child;
+    rec.op_class = static_cast<std::uint8_t>(nmfc::op_class::ALU);
+    if (src != R_NONE) {
+      rec.instr.source_registers[0] = src;
+    }
+    body_.push_back(rec);
+  }
+
   void body_atomic(const void* address, unsigned char dst, unsigned char src, bool loop_back = false)
   {
     body_memory(address, dst, src, /*store=*/false, /*atomic=*/true, loop_back);

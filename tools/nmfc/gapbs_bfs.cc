@@ -62,6 +62,7 @@ struct nmfc_options {
   std::uint32_t tiles = 4;
   unsigned grain_bits = 21;
   std::string partition = "stripe";
+  std::string shape = "chase";   // "chase" = migrate to the data; "spawn" = send work to it
   unsigned partition_passes = 3; // restreaming passes for --partition mincut
   std::int64_t budget = 20000;   // stop tracing after this many invocations
   bool relabelled = false;
@@ -115,7 +116,32 @@ int64_t TDStep(const Graph &g, pvector<NodeID> &parent,
       const int64_t degree = g.out_degree(u);
       const int64_t per_call = (g_nmfc.chunk > 0) ? g_nmfc.chunk : std::max<int64_t>(degree, 1);
       int64_t in_chunk = 0;
-      std::uint64_t token = T.begin_call(1, false, g_nmfc.fork_window > 1);
+
+      // NMFC: two shapes, and the difference between them is what this whole
+      // architecture turns on.
+      //
+      //   chase -- one invocation reads the row and then reaches for each
+      //            neighbour's parent slot, which lives on whatever tile owns
+      //            that neighbour. The context migrates once per edge.
+      //   spawn -- the invocation reads only u's own row and edge list, all of
+      //            it local, and *sends* a one-access claim to the tile that
+      //            owns each neighbour. Nothing migrates; the work travels
+      //            instead of the context.
+      //
+      // A spawned body has to be defined before the body that spawns it, so
+      // the claims are emitted first and their tokens handed to the scan.
+      const bool spawning = (g_nmfc.shape == "spawn");
+      std::vector<std::uint64_t> claim_tokens;
+      if (spawning) {
+        for (NodeID v : g.out_neigh(u)) {
+          const auto child = T.begin_call(2, /*no_return=*/true, /*deferred_join=*/false, /*spawned=*/true);
+          T.body_atomic(&parent[v], R::R_VALUE, R::R_NEIGHBOUR);
+          T.end_call(child, R::R_VALUE);
+          claim_tokens.push_back(child);
+        }
+      }
+
+      std::uint64_t token = T.begin_call(1, spawning, !spawning && g_nmfc.fork_window > 1);
       T.body_load(&g.nmfc_out_index()[u], R::R_ROW_BEGIN, R::R_VERTEX);
       T.body_load(&g.nmfc_out_index()[u + 1], R::R_ROW_END, R::R_VERTEX);
       const NodeID* edge_base = g.out_neigh(u).begin();
@@ -126,7 +152,12 @@ int64_t TDStep(const Graph &g, pvector<NodeID> &parent,
         // the scattered, dependent access, and claiming it is a real
         // read-modify-write rather than a plain load.
         T.body_load(edge_base + edge_index, R::R_NEIGHBOUR, R::R_ROW_BEGIN, in_chunk > 0);
-        T.body_atomic(&parent[v], R::R_VALUE, R::R_NEIGHBOUR);
+        if (spawning) {
+          // Send the claim to the tile that owns parent[v] instead of going there.
+          T.body_spawn(token, claim_tokens[static_cast<std::size_t>(edge_index)], R::R_NEIGHBOUR);
+        } else {
+          T.body_atomic(&parent[v], R::R_VALUE, R::R_NEIGHBOUR);
+        }
 
         NodeID curr_val = parent[v];
         if (curr_val < 0) {
@@ -145,7 +176,7 @@ int64_t TDStep(const Graph &g, pvector<NodeID> &parent,
         if (++in_chunk >= per_call && edge_index < degree) {
           nmfc_finish(token);
           T.host(&(*q_iter), R::R_VERTEX, R::R_VERTEX);
-          token = T.begin_call(1, false, g_nmfc.fork_window > 1);
+          token = T.begin_call(1, spawning, !spawning && g_nmfc.fork_window > 1);
           in_chunk = 0;
         }
       }
@@ -399,6 +430,7 @@ int main(int argc, char* argv[]) {
     else if (arg == "--tiles") { g_nmfc.tiles = static_cast<std::uint32_t>(std::stoul(next())); }
     else if (arg == "--grain-bits") { g_nmfc.grain_bits = static_cast<unsigned>(std::stoul(next())); }
     else if (arg == "--partition") { g_nmfc.partition = next(); }
+    else if (arg == "--shape") { g_nmfc.shape = next(); }
     else if (arg == "--partition-passes") { g_nmfc.partition_passes = static_cast<unsigned>(std::stoul(next())); }
     else if (arg == "--chunk") { g_nmfc.chunk = std::stoll(next()); }
     else if (arg == "--fork-window") { g_nmfc.fork_window = std::stoll(next()); }
@@ -447,7 +479,7 @@ int main(int argc, char* argv[]) {
   tracer.close();
   std::cerr << "nmfc: slice=" << (g_nmfc.chunk > 0 ? "edge-chunk" : "vertex")
             << " chunk=" << g_nmfc.chunk
-            << " partition=" << g_nmfc.partition
+            << " shape=" << g_nmfc.shape << " partition=" << g_nmfc.partition
             << " fork-window=" << g_nmfc.fork_window << "\n";
   return 0;
 }
