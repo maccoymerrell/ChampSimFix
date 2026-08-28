@@ -121,6 +121,40 @@ Interfaces registered by name, models registered by name, an explicit JSON envir
 
 ## 4. The host core: `NMFC_HOST_CORE`
 
+### What an offload *is*, and what the simulator *encodes*
+
+Read this before §4's implementation, because the two are repeatedly confused
+— including in this document's own diagrams, more than once.
+
+**The architecture.** An offload is an instruction.
+
+```
+FORK  rPC, v512     ; rPC  = a general register holding the callee's entry PC
+                    ; v512 = a 512-bit vector register: the callee's regfile
+JOIN  v512          ; retrieves that regfile once the invocation returns
+```
+
+The vector operand is not an argument *to* the regfile, it **is** the regfile:
+§7 sizes a function's entire local state at `8 × 64b`, one cache block, 512
+bits. A fork hands over all of it; a join takes all of it back. That is why
+every fabric message is about 72 bytes — 64 of regfile plus a program counter
+— and why migration costs the same as a fork.
+
+**The encoding.** ChampSim's trace record has no field for a fork, and
+`ooo_model_instr` is not to be modified. So the producer names an invocation
+by a source-memory address inside a reserved *offload aperture*, and
+`do_memory_scheduling` diverts it into the FTU instead of the load queue.
+
+The aperture is how a fork is written down in a fixed 64-byte trace record.
+It is not a mechanism in the machine. The machine has no aperture, the
+function core does not detect calls by address range, and a design that
+reasons from "a load in the aperture is a fork" has mistaken a file format for
+an instruction set. Anything built on that reading — a tile-side calling
+convention, a claim about what the core detects — is wrong at the root even
+when it is internally consistent.
+
+
+
 `O3_CPU` is copied into `inc/nmfc/nmfc_host_core.h` / `src/nmfc/nmfc_host_core.cc` and extended. (`operate()`, `initialize()`, `push_instruction()` and `print_deadlock()` are `final`, so subclassing could not hook the pipeline in any case.) The copy stays line-for-line identical to upstream except at marked `// NMFC:` blocks, so `diff` against `src/ooo_cpu.cc` remains the maintenance tool.
 
 ### The function tracking unit (FTU)
