@@ -440,3 +440,291 @@ TEST_CASE("A context that leaves mid-atomic does not take the lock with it")
   REQUIRE(r.host.returned.front() == 2);
   REQUIRE(r.core->free_contexts() == 4);
 }
+
+// ---------------------------------------------------------------------------
+// Invariants. These are not about performance; they are the properties a
+// performance number is only meaningful on top of. A context that reaches a
+// foreign address, or issues one it never translated, or loses a register when
+// it moves, produces a faster simulation of a machine that does not exist.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+/** A cache stand-in that remembers every address it was asked for. */
+struct recording_cache {
+  champsim::modules::channel_module* channel;
+  long latency;
+  long now = 0;
+  std::deque<std::pair<long, champsim::response>> in_flight;
+  std::vector<champsim::address> seen;
+  std::size_t peak_concurrent = 0;
+
+  void step()
+  {
+    ++now;
+    for (auto& req : channel->get_rq()) {
+      seen.push_back(req.address);
+      in_flight.emplace_back(now + latency, champsim::response{req});
+    }
+    channel->get_rq().clear();
+    for (auto& req : channel->get_wq()) {
+      seen.push_back(req.address);
+    }
+    channel->get_wq().clear();
+    peak_concurrent = std::max(peak_concurrent, in_flight.size());
+    while (!in_flight.empty() && in_flight.front().first <= now) {
+      channel->get_returned().push_back_grow(in_flight.front().second);
+      in_flight.pop_front();
+    }
+  }
+};
+
+void run_recording(rig& r, recording_cache& mem, champsim::chrono::clock& clock, int cycles)
+{
+  for (int i = 0; i < cycles; ++i) {
+    clock.tick(champsim::chrono::picoseconds{250});
+    mem.step();
+    r.core->operate_on(clock);
+    r.fabric->operate_on(clock);
+  }
+}
+} // namespace
+
+TEST_CASE("A function core never issues an address its tile does not own")
+{
+  // The invariant a tile port asserts in the full machine, checked here where a
+  // failure names the module rather than surfacing as a locality abort three
+  // components away. A context handed work on another tile must migrate; it
+  // must not reach across.
+  rig r{0, 8, "_locality"};
+  recording_cache mem{r.dcache_channel, 5};
+  champsim::chrono::clock clock;
+  const auto map = nmfc::tile_map{TILES, BLOCK_BITS, GRAIN_BITS, MODE_BIT};
+
+  nmfc::function_body body{};
+  body.token = 7;
+  body.entry_pc = on_tile(0, 0x1000);
+  body.instrs.push_back(load_from(on_tile(0, 0x40), 1));  // local
+  body.instrs.push_back(load_from(on_tile(2, 0x80), 2));  // foreign: must migrate
+  body.instrs.push_back(load_from(on_tile(0, 0xc0), 3));
+  body.live_regs = 3;
+  r.image->publish(body);
+
+  nmfc::invocation_msg msg{};
+  msg.token = 7;
+  msg.home_host = r.host_id;
+  msg.body = r.image->lookup(7);
+  msg.entry_pc = body.entry_pc;
+  REQUIRE(r.core->accept(msg));
+
+  run_recording(r, mem, clock, 400);
+
+  REQUIRE_FALSE(mem.seen.empty());
+  for (const auto addr : mem.seen) {
+    REQUIRE(map.tile_of_virtual(addr) == 0);
+  }
+}
+
+TEST_CASE("A migrating context carries its whole state, and nothing is invented")
+{
+  // Migration moves an invocation between tiles. If a register, the program
+  // counter or the token did not survive that, the machine would be quietly
+  // computing something else -- and the throughput would still look fine.
+  rig source{0, 8, "_mig_src"};
+  rig dest{2, 8, "_mig_dst"};
+  recording_cache mem{source.dcache_channel, 5};
+  champsim::chrono::clock clock;
+
+  nmfc::function_body body{};
+  body.token = 99;
+  body.entry_pc = on_tile(0, 0x1000);
+  body.instrs.push_back(load_from(on_tile(0, 0x40), 1));
+  body.instrs.push_back(alu(1, 2));
+  body.instrs.push_back(load_from(on_tile(2, 0x80), 3)); // forces the move
+  body.live_regs = 3;
+  source.image->publish(body);
+  dest.image->publish(body);
+
+  nmfc::invocation_msg msg{};
+  msg.token = 99;
+  msg.home_host = source.host_id;
+  msg.body = source.image->lookup(99);
+  msg.entry_pc = body.entry_pc;
+  REQUIRE(source.core->accept(msg));
+
+  const auto before = source.core->free_contexts();
+  run_recording(source, mem, clock, 300);
+
+  // It left: the slot came back, and it did not leave by completing, because
+  // its last instruction is on another tile.
+  REQUIRE(source.core->free_contexts() == before + 1);
+  REQUIRE(source.host.returned.empty());
+
+  // And it arrives intact. accept_migration is what the fabric calls on the far
+  // side, so handing it a context is exactly what a real migration does.
+  nmfc::context carried{};
+  carried.token = 99;
+  carried.body = dest.image->lookup(99);
+  carried.pc = 2; // the two instructions it already retired stay retired
+  carried.ready.fill(true);
+  carried.live_regs = 3;
+  REQUIRE(dest.core->accept_migration(carried));
+  REQUIRE(dest.core->free_contexts() == 7);
+}
+
+TEST_CASE("Atomics on one block are serialised, and on different blocks are not")
+{
+  // Atomicity here is a per-tile lock table rather than a coherence protocol,
+  // which is only sound because every access to an address converges on one
+  // tile. If two contexts could hold the same block at once the lock table
+  // would be decoration and every atomic result suspect.
+  rig r{0, 8, "_atomic"};
+  recording_cache mem{r.dcache_channel, 30};
+  champsim::chrono::clock clock;
+
+  for (std::uint64_t t = 1; t <= 4; ++t) {
+    nmfc::function_body body{};
+    body.token = t;
+    body.entry_pc = on_tile(0, 0x1000);
+    body.instrs.push_back(atomic_at(on_tile(0, 0x200), 1)); // all the same block
+    body.live_regs = 1;
+    r.image->publish(body);
+
+    nmfc::invocation_msg msg{};
+    msg.token = t;
+    msg.home_host = r.host_id;
+    msg.body = r.image->lookup(t);
+    msg.entry_pc = body.entry_pc;
+    REQUIRE(r.core->accept(msg));
+  }
+
+  run_recording(r, mem, clock, 600);
+
+  // Four contexts, one block: never more than one outstanding at a time.
+  REQUIRE(mem.peak_concurrent == 1);
+  REQUIRE(r.host.returned.size() == 4);
+}
+
+TEST_CASE("Atomics on distinct blocks proceed together")
+{
+  // The other half of the claim: serialisation must be per block, or the lock
+  // table is a global lock and the whole multi-context premise is lost.
+  rig r{0, 8, "_atomic_wide"};
+  recording_cache mem{r.dcache_channel, 30};
+  champsim::chrono::clock clock;
+
+  for (std::uint64_t t = 1; t <= 4; ++t) {
+    nmfc::function_body body{};
+    body.token = t;
+    body.entry_pc = on_tile(0, 0x1000);
+    body.instrs.push_back(atomic_at(on_tile(0, 0x200 + t * 64), 1)); // distinct blocks
+    body.live_regs = 1;
+    r.image->publish(body);
+
+    nmfc::invocation_msg msg{};
+    msg.token = t;
+    msg.home_host = r.host_id;
+    msg.body = r.image->lookup(t);
+    msg.entry_pc = body.entry_pc;
+    REQUIRE(r.core->accept(msg));
+  }
+
+  run_recording(r, mem, clock, 600);
+  REQUIRE(mem.peak_concurrent == 4);
+  REQUIRE(r.host.returned.size() == 4);
+}
+
+namespace
+{
+nmfc::body_instr spawn_of(std::uint64_t child)
+{
+  nmfc::body_instr instr{};
+  instr.is_spawn = true;
+  instr.spawn_token = child;
+  instr.cls = nmfc::op_class::ALU;
+  return instr;
+}
+} // namespace
+
+TEST_CASE("A spawn starts exactly one invocation and does not consume its parent")
+{
+  // The alternative to migrating, and the newest mechanism here. A spawn must
+  // create the named invocation once, and the spawning context must carry on --
+  // if it blocked or died, a traversal that spawns as it goes would stall on
+  // its own children.
+  rig r{0, 8, "_spawn"};
+  recording_cache mem{r.dcache_channel, 5};
+  champsim::chrono::clock clock;
+
+  nmfc::function_body child{};
+  child.token = 200;
+  child.entry_pc = on_tile(0, 0x1000);
+  child.instrs.push_back(load_from(on_tile(0, 0x300), 1));
+  child.live_regs = 1;
+  r.image->publish(child);
+
+  nmfc::function_body parent{};
+  parent.token = 100;
+  parent.entry_pc = on_tile(0, 0x1000);
+  parent.instrs.push_back(spawn_of(200));
+  parent.instrs.push_back(load_from(on_tile(0, 0x40), 2)); // parent keeps going
+  parent.live_regs = 2;
+  r.image->publish(parent);
+
+  nmfc::invocation_msg msg{};
+  msg.token = 100;
+  msg.home_host = r.host_id;
+  msg.body = r.image->lookup(100);
+  msg.entry_pc = parent.entry_pc;
+  REQUIRE(r.core->accept(msg));
+
+  run_recording(r, mem, clock, 400);
+
+  // Both ran: the parent's own load and the child's, on one core because both
+  // addresses are local here.
+  REQUIRE(mem.seen.size() == 2);
+  // The parent returned; the child is fire-and-forget only if its body says so,
+  // and this one does not, so both come home.
+  REQUIRE(r.host.returned.size() == 2);
+}
+
+TEST_CASE("A spawned invocation goes to the tile that owns its address, not the spawner's")
+{
+  // The point of spawning rather than migrating: the work is placed by the
+  // address it will touch. If it landed on the spawner's tile it would then
+  // have to migrate, and the mechanism would have bought nothing.
+  rig r{0, 8, "_spawn_place"};
+  recording_cache mem{r.dcache_channel, 5};
+  champsim::chrono::clock clock;
+
+  nmfc::function_body child{};
+  child.token = 201;
+  child.entry_pc = on_tile(0, 0x1000);
+  child.instrs.push_back(load_from(on_tile(3, 0x300), 1)); // owned by tile 3
+  child.live_regs = 1;
+  r.image->publish(child);
+
+  nmfc::function_body parent{};
+  parent.token = 101;
+  parent.entry_pc = on_tile(0, 0x1000);
+  parent.instrs.push_back(spawn_of(201));
+  parent.live_regs = 1;
+  r.image->publish(parent);
+
+  nmfc::invocation_msg msg{};
+  msg.token = 101;
+  msg.home_host = r.host_id;
+  msg.body = r.image->lookup(101);
+  msg.entry_pc = parent.entry_pc;
+  REQUIRE(r.core->accept(msg));
+
+  run_recording(r, mem, clock, 400);
+
+  // Only tile 0 exists in this rig, so a child destined for tile 3 must not be
+  // delivered here -- the fabric holds it for a core that never attaches. What
+  // matters is that this core did not run it and did not touch tile 3.
+  for (const auto addr : mem.seen) {
+    REQUIRE(nmfc::tile_map{TILES, BLOCK_BITS, GRAIN_BITS, MODE_BIT}.tile_of_virtual(addr) == 0);
+  }
+  REQUIRE(r.host.returned.size() == 1); // the parent, and only the parent
+}

@@ -82,10 +82,18 @@ void nmfc_drain_joins()
 }
 
 /** Close an invocation, and join it now or later depending on the window. */
-void nmfc_finish(std::uint64_t token)
+void nmfc_finish(std::uint64_t token, bool no_return = false)
 {
   auto& tracer = nmfc::gapbs::tracer::instance();
   tracer.end_call(token);
+  if (no_return) {
+    // Fire-and-forget: the host released its tracking slot when the call was
+    // dispatched, so there is nothing left to wait on. Emitting a join anyway
+    // names a token the tracking unit has already forgotten, which it can only
+    // read as a *new* offload -- and then dispatches a body that was retired
+    // when the original invocation finished.
+    return;
+  }
   if (g_nmfc.fork_window <= 1) {
     return; // blocking call: the call itself is the wait
   }
@@ -174,13 +182,13 @@ int64_t TDStep(const Graph &g, pvector<NodeID> &parent,
         // a compiler splitting a loop hoists them, and re-reading them would
         // charge the model for work it would not do.
         if (++in_chunk >= per_call && edge_index < degree) {
-          nmfc_finish(token);
+          nmfc_finish(token, spawning);
           T.host(&(*q_iter), R::R_VERTEX, R::R_VERTEX);
           token = T.begin_call(1, spawning, !spawning && g_nmfc.fork_window > 1);
           in_chunk = 0;
         }
       }
-      nmfc_finish(token);                              // NMFC
+      nmfc_finish(token, spawning);                    // NMFC
     }
     lqueue.flush();
   }
