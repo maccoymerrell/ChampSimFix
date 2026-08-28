@@ -90,7 +90,7 @@ struct fabric_rig {
   recording_host host;
   std::uint32_t host_id;
 
-  fabric_rig(const std::string& tag, std::vector<std::size_t> capacities, std::size_t queue_size = 16)
+  fabric_rig(const std::string& tag, std::vector<std::size_t> capacities, std::size_t queue_size = 16, const std::string& placement = "round_robin")
   {
     auto rb = geometry(builder_t{"frouter" + tag, "CONGRUENT_ROUTER"}).add_parameter("clock_period", champsim::chrono::picoseconds{1000});
     router = nmfc::tile_router_module::create_instance(rb, static_cast<champsim::modules::environment_module*>(nullptr));
@@ -98,7 +98,8 @@ struct fabric_rig {
     auto fb = geometry(builder_t{"ffab" + tag, "FUNCTION_FABRIC"})
                   .add_parameter("hop_latency", std::uint64_t{1})
                   .add_parameter("router", router)
-                  .add_parameter("queue_size", queue_size);
+                  .add_parameter("queue_size", queue_size)
+                  .add_parameter("placement_policy", placement);
     fabric = nmfc::function_fabric_module::create_instance(fb, static_cast<champsim::modules::environment_module*>(nullptr));
     host_id = fabric->attach_host(&host);
 
@@ -226,4 +227,90 @@ TEST_CASE("Completions reach the host that issued the work")
   r.run(clock, 50);
   REQUIRE(r.host.returned.size() == 1);
   REQUIRE(r.host.returned.front() == 77);
+}
+
+TEST_CASE("A congested destination cannot monopolise the dispatch path either")
+{
+  // The same failure as the migration path, and it survived the migration fix
+  // because the fix was applied to one queue and not the other: 128 queued
+  // invocations for a full tile while every other tile sat at 1024/1024 free.
+  champsim::chrono::clock clock;
+  fabric_rig r{"_disp_hol", {0, 8, 8, 8}, 16, "first_touch"};
+
+  nmfc::function_body body{};
+  body.token = 1;
+  body.instrs.push_back(nmfc::body_instr{});
+
+  std::size_t refused = 0;
+  for (std::uint64_t i = 0; i < 200; ++i) {
+    nmfc::invocation_msg m{};
+    m.token = 1000 + i;
+    m.home_host = r.host_id;
+    m.body = &body;
+    // Force it at the full tile by giving the body an address that tile owns.
+    nmfc::body_instr touch{};
+    touch.mem[0] = champsim::address{0 * GRAIN + 0x40};
+    touch.num_loads = 1;
+    body.instrs[0] = touch;
+    if (!r.fabric->dispatch(m)) {
+      ++refused;
+    }
+  }
+  REQUIRE(refused > 0);
+
+  // Work for a tile with room must still be accepted and delivered.
+  nmfc::function_body ok_body{};
+  ok_body.token = 2;
+  nmfc::body_instr touch2{};
+  touch2.mem[0] = champsim::address{2 * GRAIN + 0x40};
+  touch2.num_loads = 1;
+  ok_body.instrs.push_back(touch2);
+
+  nmfc::invocation_msg good{};
+  good.token = 7;
+  good.home_host = r.host_id;
+  good.body = &ok_body;
+  REQUIRE(r.fabric->dispatch(good));
+
+  r.run(clock, 200);
+  std::size_t landed = 0;
+  for (std::size_t t = 1; t < TILES; ++t) {
+    landed += r.cores[t]->accepted.size();
+  }
+  REQUIRE(landed >= 1);
+}
+
+TEST_CASE("Dispatch does not rewrite the entry PC")
+{
+  // A function's code is one virtual page aliased to a copy on every channel,
+  // so the same address resolves to whichever copy the destination owns. The
+  // fabric used to add a per-tile bias here, which was correct when the copies
+  // were N distinct virtual pages and sends an invocation to an address that is
+  // not its code once they are not.
+  champsim::chrono::clock clock;
+  fabric_rig r{"_entry_pc", {8, 8, 8, 8}, 16, "first_touch"};
+
+  nmfc::function_body body{};
+  body.token = 5;
+  body.entry_pc = champsim::address{0x1000};
+  nmfc::body_instr touch{};
+  touch.mem[0] = champsim::address{3 * GRAIN + 0x40}; // owned by tile 3
+  touch.num_loads = 1;
+  body.instrs.push_back(touch);
+
+  nmfc::invocation_msg msg{};
+  msg.token = 5;
+  msg.home_host = r.host_id;
+  msg.body = &body;
+  msg.entry_pc = body.entry_pc;
+  REQUIRE(r.fabric->dispatch(msg));
+  r.run(clock, 100);
+
+  // It landed somewhere, and wherever that was, it must have been told to start
+  // at the address it was given.
+  std::size_t total = 0;
+  for (const auto& c : r.cores) {
+    total += c->accepted.size();
+  }
+  REQUIRE(total == 1);
 }

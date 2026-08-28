@@ -68,7 +68,7 @@ public:
         policy_(parse_policy(builder.get_parameter<std::string>("placement_policy", true, std::string{"round_robin"}))),
         rng_(builder.get_parameter<std::uint64_t>("random_seed", true, std::uint64_t{0x9E3779B97F4A7C15ULL})),
         router_(builder.get_parameter<nmfc::tile_router_module*>("router")), tiles_(map_.num_tiles(), nullptr),
-        per_tile_invocations_(map_.num_tiles(), 0), migrations_(map_.num_tiles())
+        per_tile_invocations_(map_.num_tiles(), 0), migrations_(map_.num_tiles()), invocations_(map_.num_tiles())
   {
     // Split the configured buffering across the destinations rather than adding
     // to it, so per-destination queueing is a fairness change and not a capacity
@@ -103,18 +103,19 @@ public:
 
   bool dispatch(const nmfc::invocation_msg& msg) override
   {
-    if (invocations_.size() >= queue_size_) {
+    const auto tile = choose_tile(msg);
+    if (invocations_.at(tile).size() >= per_target_queue_) {
       ++dispatch_stalls_;
       return false;
     }
-    const auto tile = choose_tile(msg);
 
-    // Selecting the copy IS selecting the tile: the copies sit on consecutive
-    // grains, so this add is the whole placement mechanism.
-    auto routed = msg;
-    routed.entry_pc = champsim::address{msg.entry_pc.to<std::uint64_t>() + static_cast<std::uint64_t>(tile) * map_.grain()};
-
-    invocations_.push_back(entry<nmfc::invocation_msg>{routed, tile, current_time + hop_latency_});
+    // The entry PC is *not* adjusted. A function's code is one virtual page
+    // that the OS aliases to a copy on every channel, so the same address
+    // resolves to whichever copy the destination tile owns. Adding a per-tile
+    // bias here was the old layout, where the copies were N distinct virtual
+    // pages, and under aliasing it sends the invocation to an address that is
+    // not its code at all.
+    invocations_.at(tile).push_back(entry<nmfc::invocation_msg>{msg, tile, current_time + hop_latency_});
     ++per_tile_invocations_.at(tile);
     ++dispatched_;
 
@@ -174,8 +175,8 @@ public:
   {
     // Fed entirely by external pushes from cores and hosts, so never skip more
     // than a single cycle.
-    const bool no_migrations = std::all_of(std::begin(migrations_), std::end(migrations_), [](const auto& q) { return q.empty(); });
-    return (invocations_.empty() && no_migrations && completions_.empty()) ? 1 : 0;
+    const auto all_empty = [](const auto& qs) { return std::all_of(std::begin(qs), std::end(qs), [](const auto& q) { return q.empty(); }); };
+    return (all_empty(invocations_) && all_empty(migrations_) && completions_.empty()) ? 1 : 0;
   }
 
   void begin_phase(bool /*warmup*/) override
@@ -216,7 +217,7 @@ public:
 
   void print_deadlock() final
   {
-    fmt::print("[{}] invocations: {} migrations: {} completions: {}\n", NAME, invocations_.size(), queued_migrations(), completions_.size());
+    fmt::print("[{}] invocations: {} migrations: {} completions: {}\n", NAME, queued_invocations(), queued_migrations(), completions_.size());
     // Where the queued migrations are trying to go. If they are all aimed at
     // one full tile, the queue cannot drain no matter how much room the other
     // tiles have -- and the age guarantee cannot help, because the oldest
@@ -305,6 +306,15 @@ private:
    *
    * Tokens are issued in order, so "oldest" is just the smallest token.
    */
+  [[nodiscard]] std::size_t queued_invocations() const
+  {
+    std::size_t total = 0;
+    for (const auto& q : invocations_) {
+      total += q.size();
+    }
+    return total;
+  }
+
   [[nodiscard]] std::size_t queued_migrations() const
   {
     std::size_t total = 0;
@@ -352,23 +362,25 @@ private:
   {
     long progress = 0;
     champsim::bandwidth bw{max_deliver_};
-    // Same reasoning as migrations: different targets, so the head must not
-    // speak for the queue.
-    for (auto it = std::begin(invocations_); bw.has_remaining() && it != std::end(invocations_);) {
-      auto* core = it->deliver_at <= current_time ? tiles_.at(it->target) : nullptr;
-      // A new invocation may never take the reserve; it has no age guarantee
-      // and would deny the slot to the one context that does.
-      if (core == nullptr || !has_room(core) || !core->accept(it->payload)) {
-        if (core != nullptr) {
+    // Same reasoning as migrations: different targets, so one destination must
+    // not speak for the rest.
+    for (std::size_t n = 0; n < invocations_.size() && bw.has_remaining(); ++n) {
+      auto& queue = invocations_[(next_dispatch_ + n) % invocations_.size()];
+      while (bw.has_remaining() && !queue.empty() && queue.front().deliver_at <= current_time) {
+        auto& head = queue.front();
+        auto* core = tiles_.at(head.target);
+        // A new invocation may never take the reserve; it has no age guarantee
+        // and would deny the slot to the one context that does.
+        if (!has_room(core) || !core->accept(head.payload)) {
           ++refused_on_arrival_;
+          break; // this destination is full; the other queues are unaffected
         }
-        ++it;
-        continue;
+        queue.pop_front();
+        bw.consume();
+        ++progress;
       }
-      it = invocations_.erase(it);
-      bw.consume();
-      ++progress;
     }
+    next_dispatch_ = invocations_.empty() ? 0 : (next_dispatch_ + 1) % invocations_.size();
     track_peak();
     return progress;
   }
@@ -428,7 +440,7 @@ private:
 
   void track_peak()
   {
-    peak_queue_ = std::max({peak_queue_, invocations_.size(), queued_migrations(), completions_.size()});
+    peak_queue_ = std::max({peak_queue_, queued_invocations(), queued_migrations(), completions_.size()});
   }
 
   nmfc::tile_map map_;
@@ -445,7 +457,12 @@ private:
   std::vector<nmfc::function_core_module*> tiles_;
   std::vector<nmfc::offload_sink*> hosts_;
 
-  std::deque<entry<nmfc::invocation_msg>> invocations_;
+  // Per destination, for the same reason migrations are: a shared queue lets
+  // one congested tile own all of it, and then dispatch to tiles with every
+  // context free is refused because the queue is full of work for a tile that
+  // cannot take any. Measured as a deadlock with 128 queued invocations for a
+  // full tile 0 while tiles 1-3 sat at 1024/1024 free.
+  std::vector<std::deque<entry<nmfc::invocation_msg>>> invocations_;
   // One queue per destination tile, not one shared queue.
   //
   // A single shared queue lets one congested destination own all of it: a full
@@ -458,6 +475,7 @@ private:
   std::vector<std::deque<entry<nmfc::migration_msg>>> migrations_;
   std::size_t per_target_queue_ = 0;
   std::size_t next_drain_ = 0;
+  std::size_t next_dispatch_ = 0;
   std::deque<entry<nmfc::completion_msg>> completions_;
 
   std::size_t round_robin_ = 0;
