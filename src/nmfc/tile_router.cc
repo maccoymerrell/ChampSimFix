@@ -37,7 +37,16 @@ public:
 
   [[nodiscard]] std::size_t owner_of(champsim::origin /*origin*/, champsim::address vaddr) const override { return map_.tile_of_virtual(vaddr); }
 
-  /** Forced, not chosen: congruence is the invariant, so this must agree with owner_of. */
+  /**
+   * Where a new invocation should run.
+   *
+   * Forced, not chosen: congruence is the invariant, so this must agree with
+   * owner_of. Congruence is also why this router is the wrong one to run
+   * replicated code under -- every invocation starts at the same virtual
+   * address, so every invocation is sent to the same tile. Choosing among the
+   * copies is a placement policy, and a policy that balances access while
+   * working sets consolidate is what NUCA_ROUTER is for.
+   */
   [[nodiscard]] std::size_t placement_for(champsim::origin origin, champsim::address vaddr) override { return owner_of(origin, vaddr); }
 
   /** One root per channel: the tile is known before the walk begins. */

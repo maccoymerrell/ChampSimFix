@@ -136,13 +136,25 @@ public:
     // cannot be: picking the root would require the answer the walk produces.
     // A replicated grain lives in every partition, so its entry is found
     // through the asking tile's root rather than one derived from the address.
-    const auto tile = roots <= 1                    ? std::size_t{0}
-                      : tile_override.has_value()   ? *tile_override
-                                                    : router_->owner_of(origin, champsim::address{raw});
+    const auto asking = tile_override.value_or(std::size_t{0});
+    // Which copy of the table this walk belongs to. Partitioned: the tile that
+    // owns the address, because that channel holds its entries. Duplicated:
+    // one logical entry shared by every channel, so the key names no tile and
+    // the asking tile selects a copy of the page instead.
+    const auto tile = roots > 1 ? (tile_override.has_value() ? asking : router_->owner_of(origin, champsim::address{raw})) : std::size_t{0};
+    // A partitioned table indexes by the compacted address, since channel t's
+    // table covers only channel t's addresses. A duplicated one covers all of
+    // them, so it indexes by the address itself -- compacting would collide
+    // two addresses that differ only in their tile bits.
     const champsim::address compacted{roots > 1 ? map_.compact_virtual(raw) : raw};
 
     const champsim::dynamic_extent entry_extent{champsim::address::bits, shamt(level + 1)};
-    const auto key = std::tuple{origin.asid(), static_cast<std::uint32_t>(level * roots + tile), champsim::address_slice{entry_extent, compacted}};
+    // Strided by the tile count, not the root count: with a duplicated table
+    // `tile` is 0 but a partitioned one ranges over every channel, and a stride
+    // of `roots` would land level 0 on tile 1 and level 1 on tile 0 in the same
+    // slot, where the slices compared belong to different levels.
+    const auto key =
+        std::tuple{origin.asid(), static_cast<std::uint32_t>(level * map_.num_tiles() + tile), champsim::address_slice{entry_extent, compacted}};
 
     auto it = page_table_.find(key);
     bool fault = false;
@@ -150,8 +162,12 @@ public:
       // The key says which root; this says which tile stores the page. With one
       // root those are different questions, and putting every page-table page
       // on tile 0 would make the table a hotspot the fabric then has to carry.
-      const auto pt_tile = roots > 1 ? tile : map_.tile_of_virtual(raw);
-      const auto frame = allocate_standard_frame_on(pt_tile);
+      // Partitioned: a frame on the channel that owns these addresses.
+      // Duplicated: a replicated page, so every channel gets a copy and every
+      // walk is local. Putting the one table on tile 0 instead makes three
+      // walks in four remote, which is the thing both arrangements exist to
+      // prevent.
+      const auto frame = roots > 1 ? allocate_standard_frame_on(tile) : take_pt_replica_page();
       // Stamped NMFC: the whole point of placing a page-table page on the tile
       // that owns the addresses it describes is that walks stay local, and
       // tile_of() only reads grain bits when the mode says NMFC.
@@ -160,10 +176,17 @@ public:
       ++pt_pages_;
     }
 
-    const auto offset = get_offset(compacted, level);
+    // get_offset compacts internally, which is right for a partitioned table
+    // and wrong for a duplicated one.
+    const auto offset = roots > 1 ? get_offset(compacted, level) : champsim::address_slice{extent(level), compacted}.to<std::uint64_t>();
     const champsim::dynamic_extent pte_extent{champsim::data::bits{champsim::lg2(pte_entry::byte_multiple)},
                                               static_cast<std::size_t>(champsim::lg2(pte_page_size_.count()))};
-    const champsim::address paddr{champsim::splice(champsim::page_number{it->second}, champsim::address_slice{pte_extent, offset})};
+    // Copy t of a replicated page sits t grains above copy 0.
+    auto base_page = champsim::page_number{it->second};
+    if (roots <= 1) {
+      base_page = champsim::page_number{base_page.to<std::uint64_t>() + asking * pages_per_grain_};
+    }
+    const champsim::address paddr{champsim::splice(base_page, champsim::address_slice{pte_extent, offset})};
 
     return {paddr, fault ? minor_fault_penalty_ : champsim::chrono::clock::duration::zero()};
   }
@@ -248,11 +271,10 @@ public:
   [[nodiscard]] std::pair<champsim::address, champsim::chrono::clock::duration> pte_address_on(champsim::origin origin, std::uint64_t vpage, std::size_t level,
                                                                                                 std::size_t tile) override
   {
-    const auto vgrain = vpage / pages_per_grain_;
-    const bool replicated = replicated_grains_.count(std::pair{origin.asid(), vgrain}) != 0;
-    if (replicated) {
-      pte_tile_override_ = tile;
-    }
+    // The asking tile is always named. A partitioned table needs it only for
+    // replicated grains, which live in every partition; a duplicated table
+    // needs it for every walk, because it is what selects this channel's copy.
+    pte_tile_override_ = tile;
     auto result = get_pte_pa(origin, champsim::page_number{champsim::address{vpage << log2_page_size_}}, level);
     pte_tile_override_.reset();
     return result;
@@ -413,6 +435,30 @@ private:
    * property that a virtual address and its frame name the same tile. These
    * frames are deliberately on *different* tiles; they hold the same bytes.
    */
+  /**
+   * A page-table page, replicated on every channel.
+   *
+   * This is the same page type function code uses, for the same reason: one
+   * logical page, one physical copy per channel, copy t on tile t because a
+   * group hands out one grain per channel in tile order. A duplicated page
+   * table is exactly that page type applied to the table, so there is no new
+   * mechanism here -- carving pages out of a replica set is the whole of it.
+   *
+   * Returns the page number of copy 0. Copy t is that plus t grains' worth of
+   * pages, which is why the copies must come from one group rather than N
+   * independent allocations.
+   */
+  std::uint64_t take_pt_replica_page()
+  {
+    if (!pt_replica_open_ || pt_replica_next_page_ == pages_per_grain_) {
+      pt_replica_base_grain_ = take_replica_set();
+      pt_replica_next_page_ = 0;
+      pt_replica_open_ = true;
+      replica_allocs_ += map_.num_tiles();
+    }
+    return pt_replica_base_grain_ * pages_per_grain_ + pt_replica_next_page_++;
+  }
+
   std::uint64_t take_replica_set()
   {
     if (free_groups_.empty()) {
@@ -600,6 +646,11 @@ private:
   unsigned log2_page_size_;
   bool default_nmfc_;
   std::uint64_t pages_per_grain_ = 1;
+  // Page-table pages are carved from replica sets, so a walk never leaves
+  // the channel that started it.
+  std::uint64_t pt_replica_base_grain_ = 0;
+  std::uint64_t pt_replica_next_page_ = 0;
+  bool pt_replica_open_ = false;
 
   std::vector<std::deque<std::uint64_t>> free_grains_;
   std::deque<std::uint64_t> standard_frames_;

@@ -250,7 +250,14 @@ struct in_flight {
 enum class placement_policy : std::uint8_t {
   ROUND_ROBIN,
   LEAST_LOADED,
-  FIRST_TOUCH,
+  /**
+   * Ask the routing policy, given the invocation's entry program counter.
+   *
+   * The only address known at dispatch. A policy that instead looked at the
+   * data the function was about to touch was removed: dispatch precedes
+   * execution, so that address does not exist yet outside the simulator.
+   */
+  BY_ENTRY_PC,
   RANDOM,
 };
 

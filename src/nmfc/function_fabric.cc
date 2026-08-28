@@ -16,7 +16,7 @@
  *   hop_latency        cycles per hop (default 8)
  *   queue_size         messages held per class before refusal (default 64)
  *   max_deliver        messages delivered per cycle, per class (default 4)
- *   placement_policy   "round_robin" | "least_loaded" | "first_touch" | "random"
+ *   placement_policy   "round_robin" | "least_loaded" | "by_entry_pc" | "random"
  *   random_seed        seeds the random policy, so runs stay reproducible
  */
 
@@ -49,8 +49,11 @@ nmfc::placement_policy parse_policy(const std::string& name)
   if (name == "least_loaded") {
     return nmfc::placement_policy::LEAST_LOADED;
   }
-  if (name == "first_touch") {
-    return nmfc::placement_policy::FIRST_TOUCH;
+  if (name == "by_entry_pc" || name == "first_touch") {
+    // first_touch is accepted and redirected rather than rejected: it names a
+    // policy that was removed for being unimplementable, and configurations
+    // still ask for it.
+    return nmfc::placement_policy::BY_ENTRY_PC;
   }
   if (name == "random") {
     return nmfc::placement_policy::RANDOM;
@@ -272,18 +275,22 @@ private:
       }
       return best;
     }
-    case nmfc::placement_policy::FIRST_TOUCH: {
-      // Land the invocation where its first data access already lives, so the
-      // common case costs no migration at all.
-      if (msg.body != nullptr) {
-        for (const auto& instr : msg.body->instrs) {
-          if (instr.num_mem_ops() > 0) {
-            return router_->owner_of(msg.origin, instr.mem[0]);
-          }
-        }
-      }
-      return next_round_robin();
-    }
+    case nmfc::placement_policy::BY_ENTRY_PC:
+      // Ask the placement policy where this invocation should run, given the
+      // only thing known at dispatch: the address it will start executing at.
+      //
+      // What used to be here read the body to find the first address the
+      // function would touch, and placed it there. That cannot exist. Dispatch
+      // happens before the function runs, so nothing in the machine knows what
+      // it will touch -- the simulator was reading the future out of a data
+      // structure the hardware does not have. It also flattered every result
+      // built on it, because it removed migrations no real machine could have
+      // avoided.
+      // Translate before routing. The entry PC is one virtual address with a
+      // copy on every channel, so by itself it names no tile; the physical
+      // copy the operating system hands back is what does. The router asks the
+      // address space's owner, which is where that choice belongs.
+      return router_->placement_for(msg.origin, msg.entry_pc);
     case nmfc::placement_policy::RANDOM:
       return static_cast<std::size_t>(rng_() % tiles_.size());
     case nmfc::placement_policy::ROUND_ROBIN:
