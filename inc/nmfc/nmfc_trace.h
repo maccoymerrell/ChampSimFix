@@ -242,7 +242,18 @@ struct header {
   std::uint32_t num_asids;         // address spaces present in the stream
   std::uint64_t num_records;
   std::uint64_t num_calls;
-  std::uint8_t reserved[8];        // NOLINT(*-avoid-c-arrays)
+  /**
+   * The most invocations the generator lets the host leave outstanding before
+   * it waits -- its fork window. Zero means it did not say.
+   *
+   * A contract, like the geometry above. If the machine's tracking unit is
+   * smaller than this, the host fills it and then cannot reach the join that
+   * would free a slot, because that join is only emitted once the window is
+   * full. The result is a deadlock a long way from its cause, so the reader
+   * refuses instead.
+   */
+  std::uint32_t max_outstanding;
+  std::uint8_t reserved[4];        // NOLINT(*-avoid-c-arrays)
 };
 
 static_assert(sizeof(trace_instr) == 64, "trace_instr must match input_instr's layout");
@@ -273,6 +284,19 @@ inline constexpr std::uint32_t call_body_length(std::uint64_t aux1) { return sta
 inline constexpr std::uint64_t encode_call_aux1(std::uint32_t func_id, std::uint32_t body_length)
 {
   return (static_cast<std::uint64_t>(func_id) << 32) | body_length;
+}
+
+/**
+ * Whether a machine with `ftu_size` tracking slots can run a trace that leaves
+ * `max_outstanding` invocations in flight.
+ *
+ * A pure function so the rule can be tested. The reader acts on it by refusing
+ * the trace, which it must do by exiting -- but a decision that can only be
+ * observed by killing the process is a decision nothing can check.
+ */
+inline constexpr bool outstanding_fits(std::uint32_t max_outstanding, std::uint64_t ftu_size)
+{
+  return ftu_size == 0 || max_outstanding == 0 || max_outstanding <= ftu_size;
 }
 
 } // namespace nmfc

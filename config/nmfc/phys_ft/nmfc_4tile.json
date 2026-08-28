@@ -2305,6 +2305,7 @@
           "module": "instruction_producer",
           "model": "NMFC_PRODUCER",
           "trace_file": "$trace0",
+          "ftu_size": 1024,
           "repeat": false,
           "image": "@fn_image",
           "vmem": "@VMEM"

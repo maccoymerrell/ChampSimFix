@@ -1055,6 +1055,7 @@
           "module": "instruction_producer",
           "model": "INSTRUCTION_PRODUCER",
           "trace_file": "$trace0",
+          "ftu_size": 1024,
           "repeat": false
         }
       ]

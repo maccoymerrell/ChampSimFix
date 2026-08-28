@@ -46,7 +46,7 @@ nmfc::record blank_rec(nmfc::op kind, std::uint64_t token)
 
 /** Write a trace whose header matches the geometry below unless told otherwise. */
 std::string write_trace(const std::string& name, const std::vector<nmfc::record>& records, std::uint32_t tiles = TILES,
-                        std::uint32_t version = nmfc::TRACE_VERSION)
+                        std::uint32_t version = nmfc::TRACE_VERSION, std::uint32_t max_outstanding = 0)
 {
   const auto path = std::string{"/tmp/nmfc_test_"} + name + ".nmfc";
   std::ofstream out(path, std::ios::binary);
@@ -61,6 +61,7 @@ std::string write_trace(const std::string& name, const std::vector<nmfc::record>
   h.interleave_shift = GRAIN_BITS;
   h.num_asids = 1;
   h.num_records = records.size();
+  h.max_outstanding = max_outstanding;
   out.write(reinterpret_cast<const char*>(&h), sizeof(h));
   for (const auto& r : records) {
     out.write(reinterpret_cast<const char*>(&r), sizeof(r));
@@ -182,4 +183,23 @@ TEST_CASE("Host instructions pass through in order")
     REQUIRE(instr->ip.to<std::uint64_t>() == 0x1000 + i * 4);
     r.producer->consume();
   }
+}
+
+TEST_CASE("A fork window wider than the tracking unit does not fit")
+{
+  // The host leaves invocations outstanding until its window is full and only
+  // then waits. If the window exceeds the tracking unit, it fills the unit and
+  // waits for a join it can never reach -- a deadlock whose dump names the
+  // reorder buffer, three components from the decision that caused it. The
+  // reader refuses such a trace; this is the rule it refuses by.
+  REQUIRE_FALSE(nmfc::outstanding_fits(4096, 64));
+  REQUIRE_FALSE(nmfc::outstanding_fits(1025, 1024));
+
+  REQUIRE(nmfc::outstanding_fits(1024, 1024)); // exactly enough is enough
+  REQUIRE(nmfc::outstanding_fits(16, 1024));
+
+  // Undeclared on either side means the check cannot be made, and a check that
+  // cannot be made must not become a refusal.
+  REQUIRE(nmfc::outstanding_fits(0, 64));
+  REQUIRE(nmfc::outstanding_fits(4096, 0));
 }

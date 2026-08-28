@@ -161,10 +161,14 @@ public:
 
   long operate() final
   {
+    const auto stalls_before = dispatch_stalls_;
     long progress = 0;
     // Returns first: a completion frees a context on some tile, and an
     // invocation waiting for that tile would otherwise spin against a full core
     // that the very message behind it was about to drain.
+    if (dispatch_stalls_ != stalls_before) {
+      ++dispatch_blocked_cycles_;
+    }
     progress += deliver_completions();
     progress += deliver_migrations();
     progress += deliver_invocations();
@@ -183,6 +187,8 @@ public:
   {
     dispatched_ = migrated_ = finished_ = 0;
     dispatch_stalls_ = migrate_stalls_ = finish_stalls_ = 0;
+    dispatch_blocked_cycles_ = 0;
+    phase_start_ = current_time;
     refused_on_arrival_ = 0;
     reserved_deliveries_ = 0;
     std::fill(std::begin(per_tile_invocations_), std::end(per_tile_invocations_), 0);
@@ -194,9 +200,15 @@ public:
     if (dispatched_ == 0 && migrated_ == 0 && finished_ == 0) {
       return;
     }
+    const auto phase_cycles = static_cast<std::uint64_t>((current_time - phase_start_) / clock_period);
     out.line(fmt::format("{} DISPATCHED: {} MIGRATED: {} RETURNED: {}", NAME, dispatched_, migrated_, finished_));
-    out.line(fmt::format("{} STALLS dispatch: {} migrate: {} return: {} REFUSED ON ARRIVAL: {}", NAME, dispatch_stalls_, migrate_stalls_, finish_stalls_,
-                         refused_on_arrival_));
+    // Cycles first: a retry count scales with how many contexts are asking and
+    // compares to nothing, which is how 207M "dispatch stalls" came to point at
+    // a queue that turned out not to matter.
+    out.line(fmt::format("{} DISPATCH BLOCKED: {} cycles ({:.1f}% of phase) over {} retries", NAME, dispatch_blocked_cycles_,
+                         phase_cycles == 0 ? 0.0 : 100.0 * static_cast<double>(dispatch_blocked_cycles_) / static_cast<double>(phase_cycles),
+                         dispatch_stalls_));
+    out.line(fmt::format("{} STALLS migrate: {} return: {} REFUSED ON ARRIVAL: {}", NAME, migrate_stalls_, finish_stalls_, refused_on_arrival_));
     // How often the machine had to fall back on the age guarantee. A large
     // number means the tiles are chronically full, not that anything is wrong.
     out.line(fmt::format("{} RESERVED-SLOT DELIVERIES: {}", NAME, reserved_deliveries_));
@@ -485,6 +497,8 @@ private:
   std::uint64_t migrated_ = 0;
   std::uint64_t finished_ = 0;
   std::uint64_t dispatch_stalls_ = 0;
+  std::uint64_t dispatch_blocked_cycles_ = 0;
+  champsim::chrono::clock::time_point phase_start_{};
   std::uint64_t migrate_stalls_ = 0;
   std::uint64_t finish_stalls_ = 0;
   std::uint64_t refused_on_arrival_ = 0;

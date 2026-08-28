@@ -324,10 +324,14 @@ def build(args, nmfc_enabled):
                           lower="@cpu0_STLB_cpu0_PTW_channel", hit=8, fill=8, mshr=16, pq=0,
                           offset=PAGE_OFFSET))
 
+    # The reader checks the trace's declared fork window against this, so both
+    # must agree on one value rather than each deriving its own.
+    ftu_size = args.ftu_size if args.ftu_size > 0 else args.tiles * args.contexts
     producer = {
         "name": "cpu0_trace", "module": "instruction_producer",
         "model": "NMFC_PRODUCER" if nmfc_enabled else "INSTRUCTION_PRODUCER",
-        "trace_file": "$trace0", "repeat": False,
+        "trace_file": "$trace0",
+        "ftu_size": ftu_size, "repeat": False,
     }
     if nmfc_enabled:
         producer["image"] = "@fn_image"
@@ -358,7 +362,7 @@ def build(args, nmfc_enabled):
     if nmfc_enabled:
         core["fabric"] = "@fn_fabric"
         core["image"] = "@fn_image"
-        core["ftu_size"] = args.ftu_size if args.ftu_size > 0 else args.tiles * args.contexts
+        core["ftu_size"] = ftu_size
     children.append(core)
 
     children.append({"name": "heartbeat", "module": "listener", "model": "HEARTBEAT",

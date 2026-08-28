@@ -70,6 +70,7 @@ public:
         aperture_base_(builder.get_parameter<std::uint64_t>("nmfc_aperture_base", true, std::uint64_t{1} << 46)),
         aperture_bytes_(builder.get_parameter<std::uint64_t>("nmfc_aperture_bytes", true, std::uint64_t{1} << 42)),
         block_bits_(builder.get_parameter<unsigned>("log2_block_size", true, 6U)),
+        ftu_size_(builder.get_parameter<std::size_t>("ftu_size", true, std::size_t{0})),
         page_bits_(builder.get_parameter<unsigned>("log2_page_size", true, 12U))
   {
     producer_group_ = builder.get_parameter<std::string>("producer_group", true, std::string{});
@@ -151,6 +152,16 @@ private:
     }
     if (header.num_regs > nmfc::MAX_FUNCTION_REGS) {
       fail("function regfile width", header.num_regs, nmfc::MAX_FUNCTION_REGS);
+    }
+    // Not a geometry mismatch but the same kind of contract: a host that may
+    // leave more invocations outstanding than its tracking unit holds fills the
+    // unit and then waits forever for a join it cannot reach.
+    if (!nmfc::outstanding_fits(header.max_outstanding, ftu_size_)) {
+      fmt::print("[NMFC_PRODUCER] ERROR: {} lets the host leave {} invocations outstanding, but its tracking unit holds {}.\n"
+                 "  The host would fill the unit and then wait for a join it cannot reach. Raise ftu_size, or lower the\n"
+                 "  generator's --fork-window.\n",
+                 path_, header.max_outstanding, ftu_size_);
+      std::exit(-1);
     }
   }
 
@@ -367,6 +378,7 @@ private:
   std::uint64_t aperture_base_;
   std::uint64_t aperture_bytes_;
   unsigned block_bits_;
+  std::size_t ftu_size_;
   unsigned page_bits_;
 
   std::ifstream stream_;

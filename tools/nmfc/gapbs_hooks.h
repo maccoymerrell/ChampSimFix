@@ -117,6 +117,9 @@ public:
    */
   void set_budget(std::uint64_t invocations) { budget_ = invocations; }
 
+  /** How many invocations the host may leave outstanding: a contract with the machine. */
+  void set_max_outstanding(std::uint64_t n) { max_outstanding_ = n; }
+
   [[nodiscard]] bool enabled() const { return enabled_ && !budget_spent_; }
   [[nodiscard]] std::uint64_t baseline_instructions() const { return baseline_count_; }
 
@@ -394,6 +397,7 @@ public:
     header.num_asids = 1;
     header.num_records = records_;
     header.num_calls = calls_;
+    header.max_outstanding = static_cast<std::uint32_t>(max_outstanding_);
 
     out_.seekp(0);
     out_.write(reinterpret_cast<const char*>(&header), sizeof(header));
@@ -573,6 +577,7 @@ private:
   std::uint64_t definitions_ = 0;
   std::uint64_t joins_ = 0;
   std::uint64_t budget_ = 0;
+  std::uint64_t max_outstanding_ = 0;
 };
 
 } // namespace nmfc::gapbs

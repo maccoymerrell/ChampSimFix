@@ -476,6 +476,7 @@ int main(int argc, char* argv[]) {
   tracer.open(out_nmfc, g_nmfc.tiles, g_nmfc.grain_bits);
   tracer.open_baseline(out_baseline);
   tracer.set_budget(g_nmfc.budget);
+  tracer.set_max_outstanding(static_cast<std::uint64_t>(std::max<std::int64_t>(g_nmfc.fork_window, 1)));
   nmfc_declare_layout(g); // parent is declared inside DOBFS, where it exists
 
   // The source must name the same *vertex* in both layouts, or the NMFC trace
