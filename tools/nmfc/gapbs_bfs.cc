@@ -63,6 +63,7 @@ struct nmfc_options {
   unsigned grain_bits = 21;
   std::string partition = "stripe";
   std::string shape = "chase";   // "chase" = migrate to the data; "spawn" = send work to it
+  std::int64_t bu_batch = 1;     // bottom-up vertices per invocation
   unsigned partition_passes = 3; // restreaming passes for --partition mincut
   std::int64_t budget = 20000;   // stop tracing after this many invocations
   bool relabelled = false;
@@ -202,6 +203,10 @@ int64_t BUStep(const Graph &g, pvector<NodeID> &parent, Bitmap &front,
   next.reset();
   auto& T = nmfc::gapbs::tracer::instance();           // NMFC
   namespace R = nmfc::gapbs;                           // NMFC
+  const int64_t bu_batch = (g_nmfc.bu_batch > 0) ? g_nmfc.bu_batch : 1;
+  std::uint64_t bu_token = 0;   // the invocation currently being filled
+  int64_t bu_in_batch = 0;
+
   #pragma omp parallel for reduction(+ : awake_count) schedule(dynamic, 1024)
   for (NodeID u=0; u < g.num_nodes(); u++) {
     if (parent[u] < 0) {
@@ -209,25 +214,94 @@ int64_t BUStep(const Graph &g, pvector<NodeID> &parent, Bitmap &front,
       // neighbour, so per-vertex is the natural slice and chunking would only
       // add fabric traffic for work that was about to end anyway.
       T.host(&parent[u], R::R_VERTEX, R::R_VERTEX);
-      const std::uint64_t token = T.begin_call(2, false, g_nmfc.fork_window > 1);
-      T.body_load(&g.nmfc_out_index()[u], R::R_ROW_BEGIN, R::R_VERTEX);
       const NodeID* edge_base = g.in_neigh(u).begin();
       int64_t edge_index = 0;
 
-      for (NodeID v : g.in_neigh(u)) {
-        T.body_load(edge_base + edge_index, R::R_NEIGHBOUR, R::R_ROW_BEGIN, edge_index > 0);
-        T.body_load(&parent[v], R::R_VALUE, R::R_NEIGHBOUR);
-        ++edge_index;
-        if (front.get_bit(v)) {
-          T.body_store(&parent[u], R::R_VALUE);        // NMFC: the claim
-          parent[u] = v;
+      // NMFC: bottom-up stops at the first neighbour already in the frontier,
+      // so its loop carries a real sequential dependence and cannot be fanned
+      // out -- spawning every probe at once would do the work the early exit
+      // exists to avoid.
+      //
+      // Under --shape spawn it becomes a chain instead of a fan-out. Each probe
+      // reads one neighbour id, which is u's own data, and hands the test of
+      // that neighbour's parent slot to the tile owning it. If the test fails,
+      // that tile hands the next probe back. The search advances one hop at a
+      // time, exactly as the sequential version does, and no context ever
+      // reaches for an address it does not own.
+      if (g_nmfc.shape == "spawn") {
+        // Walk the chain the kernel actually takes, so the trace contains the
+        // probes that really happened and not the ones early exit skipped.
+        std::vector<NodeID> probed;
+        NodeID found = -1;
+        for (NodeID v : g.in_neigh(u)) {
+          probed.push_back(v);
+          if (front.get_bit(v)) {
+            found = v;
+            break;
+          }
+        }
+
+        // Define the chain back to front: a link can only spawn a successor
+        // that has already been published.
+        std::vector<std::uint64_t> links(probed.size(), 0);
+        for (std::size_t i = probed.size(); i-- > 0;) {
+          const auto tok = T.begin_call(3, /*no_return=*/true, /*deferred_join=*/false, /*spawned=*/true);
+          // The test itself: this neighbour's parent slot, on this tile.
+          T.body_load(&parent[probed[i]], R::R_VALUE, R::R_NEIGHBOUR);
+          if (found == probed[i]) {
+            T.body_store(&parent[u], R::R_VALUE);      // claim u, back on u's tile
+          } else if (i + 1 < probed.size()) {
+            T.body_spawn(tok, links[i + 1], R::R_NEIGHBOUR); // hand on the search
+          }
+          T.end_call(tok, R::R_VALUE);
+          links[i] = tok;
+        }
+
+        // The head of the chain is what the host dispatches: u's own row, then
+        // the first probe.
+        const std::uint64_t head = T.begin_call(2, /*no_return=*/false, g_nmfc.fork_window > 1);
+        T.body_load(&g.nmfc_out_index()[u], R::R_ROW_BEGIN, R::R_VERTEX);
+        if (!probed.empty()) {
+          T.body_load(edge_base, R::R_NEIGHBOUR, R::R_ROW_BEGIN);
+          T.body_spawn(head, links[0], R::R_NEIGHBOUR);
+        }
+        nmfc_finish(head);
+        if (found >= 0) {
+          parent[u] = found;
           awake_count++;
           next.set_bit(u);
-          break;
+        }
+      } else {
+        if (bu_token == 0) {
+          bu_token = T.begin_call(2, false, g_nmfc.fork_window > 1);
+          bu_in_batch = 0;
+        }
+        const std::uint64_t token = bu_token;
+        T.body_load(&g.nmfc_out_index()[u], R::R_ROW_BEGIN, R::R_VERTEX);
+
+        for (NodeID v : g.in_neigh(u)) {
+          T.body_load(edge_base + edge_index, R::R_NEIGHBOUR, R::R_ROW_BEGIN, edge_index > 0);
+          T.body_load(&parent[v], R::R_VALUE, R::R_NEIGHBOUR);
+          ++edge_index;
+          if (front.get_bit(v)) {
+            T.body_store(&parent[u], R::R_VALUE);      // NMFC: the claim
+            parent[u] = v;
+            awake_count++;
+            next.set_bit(u);
+            break;
+          }
+        }
+        // One invocation covers `bu_batch` vertices, so a scan that ends after
+        // two loads does not cost a whole dispatch of its own.
+        if (++bu_in_batch >= bu_batch) {
+          nmfc_finish(bu_token);
+          bu_token = 0;
         }
       }
-      nmfc_finish(token);                              // NMFC
     }
+  }
+  if (bu_token != 0) {
+    nmfc_finish(bu_token); // whatever the last batch collected
   }
   nmfc_drain_joins();                                  // NMFC: level barrier
   return awake_count;
@@ -439,6 +513,7 @@ int main(int argc, char* argv[]) {
     else if (arg == "--grain-bits") { g_nmfc.grain_bits = static_cast<unsigned>(std::stoul(next())); }
     else if (arg == "--partition") { g_nmfc.partition = next(); }
     else if (arg == "--shape") { g_nmfc.shape = next(); }
+    else if (arg == "--bu-batch") { g_nmfc.bu_batch = std::stoll(next()); }
     else if (arg == "--partition-passes") { g_nmfc.partition_passes = static_cast<unsigned>(std::stoul(next())); }
     else if (arg == "--chunk") { g_nmfc.chunk = std::stoll(next()); }
     else if (arg == "--fork-window") { g_nmfc.fork_window = std::stoll(next()); }

@@ -123,6 +123,9 @@ public:
   /** Drop the mode flag, yielding the address the DRAM geometry is indexed by. */
   [[nodiscard]] constexpr std::uint64_t strip_mode(std::uint64_t addr) const { return addr & ~mode_mask_; }
 
+  /** The tag itself, for putting back what strip_mode removed. */
+  [[nodiscard]] constexpr std::uint64_t mode_mask() const { return mode_mask_; }
+
   // ---- routing ----
 
   /** The tile owning this address, read straight out of the address. No lookup. */
@@ -187,6 +190,10 @@ public:
   [[nodiscard]] std::size_t tile_of_virtual(champsim::address addr) const { return tile_of_virtual(addr.to<std::uint64_t>()); }
   [[nodiscard]] bool is_nmfc(champsim::address addr) const { return is_nmfc(addr.to<std::uint64_t>()); }
   [[nodiscard]] champsim::address compact(champsim::address addr) const { return champsim::address{compact(addr.to<std::uint64_t>())}; }
+  /** Drop the mapping-mode tag: what a DRAM port hands down. */
+  [[nodiscard]] champsim::address strip_mode(champsim::address addr) const { return champsim::address{strip_mode(addr.to<std::uint64_t>())}; }
+  /** Put it back, for a response the cache above must still recognise. */
+  [[nodiscard]] champsim::address set_mode(champsim::address addr) const { return champsim::address{addr.to<std::uint64_t>() | mode_mask_}; }
   [[nodiscard]] champsim::address expand(champsim::address addr, std::size_t tile) const
   {
     return champsim::address{expand(addr.to<std::uint64_t>(), tile)};

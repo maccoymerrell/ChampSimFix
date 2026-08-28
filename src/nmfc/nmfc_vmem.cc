@@ -372,8 +372,21 @@ private:
     // the stock vmem reserves the bottom of memory for the same reason.
     const auto n = map_.num_tiles();
     total_sets_ = total_grains / n;
-    for (std::uint64_t grain = 1; grain < total_grains; ++grain) {
-      free_grains_[grain % n].push_back(grain);
+    // Whole groups, because a group is the unit the two mapping modes agree on.
+    //
+    // Grain g in NMFC mode sits entirely on channel g%N and occupies N
+    // channel-local chunks there; the same grain in STANDARD mode spreads its
+    // blocks over every channel and occupies one chunk on each. Those are
+    // different tilings of one space, and they only line up at the granularity
+    // of an aligned run of N grains -- a *group*, which under either mode
+    // occupies chunks [kN, kN+N) on every channel.
+    //
+    // Mixing modes inside a group therefore aliases: measured at 6.7% of blocks
+    // colliding on a channel-local address, which nothing below the controller
+    // could detect and which would show up as row-buffer hits between unrelated
+    // pages.
+    for (std::uint64_t group = 1; (group + 1) * n <= total_grains; ++group) {
+      free_groups_.push_back(group);
     }
     if (total_grains <= 1) {
       fmt::print("[NMFC_VMEM] ERROR: DRAM holds {} grains of {} bytes; nothing to allocate\n", total_grains, map_.grain());
@@ -382,39 +395,40 @@ private:
   }
 
   /** Take a grain owned by `tile`, spilling to another tile if that list is dry. */
-  /**
-   * One free grain on every channel, sharing a compacted index.
-   *
-   * Grain g lives on tile g % N, so the set {kN .. kN+N-1} is exactly that --
-   * the copies then differ only in the tile-select field, which is what lets
-   * expand(compact(pa), t) name any copy without a table. Searched from the
-   * top, where allocation has not yet reached, so taking one costs nothing that
-   * ordinary allocation wanted.
-   */
   std::uint64_t take_congruent_set()
   {
-    const auto n = map_.num_tiles();
-    for (std::uint64_t k = total_sets_; k-- > 1;) {
-      bool whole_set_free = true;
-      for (std::size_t t = 0; t < n && whole_set_free; ++t) {
-        const auto& list = free_grains_[t];
-        whole_set_free = std::find(std::begin(list), std::end(list), k * n + t) != std::end(list);
-      }
-      if (!whole_set_free) {
-        continue;
-      }
-      for (std::size_t t = 0; t < n; ++t) {
-        auto& list = free_grains_[t];
-        list.erase(std::find(std::begin(list), std::end(list), k * n + t));
-      }
-      return k * n;
+    // A congruent set *is* a group: an aligned run of N grains, one per channel,
+    // sharing a compacted index. That is the same unit the two mapping modes
+    // agree on, so replication needs no separate search -- it needs a group.
+    if (free_groups_.empty()) {
+      fmt::print("[NMFC_VMEM] ERROR: no free grain group left for a replicated page.\n");
+      std::exit(-1);
     }
-    fmt::print("[NMFC_VMEM] ERROR: no congruent frame set left for a replicated page.\n");
-    std::exit(-1);
+    const auto group = free_groups_.front();
+    free_groups_.pop_front();
+    return group * map_.num_tiles();
+  }
+
+  /** Open a fresh group for NMFC use, giving each channel one grain from it. */
+  void open_nmfc_group()
+  {
+    if (free_groups_.empty()) {
+      return;
+    }
+    const auto group = free_groups_.front();
+    free_groups_.pop_front();
+    const auto n = map_.num_tiles();
+    for (std::size_t t = 0; t < n; ++t) {
+      const auto grain = group * n + t;
+      free_grains_[grain % n].push_back(grain); // == t, by construction
+    }
   }
 
   std::uint64_t take_grain(std::size_t tile)
   {
+    if (free_grains_[tile].empty()) {
+      open_nmfc_group();
+    }
     if (!free_grains_[tile].empty()) {
       const auto grain = free_grains_[tile].front();
       free_grains_[tile].pop_front();
@@ -423,6 +437,7 @@ private:
     // Spill: correctness is unaffected, the access simply takes one extra hop,
     // and the rate at which this happens is the evidence that siloing overran
     // a channel's capacity.
+    open_nmfc_group();
     for (std::size_t offset = 1; offset < free_grains_.size(); ++offset) {
       auto& other = free_grains_[(tile + offset) % free_grains_.size()];
       if (!other.empty()) {
@@ -490,11 +505,33 @@ private:
    * tile that grain came from does not matter: under the standard layout the
    * grain's blocks spread across every channel regardless.
    */
+  /** A grain from a group reserved for STANDARD use. */
+  std::uint64_t take_standard_grain()
+  {
+    if (standard_grains_.empty()) {
+      if (free_groups_.empty()) {
+        fmt::print("[NMFC_VMEM] ERROR: out of physical memory (no free grain groups)\n");
+        std::exit(-1);
+      }
+      const auto group = free_groups_.front();
+      free_groups_.pop_front();
+      const auto n = map_.num_tiles();
+      for (std::size_t i = 0; i < n; ++i) {
+        standard_grains_.push_back(group * n + i);
+      }
+    }
+    const auto grain = standard_grains_.front();
+    standard_grains_.pop_front();
+    return grain;
+  }
+
   std::uint64_t allocate_standard_frame()
   {
     if (standard_frames_.empty()) {
-      refill_standard_frames(standard_refill_tile_);
-      standard_refill_tile_ = (standard_refill_tile_ + 1) % free_grains_.size();
+      const auto grain = take_standard_grain();
+      for (std::uint64_t page = 0; page < pages_per_grain_; ++page) {
+        standard_frames_.push_back(grain * pages_per_grain_ + page);
+      }
     }
     const auto frame = standard_frames_.front();
     standard_frames_.pop_front();
@@ -506,7 +543,11 @@ private:
   {
     auto& pool = standard_frames_by_tile_[tile];
     if (pool.empty()) {
-      const auto grain = take_grain(tile);
+      // A STANDARD unit is spread over every channel, so it cannot come from a
+      // group that NMFC is using: it must come from a group given wholly to
+      // this mode. The `tile` argument is therefore a hint about which walk
+      // wanted it, not a claim about where the data lands.
+      const auto grain = take_standard_grain();
       for (std::uint64_t page = 0; page < pages_per_grain_; ++page) {
         pool.push_back(grain * pages_per_grain_ + page);
       }
@@ -571,6 +612,9 @@ private:
    * that has been picked over cannot promise one.
    */
   std::uint64_t total_sets_ = 0;
+  /** Groups nothing has claimed yet; a group is an aligned run of N grains. */
+  std::deque<std::uint64_t> free_groups_;
+  std::deque<std::uint64_t> standard_grains_;
   std::uint64_t remaps_ = 0;
   std::uint64_t generation_ = 0;
   std::vector<std::pair<std::uint32_t, std::uint64_t>> remap_log_;

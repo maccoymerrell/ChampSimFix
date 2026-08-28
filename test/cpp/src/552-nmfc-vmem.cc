@@ -392,3 +392,56 @@ TEST_CASE("A congruent router refuses to let a page move at all")
   }
   REQUIRE(r.placement->page_mapping_on(champsim::origin{0, 0}, vpage.to<std::uint64_t>(), 0) == home);
 }
+
+TEST_CASE("Global physical addresses map injectively onto channel-local ones")
+{
+  // What ramulator2 is handed is a *channel-local* physical address: the tile
+  // field removed, the mode tag stripped, dense from zero. That transform has to
+  // be a bijection onto each channel's own space. Two global blocks landing on
+  // one channel-local address is aliasing that no model below can detect -- the
+  // DRAM would report row hits for accesses to unrelated pages, and every
+  // bandwidth number computed from it would be wrong in the flattering
+  // direction.
+  //
+  // The two modes remove the tile field at *different* bit positions -- grain
+  // for NMFC, block for STANDARD -- so they are two different maps onto one
+  // space, and nothing so far has checked that their images are disjoint.
+  rig r{"_bijection"};
+  const auto map = the_map();
+  constexpr std::uint64_t BLOCK = 64;
+  const auto blocks_per_page = (std::uint64_t{1} << LOG2_PAGE) / BLOCK;
+
+  // (tile, channel-local block) -> the global block that claimed it
+  std::map<std::pair<std::size_t, std::uint64_t>, std::uint64_t> claimed;
+  std::size_t collisions = 0;
+
+  const auto record = [&](std::uint64_t paddr) {
+    const auto tile = map.tile_of(paddr);
+    // Exactly what a DRAM port must hand down: tile field out, tag off.
+    const auto local = map.strip_mode(map.compact(paddr)) / BLOCK;
+    const auto [it, fresh] = claimed.emplace(std::pair{tile, local}, paddr);
+    if (!fresh && it->second != paddr) {
+      ++collisions;
+    }
+  };
+
+  // A mix of both modes, which is what §5.4 says a real address space has.
+  for (std::uint64_t i = 0; i < 24; ++i) {
+    const auto nmfc_page = vpage_in(700 + i, 0);
+    r.placement->hint_placement(0, nmfc_page.to<std::uint64_t>(), nmfc::placement_hint{nmfc::mapping_mode::NMFC, static_cast<std::uint32_t>(i % TILES)});
+    const auto npa = champsim::address{r.vmem->va_to_pa(champsim::origin{0, 0}, nmfc_page).first}.to<std::uint64_t>();
+    for (std::uint64_t b = 0; b < blocks_per_page; ++b) {
+      record(npa + b * BLOCK);
+    }
+
+    // Unhinted pages fall to the default region, which this rig sets to standard.
+    const auto std_page = champsim::page_number{champsim::address{(900 + i) << LOG2_PAGE}};
+    const auto spa = champsim::address{r.vmem->va_to_pa(champsim::origin{0, 0}, std_page).first}.to<std::uint64_t>();
+    for (std::uint64_t b = 0; b < blocks_per_page; ++b) {
+      record(spa + b * BLOCK);
+    }
+  }
+
+  INFO("distinct global blocks: " << claimed.size() << ", collisions: " << collisions);
+  REQUIRE(collisions == 0);
+}
