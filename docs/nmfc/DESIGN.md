@@ -309,6 +309,41 @@ argument leaves nothing behind to resolve.
 
 ---
 
+## 4.1.1 Two axes, optimised separately
+
+There are two questions and they must not be answered with the same
+experiment.
+
+**Axis 1 -- the hardware.** What the machine achieves under ideal conditions.
+Optimising it needs workloads that exercise the full band of behaviours and
+that are known, by construction, to use the machine well: nearly all the work
+offloaded, enough invocations resident to fill the contexts, invocations large
+enough that dispatch and migration amortise, and no serialisation left on the
+host.
+
+**Axis 2 -- the mapping.** How well a real algorithm can be expressed on that
+machine by the pseudo-compiler. This is a question about programs, and its
+answer is allowed to be bad without implicating the hardware.
+
+Axis 1 needs axis 2 to know where the design space is, but a hardware
+conclusion drawn from a workload that misuses the hardware is a conclusion
+about the workload. That failure has already happened here, repeatedly and
+expensively: kernels offloading seven to eleven percent of their work, with a
+join one instruction behind every fork, produced runs at four resident
+contexts of four thousand and one percent channel occupancy. Read as hardware
+results they said migration was ruinous, the placement policy was inert, and
+larger invocations did not help. Every one of those was an artifact of the
+mapping. The kernel that offloads seventy-five percent migrates three hundred
+and sixty times more and is the fastest measured.
+
+So before any run is used to judge the hardware, it has to pass a
+qualification: what fraction of the work left the host, how many invocations
+were resident, and whether the host ever blocked. A run that fails those is
+evidence about axis 2 only, and must be labelled that way rather than quoted
+as a property of the machine.
+
+---
+
 ## 4.2 Placement policies: what moves, and who decides
 
 Several policies are under test. They are not variations on one idea; they

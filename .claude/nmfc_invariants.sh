@@ -43,5 +43,12 @@ NMFC invariants (docs/nmfc/DESIGN.md §0) -- settled, do not re-derive:
     plus "block until address A is committed by invocation B". A traced spin
     runs zero times, so without the hook the wait is unmodelled and every
     number is silently optimistic.
+10. TWO AXES (§4.1.1). Hardware performance and workload mapping are separate
+    questions; never optimise both with one experiment. Before a run is used to
+    judge the HARDWARE it must qualify: what fraction of work left the host,
+    how many invocations were resident, did the host ever block. A run that
+    fails those is evidence about the MAPPING only. Conclusions like "migration
+    is ruinous" and "the policy is inert" were drawn this session from kernels
+    offloading 7% of their work, and were wrong.
 Before adding a mechanism, check whether the design already names one.
 EOF

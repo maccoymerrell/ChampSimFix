@@ -29,6 +29,16 @@ readelf -sW "$OUT/bfs_nmfc" | awk '$4=="FUNC" && $8 ~ /^_Z[0-9]+nmfc_/ {printf "
 # the source said so.
 objdump -d --no-show-raw-insn "$OUT/bfs_nmfc" | awk '/^ *[0-9a-f]+:.*lock/ {gsub(":","",$1); print $1}' > "$OUT/atomics.txt"
 
+# Where the memory-committing loop waits. One program counter, so the
+# annotation pass places the block exactly rather than guessing from whichever
+# load of the output happens to come first.
+readelf -sW "$OUT/bfs_nmfc" | awk '$4=="FUNC" && $8=="__nmfc_wait" {printf "%s %s\n", $2, $3}' > "$OUT/waits.txt"
+
+# Commit sites: the two-byte marker a function puts immediately before the
+# store that publishes its block. Read from the disassembly, like the atomics,
+# because an instruction is a commit by being marked as one.
+objdump -d --no-show-raw-insn "$OUT/bfs_nmfc" | awk '/nopl +0x2a\(%rax\)/ {gsub(":","",$1); print $1}' > "$OUT/commits.txt"
+
 # Return sites, likewise from the disassembly. Pin does not mark ret as a
 # branch, and this machine's return is not a stack pop, so the annotation pass
 # has to know which instruction is the return in order to drop the pop.
@@ -44,5 +54,7 @@ echo "--- captured in $OUT ---"
 wc -l < "$OUT/symbols.txt" | xargs echo "  offloadable functions:"
 wc -l < "$OUT/atomics.txt" | xargs echo "  atomic sites:"
 wc -l < "$OUT/rets.txt" | xargs echo "  return sites:"
+wc -l < "$OUT/waits.txt" | xargs echo "  wait sites:"
+wc -l < "$OUT/commits.txt" | xargs echo "  commit sites:"
 wc -l < "$OUT/regions.txt" | xargs echo "  regions:"
 ls -la "$OUT/trace.champsimtrace" | awk '{print "  trace bytes:", $5}'

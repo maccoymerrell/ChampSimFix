@@ -32,6 +32,7 @@
 extern "C" {
 __attribute__((noinline, used)) void __champsim_start_trace(void) { asm volatile(""); }
 __attribute__((noinline, used)) void __champsim_stop_trace(void) { asm volatile(""); }
+__attribute__((noinline, used)) void __nmfc_wait(const void* p) { (void)*static_cast<const volatile int*>(p); }
 }
 
 /**
@@ -63,28 +64,30 @@ static constexpr uint32_t NMFC_GRAIN_BITS = 20;
  * to put in the next frontier without reading anything back from memory.
  */
 /**
- * One offloaded function: expand a vertex.
+ * One offloaded function: expand a chunk of a vertex's neighbours.
  *
- * It reads the vertex's neighbour list and claims every unvisited neighbour,
- * writing the winners out and returning where it stopped. That is the whole
- * per-edge body of the traversal -- the scan, the test, the compare and swap
- * -- so nearly all of the work leaves the host.
+ * It returns nothing and waits for nothing. Claimed vertices are written into
+ * the output slot it was handed, terminated by -1, and the host reads the
+ * slots once the level is done.
  *
- * Splitting the scan off and offloading only the compare and swap was tried
- * and measured: it left ninety percent of the traversal on the host, four
- * contexts busy of four thousand, and the memory channel one percent occupied.
- * A function has to be given the work, not a fragment of it.
+ * Returning a value is what kept the machine empty: a return is a register
+ * dependency, so the join lands one instruction behind the fork and the host
+ * could never have more than a reorder buffer's worth outstanding. With
+ * nothing to wait for it can fork a whole level.
  *
- * The neighbour list is contiguous, so reading it is sequential; parent[v] is
- * scattered, so claiming migrates. Whether that migration costs anything is a
- * question about whether the channel is busy, not a reason to move less work.
+ * The output is *per invocation* on purpose. Appending to a shared frontier
+ * through an atomic counter was tried and is far worse than it looks: one word,
+ * contended by every claim on every tile, so each one has to reach that word
+ * and the whole machine serialises on a single address. A slot per invocation
+ * has no shared state at all.
  *
- * Live at the compare and swap: p, e, parent, u, w, v, curr, and rax for the
- * swap itself. Eight. Returning the end pointer is what keeps the output base
- * from having to stay live alongside them.
+ * The terminator is a register budget, not a style choice. Live at the compare
+ * and swap: p, e, parent, u, w, v, curr, and the register the swap pins --
+ * eight, the whole file. Returning a count would need the slot base to stay
+ * live alongside them, which is nine.
  */
 NMFC_FUNCTION
-NodeID* nmfc_expand(const NodeID* first, const NodeID* last, NodeID* parent, NodeID u, NodeID* out)
+void nmfc_expand(const NodeID* first, const NodeID* last, NodeID* parent, NodeID u, NodeID* out)
 {
   NodeID* w = out;
   for (const NodeID* p = first; p != last; ++p) {
@@ -94,44 +97,51 @@ NodeID* nmfc_expand(const NodeID* first, const NodeID* last, NodeID* parent, Nod
       *w++ = v;
     }
   }
-  return w;
+  // Publish. The marker names this store as the commit: the block is complete
+  // and whoever waits on this address may proceed.
+  NMFC_COMMIT(w, -1);
 }
 
-/** Expansions issued before any result is read. */
-static constexpr int32_t ISSUE = 32;
-/**
- * Neighbours per invocation, which also bounds its output.
- *
- * A whole vertex per invocation overruns the output on a hub -- a kron vertex
- * can have tens of thousands of neighbours and claim most of them -- and it
- * makes the work per invocation as skewed as the degree distribution.
- * Chunking bounds both, and gives the machine more invocations to overlap.
- */
+/** Neighbours per invocation. Bounds the work, and the output slot with it. */
 static constexpr int32_t CHUNK = 2048;
+/** Invocations forked before the host reads any of their slots. */
+static constexpr int32_t LEVEL = 1024;
+/**
+ * Slot stride, padded to a cache block.
+ *
+ * Ownership of a committed result is by address, at block granularity, so two
+ * slots must never share a block. CHUNK+1 entries is 8196 bytes, which is not
+ * a multiple of 64: one slot's last block is the next slot's first, and two
+ * invocations then claim the same block. The pairing check caught it on its
+ * first run.
+ */
+static constexpr int32_t SLOT = ((CHUNK + 1) * static_cast<int32_t>(sizeof(NodeID)) + 63) / 64 * 64 / static_cast<int32_t>(sizeof(NodeID));
 
 /**
- * The host walks the frontier and hands each vertex to a function.
+ * A step: fork expansions until the slot pool is full, then read the slots.
  *
- * It issues a group of expansions before reading any of their results: the
- * return is a register dependency, so consuming it on the next line puts the
- * join one instruction behind the fork and nothing overlaps.
+ * The host touches no invocation's result while forking, so nothing serialises
+ * the forks against each other and a poolful can be resident at once.
  */
-static int64_t TDStepOffloaded(const Graph& g, NodeID* parent, SlidingQueue<NodeID>& queue, NodeID* out)
+static int64_t TDStepOffloaded(const Graph& g, NodeID* parent, SlidingQueue<NodeID>& queue, NodeID* pool)
 {
   int64_t scout_count = 0;
   QueueBuffer<NodeID> lqueue(queue);
-  NodeID* end[ISSUE];
-  NodeID* base[ISSUE];
-  int32_t k = 0;
+  int32_t issued = 0;
 
   const auto harvest = [&]() {
-    for (int32_t i = 0; i < k; ++i) {
-      for (NodeID* q = base[i]; q != end[i]; ++q) {
+    for (int32_t i = 0; i < issued; ++i) {
+      const NodeID* const slot = pool + static_cast<std::size_t>(i) * SLOT;
+      // The wait site. On real hardware the core spins here until the block is
+      // committed; in the traced run it is already there, which is exactly why
+      // the site has to be marked rather than inferred.
+      __nmfc_wait(slot);
+      for (const NodeID* q = slot; *q >= 0; ++q) {
         lqueue.push_back(*q);
         scout_count += g.out_degree(*q);
       }
     }
-    k = 0;
+    issued = 0;
   };
 
   for (auto q_iter = queue.begin(); q_iter < queue.end(); q_iter++) {
@@ -139,10 +149,9 @@ static int64_t TDStepOffloaded(const Graph& g, NodeID* parent, SlidingQueue<Node
     auto neigh = g.out_neigh(u);
     for (const NodeID* p = neigh.begin(); p != neigh.end();) {
       const NodeID* const stop = (neigh.end() - p > CHUNK) ? p + CHUNK : neigh.end();
-      base[k] = out + static_cast<std::size_t>(k) * CHUNK;
-      end[k] = nmfc_expand(p, stop, parent, u, base[k]);
+      nmfc_expand(p, stop, parent, u, pool + static_cast<std::size_t>(issued) * SLOT);
       p = stop;
-      if (++k == ISSUE) {
+      if (++issued == LEVEL) {
         harvest();
       }
     }
@@ -217,12 +226,13 @@ static NodeID* DOBFS(const Graph& g, NodeID source, uint32_t grain_bits, uint32_
 
   const std::size_t grain = std::size_t{1} << NMFC_GRAIN_BITS;
 
-  // Output space for a group of expansions. Which tile backs it is the
-  // operating system's decision, not this program's.
-  NodeID* out = nullptr;
-  const std::size_t out_bytes = static_cast<std::size_t>(ISSUE) * CHUNK * sizeof(NodeID);
-  if (posix_memalign(reinterpret_cast<void**>(&out), grain, grain * ((out_bytes + grain - 1) / grain)) != 0) {
-    std::fprintf(stderr, "nmfc: cannot allocate expansion output\n");
+  // The next frontier, built by the functions themselves: element 0 is the
+  // count, the vertices follow. Which tile backs it is the operating system's
+  // decision, not this program's.
+  NodeID* pool = nullptr;
+  const std::size_t pool_bytes = static_cast<std::size_t>(LEVEL) * SLOT * sizeof(NodeID);
+  if (posix_memalign(reinterpret_cast<void**>(&pool), grain, grain * ((pool_bytes + grain - 1) / grain)) != 0) {
+    std::fprintf(stderr, "nmfc: cannot allocate the output pool\n");
     std::exit(1);
   }
 
@@ -230,12 +240,12 @@ static NodeID* DOBFS(const Graph& g, NodeID source, uint32_t grain_bits, uint32_
     {"index", (const void*)g.nmfc_out_index(), (static_cast<std::size_t>(g.num_nodes()) + 1) * sizeof(void*)},
     {"neighbors", (const void*)g.nmfc_out_neighbors(), static_cast<std::size_t>(g.num_edges_directed()) * sizeof(NodeID)},
     {"parent", parent, static_cast<std::size_t>(g.num_nodes()) * sizeof(NodeID)},
-    {"out", out, grain * ((out_bytes + grain - 1) / grain)},
+    {"pool", pool, grain * ((pool_bytes + grain - 1) / grain)},
   });
 
   __champsim_start_trace();
   while (!queue.empty()) {
-    TDStepOffloaded(g, parent, queue, out);
+    TDStepOffloaded(g, parent, queue, pool);
     queue.slide_window();
   }
   __champsim_stop_trace();

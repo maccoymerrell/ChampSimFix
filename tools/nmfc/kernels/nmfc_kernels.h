@@ -35,6 +35,45 @@ extern "C" {
 __attribute__((noinline, used)) void __champsim_start_trace(void);
 __attribute__((noinline, used)) void __champsim_stop_trace(void);
 
+/**
+ * Block until the invocation that produced `p` has committed it.
+ *
+ * The memory-committing loop's wait site. A caller reading an invocation's
+ * output block must call this first, and the annotation pass turns the load it
+ * performs into the join for whichever invocation wrote that address.
+ *
+ * It has to *touch* the address rather than merely take it: a trace records
+ * the addresses an instruction accessed, not the values in its registers, so a
+ * marker that only received a pointer would leave nothing behind to resolve
+ * against. The load is volatile so it survives optimisation, and the function
+ * is noinline so the wait has one identifiable program counter.
+ */
+__attribute__((noinline, used)) void __nmfc_wait(const void* p);
+
+} // extern "C"
+
+/**
+ * "I commit work here": the function declares the address its result lives at.
+ *
+ * Ownership is by address, so the commit has to name one, and it has to be
+ * marked rather than inferred from whichever store happened to come last -- a
+ * function may write scratch it never publishes.
+ *
+ * It cannot be a called hook the way __nmfc_wait is. A call from inside an
+ * offloaded function pushes a return address, and a function core has a
+ * register file and no stack; it would also take the program counter outside
+ * the function's range and split the body in two. So the site is marked in
+ * place with a two-byte no-op the disassembly can find, immediately before the
+ * store that publishes the block.
+ */
+#define NMFC_COMMIT(p, v)                                                                                                                            \
+  do {                                                                                                                                              \
+    asm volatile("nopl 0x2a(%%rax)" : : : "memory");                                                                                                  \
+    *(p) = (v);                                                                                                                                     \
+  } while (0)
+
+extern "C" {
+
 } // extern "C"
 
 #endif

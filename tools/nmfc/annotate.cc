@@ -33,7 +33,7 @@ namespace
 {
 
 struct options {
-  std::string trace, symbols, atomics, rets, regions, regmap, out;
+  std::string trace, symbols, atomics, rets, waits, commits, regions, regmap, out;
   std::uint32_t tiles = 4;
   std::uint32_t grain_bits = 20;
   std::uint32_t page_bits = 12;
@@ -218,6 +218,8 @@ int main(int argc, char** argv)
     else if (a == "--symbols") { opt.symbols = next(); }
     else if (a == "--atomics") { opt.atomics = next(); }
     else if (a == "--rets") { opt.rets = next(); }
+    else if (a == "--waits") { opt.waits = next(); }
+    else if (a == "--commits") { opt.commits = next(); }
     else if (a == "--regions") { opt.regions = next(); }
     else if (a == "--regmap") { opt.regmap = next(); }
     else if (a == "--out") { opt.out = next(); }
@@ -240,6 +242,30 @@ int main(int argc, char** argv)
   const auto ret_pcs = load_atomics(ret_opt);
   std::uint32_t result_reg = 0;
   const auto canon = load_regmap(opt, result_reg);
+
+  // The memory-committing loop's wait site, as a program-counter range: the
+  // block belongs where the caller said it does, not at whichever load of the
+  // output happens to come first.
+  std::vector<std::pair<std::uint64_t, std::uint64_t>> wait_pcs;
+  if (!opt.waits.empty()) {
+    std::ifstream win(opt.waits);
+    std::uint64_t a = 0, n = 0;
+    while (win >> std::hex >> a >> std::dec >> n) {
+      wait_pcs.emplace_back(a, a + n);
+    }
+  }
+  options commit_opt = opt;
+  commit_opt.atomics = opt.commits;
+  const auto commit_pcs = load_atomics(commit_opt);
+
+  const auto is_wait = [&](std::uint64_t ip) {
+    for (const auto& [lo, hi] : wait_pcs) {
+      if (ip >= lo && ip < hi) {
+        return true;
+      }
+    }
+    return false;
+  };
   if (result_reg == 0) {
     die("the register map does not name a return register");
   }
@@ -345,7 +371,41 @@ int main(int argc, char** argv)
   std::uint64_t token = 0;
   std::unordered_map<std::uint32_t, std::uint8_t> slot;
   std::uint64_t dropped_stack = 0, n_bodies = 0, n_atomics = 0, n_joins = 0;
-  std::uint64_t awaiting = 0; // token whose result has not been consumed yet
+  std::uint64_t awaiting = 0;      // token whose result has not been consumed yet
+  // A finished invocation is held for a few host instructions before it is
+  // written, because whether it is a fork-and-wait or a fire-and-forget is
+  // decided by what comes next: if nothing reads the value it produced, the
+  // host never waits for it, and marking it deferred-join would leave a
+  // tracking-unit entry outstanding for an answer that never arrives.
+  // An invocation that returns nothing still has to be waited for: the host
+  // reads what it wrote. That read is the join -- a real instruction, and the
+  // only point at which the host actually needs the work to have finished.
+  //
+  // Without it the trace is silently optimistic. In the traced program the call
+  // was synchronous, so the output was always already there and a polling loop
+  // would spin zero times; nothing about the wait survives into the trace, and
+  // a trace-driven simulator cannot invent it because it does not model values.
+  // Ownership, by address: which invocation committed a block, and whether
+  // anyone has blocked on it yet. Both directions are checked -- an invocation
+  // that commits twice, or a caller that blocks twice on one commit, is a
+  // broken pairing and the trace is refused rather than emitted.
+  // Ownership covers every block the invocation wrote, not just the one its
+  // commit store touched. It has to: the commit lands at the terminator, whose
+  // address depends on how much was claimed, while the caller waits on the
+  // slot base -- the function cannot commit at the base without keeping it
+  // live across the whole loop, which is a ninth register it does not have.
+  std::unordered_map<std::uint64_t, std::uint64_t> wrote; // block -> owning token
+  std::unordered_map<std::uint64_t, std::vector<std::uint64_t>> owns; // token -> its blocks
+  std::vector<std::uint64_t> touched; // blocks written by the invocation being built
+  bool commit_pending = false; // the marker was seen; the next store publishes
+  std::uint64_t n_commits = 0;
+  std::uint64_t n_mem_joins = 0;
+  bool holding = false;
+  nmfc::record held_call{};
+  std::vector<nmfc::record> held_body;
+  std::vector<nmfc::record> held_after; // host records seen while holding
+  std::uint64_t n_forget = 0;
+  constexpr int LOOKAHEAD = 4;
 
   const auto reg_slot = [&](unsigned char raw_reg) -> unsigned char {
     if (raw_reg == 0) {
@@ -364,25 +424,50 @@ int main(int argc, char** argv)
     return pos->second;
   };
 
-  const auto flush_body = [&]() {
-    if (!have_call || body.empty()) {
+  // Write a held invocation, now that its kind is known.
+  const auto emit_held = [&](bool no_return) {
+    if (!holding) {
       return;
     }
-    call_rec.aux1 = nmfc::encode_call_aux1(cur != nullptr ? cur->id : 0, static_cast<std::uint32_t>(body.size()));
-    put(call_rec);
+    // Deferred, never fire-and-forget. An invocation that returns nothing in
+    // registers still writes output the host reads, and that read is its join;
+    // marking it NO_RETURN would complete it at dispatch and leave the later
+    // join referring to an entry that no longer exists. `no_return` here only
+    // records that nothing consumed its *register* result nearby.
+    if (no_return) {
+      ++n_forget;
+    }
+    put(held_call);
     ++n_calls;
-    for (const auto& r : body) {
+    for (const auto& r : held_body) {
       put(r);
     }
     nmfc::record ret{};
     ret.kind = static_cast<std::uint8_t>(nmfc::op::RET);
-    ret.token = token;
+    ret.token = held_call.token;
     // The whole register file comes home: 512 bits in, 512 bits out.
     ret.aux0 = opt.num_regs;
     put(ret);
+    for (const auto& r : held_after) {
+      put(r);
+    }
+    held_body.clear();
+    held_after.clear();
+    holding = false;
+    ++n_bodies;
+  };
+
+  const auto flush_body = [&]() {
+    if (!have_call || body.empty()) {
+      return;
+    }
+    emit_held(true); // an invocation still held when the next one starts was never waited on
+    call_rec.aux1 = nmfc::encode_call_aux1(cur != nullptr ? cur->id : 0, static_cast<std::uint32_t>(body.size()));
+    held_call = call_rec;
+    held_body = body;
+    holding = true;
     body.clear();
     have_call = false;
-    ++n_bodies;
     awaiting = token; // the next instruction to read the result register joins it
   };
 
@@ -409,6 +494,7 @@ int main(int argc, char** argv)
         // invocation however much room it has.
         call_rec.flag_bits |= nmfc::FLAG_DEFERRED_JOIN;
         call_rec.token = ++token;
+        touched.clear();
         const auto entry = remap(fn->start);
         if (!entry) {
           die("function entry point falls outside the code region");
@@ -487,16 +573,99 @@ int main(int argc, char** argv)
                                                             : nmfc::op_class::ALU);
 
     if (in_body) {
+      // Ownership is over the invocation's *output*, so an atomic is excluded:
+      // a read-modify-write is shared state by definition, and two invocations
+      // claiming different vertices in one block of parent[] would otherwise
+      // each claim to own that block.
+      if (atomic_pcs.count(raw.ip) == 0) {
+        for (const auto a : rec.instr.destination_memory) {
+          if (a != 0) {
+            touched.push_back(a >> opt.block_bits);
+          }
+        }
+      }
+      if (commit_pcs.count(raw.ip) != 0) {
+        if (commit_pending) {
+          die("invocation " + std::to_string(token) + " reached a second commit marker before publishing the first");
+        }
+        commit_pending = true;
+      } else if (commit_pending) {
+        // The store after the marker publishes. Everything this invocation
+        // wrote becomes its, so whichever address the caller waits on resolves.
+        commit_pending = false;
+        if (owns.count(token) != 0) {
+          die("invocation " + std::to_string(token) + " commits twice");
+        }
+        std::sort(touched.begin(), touched.end());
+        touched.erase(std::unique(touched.begin(), touched.end()), touched.end());
+        for (const auto blk : touched) {
+          const auto prior = wrote.find(blk);
+          if (prior != wrote.end() && prior->second != token) {
+            die("invocation " + std::to_string(token) + " commits block " + std::to_string(blk) + ", which invocation " +
+                std::to_string(prior->second) + " committed and nothing has blocked on -- a double commit");
+          }
+          wrote[blk] = token;
+        }
+        owns[token] = touched;
+        ++n_commits;
+      }
       const bool is_atomic = atomic_pcs.count(raw.ip) != 0;
       rec.kind = static_cast<std::uint8_t>(is_atomic ? nmfc::op::ATOMIC : nmfc::op::BODY);
       n_atomics += is_atomic ? 1 : 0;
       body.push_back(rec);
     } else {
       if (have_pending) {
-        put(pending);
+        if (holding) {
+          held_after.push_back(pending);
+          if (held_after.size() >= LOOKAHEAD) {
+            const auto tail = held_after;
+            held_after.clear();
+            emit_held(true); // nothing read it within the lookahead
+            for (const auto& r : tail) {
+              put(r);
+            }
+          }
+        } else {
+          put(pending);
+        }
       }
       rec.kind = static_cast<std::uint8_t>(nmfc::op::HOST);
-      if (awaiting != 0) {
+      // The marked wait site, and only it: block here until whichever
+      // invocation wrote this address has committed it.
+      if (is_wait(raw.ip)) {
+        for (const auto a : rec.instr.source_memory) {
+          if (a == 0) {
+            continue;
+          }
+          const auto it = wrote.find(a >> opt.block_bits);
+          if (it == wrote.end()) {
+            continue; // this operand is not a committed block; try the next
+          }
+          {
+            rec.kind = static_cast<std::uint8_t>(nmfc::op::JOIN);
+            rec.token = it->second;
+            // Consumed: the whole invocation's ownership is released, so a
+            // second block on any part of it is an error.
+            const auto owner = it->second;
+            const auto o = owns.find(owner);
+            if (o != owns.end()) {
+              for (const auto blk : o->second) {
+                wrote.erase(blk);
+              }
+              owns.erase(o);
+            } else {
+              die("blocked on a commit that was already consumed -- a double block");
+            }
+            ++n_joins;
+            ++n_mem_joins;
+            if (holding) {
+              emit_held(false);
+            }
+            break;
+          }
+        }
+      }
+      if (rec.kind == static_cast<std::uint8_t>(nmfc::op::HOST) && awaiting != 0 && holding) {
         // The join is a real instruction: whichever one first reads the value
         // the invocation produced. Nothing is synthesised for it.
         for (const auto r : raw.source_registers) {
@@ -506,6 +675,7 @@ int main(int argc, char** argv)
             rec.token = awaiting;
             awaiting = 0;
             ++n_joins;
+            emit_held(false); // something reads its result, so the host does wait
             break;
           }
         }
@@ -517,6 +687,7 @@ int main(int argc, char** argv)
   if (cur != nullptr) {
     flush_body();
   }
+  emit_held(true);
   if (have_pending) {
     put(pending);
   }
@@ -529,6 +700,11 @@ int main(int argc, char** argv)
 
   std::fprintf(stderr, "[annotate] read %lu instructions -> %lu records, %lu invocations, %lu joins, %lu atomics\n", n_in, n_records, n_calls,
                n_joins, n_atomics);
+  std::fprintf(stderr, "[annotate] %lu invocations return no register value; %lu commits, %lu blocks matched to them\n", n_forget, n_commits,
+               n_mem_joins);
+  if (n_commits != n_mem_joins) {
+    std::fprintf(stderr, "[annotate] NOTE: %lu commits were never blocked on (unharvested at trace end)\n", n_commits - n_mem_joins);
+  }
   if (dropped_stack != 0) {
     std::fprintf(stderr, "[annotate] dropped %lu stack accesses from returns (this machine has no stack)\n", dropped_stack);
   }
