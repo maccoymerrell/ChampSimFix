@@ -41,8 +41,9 @@ __attribute__((noinline, used)) void __champsim_stop_trace(void) { asm volatile(
  * in, which puts arguments on a stack this machine does not have.
  */
 static constexpr uint32_t NMFC_GRAIN_BITS = 20;
-static constexpr uint32_t NMFC_TILES = 4;
-static_assert((NMFC_TILES & (NMFC_TILES - 1)) == 0, "tile count must be a power of two for the mask to be exact");
+// No tile count here on purpose. The grain is a page size, which a compiler may
+// know; how many channels back it, and which one backs any given grain, is the
+// operating system's business and this program never asks.
 
 /**
  * One offloaded function: claim up to six vertices, all owned by one tile.
@@ -61,133 +62,92 @@ static_assert((NMFC_TILES & (NMFC_TILES - 1)) == 0, "tile count must be a power 
  * Returns a bitmask of which of the six were claimed, so the caller knows what
  * to put in the next frontier without reading anything back from memory.
  */
-/** One claim, always inlined: the helper exists for legibility, not as a call. */
-static inline __attribute__((always_inline)) uint32_t claim_one(NodeID* parent, NodeID u, NodeID v, uint32_t bit)
-{
-  if (v < 0) {
-    return 0; // an unused slot in a short group
-  }
-  const NodeID curr = parent[v];
-  return (curr < 0 && compare_and_swap(parent[v], curr, u)) ? bit : 0;
-}
-
+/**
+ * One offloaded function: expand a vertex.
+ *
+ * It reads the vertex's neighbour list and claims every unvisited neighbour,
+ * writing the winners out and returning where it stopped. That is the whole
+ * per-edge body of the traversal -- the scan, the test, the compare and swap
+ * -- so nearly all of the work leaves the host.
+ *
+ * Splitting the scan off and offloading only the compare and swap was tried
+ * and measured: it left ninety percent of the traversal on the host, four
+ * contexts busy of four thousand, and the memory channel one percent occupied.
+ * A function has to be given the work, not a fragment of it.
+ *
+ * The neighbour list is contiguous, so reading it is sequential; parent[v] is
+ * scattered, so claiming migrates. Whether that migration costs anything is a
+ * question about whether the channel is busy, not a reason to move less work.
+ *
+ * Live at the compare and swap: p, e, parent, u, w, v, curr, and rax for the
+ * swap itself. Eight. Returning the end pointer is what keeps the output base
+ * from having to stay live alongside them.
+ */
 NMFC_FUNCTION
-uint32_t nmfc_claim6(NodeID* parent, NodeID u, uint64_t a, uint64_t b, uint64_t c)
+NodeID* nmfc_expand(const NodeID* first, const NodeID* last, NodeID* parent, NodeID u, NodeID* out)
 {
-  // Unrolled so each packed word dies as soon as it is consumed. Written as a
-  // loop over an index instead, the compiler kept all three live across every
-  // iteration, needed a ninth register and built a stack frame to spill into --
-  // on a machine that has no stack.
-  uint32_t got = 0;
-  got |= claim_one(parent, u, static_cast<NodeID>(a & 0xffffffffULL), 1u << 0);
-  got |= claim_one(parent, u, static_cast<NodeID>(a >> 32), 1u << 1);
-  got |= claim_one(parent, u, static_cast<NodeID>(b & 0xffffffffULL), 1u << 2);
-  got |= claim_one(parent, u, static_cast<NodeID>(b >> 32), 1u << 3);
-  got |= claim_one(parent, u, static_cast<NodeID>(c & 0xffffffffULL), 1u << 4);
-  got |= claim_one(parent, u, static_cast<NodeID>(c >> 32), 1u << 5);
-  return got;
+  NodeID* w = out;
+  for (const NodeID* p = first; p != last; ++p) {
+    const NodeID v = *p;
+    const NodeID curr = parent[v];
+    if (curr < 0 && compare_and_swap(parent[v], curr, u)) {
+      *w++ = v;
+    }
+  }
+  return w;
 }
 
-/** Which tile owns an address, under the congruent mapping the simulator uses. */
-static inline uint32_t tile_of(const void* p)
-{
-  return static_cast<uint32_t>((reinterpret_cast<uintptr_t>(p) >> NMFC_GRAIN_BITS) & (NMFC_TILES - 1));
-}
-
-static constexpr int GROUP = 6;
+/** Expansions issued before any result is read. */
+static constexpr int32_t ISSUE = 32;
+/**
+ * Neighbours per invocation, which also bounds its output.
+ *
+ * A whole vertex per invocation overruns the output on a hub -- a kron vertex
+ * can have tens of thousands of neighbours and claim most of them -- and it
+ * makes the work per invocation as skewed as the degree distribution.
+ * Chunking bounds both, and gives the machine more invocations to overlap.
+ */
+static constexpr int32_t CHUNK = 2048;
 
 /**
- * How many invocations the host tries to keep outstanding.
+ * The host walks the frontier and hands each vertex to a function.
  *
- * A fork does not wait; a join does. Written as `got = claim(...)` with the
- * result used on the next line, the two collapse and the machine holds exactly
- * one invocation while having room for a thousand. Issuing a window of
- * independent calls first and consuming their results afterwards is what lets
- * the reorder buffer carry several at once.
+ * It issues a group of expansions before reading any of their results: the
+ * return is a register dependency, so consuming it on the next line puts the
+ * join one instruction behind the fork and nothing overlaps.
  */
-static constexpr int WINDOW = 64;
-
-struct pending_group {
-  NodeID u;
-  uint64_t a, b, c;
-  NodeID v[GROUP];
-};
-
-/**
- * The host walks the frontier and the edge lists itself.
- *
- * That is deliberate: the scan is sequential and prefetchable, which an
- * out-of-order core with a memory hierarchy already handles well. What it
- * handles badly is the scattered read-modify-write on parent[], and that is
- * what goes near the memory. Grouping by owning tile is a shift and a mask per
- * neighbour.
- */
-static int64_t TDStepOffloaded(const Graph& g, NodeID* parent, SlidingQueue<NodeID>& queue)
+static int64_t TDStepOffloaded(const Graph& g, NodeID* parent, SlidingQueue<NodeID>& queue, NodeID* out)
 {
   int64_t scout_count = 0;
   QueueBuffer<NodeID> lqueue(queue);
-  NodeID stage[NMFC_TILES][GROUP];
-  int32_t n[NMFC_TILES];
-  pending_group win[WINDOW];
-  uint32_t res[WINDOW];
-  int nw = 0;
+  NodeID* end[ISSUE];
+  NodeID* base[ISSUE];
+  int32_t k = 0;
 
-  const auto drain = [&]() {
-    // Issue first, consume second. Nothing in this loop depends on the result
-    // of the previous call, so they can all be in flight together.
-    for (int i = 0; i < nw; ++i) {
-      res[i] = nmfc_claim6(parent, win[i].u, win[i].a, win[i].b, win[i].c);
-    }
-    for (int i = 0; i < nw; ++i) {
-      for (int k = 0; k < GROUP; ++k) {
-        if ((res[i] & (1u << k)) != 0) {
-          lqueue.push_back(win[i].v[k]);
-          scout_count += g.out_degree(win[i].v[k]);
-        }
+  const auto harvest = [&]() {
+    for (int32_t i = 0; i < k; ++i) {
+      for (NodeID* q = base[i]; q != end[i]; ++q) {
+        lqueue.push_back(*q);
+        scout_count += g.out_degree(*q);
       }
     }
-    nw = 0;
-  };
-
-  const auto submit = [&](uint32_t t, NodeID u) {
-    pending_group& gp = win[nw];
-    gp.u = u;
-    for (int i = 0; i < GROUP; ++i) {
-      gp.v[i] = (i < n[t]) ? stage[t][i] : -1;
-    }
-    const auto pack = [&](int i) {
-      return (static_cast<uint64_t>(static_cast<uint32_t>(gp.v[i + 1])) << 32) | static_cast<uint32_t>(gp.v[i]);
-    };
-    gp.a = pack(0);
-    gp.b = pack(2);
-    gp.c = pack(4);
-    n[t] = 0;
-    if (++nw == WINDOW) {
-      drain();
-    }
+    k = 0;
   };
 
   for (auto q_iter = queue.begin(); q_iter < queue.end(); q_iter++) {
     const NodeID u = *q_iter;
-    for (uint32_t t = 0; t < NMFC_TILES; ++t) {
-      n[t] = 0;
-    }
     auto neigh = g.out_neigh(u);
-    for (const NodeID* p = neigh.begin(); p != neigh.end(); ++p) {
-      const NodeID v = *p;
-      const uint32_t t = tile_of(&parent[v]);
-      stage[t][n[t]++] = v;
-      if (n[t] == GROUP) {
-        submit(t, u);
-      }
-    }
-    for (uint32_t t = 0; t < NMFC_TILES; ++t) {
-      if (n[t] != 0) {
-        submit(t, u);
+    for (const NodeID* p = neigh.begin(); p != neigh.end();) {
+      const NodeID* const stop = (neigh.end() - p > CHUNK) ? p + CHUNK : neigh.end();
+      base[k] = out + static_cast<std::size_t>(k) * CHUNK;
+      end[k] = nmfc_expand(p, stop, parent, u, base[k]);
+      p = stop;
+      if (++k == ISSUE) {
+        harvest();
       }
     }
   }
-  drain();
+  harvest();
   lqueue.flush();
   return scout_count;
 }
@@ -257,15 +217,25 @@ static NodeID* DOBFS(const Graph& g, NodeID source, uint32_t grain_bits, uint32_
 
   const std::size_t grain = std::size_t{1} << NMFC_GRAIN_BITS;
 
+  // Output space for a group of expansions. Which tile backs it is the
+  // operating system's decision, not this program's.
+  NodeID* out = nullptr;
+  const std::size_t out_bytes = static_cast<std::size_t>(ISSUE) * CHUNK * sizeof(NodeID);
+  if (posix_memalign(reinterpret_cast<void**>(&out), grain, grain * ((out_bytes + grain - 1) / grain)) != 0) {
+    std::fprintf(stderr, "nmfc: cannot allocate expansion output\n");
+    std::exit(1);
+  }
+
   write_manifest(manifest, {
     {"index", (const void*)g.nmfc_out_index(), (static_cast<std::size_t>(g.num_nodes()) + 1) * sizeof(void*)},
     {"neighbors", (const void*)g.nmfc_out_neighbors(), static_cast<std::size_t>(g.num_edges_directed()) * sizeof(NodeID)},
     {"parent", parent, static_cast<std::size_t>(g.num_nodes()) * sizeof(NodeID)},
+    {"out", out, grain * ((out_bytes + grain - 1) / grain)},
   });
 
   __champsim_start_trace();
   while (!queue.empty()) {
-    TDStepOffloaded(g, parent, queue);
+    TDStepOffloaded(g, parent, queue, out);
     queue.slide_window();
   }
   __champsim_stop_trace();
