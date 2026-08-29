@@ -36,5 +36,12 @@ NMFC invariants (docs/nmfc/DESIGN.md §0) -- settled, do not re-derive:
     tile_of() in the kernel bakes in a layout and tests the allocator instead
     of the architecture. Grain-granular NUCA is a tile SWAP, not a fresh
     allocation; prefer a duplication policy over sub-grain swaps.
+ 9. TWO INVOCATION LOOPS (§4.3). Register-returning: JOIN retrieves the vector,
+    the join is a register dependency, concurrency is capped by the reorder
+    buffer. Memory-committing: the result is a block in memory, the caller
+    busy-spins on it, and the trace needs a symbol hook marking the spin site
+    plus "block until address A is committed by invocation B". A traced spin
+    runs zero times, so without the hook the wait is unmodelled and every
+    number is silently optimistic.
 Before adding a mechanism, check whether the design already names one.
 EOF

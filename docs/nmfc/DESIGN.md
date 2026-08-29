@@ -261,6 +261,54 @@ host the traces are collected on, not of the machine being designed.
 
 ---
 
+## 4.3 Two invocation loops
+
+An invocation returns its 512-bit register file either way. What differs is
+whether that is where the *result* lives, and the two cases need different
+things from the trace.
+
+**Register-returning.** The value comes home in the vector register. `FORK`
+starts it, `JOIN` retrieves it, and the join is a register dependency: the
+consumer of the returned value is where the host waits. Nothing extra is
+needed to express this -- the compiler already emits a use of the return
+value, and that use is the join.
+
+Its limit is structural. A register dependency sits wherever the compiler put
+it, which for `x = f(...)` is the instruction after the call, so the host can
+have no more outstanding than its reorder buffer reaches -- measured here at
+fifteen to eighteen invocations against a tracking unit of 1024.
+
+**Memory-committing.** The value is not returned; the invocation writes a block
+to memory and the caller reads it later. The caller has nothing to wait on at
+the call site, so it can fork as many as the tracking unit holds. A standard
+core consuming this result busy-spins on the block until it is committed.
+
+That spin is the problem, and it is a problem *for the trace*, not for the
+machine. In a traced program the call was synchronous, so the block was always
+already written and the spin executed zero times. Nothing about the wait
+survives into the trace, and a trace-driven simulator cannot reconstruct it
+because it does not model values -- so a memory-committing loop replayed
+naively lets the host read results it never waited for, and the optimism is
+invisible in every number it produces.
+
+So the trace needs two things the register loop does not:
+
+* **A symbol hook marking where the spin begins.** A named, non-inlined
+  function the host calls before touching an invocation's output, so the
+  annotation pass knows the wait site exactly rather than inferring it from
+  whichever load happens to come first.
+* **A primitive meaning "block until address A is committed by invocation
+  B".** The annotation pass knows which invocation wrote which addresses, so
+  it can resolve A to B; the marker tells it where the block belongs. What the
+  simulator sees is an ordinary deferred join, placed where the host actually
+  needed the answer.
+
+The hook must *touch* the address it waits on, because a trace records
+addresses and not register values -- a marker that merely takes a pointer
+argument leaves nothing behind to resolve.
+
+---
+
 ## 4.2 Placement policies: what moves, and who decides
 
 Several policies are under test. They are not variations on one idea; they
