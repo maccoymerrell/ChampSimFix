@@ -240,7 +240,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
 
     }
 
-    int64_t gitBit(unsigned long BitIndex, Addr_t address){
+    int64_t gitBit(Addr_t address,unsigned long BitIndex){
       return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
     }
 
@@ -391,7 +391,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
 
     }
 
-    int64_t gitBit(unsigned long BitIndex, Addr_t address){
+    int64_t gitBit(Addr_t address,unsigned long BitIndex){
       return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
     }
 
@@ -544,7 +544,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
 
     }
 
-    int64_t gitBit(unsigned long BitIndex, Addr_t address){
+    int64_t gitBit(Addr_t address,unsigned long BitIndex){
       return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
     }
 
@@ -698,7 +698,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
 
     }
 
-    int64_t gitBit(unsigned long BitIndex, Addr_t address){
+    int64_t gitBit(Addr_t address,unsigned long BitIndex){
       return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
     }
 
@@ -853,7 +853,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
 
     }
 
-    int64_t gitBit(unsigned long BitIndex, Addr_t address){
+    int64_t gitBit(Addr_t address,unsigned long BitIndex){
       return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
     }
 
@@ -1004,7 +1004,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
 
     }
 
-    int64_t gitBit(unsigned long BitIndex, Addr_t address){
+    int64_t gitBit(Addr_t address,unsigned long BitIndex){
       return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
     }
 
@@ -1152,7 +1152,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
       }
     }
 
-    bool gitBit(unsigned long BitIndex, Addr_t address){
+    bool gitBit(Addr_t address,unsigned long BitIndex){
       return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
     }
 
@@ -1277,7 +1277,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
       }
     }
 
-    bool gitBit(unsigned long BitIndex, Addr_t address){
+    bool gitBit(Addr_t address,unsigned long BitIndex){
       return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
     }
 
@@ -1402,7 +1402,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
       }
     }
 
-    bool gitBit(unsigned long BitIndex, Addr_t address){
+    bool gitBit(Addr_t address,unsigned long BitIndex){
       return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
     }
 
@@ -1526,7 +1526,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
       }
     }
 
-    bool gitBit(unsigned long BitIndex, Addr_t address){
+    bool gitBit(Addr_t address,unsigned long BitIndex){
       return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
     }
 
@@ -1658,7 +1658,7 @@ class ZEN4 final : public IAddrMapper, public Implementation {
       }
     }
 
-    bool gitBit(unsigned long BitIndex, Addr_t address){
+    bool gitBit(Addr_t address,unsigned long BitIndex){
       return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
     }
 
@@ -1780,7 +1780,7 @@ class ZEN4_8GB_RAF_3 final : public IAddrMapper, public Implementation {
       }
     }
 
-    bool gitBit(unsigned long BitIndex, Addr_t address){
+    bool gitBit(Addr_t address,unsigned long BitIndex){
       return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
     }
 
@@ -2002,8 +2002,8 @@ public:
     assert(m_addr_bits[m_dram->m_levels("column")] <= gang_size);
   }
 
-  int64_t gitBit(unsigned long BitIndex, Addr_t address){
-    return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
+  int64_t gitBit(Addr_t address,unsigned long BitIndex){
+    return (((1<<BitIndex) & address) !=0); // return the selected bit from the adress
   }
 
   void apply(Request& req) override {
@@ -2157,7 +2157,7 @@ public:
     assert(m_addr_bits[m_dram->m_levels("column")] <= gang_size);
   }
 
-  int64_t gitBit(unsigned long BitIndex, Addr_t address){
+  int64_t gitBit(Addr_t address,unsigned long BitIndex){
     return (((1<<BitIndex) & address ) !=0); // return the selected bit from the adress
   }
 
