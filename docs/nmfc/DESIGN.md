@@ -3333,9 +3333,21 @@ throughout (3.35M): the same work.
 | edges duplicate | 343,858 | 28.8% | 125.8 ms |
 | edges duplicate + first-touch | 245,709 | -- | 124.5 ms |
 
-Seven times fewer migrations and **38% longer**. The mechanism is not subtle and
-the slice statistics name it: LLC misses went from 213,183 to 1,673,842, and
-cycles spent asleep on a load from 53.3M to 96.0M. Replicating an 8 MiB array
+Seven times fewer migrations and **38% longer**.
+
+Re-measured on the later build -- store buffer, derived remap budget, tile
+derived from the frame -- the inversion is unchanged: **91.0218 ms** baseline
+against **125.226 ms** replicated round-robin and **124.004 ms** replicated
+first-touch, with migrations 1,605,541 / 343,886 / 245,702 and slice miss rates
+5.4% / 28.8% / 28.0%. Every change since the first measurement -- a store
+buffer, a derived remap budget, a page-table ordering bug -- and the answer
+moves in the fourth significant figure. That is the more useful half of the
+result: the mechanism is capacity, and capacity does not care what else was
+fixed.
+
+The mechanism is not subtle and the slice statistics name it: LLC misses went
+from 213,183 to 1,673,842, and cycles spent asleep on a load from 53.3M to
+96.0M. Replicating an 8 MiB array
 onto four 4 MiB slices means every tile must hold all of it in a slice that
 previously held only its ~2 MiB share. Aggregate capacity for that array fell
 from about 16 MiB to about 4 MiB, and what the migrations had been costing in
