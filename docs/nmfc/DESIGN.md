@@ -3601,7 +3601,9 @@ result goes to memory and the entry retires on the tile's ACK.
 | 512 | 11.3048 ms | 524,288 | 396,161 | 2,625,144 |
 
 Not similar. **Identical**, in every statistic the tiles emit, across an eight-
-fold range.
+fold range. §31.3 is the reason, measured rather than inferred: the tiles never
+held more than 53 of their 128 contexts at any instant, so there was nothing for
+the extra ones to do.
 
 Repeated at four times the access set -- 64 MiB, 8,192 invocations, 2,097,152
 loads, 1,577,865 migrations -- and on the later build carrying the store buffer
@@ -3613,17 +3615,49 @@ not necessarily the same workload.) A machine whose answer does not change to se
 resource is multiplied by eight is not using that resource, and the numbers say
 so much more plainly than a curve with a knee in it would have.
 
-The reason is the admission path, not the tiles. §23.2's `FORK` returns "a
-handle, or 0 if no FTU entry is free", and the tracking unit has 64 entries; the
-fabric's control queue is 64 as well, and refuses beyond that. Either way the
-host can have at most 64 invocations outstanding across the whole machine,
-sixteen per tile at four tiles, and every context above sixteen is capacity
-nothing can fill. The sweep was measuring a quantity that was pinned somewhere
-else.
+### 31.3 Ask the machine instead: occupancy, not ablation
 
-The two caps are the same number, so this experiment does not separate them --
-raising one without the other would only move the refusal. What it does
-establish is which *side* the limit is on, and it is the host's.
+The sweep above says a resource was not the constraint, and it says so the worst
+way -- by elimination, and only for the resource that happened to be swept. The
+machine can answer directly, and the instrumentation to make it do so is three
+counters per structure: entries live summed over cycles, the high-water mark,
+and the cycles anything was outstanding at all as a denominator. That last one
+matters here because these programs offload a phase and then verify the answer
+on the host, so an average over the whole run is mostly an average over an idle
+machine.
+
+Four tiles, 128 contexts each, and a 64-entry tracking unit:
+
+| | mean while in use | peak | |
+|---|---|---|---|
+| **host tracking unit** | **63.61 of 64** | **64** | full 98.5% of the time it was in use |
+| fabric control queue | 0.08 of 64 | 5 | zero refusals |
+| tile 0 contexts | 5.37 of 128 | 18 | |
+| tile 1 contexts | 13.27 of 128 | 53 | |
+| tile 2 contexts | 12.57 of 128 | 35 | |
+| tile 3 contexts | 5.61 of 128 | 24 | |
+
+**The tracking unit is 99% full while the tiles are 4 to 10% full.** That is the
+whole answer, in one run, and it separates what the sweep could not: the control
+queue is empty and refuses nothing, so the 64 that binds is the FTU's and not
+the queue's. §23.2's `FORK` returns "a handle, or 0 if no FTU entry is free", and
+it is returning zero almost continuously while 460 of the machine's 512 contexts
+sit unused.
+
+The same instrumentation says something different about BFS, which is why it is
+worth having on every run rather than reaching for after a sweep disappoints:
+
+| | mean while in use | peak | |
+|---|---|---|---|
+| host tracking unit | 23.20 of 64 | 24 | **never full** |
+| tile contexts | 1.15-3.39 of 128 | 5-13 | |
+
+BFS never fills the window. Its limit is its own dependency structure -- a
+level-synchronous frontier, where the next level cannot start until this one
+finishes -- and no amount of admission capacity changes that. Two workloads, two
+different binding constraints, and the run time alone distinguishes neither.
+
+`run_coherent.sh` prints these on every run now.
 
 This is worth stating as a design property rather than as a configuration
 mistake. A host-issued function call occupies a host-side entry until it
@@ -3632,7 +3666,7 @@ the tiles' context count only bounds how that concurrency may be distributed.
 §20's lever is the FTU and the host's issue rate; contexts are a lever only once
 those are not the binding one.
 
-### 31.3 What the machine did do
+### 31.4 What the machine did do
 
 At the point the sweep pinned, the gather is memory-bound in the way it was
 designed to be. Slice miss rate 25.6% on 361,934 misses -- the access set is
