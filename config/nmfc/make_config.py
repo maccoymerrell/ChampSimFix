@@ -102,22 +102,29 @@ def build(args, nmfc_enabled):
     for t in range(tiles):
         children.append(channel(f"fabric_tile{t}_channel", 64, 64, 64,
                                 comment=f"compute tile -> memory tile {t}"))
-        children.append(channel(f"tile{t}_LLC_DRAM_channel", 64, 64, 64))
+        banks = max(1, int(getattr(args, "llc_banks", 1)))
+        for b in range(banks):
+            children.append(channel(f"tile{t}_LLC_DRAM_channel{b}" if banks > 1 else f"tile{t}_LLC_DRAM_channel", 64, 64, 64))
         if nmfc_enabled:
             # The mapping-mode tag is information for routing and for cache
             # tagging, and it sits above every field a DRAM address mapping has.
             # Stripping it here is what makes the address handed to the memory
             # controller a valid physical address for that channel's own space.
-            children.append({
-                "_comment": f"tile {t}: drop the mapping-mode tag on the way into the memory controller",
-                "name": f"tile{t}_mode_port", "module": "channel", "model": "DRAM_MODE_PORT",
-                "lower": f"@tile{t}_LLC_DRAM_channel",
-                "nmfc_num_tiles": tiles, "log2_block_size": 6,
-                "nmfc_grain_bits": args.grain_bits, "nmfc_mode_bit": args.mode_bit,
-            })
+            # One per bank: each bank has its own way down to the controller, so
+            # nothing gathers the banks' misses back into a single queue.
+            for b in range(banks):
+                children.append({
+                    "_comment": f"tile {t}: drop the mapping-mode tag on the way into the memory controller",
+                    "name": (f"tile{t}_mode_port{b}" if banks > 1 else f"tile{t}_mode_port"),
+                    "module": "channel", "model": "DRAM_MODE_PORT",
+                    "lower": (f"@tile{t}_LLC_DRAM_channel{b}" if banks > 1 else f"@tile{t}_LLC_DRAM_channel"),
+                    "nmfc_num_tiles": tiles, "log2_block_size": 6,
+                    "nmfc_grain_bits": args.grain_bits, "nmfc_mode_bit": args.mode_bit,
+                })
         if nmfc_enabled:
-            children.append(channel(f"tile{t}_fc_dcache_channel", 64, 64, 0,
-                                    comment=f"function core {t} -> its data cache"))
+            if args.fc_dcache:
+                children.append(channel(f"tile{t}_fc_dcache_channel", 64, 64, 0,
+                                        comment=f"function core {t} -> its data cache"))
             children.append(channel(f"tile{t}_fc_icache_channel", 32, 0, 0))
             children.append(channel(f"tile{t}_LLC_fcD_channel", 64, 64, 0,
                                     comment=f"function core {t}'s data port into the slice"))
@@ -146,7 +153,11 @@ def build(args, nmfc_enabled):
                 "name": f"tile{t}_DRAM", "module": "memory_controller", "model": "RAMULATOR_MC",
                 "config": per_tile_ramulator_config(args.ramulator_config, t),
                 "max_accept": {"bandwidth": 4},
-                "ul_channels": [f"@tile{t}_LLC_DRAM_channel"],
+                # One input port per LLC bank. FRFCFS already queues per DRAM
+                # bank, and the fabric routed on the bank field, so each bank's
+                # misses arrive at the queue that will serve them.
+                "ul_channels": ([f"@tile{t}_LLC_DRAM_channel{b}" for b in range(banks)] if banks > 1
+                                else [f"@tile{t}_LLC_DRAM_channel"]),
             })
             continue
         children.append({
@@ -213,6 +224,7 @@ def build(args, nmfc_enabled):
         })
 
     # ---- memory tiles ---------------------------------------------------
+    bank_sources = []
     for t in range(tiles):
         upper = [f"@fabric_tile{t}_channel"]
         if nmfc_enabled:
@@ -222,12 +234,28 @@ def build(args, nmfc_enabled):
                     upper += [f"@tile{t}_LLC_mmu{r}_channel" for r in range(tiles)]
                 else:
                     upper.append(f"@tile{t}_LLC_mmu_channel")
-        children.append(cache(
-            f"tile{t}_LLC", args.llc_sets // tiles, 16,
-            upper=upper, lower=(f"@tile{t}_mode_port" if nmfc_enabled else f"@tile{t}_LLC_DRAM_channel"),
-            hit=20, fill=20, mshr=64, pq=32,
-            comment=f"LLC slice owned by memory tile {t}; indexed on the compacted address",
-        ))
+        banks = max(1, int(getattr(args, "llc_banks", 1)))
+        if banks == 1:
+            children.append(cache(
+                f"tile{t}_LLC", args.llc_sets // tiles, 16,
+                upper=upper, lower=(f"@tile{t}_mode_port" if nmfc_enabled else f"@tile{t}_LLC_DRAM_channel"),
+                hit=20, fill=20, mshr=64, pq=32,
+                comment=f"LLC slice owned by memory tile {t}; indexed on the compacted address",
+            ))
+        else:
+            # The sources are turned into bank fabrics by a pass at the end, so
+            # that each fabric is declared after the channels it names -- the
+            # environment resolves @-references in declaration order -- and so
+            # that a source channel is replaced rather than duplicated.
+            bank_sources.extend((t, src.lstrip("@")) for src in upper)
+            for b in range(banks):
+                children.append(cache(
+                    f"tile{t}_LLC_b{b}", max(1, args.llc_sets // tiles // banks), 16,
+                    upper=[f"@{src.lstrip('@')}_b{b}" for src in upper],
+                    lower=(f"@tile{t}_mode_port{b}" if nmfc_enabled else f"@tile{t}_LLC_DRAM_channel{b}"),
+                    hit=20, fill=20, mshr=64, pq=32,
+                    comment=f"LLC bank {b} of memory tile {t}: the DRAM banks whose index ends in {b}",
+                ))
 
         if not nmfc_enabled:
             continue
@@ -281,12 +309,30 @@ def build(args, nmfc_enabled):
                 "hit_latency": 1, "mshr_size": 32,
             })
 
-        children.append(cache(
-            f"tile{t}_fc_dcache", 64, 8,
-            upper=[f"@tile{t}_fc_dcache_channel"], lower=f"@tile{t}_fcD_port",
-            hit=2, fill=2, mshr=64, pq=0,
-            comment="small and close: the LLC tag check is expensive and these kernels have tight working sets",
-        ))
+        if args.fc_dcache:
+            children.append(cache(
+                f"tile{t}_fc_dcache", 64, 8,
+                upper=[f"@tile{t}_fc_dcache_channel"], lower=f"@tile{t}_fcD_port",
+                hit=2, fill=2, mshr=64, pq=0,
+                comment="small and close: the LLC tag check is expensive and these kernels have tight working sets",
+            ))
+        else:
+            # No data cache. A function's 512-bit register file is its only
+            # local storage, which is the whole local-state budget the design
+            # gives it, and the modelled cache hit 11% -- no replacement policy
+            # pushed it past 13.9%, so there is no working set between the
+            # register file and the slice for it to hold. Its channel becomes a
+            # plain conduit to the tile's port.
+            children.append({
+                "_comment": f"function core {t} addresses its tile's slice directly",
+                "name": f"tile{t}_fc_dcache_bypass", "module": "channel", "model": "TILE_PORT",
+                "tile": t, "lower": f"@tile{t}_LLC_fcD_channel", "latency": 1, "queue_size": 64,
+                "rq_size": 64, "wq_size": 64, "pq_size": 0, "match_offset_bits": False,
+                "strict_locality": True,
+                "nmfc_num_tiles": tiles, "log2_block_size": 6,
+                "nmfc_grain_bits": args.grain_bits, "nmfc_mode_bit": args.mode_bit,
+                "clock_period": CLOCK,
+            })
         children.append(cache(
             f"tile{t}_fc_icache", 16, 4,
             upper=[f"@tile{t}_fc_icache_channel"], lower=f"@tile{t}_fcI_port",
@@ -300,7 +346,7 @@ def build(args, nmfc_enabled):
             "num_contexts": args.contexts,
             "issue_width": {"bandwidth": 4},
             "fabric": "@fn_fabric", "image": "@fn_image", "vmem": "@VMEM", "router": "@ROUTER",
-            "dcache": f"@tile{t}_fc_dcache_channel",
+            "dcache": (f"@tile{t}_fc_dcache_channel" if args.fc_dcache else f"@tile{t}_fc_dcache_bypass"),
             "icache": f"@tile{t}_fc_icache_channel",
             "fetch_bubble": 1,
             **({"mmu": f"@tile{t}_mmu"} if args.mmu else {}),
@@ -396,6 +442,34 @@ def build(args, nmfc_enabled):
     children.append(controller)
 
     label = "NMFC" if nmfc_enabled else "baseline"
+    # ---- bank the LLC ---------------------------------------------------
+    #
+    # Each source channel becomes a fabric of the same name, so every producer
+    # keeps the reference it already had, fanning out to one channel per bank.
+    # Routing is on the DRAM bank field taken from the device geometry, so a
+    # bank's misses arrive at the ramulator queue that will serve them --
+    # FRFCFS keeps one per bank, and nothing gathers them to split them again.
+    if bank_sources:
+        shift = int(getattr(args, "bank_shift", 12))
+        banks = max(1, int(getattr(args, "llc_banks", 1)))
+        by_name = {c["name"]: i for i, c in enumerate(children) if isinstance(c, dict) and "name" in c}
+        replacement = []
+        for t, base in bank_sources:
+            i = by_name.get(base)
+            if i is None:
+                continue
+            fabric = {
+                "_comment": f"memory tile {t}: routes {base} into the LLC banks by DRAM bank",
+                "name": base, "module": "channel", "model": "INTERLEAVE_FABRIC",
+                "clock_period": CLOCK, "hop_latency": 1, "queue_size": 64,
+                "max_forward": {"bandwidth": 4},
+                "select_shift": shift, "select_count": banks,
+                "tiles": [f"@{base}_b{b}" for b in range(banks)],
+            }
+            replacement.append((i, [channel(f"{base}_b{b}", 64, 64, 16) for b in range(banks)] + [fabric]))
+        for i, entries in sorted(replacement, reverse=True):
+            children[i:i + 1] = entries
+
     return {
         "_description": f"{label}: one compute tile and {tiles} memory tiles, each owning an "
                         f"LLC slice and one DRAM channel"
@@ -464,6 +538,7 @@ def derive_geometry(ramulator_config, tiles):
     bits = grain.bit_length() - 1
     if (1 << bits) != grain:
         raise SystemExit(f"derived grain {grain} is not a power of two; check {ramulator_config}")
+
     return {
         "grain_bits": bits, "grain": grain, "row_bytes": row_bytes,
         "banks_per_channel": banks_per_channel, "rows_per_bank": rows_per_bank,
@@ -505,6 +580,12 @@ def main():
     parser.add_argument("--router", default="CONGRUENT_ROUTER",
                         choices=["CONGRUENT_ROUTER", "RELOCATION_ROUTER", "PHYSICAL_ROUTER", "ADAPTIVE_ROUTER", "NUCA_ROUTER"],
                         help="when the owning tile is decided, relative to translation")
+    parser.add_argument("--llc-banks", type=int, default=1,
+                        help="LLC banks per memory tile, routed by DRAM bank so misses reach ramulator "
+                             "already sorted into the per-bank queue that will serve them (1 = unbanked)")
+    parser.add_argument("--no-fc-dcache", dest="fc_dcache", action="store_false", default=True,
+                        help="function cores address the LLC directly; their 512-bit regfile is the only "
+                             "local storage (the modelled D-cache hits 11%)")
     parser.add_argument("--dram", choices=["default", "ramulator"], default="default")
     parser.add_argument("--mmu", action="store_true", default=True,
                         help="model function-core translation (default)")
@@ -518,6 +599,10 @@ def main():
 
     if args.dram == "ramulator":
         g = derive_geometry(args.ramulator_config, args.tiles)
+        # The field the bank fabric routes on: everything above one row is the
+        # bank field, and it is taken from the device rather than chosen.
+        args.bank_shift = (g["row_bytes"]).bit_length() - 1
+        args.bank_count = g["banks_per_channel"]
         if args.grain_bits not in (0, g["grain_bits"]):
             raise SystemExit(
                 f"--grain-bits {args.grain_bits} contradicts the DRAM, which requires {g['grain_bits']} "

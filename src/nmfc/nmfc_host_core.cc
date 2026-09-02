@@ -69,7 +69,12 @@ long NMFC_HOST_CORE::operate()
   progress += dispatch_offloads();             // NMFC: hand invocations to the fabric
   {
     // NMFC: sample tracking-unit occupancy once per operated cycle.
-    const auto occupied = static_cast<std::size_t>(std::count_if(std::begin(FTU), std::end(FTU), [](const auto& e) { return e.has_value(); }));
+    //
+    // Counted incrementally, not scanned. This ran std::count_if over the whole
+    // FTU every cycle -- 1024 entries x tens of millions of cycles, tens of
+    // billions of iterations, to maintain a mean and a peak. It was the single
+    // largest cost in the host core's profile, and it is a statistic.
+    const auto occupied = ftu_occupied_;
     ftu_occupancy_sum_ += occupied;
     ftu_peak_ = std::max(ftu_peak_, occupied);
     ++ftu_cycles_;
@@ -112,7 +117,8 @@ void NMFC_HOST_CORE::begin_phase(bool warmup)
   // edge, since invocations issued before it are still owed a return.
   offloads_issued_ = offloads_completed_ = offload_dispatch_stalls_ = offload_fire_and_forget_ = 0;
   ftu_occupancy_sum_ = ftu_cycles_ = 0;
-  ftu_peak_ = static_cast<std::size_t>(std::count_if(std::begin(FTU), std::end(FTU), [](const auto& e) { return e.has_value(); }));
+  ftu_occupied_ = static_cast<std::size_t>(std::count_if(std::begin(FTU), std::end(FTU), [](const auto& e) { return e.has_value(); }));
+  ftu_peak_ = ftu_occupied_;
 }
 
 void NMFC_HOST_CORE::end_phase(champsim::stat_report& out)
@@ -1206,8 +1212,7 @@ bool NMFC_HOST_CORE::offload_slots_available(const ooo_model_instr& instr) const
   if (needed == 0) {
     return true;
   }
-  const auto free_slots = std::count_if(std::begin(FTU), std::end(FTU), [](const auto& entry) { return !entry.has_value(); });
-  return free_slots >= needed;
+  return FTU.size() - ftu_occupied_ >= needed;
 }
 
 std::size_t NMFC_HOST_CORE::find_token(uint64_t token) const
@@ -1251,6 +1256,7 @@ void NMFC_HOST_CORE::retire_if_done(std::size_t idx)
     return;
   }
   slot.reset();
+  --ftu_occupied_;
   ++offloads_completed_;
 }
 
@@ -1285,6 +1291,7 @@ void NMFC_HOST_CORE::allocate_offload(const ooo_model_instr& instr, std::size_t 
   fresh.origin = instr.origin;
   fresh.call = ftu_waiter{instr.instr_id, rob_slot, true};
   slot->emplace(fresh);
+  ++ftu_occupied_;
   ftu_dispatch_queue_.push_back(static_cast<std::size_t>(std::distance(std::begin(FTU), slot)));
   ++offloads_issued_;
 }
@@ -1362,7 +1369,7 @@ void NMFC_HOST_CORE::complete_offload(std::size_t idx)
 
 void NMFC_HOST_CORE::print_ftu_deadlock() const
 {
-  const auto occupied = std::count_if(std::begin(FTU), std::end(FTU), [](const auto& e) { return e.has_value(); });
+  const auto occupied = ftu_occupied_;
   fmt::print("[{}_FTU] occupied: {}/{} dispatch queue: {}\n", NAME, occupied, FTU.size(), ftu_dispatch_queue_.size());
   std::size_t shown = 0;
   for (std::size_t idx = 0; idx < FTU.size() && shown < 8; ++idx) {

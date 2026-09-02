@@ -29,6 +29,15 @@
  *   queue_size         inbound requests held before add_* refuses (default 64)
  *   max_forward        requests moved per cycle, each direction (default 4)
  *   compact_tile_bits  bool (default true) — off only to A/B the compaction
+ *   select_shift       bits below the field that picks a downstream (optional)
+ *   select_count       how many downstreams that field selects (optional)
+ *
+ * The selecting field is the tile field by default. Given select_shift and
+ * select_count it is whatever those name, which is how one of these becomes a
+ * bank fabric inside a memory tile: the field is the DRAM bank field, taken
+ * from the geometry the memory controller derived, so an LLC bank's misses
+ * arrive at ramulator already sorted into the queue that will serve them --
+ * FRFCFS keeps one per bank, so there is nothing to gather and split again.
  */
 
 #include <algorithm>
@@ -61,9 +70,15 @@ public:
         tiles_(builder.get_parameter<std::vector<channel_type*>>("tiles")), map_(nmfc::tile_map_from(builder)),
         hop_latency_(nmfc::cycles_from(builder, "hop_latency", 4)), queue_size_(builder.get_parameter<std::size_t>("queue_size", true, std::size_t{64})),
         max_forward_(builder.get_parameter<champsim::bandwidth::maximum_type>("max_forward", true, champsim::bandwidth::maximum_type{4})),
-        compact_(builder.get_parameter<bool>("compact_tile_bits", true, true)), per_tile_requests_(tiles_.size(), 0)
+        compact_(builder.get_parameter<bool>("compact_tile_bits", true, true)),
+        select_shift_(builder.get_parameter<unsigned>("select_shift", true, 0U)),
+        select_count_(builder.get_parameter<std::size_t>("select_count", true, std::size_t{0})), per_tile_requests_(tiles_.size(), 0)
   {
-    if (tiles_.size() != map_.num_tiles()) {
+    if (select_count_ != 0 && tiles_.size() != select_count_) {
+      fmt::print("[{}] ERROR: {} downstream channels but the selecting field names {}\n", NAME, tiles_.size(), select_count_);
+      std::exit(-1);
+    }
+    if (select_count_ == 0 && tiles_.size() != map_.num_tiles()) {
       fmt::print("[{}] ERROR: {} downstream channels declared but nmfc_num_tiles is {}. Routing would address a tile that does not exist.\n", NAME,
                  tiles_.size(), map_.num_tiles());
       std::exit(-1);
@@ -162,7 +177,7 @@ private:
       ++rejected_; // back-pressure: the cache above will retry
       return false;
     }
-    const auto tile = map_.tile_of(packet.address);
+    const auto tile = select_of(packet.address);
     inbound_.push_back(pending_request{packet, kind, tile, current_time + hop_latency_});
     if (inbound_.size() > occupancy_high_water_) {
       occupancy_high_water_ = inbound_.size();
@@ -173,6 +188,44 @@ private:
   [[nodiscard]] std::size_t count_of(queue_kind kind) const
   {
     return static_cast<std::size_t>(std::count_if(std::begin(inbound_), std::end(inbound_), [kind](const auto& entry) { return entry.kind == kind; }));
+  }
+
+  /** Which downstream owns this address: the tile field, or the named one. */
+  [[nodiscard]] std::size_t select_of(champsim::address addr) const
+  {
+    if (select_count_ == 0) {
+      return map_.tile_of(addr);
+    }
+    return static_cast<std::size_t>((addr.to<std::uint64_t>() >> select_shift_) & (select_count_ - 1));
+  }
+
+  /**
+   * Remove the selecting field, so every downstream uses all of its sets
+   * rather than the 1/N its share of the field would leave it.
+   */
+  [[nodiscard]] champsim::address compact_of(champsim::address addr) const
+  {
+    if (select_count_ == 0) {
+      return map_.compact(addr);
+    }
+    const auto raw = addr.to<std::uint64_t>();
+    const auto bits = static_cast<unsigned>(champsim::lg2(select_count_));
+    const auto low = raw & ((std::uint64_t{1} << select_shift_) - 1);
+    const auto high = (raw >> (select_shift_ + bits)) << select_shift_;
+    return champsim::address{high | low};
+  }
+
+  /** Put it back on the way up. */
+  [[nodiscard]] champsim::address expand_of(champsim::address addr, std::size_t which) const
+  {
+    if (select_count_ == 0) {
+      return map_.expand(addr, which);
+    }
+    const auto raw = addr.to<std::uint64_t>();
+    const auto bits = static_cast<unsigned>(champsim::lg2(select_count_));
+    const auto low = raw & ((std::uint64_t{1} << select_shift_) - 1);
+    const auto high = (raw >> select_shift_) << (select_shift_ + bits);
+    return champsim::address{high | (static_cast<std::uint64_t>(which) << select_shift_) | low};
   }
 
   /** Move due requests down, compacting the address for the slice below. */
@@ -189,7 +242,7 @@ private:
 
       auto forwarded = entry.req;
       if (compact_) {
-        forwarded.address = map_.compact(entry.req.address);
+        forwarded.address = compact_of(entry.req.address);
       }
 
       const bool accepted = (entry.kind == queue_kind::RQ)   ? downstream->add_rq(forwarded)
@@ -218,7 +271,7 @@ private:
       for (const auto& response : from_slice) {
         auto restored = response;
         if (compact_) {
-          restored.address = map_.expand(response.address, tile);
+          restored.address = expand_of(response.address, tile);
         }
         in_return_.push_back(nmfc::in_flight<response_type>{restored, current_time + hop_latency_});
         ++progress;
@@ -242,6 +295,8 @@ private:
   std::size_t queue_size_;
   champsim::bandwidth::maximum_type max_forward_;
   bool compact_;
+  unsigned select_shift_;
+  std::size_t select_count_;
 
   std::deque<pending_request> inbound_;
   std::deque<nmfc::in_flight<response_type>> in_return_;

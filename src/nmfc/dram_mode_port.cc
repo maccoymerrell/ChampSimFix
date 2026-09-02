@@ -74,6 +74,13 @@ public:
   response_queue_type& get_returned() override
   {
     auto& returned = lower_->get_returned();
+    // The fabric above polls every channel every cycle just to ask whether
+    // anything came back, and that lands here. With nothing tagged or nothing
+    // returned there is no fix-up to do, and the walk plus a hash lookup per
+    // response is pure overhead -- this was ~5% of simulation time.
+    if (tagged_.empty() || std::empty(returned)) {
+      return returned;
+    }
     for (auto& response : returned) {
       const auto stripped = response.address.to<std::uint64_t>();
       if (auto it = tagged_.find(stripped); it != std::end(tagged_)) {

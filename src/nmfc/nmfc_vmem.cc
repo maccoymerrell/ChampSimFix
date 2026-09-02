@@ -528,14 +528,34 @@ private:
     auto it = nmfc_grains_.find(key);
     bool fault = false;
     if (it == std::end(nmfc_grains_)) {
-      // Placement is the router's call, not the hint's. Under a congruent
-      // router the answer is forced by the virtual address and a hint that
-      // disagreed would put the data on one tile and send the invocation to
-      // another; under a physical router the hint is only a starting
-      // suggestion, and the router owns the balance decision.
+      // Placement is the address space owner's decision, taken at translation
+      // time -- which is what the hint carries. Its default is the congruent
+      // tile, `vgrain % num_tiles`, and an explicit hint is the placement pass
+      // deliberately siloing a structure. Either way the frame lands on the tile
+      // the virtual address names, which is the invariant `TRANSLATE_FIRST`
+      // routing depends on: the function core routes on `tile_of(physical)`, so
+      // a frame placed anywhere else sends the invocation to a tile its own
+      // address never named.
+      //
+      // This used to call `router_->placement_for()` and discard the hint. That
+      // function returns a round-robin counter which never reads the address, so
+      // a grain's tile was decided by the order it happened to be touched first.
+      // Grains do not carry equal traffic, so spreading them evenly by count
+      // spread traffic unevenly, and 75.3% of all accesses routed to the wrong
+      // tile. Balancing is not this decision's job -- it belongs to
+      // remap_grain(), which moves a whole component once migrations have shown
+      // which grains belong together.
+      //
+      // The two routing orders disagree about who owns this, and the difference
+      // is not cosmetic. Under VIRTUAL_FIRST a core routes on the virtual
+      // address before translating, so the address *is* the placement: a hint
+      // naming a different tile would send the invocation one way and its data
+      // another, and is simply invalid. Under TRANSLATE_FIRST the core routes on
+      // the frame, so the hint is a real choice the placement pass gets to make.
       const champsim::address va{vpage << log2_page_size_};
-      const auto tile = router_->placement_for(champsim::origin{asid, 0}, va);
-      (void)hint;
+      const auto tile = router_->order() == nmfc::routing_order::VIRTUAL_FIRST
+                            ? router_->placement_for(champsim::origin{asid, 0}, va)
+                            : hint.tile;
       it = nmfc_grains_.emplace(key, take_grain(tile)).first;
       fault = true;
       ++nmfc_allocs_;

@@ -507,6 +507,8 @@ private:
     ftu_waiter join{};
   };
   std::vector<std::optional<ftu_entry>> FTU;
+  /** Live count of engaged FTU entries, so occupancy is never scanned for. */
+  std::size_t ftu_occupied_ = 0;
   std::deque<std::size_t> ftu_dispatch_queue_;
 
   nmfc::function_fabric_module* fabric_ = nullptr;

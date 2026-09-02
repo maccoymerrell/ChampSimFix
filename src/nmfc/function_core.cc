@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <array>
+#include <numeric>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -291,6 +292,16 @@ public:
     out.line(fmt::format("{} ATOMIC WAIT: {} context-cycles over {} waits, {} of {} updates took a forwarded value", NAME, atomic_wait_cycles_,
                          atomic_conflicts_, atomic_forwards_, atomics_));
     out.line(fmt::format("{} PORT RETRIES fetch: {} data: {}", NAME, fetch_retries_, data_retries_));
+    {
+      const auto four = [](const std::array<std::uint64_t, 8>& h) {
+        return fmt::format("{} {} {} {}", h[0], h[1], h[2], h[3]);
+      };
+      const auto total = std::accumulate(std::begin(owner_hist_), std::end(owner_hist_), std::uint64_t{0});
+      out.line(fmt::format("{} ROUTE physical-tile: {} | virtual-tile: {} | migrate-target: {} | INCONGRUENT: {} of {}", NAME,
+                           four(owner_hist_), four(virtual_hist_), four(migrate_target_hist_), incongruent_, total));
+      out.line(fmt::format("{} ROUTE MODE nmfc-stamped: {} standard-stamped: {} | INCONGRUENT among nmfc-stamped: {}", NAME,
+                           nmfc_mode_ops_, standard_mode_ops_, incongruent_nmfc_));
+    }
     const auto share = [&](std::uint64_t n) { return wait_resident_ == 0 ? 0.0 : 100.0 * static_cast<double>(n) / static_cast<double>(wait_resident_); };
     out.line(fmt::format("{} RESIDENCY SPLIT memory: {:.1f}% issue-queue: {:.1f}% exec-latency: {:.1f}% translation: {:.1f}% lock: {:.1f}% "
                          "migration: {:.1f}% other-blocked: {:.1f}% running: {:.1f}% (of {} samples)",
@@ -925,8 +936,33 @@ private:
       // simply reads the answer out of it. A migration here discards it, which
       // is the real cost of this model and what the cold-start statistic counts.
       for (std::size_t i = 0; i < ops; ++i) {
-        if (const auto target = map_.tile_of(champsim::address{physical[i]}); target != tile_) {
+        const auto target = map_.tile_of(champsim::address{physical[i]});
+
+        // Congruence, sampled where it is used rather than where it is
+        // established. The frame a virtual grain gets is supposed to sit on the
+        // tile that grain's own address names; nothing checks that under
+        // TRANSLATE_FIRST, because the check in NMFC_VMEM is gated on
+        // VIRTUAL_FIRST. If the two disagree the routing decision is made on a
+        // tile the placement pass never chose, and the whole distribution moves.
+        ++owner_hist_[target & (owner_hist_.size() - 1)];
+        ++virtual_hist_[map_.tile_of_virtual(instr.mem[i].to<std::uint64_t>()) & (virtual_hist_.size() - 1)];
+        // Separate the two ways congruence can break. tile_of() reads the grain
+        // field only for an NMFC-stamped address; for a STANDARD one it reads the
+        // block field, which is a different field and legitimately unrelated to
+        // the grain. So an unstamped page and a misplaced frame look identical in
+        // an aggregate mismatch count, and they have opposite fixes.
+        const bool nmfc_mode = map_.is_nmfc(physical[i]);
+        nmfc_mode ? ++nmfc_mode_ops_ : ++standard_mode_ops_;
+        if (map_.tile_of_virtual(instr.mem[i].to<std::uint64_t>()) != target) {
+          ++incongruent_;
+          if (nmfc_mode) {
+            ++incongruent_nmfc_;
+          }
+        }
+
+        if (target != tile_) {
           ctx.last_route_address = instr.mem[i];
+          ++migrate_target_hist_[target & (migrate_target_hist_.size() - 1)];
           return begin_migration(slot, target);
         }
       }
@@ -1116,7 +1152,30 @@ private:
     }
     release_context_lock(ctx);
     ctx.prepare_for_migration();
-    migrating_.push_back(std::pair{slot, target});
+
+    // The slot goes back NOW, before the fabric has been asked for anything.
+    //
+    // A context's whole state is its register file, and once it has decided to
+    // leave, that state is a message -- it does not need a tile slot to sit in.
+    // Holding the slot until the fabric accepted was hold-and-wait, and it
+    // deadlocked exactly as that always does: every context on a full tile
+    // wanting to leave, every destination full, the fabric queues full because
+    // they only drain when a destination frees a slot, and no destination able
+    // to free one because its own contexts were holding slots waiting for the
+    // fabric. Measured at cycle 9,100,426: four tiles at 0-1 free contexts, 983
+    // tokens waiting, and 124 of 124 occupied contexts on one tile in the
+    // migrating state.
+    //
+    // The age guarantee did not save it. Reserving a slot for the oldest waiter
+    // admits one context into a full tile but promises nothing about that
+    // context ever leaving, so the reserve is consumed once and gone.
+    //
+    // With the slot released here, a full tile can always evacuate: every
+    // context either finishes or leaves, so a tile cannot stay full while its
+    // contexts want out. The outgoing queue is bounded by the context count by
+    // construction -- a tile cannot have more contexts leaving than it had.
+    migrating_.push_back(std::pair{ctx, target});
+    release_slot(slot);
     return true;
   }
 
@@ -1157,8 +1216,8 @@ private:
     // seizes. This is the third of three stages that each needed the same fix:
     // this deque, the fabric's queues, and the destination's context array.
     for (auto it = std::begin(migrating_); it != std::end(migrating_);) {
-      const auto [slot, target] = *it;
-      auto& ctx = contexts_[slot];
+      const auto& ctx = it->first;
+      const auto target = it->second;
 
       nmfc::migration_msg msg{};
       msg.ctx = ctx;
@@ -1171,7 +1230,6 @@ private:
         nmfc::hooks::migrate.emit(ctx.token, tile_, target, ctx.migrations);
       }
       it = migrating_.erase(it);
-      release_slot(slot);
       ++departed_;
       ++progress;
     }
@@ -1202,7 +1260,9 @@ private:
   std::deque<std::size_t> ready_;
   std::multimap<champsim::chrono::clock::time_point, std::size_t> timers_;
   std::deque<std::size_t> done_;
-  std::deque<std::pair<std::size_t, std::size_t>> migrating_;
+  // Contexts on their way out, held *by value* with their destination. A
+  // departing context does not keep its tile slot: see begin_migration().
+  std::deque<std::pair<nmfc::context, std::size_t>> migrating_;
 
   std::unordered_map<std::uint64_t, std::vector<outstanding_op>> outstanding_;
   std::unordered_set<std::uint64_t> locked_blocks_;
@@ -1247,6 +1307,13 @@ private:
   // counted one per retry per cycle, and now that they park it counts one per
   // wait. Neither is a duration, so neither can be compared across the two.
   std::uint64_t atomic_wait_cycles_ = 0;
+  std::array<std::uint64_t, 8> owner_hist_{};
+  std::array<std::uint64_t, 8> virtual_hist_{};
+  std::array<std::uint64_t, 8> migrate_target_hist_{};
+  std::uint64_t incongruent_ = 0;
+  std::uint64_t incongruent_nmfc_ = 0;
+  std::uint64_t nmfc_mode_ops_ = 0;
+  std::uint64_t standard_mode_ops_ = 0;
 
   // Slots that arrived by migration and have not yet issued a real instruction.
   // The cycles between arrival and that first issue are what a dropped

@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <deque>
 #include <map>
 #include <memory>
@@ -219,7 +220,8 @@ public:
       : champsim::modules::memory_controller_module(resolve_period(builder)), queues_(builder.get_parameter<std::vector<channel_type*>>("ul_channels")),
         config_path_(builder.get_parameter<std::string>("config")), size_bytes_(resolve_size(builder)),
         max_accept_(builder.get_parameter<champsim::bandwidth::maximum_type>("max_accept", true, champsim::bandwidth::maximum_type{4})),
-        block_bytes_(builder.get_parameter<unsigned>("block_size", true, 64U))
+        block_bytes_(builder.get_parameter<unsigned>("block_size", true, 64U)),
+        access_trace_path_(builder.get_parameter<std::string>("access_trace", true, std::string{}))
   {
     auto config = Ramulator::Config::parse_config_file(config_path_);
     frontend_ = Ramulator::Factory::create_frontend(config);
@@ -302,9 +304,18 @@ public:
     progress += deliver_responses();
 
     // Timer-driven work inside the memory system (a refresh in flight, a busy
-    // bank) advances without retiring anything, so report the tick as progress
-    // and keep the deadlock detector from reading it as a stall.
-    return progress + 1;
+    // bank) advances without retiring anything, so a tick with requests still
+    // in flight counts as progress -- otherwise the stall detector reads a
+    // slow DRAM as a deadlock.
+    //
+    // But only then. This used to return `progress + 1` unconditionally, which
+    // does not avoid a false positive, it destroys the detector: the phase
+    // controller stalls on `progress == 0` summed over every operable, so one
+    // module that always claims progress means ABORT can never fire and
+    // print_deadlock() is never reached. A real deadlock then presents as a
+    // simulation that runs forever with cycles advancing and nothing retiring,
+    // which cost two days of wall clock before it was noticed.
+    return progress + (outstanding_ > 0 ? 1 : 0);
   }
 
   [[nodiscard]] std::size_t get_num_channels() const final { return 1; }
@@ -323,6 +334,15 @@ public:
 
   void begin_phase(bool /*warmup*/) override
   {
+    if (!access_trace_path_.empty() && trace_out_ == nullptr) {
+      const auto path = fmt::format("{}.{}.trace", access_trace_path_, NAME);
+      trace_out_ = std::fopen(path.c_str(), "w");
+      if (trace_out_ == nullptr) {
+        fmt::print("[{}] ERROR: cannot open access trace {}\n", NAME, path);
+        std::exit(-1);
+      }
+    }
+
     reads_ = writes_ = completed_ = refused_ = transactions_ = 0;
     dram_cycles_ = 0;
     latency_sum_ = 0;
@@ -424,6 +444,16 @@ private:
     for (unsigned i = 0; i < transactions_per_block_; ++i) {
       const auto offset = static_cast<std::uint64_t>(i) * static_cast<std::uint64_t>(tx_bytes_);
       const auto remaining = block_bytes_ - static_cast<unsigned>(offset);
+
+      // Optional capture of the exact address stream this channel is asked for,
+      // in ramulator's LoadStoreTrace format. Replaying it headless drives the
+      // same device with the same addresses at whatever rate the frontend can
+      // inject, which separates "this stream cannot go faster on this device"
+      // from "our machine never asked for it faster" -- a distinction no
+      // in-simulation counter can make, because both look like a busy queue.
+      if (trace_out_ != nullptr) {
+        fmt::print(trace_out_, "{} {:#x}\n", type == 1 ? "ST" : "LD", base + offset);
+      }
       to_issue_.push_back(pending_tx{static_cast<Ramulator::Addr_t>(base + offset), type, static_cast<int>(std::min<unsigned>(remaining, static_cast<unsigned>(tx_bytes_))),
                                      static_cast<int>(request.origin.cpu()), block});
     }
@@ -508,6 +538,8 @@ private:
   bool finalized_ = false;
   champsim::bandwidth::maximum_type max_accept_;
   unsigned block_bytes_;
+  std::string access_trace_path_;
+  std::FILE* trace_out_ = nullptr;
 
   int tx_bytes_ = 0;
   unsigned transactions_per_block_ = 1;

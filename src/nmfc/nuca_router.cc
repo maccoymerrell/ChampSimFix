@@ -92,11 +92,22 @@ public:
   void attach_placement(nmfc::page_placement_sink* placement) override { placement_ = placement; }
 
   /** Interleave by default, which is R-NUCA's policy for data it has not yet classified. */
-  [[nodiscard]] std::size_t placement_for(champsim::origin /*origin*/, champsim::address /*vaddr*/) override
+  [[nodiscard]] std::size_t placement_for(champsim::origin /*origin*/, champsim::address vaddr) override
   {
-    const auto tile = next_tile_;
-    next_tile_ = (next_tile_ + 1) % map_.num_tiles();
-    return tile;
+    // Congruent: a grain starts on the tile its own address names. Under
+    // TRANSLATE_FIRST a function core routes on tile_of(physical), so this is
+    // the only starting point that keeps the invocation and its data on the
+    // same tile, and it is what preserves the interleaving the placement pass
+    // laid down -- regions are spread across grains so any contiguous range
+    // covers every tile evenly.
+    //
+    // What used to be here was a round-robin counter that never looked at the
+    // address, so a grain's tile depended on the order it was first touched.
+    // Grains carry very unequal traffic, so distributing them evenly by count
+    // distributed traffic unevenly. Balance belongs to remap_grain(), which
+    // moves a whole component deliberately once migrations show which grains
+    // belong together; it does not belong to first touch.
+    return map_.tile_of_virtual(vaddr.to<std::uint64_t>());
   }
 
   void note_migration(champsim::origin origin, champsim::address vaddr, std::size_t from, std::size_t to, std::uint64_t token) override
@@ -285,7 +296,6 @@ private:
   nmfc::page_placement_sink* placement_ = nullptr;
 
   std::unordered_map<std::uint64_t, grain_state> grains_;
-  std::size_t next_tile_ = 0;
   std::uint64_t observed_ = 0;
   std::uint64_t remapped_ = 0;
   std::uint64_t classified_ = 0;

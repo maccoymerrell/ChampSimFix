@@ -235,7 +235,7 @@ TEST_CASE("A congested destination cannot monopolise the dispatch path either")
   // because the fix was applied to one queue and not the other: 128 queued
   // invocations for a full tile while every other tile sat at 1024/1024 free.
   champsim::chrono::clock clock;
-  fabric_rig r{"_disp_hol", {0, 8, 8, 8}, 16, "first_touch"};
+  fabric_rig r{"_disp_hol", {0, 8, 8, 8}, 16, "by_entry_pc"};
 
   nmfc::function_body body{};
   body.token = 1;
@@ -247,11 +247,9 @@ TEST_CASE("A congested destination cannot monopolise the dispatch path either")
     m.token = 1000 + i;
     m.home_host = r.host_id;
     m.body = &body;
-    // Force it at the full tile by giving the body an address that tile owns.
-    nmfc::body_instr touch{};
-    touch.mem[0] = champsim::address{0 * GRAIN + 0x40};
-    touch.num_loads = 1;
-    body.instrs[0] = touch;
+    // Aim it at the full tile the way the machine does: the entry PC names
+    // the tile, because the copy of the code it starts at lives there.
+    m.entry_pc = champsim::address{0 * GRAIN + 0x1000};
     if (!r.fabric->dispatch(m)) {
       ++refused;
     }
@@ -261,15 +259,13 @@ TEST_CASE("A congested destination cannot monopolise the dispatch path either")
   // Work for a tile with room must still be accepted and delivered.
   nmfc::function_body ok_body{};
   ok_body.token = 2;
-  nmfc::body_instr touch2{};
-  touch2.mem[0] = champsim::address{2 * GRAIN + 0x40};
-  touch2.num_loads = 1;
-  ok_body.instrs.push_back(touch2);
+  ok_body.instrs.push_back(nmfc::body_instr{});
 
   nmfc::invocation_msg good{};
   good.token = 7;
   good.home_host = r.host_id;
   good.body = &ok_body;
+  good.entry_pc = champsim::address{2 * GRAIN + 0x1000}; // a tile with room
   REQUIRE(r.fabric->dispatch(good));
 
   r.run(clock, 200);
@@ -288,15 +284,12 @@ TEST_CASE("Dispatch does not rewrite the entry PC")
   // were N distinct virtual pages and sends an invocation to an address that is
   // not its code once they are not.
   champsim::chrono::clock clock;
-  fabric_rig r{"_entry_pc", {8, 8, 8, 8}, 16, "first_touch"};
+  fabric_rig r{"_entry_pc", {8, 8, 8, 8}, 16, "by_entry_pc"};
 
   nmfc::function_body body{};
   body.token = 5;
-  body.entry_pc = champsim::address{0x1000};
-  nmfc::body_instr touch{};
-  touch.mem[0] = champsim::address{3 * GRAIN + 0x40}; // owned by tile 3
-  touch.num_loads = 1;
-  body.instrs.push_back(touch);
+  body.entry_pc = champsim::address{3 * GRAIN + 0x1000}; // owned by tile 3
+  body.instrs.push_back(nmfc::body_instr{});
 
   nmfc::invocation_msg msg{};
   msg.token = 5;
