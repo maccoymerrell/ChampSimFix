@@ -3456,10 +3456,6 @@ downstream ever saw the extra writes, so nothing downstream was ever slowed by
 them. `storeBuffer=0` restores the old behaviour, because a cost that can be
 measured should not have to be argued about.
 
-**The loader touches the whole `.bss`.** Startup cost is proportional to a
-program's static footprint, before `main` runs. A simulator artefact rather than
-a machine property, but it bounds how large a workload can be run.
-
 **~~`first_touch` reads context lane 0.~~ It now refuses a lane that does not
 hold an address.** The lane is still a convention (`firstTouchLane`), but a
 value below `firstTouchFloor` -- 4 KiB by default -- is a count or a loop bound
@@ -3477,14 +3473,35 @@ not have been against a smaller one, and it withheld moves the policy could have
 made on a larger one. `setRemapBudget()` still overrides it, so the cost of a
 tighter bound can be measured.
 
-**Vanadis is the debug build.** `VANADIS_BUILD_DEBUG` is hard-coded in its
-`Makefile.am`, so the component is `dbg_VanadisCPU` and the faster
-`VanadisCPU` is never produced. Correct, slower than it needs to be.
+**Vanadis is the debug build, and this is deliberately left alone.**
+`VANADIS_BUILD_DEBUG` is unconditional in its `Makefile.am`, so the component is
+`dbg_VanadisCPU` and the faster `VanadisCPU` is never produced. This is a
+*simulation speed* item and not a fidelity one -- the model is the same model,
+and no measurement in this document would change -- so it is not a readiness
+blocker, and rebuilding our sst-elements fork to chase it trades a working
+install against nothing that shows up in a result. The Vanadis suite passes on
+the debug component at one and two tiles.
+
+**One item is genuinely open: `.bss` is touched in full at load.** Startup cost
+is proportional to a program's static footprint before `main` runs. It is a
+simulator artefact rather than a machine property, and it bounds how large a
+workload can be run rather than distorting one that does run.
 
 ### 30.3 Two hazards that were silent until this section
 
 Both were found by writing the checks rather than by hitting them, which is the
 only way this file's bugs have ever been found early.
+
+**Two page tables that are copies could be built from different parameters.**
+Found by deriving the remap budget: the budget comes from `memSize`, and a
+component given none derived a different budget from every component that had
+one -- so the fabric could move a grain into a slot the tiles refuse, and both
+frames would be legal addresses, so nothing would say so. `vanadis-nmfc.py` had
+exactly that shape waiting: `build()` passed `memSize` to the fabric and the
+config passed neither `memSize` nor `modeBit` to its three MMUs or its tiles.
+`memSize` is a fatal at construction now rather than a default, because the
+failure it prevents is invisible at run time, and the configurations build one
+dict and hand every page-table builder the same one.
 
 **Identity-mapped frames could collide with allocated ones.** Regular and
 standard pages are mapped identically -- the virtual address *is* the physical
@@ -3584,11 +3601,17 @@ not necessarily the same workload.) A machine whose answer does not change to se
 resource is multiplied by eight is not using that resource, and the numbers say
 so much more plainly than a curve with a knee in it would have.
 
-The reason is the host, not the tiles. §23.2's `FORK` returns "a handle, or 0 if
-no FTU entry is free", and the tracking unit has 64 entries -- so the host can
-have at most 64 invocations outstanding across the whole machine, sixteen per
-tile at four tiles. Every context above sixteen is capacity the host has no way
-to fill. The sweep was measuring a quantity that was pinned somewhere else.
+The reason is the admission path, not the tiles. §23.2's `FORK` returns "a
+handle, or 0 if no FTU entry is free", and the tracking unit has 64 entries; the
+fabric's control queue is 64 as well, and refuses beyond that. Either way the
+host can have at most 64 invocations outstanding across the whole machine,
+sixteen per tile at four tiles, and every context above sixteen is capacity
+nothing can fill. The sweep was measuring a quantity that was pinned somewhere
+else.
+
+The two caps are the same number, so this experiment does not separate them --
+raising one without the other would only move the refusal. What it does
+establish is which *side* the limit is on, and it is the host's.
 
 This is worth stating as a design property rather than as a configuration
 mistake. A host-issued function call occupies a host-side entry until it
