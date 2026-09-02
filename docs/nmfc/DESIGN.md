@@ -3268,3 +3268,92 @@ work.
 groups x 4 banks = 64 per channel; the grain formula uses 32, which is the
 per-rank count. They should be reconciled before any bank-conflict number is
 quoted.
+
+## 29. Replication beats placement, and the compiler's lever is a type
+
+The obvious response to §27.1's migration rate is to reshape the unit of work so
+an invocation only touches data it owns. For a graph that separability is very
+hard to manufacture -- and the NUCA policy said so empirically before anything
+was built for it, refusing all 818 co-access components as larger than a tile's
+fair share, because on this graph everything touches everything.
+
+**And the reshaping that suggests itself is the rejected design.** Bucketing a
+vertex's neighbours by the tile owning `parent[n]`, storing per-tile edge
+segments, and pinning each to its tile means the *program* computing tile
+arithmetic on addresses and baking the tile count into its data structure.
+Invariant 12 rejects exactly that -- "lets a program steer placement by choosing
+addresses" -- and invariant 4 says placement is a run-time decision by the
+address space's owner "rather than a layout the compiler baked in". It also
+misuses the hint: a vtile is a *relation*, saying these pages belong together,
+not a location saying this page goes on tile 3.
+
+So the compile-time levers are only two: **which page type** an object gets, and
+**which vtile** groups objects that belong together. Never which tile. That is a
+narrower instrument than it first appears, and on this workload it is enough.
+
+### 29.1 What the type buys
+
+BFS's edge array is read by every core on every edge and written by nobody after
+construction. That is §5.0.1's definition of a duplicate page -- "what every
+core needs: instruction pages, read-only data". Declaring it so is a statement
+about the data, not about where it goes; the copies are placed by the address
+space's owner, one per tile.
+
+131,072 vertices, ~1M edges, four tiles, same kernel and same graph throughout:
+
+| | migrations | per instruction | per memory op |
+|---|---|---|---|
+| baseline, round-robin | 1,703,838 | 0.1519 | 0.509 |
+| baseline, first-touch | 1,539,777 | 0.1420 | 0.467 |
+| **edges duplicate**, round-robin | 343,858 | 0.0352 | 0.103 |
+| **edges duplicate**, first-touch | **245,709** | **0.0254** | **0.073** |
+
+Memory operations are identical across all four (3.35M) -- the program does the
+same work. Instructions fall 14%, because a migration re-executes the
+instruction that caused it.
+
+**Replication is worth 5.0x. Placement is worth 1.11x.** Together 6.9x, and the
+order matters: first-touch buys 11% on the baseline and 40% once replication has
+removed the traffic that was drowning it. A placement policy cannot help while
+the context is ping-ponging twice per edge between the edge array's tile and
+`parent[]`'s; remove that and the placement decision starts to matter.
+
+Against the parity table §14.0 already measured:
+
+| | migrations per instruction |
+|---|---|
+| ChampSim, chase, GAP BFS | 0.7428 |
+| ChampSim, chase, oracle placement | 0.020 |
+| **Rev, chase, edges duplicate + first-touch** | **0.0254** |
+| ChampSim, spawn | 0.0015 |
+
+A chase decomposition with the right page type lands within 1.3x of an *oracle*
+placement -- with no oracle, no spawn, and no program choosing tiles.
+
+### 29.2 What it costs, and when it does not work
+
+The edge array is 8 MiB and becomes 32 MiB: one copy per tile. The working set
+goes from about 13 MiB to about 37 MiB, **2.85x**, to remove 1.36M migrations.
+
+Whether that is a good trade is a property of the workload, not of the machine,
+and the honest statement of the limit is this: **it worked because BFS's largest
+structure is read-only.** The mutable state -- `parent[]`, the frontier and its
+counter -- cannot be replicated, and it is exactly what the residual 245,709
+migrations are. A workload whose dominant structure is written gets nothing from
+this, and for it the shape argument of §20.2 is still the only answer.
+
+Two smaller notes from building it. Duplicates being "read-only by construction"
+(§5.0.1) is not the same as never written: a program *builds* one and then stops
+writing it, and §5.0.1's clause that "kernel writes are duplicated as well" is
+what makes that possible. The host MMU now fans a write to a duplicate page out
+to every copy; without it the other N-1 tiles read whatever was there before and
+every core but one computes on garbage.
+
+And the grain is not a constant. G is row_bytes x banks x channels, so it is
+512 KiB at two tiles and 1 MiB at four, while every test binary was linked with
+`__grain=524288`. `nmfc.ld` says in its own header that a binary laid out for
+one machine is not laid out for another; running a 512 KiB layout on a 1 MiB
+machine put two page types in one grain, and the check in §5.2 caught it.
+`grain_region()` had also been *computing* where the silo'd data was -- "the
+grain after the text" -- which is a guess about section order that stopped being
+true the moment a section was added between them. It reads the symbols now.
