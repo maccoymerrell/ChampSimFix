@@ -3291,7 +3291,7 @@ So the compile-time levers are only two: **which page type** an object gets, and
 **which vtile** groups objects that belong together. Never which tile. That is a
 narrower instrument than it first appears, and on this workload it is enough.
 
-### 29.1 What the type buys
+### 29.1 What the type buys, and what it costs to buy it
 
 BFS's edge array is read by every core on every edge and written by nobody after
 construction. That is §5.0.1's definition of a duplicate page -- "what every
@@ -3305,42 +3305,64 @@ space's owner, one per tile.
 |---|---|---|---|
 | baseline, round-robin | 1,703,838 | 0.1519 | 0.509 |
 | baseline, first-touch | 1,539,777 | 0.1420 | 0.467 |
-| **edges duplicate**, round-robin | 343,858 | 0.0352 | 0.103 |
-| **edges duplicate**, first-touch | **245,709** | **0.0254** | **0.073** |
+| edges duplicate, round-robin | 343,858 | 0.0352 | 0.103 |
+| edges duplicate, first-touch | 245,709 | 0.0254 | 0.073 |
 
-Memory operations are identical across all four (3.35M) -- the program does the
-same work. Instructions fall 14%, because a migration re-executes the
-instruction that caused it.
+Replication removes 5.0x of the migrations; placement adds another 1.4x on top
+of it, having been worth only 1.11x before. Memory operations are identical
+throughout (3.35M): the same work.
 
-**Replication is worth 5.0x. Placement is worth 1.11x.** Together 6.9x, and the
-order matters: first-touch buys 11% on the baseline and 40% once replication has
-removed the traffic that was drowning it. A placement policy cannot help while
-the context is ping-ponging twice per edge between the edge array's tile and
-`parent[]`'s; remove that and the placement decision starts to matter.
+### 29.2 And it is slower
 
-Against the parity table §14.0 already measured:
+**The migrations were not the limitation, and cutting them cost time.**
 
-| | migrations per instruction |
-|---|---|
-| ChampSim, chase, GAP BFS | 0.7428 |
-| ChampSim, chase, oracle placement | 0.020 |
-| **Rev, chase, edges duplicate + first-touch** | **0.0254** |
-| ChampSim, spawn | 0.0015 |
+| | migrations | LLC slice miss rate | run time |
+|---|---|---|---|
+| baseline | 1,703,838 | **5.4%** | **91.0 ms** |
+| edges duplicate | 343,858 | 28.8% | 125.8 ms |
+| edges duplicate + first-touch | 245,709 | -- | 124.5 ms |
 
-A chase decomposition with the right page type lands within 1.3x of an *oracle*
-placement -- with no oracle, no spawn, and no program choosing tiles.
+Seven times fewer migrations and **38% longer**. The mechanism is not subtle and
+the slice statistics name it: LLC misses went from 213,183 to 1,673,842, and
+cycles spent asleep on a load from 53.3M to 96.0M. Replicating an 8 MiB array
+onto four 4 MiB slices means every tile must hold all of it in a slice that
+previously held only its ~2 MiB share. Aggregate capacity for that array fell
+from about 16 MiB to about 4 MiB, and what the migrations had been costing in
+fabric traffic came back as DRAM traffic, with interest.
 
-### 29.2 What it costs, and when it does not work
+This is invariant 11 doing exactly what it says. "Migration moves the work
+instead of the data, at parity... the two are alternatives, never both, so
+migration traffic *subsumes* data traffic rather than adding to it." If
+migration is at parity with the transfer it replaces, then removing migrations
+cannot buy time -- it can only move the cost somewhere else, and here it moved
+it somewhere worse. A migration rate is evidence about *placement* (invariant 5)
+and is not by itself a cost to be minimised.
+
+It also retro-validates the placement policy. R-NUCA interleaves shared
+read-write data and replicates only instructions, and §28's NUCA pass refused
+all 818 co-access components as larger than a tile's fair share. It was right,
+and this experiment is the measurement of what doing otherwise costs.
+
+**So duplication stays an option and is off by default.** `tile_bfs.c` declares
+the edge array duplicate only under `NMFC_BFS_REPLICATE`; the baseline binary
+and every suite configuration leave it regular. The mechanism -- a duplicate
+region and an MMU that fans a write out to every copy -- is always present,
+because the type is what a program declares and the machine has to honour it.
+Whether declaring it is a good idea is a property of the array's size against a
+slice's, and on this workload it is not.
+
+### 29.3 What it costs, and when it does not work
 
 The edge array is 8 MiB and becomes 32 MiB: one copy per tile. The working set
-goes from about 13 MiB to about 37 MiB, **2.85x**, to remove 1.36M migrations.
+goes from about 13 MiB to about 37 MiB, **2.85x**, and the machine gets slower.
+Replication pays only when the replicated object is small against a slice --
+which is why R-NUCA replicates instructions, and why §5.0.1 lists "instruction
+pages" first.
 
-Whether that is a good trade is a property of the workload, not of the machine,
-and the honest statement of the limit is this: **it worked because BFS's largest
+The other limit is unchanged: **it works at all only because BFS's largest
 structure is read-only.** The mutable state -- `parent[]`, the frontier and its
-counter -- cannot be replicated, and it is exactly what the residual 245,709
-migrations are. A workload whose dominant structure is written gets nothing from
-this, and for it the shape argument of §20.2 is still the only answer.
+counter -- cannot be replicated, and it is exactly what the residual migrations
+are. A workload whose dominant structure is written gets nothing from this.
 
 Two smaller notes from building it. Duplicates being "read-only by construction"
 (§5.0.1) is not the same as never written: a program *builds* one and then stops
@@ -3352,8 +3374,88 @@ every core but one computes on garbage.
 And the grain is not a constant. G is row_bytes x banks x channels, so it is
 512 KiB at two tiles and 1 MiB at four, while every test binary was linked with
 `__grain=524288`. `nmfc.ld` says in its own header that a binary laid out for
-one machine is not laid out for another; running a 512 KiB layout on a 1 MiB
-machine put two page types in one grain, and the check in §5.2 caught it.
-`grain_region()` had also been *computing* where the silo'd data was -- "the
-grain after the text" -- which is a guess about section order that stopped being
-true the moment a section was added between them. It reads the symbols now.
+one machine is not laid out for another, and it means it -- running a 512 KiB
+layout on a 1 MiB machine put two page types in one grain, and the §5.2 check
+caught it. `grain_region()` had also been *computing* where the silo'd data was
+-- "the grain after the text" -- which is a guess about section order that
+stopped being true the moment a section was added between them. It reads the
+symbols now.
+
+## 30. Is it ready? What is still wrong or unproven
+
+Written after §29 inverted itself under measurement, which is the reason to
+write it: the model is now good enough that its answers change conclusions, and
+that is exactly when its remaining weak points matter.
+
+### 30.1 Settled by measurement
+
+**Migration rate is not a cost.** §29.2 removed five sixths of the migrations
+and the machine got 38% slower. Invariant 11 says migration is at parity with
+the transfer it replaces, so a migration count is evidence about placement
+(invariant 5) and not a quantity to minimise. Every earlier alarm in this
+document about migration rates was reading the wrong number.
+
+**Aggressive duplication is an option and stays off.** `NMFC_BFS_REPLICATE`
+builds the replicated variant; the baseline and every suite configuration leave
+the array regular. The *mechanism* is always available because a page type is
+something a program declares and the machine must honour, but nothing declares
+it by default, and on this workload declaring it is a pessimisation.
+
+### 30.2 Known wrong, or known unproven
+
+**`STANDARD` pages are written and unreachable.** §5.3's second mapping mode
+exists in `PageTable` and in the fabric's routing, and no configuration can use
+it: the LLC slices and memory controllers are declared with a grain-sized
+interleave, so a block-striped address routed to a tile by the standard mapping
+is rejected by that tile's controller. No test declares one. It should be
+treated as unimplemented until a configuration exists that can carry it.
+
+**The device declares more banks than §5.2's arithmetic uses.** The DDR5 model
+is 2 ranks x 8 bank groups x 4 banks = 64 banks per channel; the grain formula
+uses 32, which is the per-rank count. Both are self-consistent and they are not
+consistent with each other. No bank-conflict number should be quoted until this
+is reconciled.
+
+**The host's L1 is write-through with no write combining.** Every store becomes
+a separate event at the L2, so a program that initialises a large array streams
+one L2 access per 8 bytes. This is a real property of a write-through L1 and it
+is probably an overstatement of the cost -- a real one has a store buffer that
+coalesces. It is also what makes a large workload slow to simulate: the setup
+dominates the measurement.
+
+**The loader touches the whole `.bss`.** Startup cost is proportional to a
+program's static footprint, before `main` runs. A simulator artefact rather than
+a machine property, but it bounds how large a workload can be run.
+
+**`first_touch` reads context lane 0.** It assumes the invocation's first data
+address is in the first lane. That is a convention this document's kernels
+happen to follow and nothing enforces it; a kernel that lays its context out
+differently gets a bad placement silently rather than an error.
+
+**The placement policy may move sixteen grains.** `remapBudget_` bounds the
+arena a moved grain takes frames from, because an arena that can grow without
+limit eventually reaches whatever is above it. Beyond the budget the policy is
+told no. Sixteen is a number chosen to be safe, not one derived from anything.
+
+**Vanadis is the debug build.** `VANADIS_BUILD_DEBUG` is hard-coded in its
+`Makefile.am`, so the component is `dbg_VanadisCPU` and the faster
+`VanadisCPU` is never produced. Correct, slower than it needs to be.
+
+### 30.3 Two hazards that were silent until this section
+
+Both were found by writing the checks rather than by hitting them, which is the
+only way this file's bugs have ever been found early.
+
+**Identity-mapped frames could collide with allocated ones.** Regular and
+standard pages are mapped identically -- the virtual address *is* the physical
+one -- so anything a program places at or above `physBase` lands on the frames
+the allocator hands to grain and duplicate pages. The header has said "above
+anything the program image occupies" since the beginning and nothing checked it.
+`checkBelowPhysBase()` does now.
+
+**The page tables were inside the frame arena.** `walkBase` was a constant,
+512 MiB, chosen when the arena was smaller; at four tiles the arena reaches
+past it, so page-table reads had been landing on allocated frames. Silently,
+because a walk's data is never inspected -- the walk exists to cost time, and
+it was costing time against the right addresses for the wrong reason. It is
+derived from the arena's top now, and a hand-set value below that is refused.
