@@ -3009,36 +3009,78 @@ is to make the baseline the same source.
 
 It agrees with the reference at one, two and four tiles.
 
-### 27.1 The migration budget is missed by two orders of magnitude
+### 27.1 The first numbers were an artefact, and the artefact was a page table
 
-Four tiles, 4,096 vertices, summed across the tiles:
+**Retracted.** This subsection first reported 55,455 migrations -- one per 7.8
+instructions, "129x over invariant 5's budget" -- and concluded that the kernel
+was shaped wrong. The kernel *is* a chase, and §14.0 and §20.2 do say a chase
+migrates. But the number was not measuring that. It was measuring a bug, and
+the bug was in `PageTable`.
 
-| | |
+`PageTable` was constructed with a "block size" of 64 and used it for two
+things it must never be used for:
+
+```
+pageOf( addr )  ->  addr / 64          // the TLB and per-context translation key
+lookup(addr).tile -> (addr / 64) % N   // which tile owns a REGULAR page
+```
+
+A page table maps at *page* granularity. Keying translations on 64-byte cache
+lines makes every line its own page, so the tile TLB and the four entries a
+context carries can never hit on the next access to the same array -- which is
+what produced 87,039 walks. And deciding ownership per cache line means a
+context believed it owned one line in N while the fabric, the LLC slices and
+the memory controllers all partition at the **grain** (1 MiB at four tiles). So
+a context walking a contiguous array that lives entirely on one tile migrated
+every 64 bytes, arrived at a tile that did not hold the data either, and its
+access went back over the fabric to the real owner. The migrations bought
+nothing because they were computed from a partition nothing else used.
+
+This is invariant 9's failure mode exactly -- "a grain sits on the tile its
+physical address names" -- and §18's lesson repeated: the congruence check
+exists, is called from `NMFCTile`, and only inspects GRAIN regions, so REGULAR
+pages were never checked at all.
+
+Ownership is now decided at the grain, matching the fabric and the memory
+system, and a translation is keyed on a 4 KiB page. Same graph, same kernel,
+four tiles:
+
+| | before | after |
+|---|---|---|
+| instructions | 431,462 | 302,467 |
+| **migrations** | **55,455** | **3,068** |
+| migrations per instruction | 0.1285 | **0.0101** |
+| walks | 87,039 | 12,320 |
+| page-table references | 261,117 | 36,960 |
+| cold arrivals | 50,798 | 1,948 |
+| loads + stores + atomics | 83,843 | 83,747 |
+
+The memory-operation count is unchanged -- the program does the same work -- so
+the 52,000 migrations that disappeared were entirely artefact. Instructions fell
+30% because a migration re-executes the instruction that caused it.
+
+**And the comparison that should have been made first.** §14.0 already measured
+this machine's predecessor on the real kernel, and the parity target for a
+*chase* decomposition is there in the table:
+
+| | migrations per instruction |
 |---|---|
-| instructions | 431,462 |
-| invocations | 4,096 (105 instructions each) |
-| **migrations** | **55,455 -- one per 7.8 instructions** |
-| walks | 87,039 -- one per 5.0 instructions |
-| page-table references | 261,117 -- 0.61 per instruction |
-| atomics | 36,863 |
+| ChampSim, chase, GAP BFS | 0.7428 |
+| ChampSim, chase, oracle placement | 0.020 |
+| **Rev, chase, this BFS** | **0.0101** |
+| ChampSim, spawn | 0.0015 |
 
-**Invariant 5 budgets roughly one migration per thousand instructions. This is
-one per eight: 129x over.** Each invocation migrates 13.5 times while executing
-105 instructions.
+Invariant 5's "one per thousand" is the budget a *well-shaped* function meets;
+§14.0's spawn decomposition is what reaches it. Comparing a chase against it and
+declaring a 129x failure was the mistake invariant 8 warns about in the other
+direction -- judging the machine against the wrong reference. Rev's chase now
+sits between ChampSim's oracle-placed chase and its spawn, which is where a
+chase on a scattered placement should sit.
 
-This is not a defect in the machine. It is the machine measuring a function
-whose shape the design already rejects, and saying so in numbers for the first
-time. §20.2 states the rule -- "if work is discovered that the function cannot
-carry out itself, the unit of work is shaped wrong: it does not own the data it
-discovered. Reshape it rather than spawn" -- and §14.0 says the same thing about
-slices of a loop: "a slice has to *chase*". The kernel here is handed a vertex
-and then reaches for `parent[n]` of every neighbour, and a neighbour is by
-construction on a random tile. It does not own what it discovers, so it moves,
-and it moves per edge rather than per vertex.
-
-The remedy is a differently-shaped unit of work, not a faster fabric, and
-finding it is the next piece of design rather than the next piece of code.
-What has changed is that the question is now answerable by measurement.
+What survives from the original conclusion is only this: a chase migrates
+because it reaches for data it does not own, and the remedy is a differently
+shaped unit of work. That was true before the bug and is true after it. It just
+was not what these numbers were showing.
 
 ### 27.2 Arrival is not free once translation is real
 
@@ -3092,3 +3134,55 @@ first was not enough:
    client to give the oldest pinned line up and the fill retries. Without that
    the cache wedges on a workload doing atomics to colliding addresses -- which
    is any workload doing enough atomics.
+
+## 28. Audit against the ChampSim machine
+
+Read from the code rather than from this document. Where an answer is "no", it
+is a gap, not a decision, unless it says so.
+
+### 28.1 What is verified
+
+| | |
+|---|---|
+| **One ramulator instance per memory tile** | Yes. `coherent_memory.build()` creates a `memHierarchy.MemController` per tile, each with its own `memHierarchy.ramulator2` backend and its own `statsFile`. |
+| **LLC slice banks aligned to DRAM banks** | Now. Each slice was banked `DRAM_BANKS / ntiles`, so a four-tile machine had 8-bank slices over 32-bank channels and a cache bank stopped being the same partition as the DRAM bank behind it. A tile owns a *whole* channel, so the divisor was wrong; slices are banked to the channel's bank count. (The device declares 2 ranks x 8 bank groups x 4 banks = 64 banks per channel while §5.2's arithmetic uses 32 -- per rank. The two should be reconciled before any bank-conflict number is quoted.) |
+| **Address partitioning across tiles** | Now, and this was the §27.1 bug: three components decide it and one disagreed. `NMFCCoherenceFabric::tileOf` and the slice/controller interleave both use `(pa / G) % N`; `PageTable::lookup` used `(pa / 64) % N`. They agree now, and the memHierarchy ranges are declared so the slice *asserts* the partition rather than trusting it. |
+| **Migration payload** | `MigrationEvent::SIZE_BYTES = NMFC_CTX_BYTES + 8 = 72` -- the 512-bit register file and the program counter, exactly invariant 11's arithmetic. `migrate()` sends the translation's tile, refuses to migrate a context to itself, and releases any held word before leaving. |
+| **Only data migrates** | `migrate()` is called from exactly three places: `issueLoad`, `issueStore`, `issueAtomic`. Instruction fetch translates but never migrates; the page walk issues physical addresses and never translates. Migrations (3,068) are well under memory operations (83,747). |
+| **Per-context fetch and data slots** | `ibufValid/ibufPC/ibufInsn` and `dbufValid/dbufReg/dbufValue` per context; the shared BTB drives `requestFetch` a re-issue window ahead (`btbLookups`, `btbCorrect`). Separate `fc I$` and `fc D$` components per tile, both above that tile's LLC slice. |
+| **512 bits, no stack** | Every register access goes through `RegLayout::defines()`, and a function touching a register the layout does not define is refused at issue. The default layout is eight 64-bit lanes over 64 bytes. |
+
+### 28.2 What is not
+
+**The out-of-order host is not the default.** Five configurations run on Rev and
+one on Vanadis. Rev is in-order, so every number taken on it understates what a
+real host would do to the fabric. The OoO configuration is the reference machine
+and should be what a measurement runs on; the Rev configurations are the fast
+functional path.
+
+**No NUCA/NUMA policy.** ChampSim has `nuca_router.cc` and `adaptive_router.cc`
+with `remap_grain()` and `honour_remaps()`. Rev has round-robin, least-loaded,
+by-entry-pc and random -- and invariant 6 says in as many words that those are
+*not substitutes* for a placement policy. This is the largest missing piece, and
+§14.0's oracle-placement row is what it would be measured against.
+
+**No mode bit and no mixed page sizes.** `nmfc_vmem.cc` (668 lines) and
+`nmfc_mmu.cc` (478) implement §5.3's mapping-mode bit and §5.4's G-sized huge
+pages beside 4 KiB pages. Rev's `PageTable` is 281 lines with one page size and
+no mode bit -- which is *why* §27.1's bug was possible: with only one mapping
+implemented in the memory system, the second mapping in the page table had
+nothing to be consistent with.
+
+**Congruence is only checked for grain regions.** `checkCongruent()` skips
+REGULAR pages, which is how a partition mismatch on exactly those pages survived
+every run. Invariant 9 says check it on every run; it checks a third of it.
+
+**No spawn.** ChampSim's `function_core.cc` has `issue_spawn`, and §14.0's
+headline results depend on it. Invariant 10 forbids it here. That is a decision,
+not a gap -- but it means §14.0's 0.0015 migrations per instruction is not a
+target this machine can reach by that route, and the successor form (`CONT`) has
+not been measured as a substitute.
+
+**The trace path does not exist and does not need to.** `nmfc_producer.cc` and
+`nmfc_trace.h` exist because ChampSim is trace-driven. Rev and Vanadis execute
+real binaries.
