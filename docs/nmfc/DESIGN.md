@@ -2991,3 +2991,104 @@ the tracking unit against a loopback stub rather than a tile.
 What remains before §24 step 0: nothing in the machine. The baseline is stock
 GAPBS with no NMFC at all, and it can be run on this core, against this memory
 system, whenever the workload is ready.
+
+## 27. The first workload, and the first thing it said
+
+`test/tile_bfs.c` is a breadth-first search over a CSR graph: skewed degree, a
+row lookup and then an edge chase, `parent[]` claimed by AMOSWAP so that a
+vertex enters the frontier exactly once, and the frontier appended through an
+AMOADD counter. It is the shape §1 names -- graph traversal, pointer chasing,
+sparse indexing -- rather than another microbenchmark.
+
+One source builds two programs. `host_bfs.exe` runs the reference algorithm on
+the host and nothing else; `tile_bfs.exe` runs the same traversal over the same
+graph with one invocation per frontier vertex, and then runs the reference
+afterwards and compares. That is deliberate: invariant 8 says never to compare
+the architecture against a weaker algorithm, and the cheapest way to honour it
+is to make the baseline the same source.
+
+It agrees with the reference at one, two and four tiles.
+
+### 27.1 The migration budget is missed by two orders of magnitude
+
+Four tiles, 4,096 vertices, summed across the tiles:
+
+| | |
+|---|---|
+| instructions | 431,462 |
+| invocations | 4,096 (105 instructions each) |
+| **migrations** | **55,455 -- one per 7.8 instructions** |
+| walks | 87,039 -- one per 5.0 instructions |
+| page-table references | 261,117 -- 0.61 per instruction |
+| atomics | 36,863 |
+
+**Invariant 5 budgets roughly one migration per thousand instructions. This is
+one per eight: 129x over.** Each invocation migrates 13.5 times while executing
+105 instructions.
+
+This is not a defect in the machine. It is the machine measuring a function
+whose shape the design already rejects, and saying so in numbers for the first
+time. §20.2 states the rule -- "if work is discovered that the function cannot
+carry out itself, the unit of work is shaped wrong: it does not own the data it
+discovered. Reshape it rather than spawn" -- and §14.0 says the same thing about
+slices of a loop: "a slice has to *chase*". The kernel here is handed a vertex
+and then reaches for `parent[n]` of every neighbour, and a neighbour is by
+construction on a random tile. It does not own what it discovers, so it moves,
+and it moves per edge rather than per vertex.
+
+The remedy is a differently-shaped unit of work, not a faster fabric, and
+finding it is the next piece of design rather than the next piece of code.
+What has changed is that the question is now answerable by measurement.
+
+### 27.2 Arrival is not free once translation is real
+
+Invariant 11 says arrival costs 2.2-2.3 cycles with a 100% instruction-cache hit
+rate. That was measured on the ChampSim model, **where translation was an
+oracle** (§13's known gaps say so outright). With the walk issuing real
+references, 12,738 of tile 0's 13,423 arrivals -- **95%** -- took a cold walk,
+because §7.1 drops a context's translations when it migrates.
+
+So a migration costs 72 bytes on the fabric *and* three local memory references
+per distinct page the arriving context then touches. At this migration rate the
+walk traffic (0.61 references per instruction) is comparable to the program's
+own. Invariant 11's "arrival is not costly" holds for the fabric and does not
+hold for translation, and the two were never measured together before.
+
+### 27.3 The hand-off chain does not fire on this workload
+
+§25.6 measured sixteen invocations on one counter costing two memory reads,
+fourteen taken by hand-off. On BFS: 36,863 atomics and **2 hand-offs**. Nearly
+every atomic is on a *different* word -- `parent[n]` for distinct n -- so there
+is no chain to pass along, and the one genuinely shared word (the frontier
+counter) is a small fraction of the total. The optimisation is real and the
+earlier measurement was not wrong; it was a measurement of a contended counter,
+which is not what a traversal mostly does.
+
+### 27.4 A coherence hole the workload found
+
+The held-word table (§25.6) keeps an atomic's word **above** the data cache on
+purpose, and nothing connected it to the directory. Two tiles cannot contend for
+a line by construction -- but a host and a tile can, and here they did: the host
+writes `frontier_count = 0` between levels, the write is applied to a copy no
+tile is reading, and the tiles keep incrementing a stale value. Every level was
+expanded roughly three times over. The traversal was still *correct* -- every
+vertex agreed with the reference on whether it was reached -- which is what made
+it worth catching: a wrong count and a right answer is exactly the failure that
+survives a test suite.
+
+Three things were needed, and the second and third were only found because the
+first was not enough:
+
+1. **The tile is told when a line is snooped away.** The cache pushes the snoop
+   up to its client, which hands back the word it was holding; the cache patches
+   it into the line before answering. A leaf cache does this only when
+   `notifyClient` says its client keeps state above it.
+2. **A held word's line is pinned in the cache.** Releasing on snoop is useless
+   if the line was quietly evicted first: the directory then no longer believes
+   this agent holds anything, and the snoop never comes. Pinning rides on the
+   request that fills the line, so there is no window between the two.
+3. **A pin is a request, not a right.** Pinning every atomic's line filled whole
+   sets, and a fill then had nowhere to land. A set with no free way asks the
+   client to give the oldest pinned line up and the fill retries. Without that
+   the cache wedges on a workload doing atomics to colliding addresses -- which
+   is any workload doing enough atomics.
