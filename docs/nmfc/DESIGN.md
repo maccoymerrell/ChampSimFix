@@ -2593,10 +2593,21 @@ result.
 > (`tile_memory.py`, `rev-test-tilemem.py`, `rev-test-tiles.py`) is kept for
 > comparison and still has them -- and `rev-test-tiles.py` fails `tile_mem`'s
 > store checks at two tiles, which the new hierarchy passes at one, two and
-> four. What remains unbuilt is distance and bandwidth on the *NMFC control*
-> path: invocation, completion and migration still ride `NMFCFabricComponent`,
-> so the first fiction in §26.0.1 stands for them. The rest of this subsection
-> is what was wrong, kept because it is what the fix was measured against.
+> four.
+>
+> **The control path is built too, and this note used to say it was not.**
+> Invocation, completion and migration go through `transitTo()` on the coherence
+> fabric: the same `portFree_` the data and coherence traffic occupy, charged
+> the same hops, the same serialisation and the same queueing behind a busy
+> link. That is what makes §21's subsumption claim testable at all -- if control
+> rode a separate structure, migration would be free by construction and the
+> claim would be true by assumption. `NMFCFabricComponent` survives only for
+> `rev-test-tiles.py`, which is the flat unit-test configuration and takes no
+> measurements. The suite reports `bytesControl`, `hopCycles`, `serialCycles`
+> and `linkQueueCycles`, which is the evidence rather than the assertion.
+>
+> The rest of this subsection is what was wrong, kept because it is what the fix
+> was measured against.
 
 Before the fictions, the structure. §5.9 says the machine is a standard memory
 system with the partition moved to the fabric. The Rev model was not that
@@ -3403,39 +3414,68 @@ it by default, and on this workload declaring it is a pessimisation.
 
 ### 30.2 Known wrong, or known unproven
 
-**`STANDARD` pages are written and unreachable.** §5.3's second mapping mode
-exists in `PageTable` and in the fabric's routing, and no configuration can use
-it: the LLC slices and memory controllers are declared with a grain-sized
-interleave, so a block-striped address routed to a tile by the standard mapping
-is rejected by that tile's controller. No test declares one. It should be
-treated as unimplemented until a configuration exists that can carry it.
+**~~`STANDARD` pages are written and unreachable.~~ Implemented, and it found
+two bugs on the way in.** §5.3's second mapping mode now has a section in the
+linker script (`.nmfc_std`), a `NMFC_STD_DATA` attribute, a region type the
+configuration derives from the symbols like every other, and `tile_std.exe`,
+which is in the coherent suite at two and four tiles. See §32.
 
-**The device declares more banks than §5.2's arithmetic uses.** The DDR5 model
-is 2 ranks x 8 bank groups x 4 banks = 64 banks per channel; the grain formula
-uses 32, which is the per-rank count. Both are self-consistent and they are not
-consistent with each other. No bank-conflict number should be quoted until this
-is reconciled.
+**~~The device declares more banks than §5.2's arithmetic uses.~~ Reconciled;
+the formula was under-explained, not wrong.** The DDR5 model is 2 ranks x 8
+bank groups x 4 banks = 64 flat banks per channel and the grain formula uses
+32, the per-rank count. Under the device's `RoBaRaCoCh` mapping the rank bit
+sits *below* the five bank bits, so a contiguous 512 KiB sweeps every flat bank
+once. G is a whole number of those sweeps at an even tile count -- 1 MiB at
+four tiles is two, so every flat bank gets two rows rather than one -- and the
+`NMFCBankBalance` plugin measures the consequence directly rather than leaving
+it to arithmetic: a four-tile stress run reports `nmfc_banks_never_accessed` 0
+with a bank access spread of 1.31.
 
-**The host's L1 is write-through with no write combining.** Every store becomes
-a separate event at the L2, so a program that initialises a large array streams
-one L2 access per 8 bytes. This is a real property of a write-through L1 and it
-is probably an overstatement of the cost -- a real one has a store buffer that
-coalesces. It is also what makes a large workload slow to simulate: the setup
-dominates the measurement.
+The claim to make is therefore "a G-unit uses every bank of its channel
+evenly", not "one row open in every bank". At an *odd* tile count G is 1.5
+sweeps and a single G-unit covers half the banks twice; `grain()` now says so
+on stderr, and the statistic is the check. The slice stays banked by 32 and not
+64 on purpose: two flat banks differing only in rank are the same bank index at
+the same address position, so banking the cache by 64 would split on a bit the
+DRAM does not use to select a bank.
+
+**~~The host's L1 is write-through with no write combining.~~ It has a store
+buffer now, and the measurement says the concern was real in traffic and worth
+nothing in time.** A run of stores to one line is folded into a single
+downstream write -- contiguous spans only, stopping at the first load so nothing
+is reordered past one, and no store answered before the combined write has
+reached the cache below, which is why this needs no fence at the offload point.
+On the host BFS baseline it folds **873,207 stores into 152,944 writes**, 5.7x
+less L1-to-L2 write traffic, for a run time of **58.9138 ms either way -- to
+seven figures**, and 91.0181 ms against 91.039 ms on the offloaded build, a
+0.02% difference.
+
+That is worth keeping as a result rather than only as a fix. The pessimism was
+entirely on the L1-to-L2 link, and the write-back L2 absorbed it: nothing
+downstream ever saw the extra writes, so nothing downstream was ever slowed by
+them. `storeBuffer=0` restores the old behaviour, because a cost that can be
+measured should not have to be argued about.
 
 **The loader touches the whole `.bss`.** Startup cost is proportional to a
 program's static footprint, before `main` runs. A simulator artefact rather than
 a machine property, but it bounds how large a workload can be run.
 
-**`first_touch` reads context lane 0.** It assumes the invocation's first data
-address is in the first lane. That is a convention this document's kernels
-happen to follow and nothing enforces it; a kernel that lays its context out
-differently gets a bad placement silently rather than an error.
+**~~`first_touch` reads context lane 0.~~ It now refuses a lane that does not
+hold an address.** The lane is still a convention (`firstTouchLane`), but a
+value below `firstTouchFloor` -- 4 KiB by default -- is a count or a loop bound
+rather than a pointer, and the policy falls back to round-robin and says so in
+`placedNotAnAddress` instead of translating it and placing the invocation on
+whatever tile that landed on. It is a heuristic, stated as one: it catches the
+small integer a miscounted lane holds, not a wild pointer.
 
-**The placement policy may move sixteen grains.** `remapBudget_` bounds the
-arena a moved grain takes frames from, because an arena that can grow without
-limit eventually reaches whatever is above it. Beyond the budget the policy is
-told no. Sixteen is a number chosen to be safe, not one derived from anything.
+**~~The placement policy may move sixteen grains.~~ The budget is derived from
+the space that is left.** A moved grain takes one run of frames on every tile,
+so it costs `grain x tiles`; the budget is how many such runs fit above the
+allocated arena, less one reserved for the page tables. "Safe" is not a property
+a bound can have on its own -- sixteen was safe against this memory and would
+not have been against a smaller one, and it withheld moves the policy could have
+made on a larger one. `setRemapBudget()` still overrides it, so the cost of a
+tighter bound can be measured.
 
 **Vanadis is the debug build.** `VANADIS_BUILD_DEBUG` is hard-coded in its
 `Makefile.am`, so the component is `dbg_VanadisCPU` and the faster
@@ -3453,9 +3493,192 @@ the allocator hands to grain and duplicate pages. The header has said "above
 anything the program image occupies" since the beginning and nothing checked it.
 `checkBelowPhysBase()` does now.
 
+**A page-granular TLB cannot carry a block-granular owner.** Found by making
+§5.3's standard mapping reachable and then not believing the first measurement.
+The tile's TLB entry cached the owning tile beside the frame, which is right for
+every type whose page sits on one tile and wrong for the one type whose owner
+changes *within* a page: a function core summing a 4 KiB block-spread array
+migrated three times where the mapping calls for sixty-four, because every
+access after the first reused one entry. The tile is derived from the frame now
+and never cached beside it -- `tileOfPhysical(frame)`, the same function the
+fabric routes by. For every other type the two are equal by construction, which
+is exactly what `checkCongruent()` asserts, so this is a no-op everywhere except
+where it was wrong. It is also the better structure: a TLB holds a translation,
+and a partition is a property of the physical address.
+
+**One grammar had three parsers.** The `base:size:type:vtile` region string was
+parsed separately in the fabric, the tile and the host MMU. Two of the copies
+learned about `standard` and the third did not, so the first configuration to
+declare a block-spread region was accepted by the fabric and killed the host MMU
+several components later. Every one of these builds its own page table and they
+agree only because placement is a function of the declarations -- so a parser
+that disagrees about what was declared makes translation component-dependent.
+There is one `PageTable::parseRegion` now and the three callers only name
+themselves in the error.
+
+**A check ran before the value it checked was read.** `walkBase` is read from
+the parameters, and the block that derives it from the top of the frame arena
+ran *above* that read -- so it saw the member's initialiser, 512 MiB, decided it
+was not zero, compared it against an arena top that was smaller, and passed. The
+parameter read then overwrote it with the same 512 MiB. Both halves of the fix
+this document already claims -- "zero means derive it" and "a hand-set value
+below the arena is refused" -- were unreachable, and the section below said they
+worked. It stayed quiet for exactly as long as the arena stayed under 512 MiB,
+and the first thing to grow the arena found it immediately. A check whose inputs
+are not yet initialised is not a weak check, it is a comment.
+
 **The page tables were inside the frame arena.** `walkBase` was a constant,
 512 MiB, chosen when the arena was smaller; at four tiles the arena reaches
 past it, so page-table reads had been landing on allocated frames. Silently,
 because a walk's data is never inspected -- the walk exists to cost time, and
 it was costing time against the right addresses for the wrong reason. It is
 derived from the arena's top now, and a hand-set value below that is refused.
+
+## 31. The stress workload: contexts are not the lever, and never were
+
+§20 named "contexts, and the shape of a function" as the two levers left. The
+first of those is not reachable from this host, and it took a workload built to
+saturate the machine to show it.
+
+### 31.1 The workload
+
+`tile_stress.c` is an indexed gather -- `acc += data[idx[i]]` -- over an access
+set larger than the aggregate LLC. Sixteen MiB of data against four 4 MiB
+slices, random indices, two dependent loads per element and no reuse worth
+speaking of: the second load cannot issue until the first returns, so a context
+sleeps twice per element and nothing the core does can hide it. 4,096
+invocations of 64 elements each, 524,288 loads.
+
+It is a migration generator by construction, which is the point. Random indices
+into a 16 MiB array mean three quarters of every access is on another tile, and
+the machine has to move the work rather than the data 396,161 times in 11.3 ms
+to answer a gather that a host would answer by moving the data.
+
+**The first version of it did not run, and the machine said so.** It forked with
+`FORK.R` and joined immediately. A `JOIN` on an invocation that has not returned
+answers 0 and retires nothing -- §23.1 is explicit that it is a *try* -- so the
+tracking unit filled, every later fork was refused, and the retry loop span eight
+million times per invocation. The comment above the loop said "fire and forget"
+while the code did the opposite. It is `nmfc_forkf_r()` now, with no join: the
+result goes to memory and the entry retires on the tile's ACK.
+
+### 31.2 What it said, which was not what the sweep was built to ask
+
+| contexts per tile | simulated time | loads | migrations | instructions |
+|---|---|---|---|---|
+| 64 | 11.3048 ms | 524,288 | 396,161 | 2,625,144 |
+| 128 | 11.3048 ms | 524,288 | 396,161 | 2,625,144 |
+| 256 | 11.3048 ms | 524,288 | 396,161 | 2,625,144 |
+| 512 | 11.3048 ms | 524,288 | 396,161 | 2,625,144 |
+
+Not similar. **Identical**, in every statistic the tiles emit, across an eight-
+fold range.
+
+Repeated at four times the access set -- 64 MiB, 8,192 invocations, 2,097,152
+loads, 1,577,865 migrations -- and on the later build carrying the store buffer
+and the derived remap budget: **136.143 ms at 64 contexts and 136.143 ms at
+512**. Same answer, larger workload, different build. (The binary reports its
+own size in its banner, and it has to be read: `make` rebuilds `tile_stress.exe`
+at whatever `STRESS_SIZE` defaults to, so two runs of "the stress workload" are
+not necessarily the same workload.) A machine whose answer does not change to seven figures when a
+resource is multiplied by eight is not using that resource, and the numbers say
+so much more plainly than a curve with a knee in it would have.
+
+The reason is the host, not the tiles. §23.2's `FORK` returns "a handle, or 0 if
+no FTU entry is free", and the tracking unit has 64 entries -- so the host can
+have at most 64 invocations outstanding across the whole machine, sixteen per
+tile at four tiles. Every context above sixteen is capacity the host has no way
+to fill. The sweep was measuring a quantity that was pinned somewhere else.
+
+This is worth stating as a design property rather than as a configuration
+mistake. A host-issued function call occupies a host-side entry until it
+retires, so **the tracking unit is the concurrency of the whole machine**, and
+the tiles' context count only bounds how that concurrency may be distributed.
+§20's lever is the FTU and the host's issue rate; contexts are a lever only once
+those are not the binding one.
+
+### 31.3 What the machine did do
+
+At the point the sweep pinned, the gather is memory-bound in the way it was
+designed to be. Slice miss rate 25.6% on 361,934 misses -- the access set is
+genuinely larger than the cache, which is what the size was chosen for -- and
+27.0M cycles asleep on a load against 1.9M spent issuing. The DRAM underneath is
+being used the way §5.2 intends: 98.1% row hit rate on channel 0, every flat
+bank touched, bank access spread 1.31.
+
+And the migration rate is legitimate by invariant 11's test. 396,161 migrations
+against 524,288 loads is 0.76 per memory operation, below the ceiling that says
+a data migration may never outnumber the loads and stores that caused it. None
+of them are instruction fetch or translation: those are local by construction,
+because the code is a duplicate page and the page table is walked on the tile.
+
+## 32. §5.3's other mapping mode, made reachable
+
+The document has described two mappings since §5.3 -- one grain-striped for NMFC
+data, one block-spread for everything else, told apart by a bit one position
+above the top of DRAM -- and until now only the first could be carried. The
+`STANDARD` type existed in `PageTable`, the fabric routed it, and no
+configuration could use it, because the LLC slice and memory controller below
+each tile are declared with a grain interleave and a block-spread address does
+not satisfy one. That is worse than not having written it: it read as
+implemented.
+
+### 32.1 What it took
+
+A section in the linker script (`.nmfc_std`, its own grain, because a grain
+carries one type), an `NMFC_STD_DATA` attribute, and a region the configuration
+derives from the symbols like every other. Then three things that were not
+obvious:
+
+**The mode bit had to be turned on.** No configuration set one, and
+`tileOfPhysical` reads a zero mode bit as "there is one mapping and it is the
+NMFC one" -- which is correct with one mapping and wrong the moment there are
+two. `coherent_memory.mode_bit()` computes it once, from the memory size, and
+hands the same value to the fabric, the host MMU and every tile. Each builds its
+own page table, so a component with a different mode bit computes different
+frames for the same address, and nothing detects that: the addresses stay legal,
+they simply are not the same addresses.
+
+**The slice and controller ranges had to widen.** memHierarchy cannot express
+the union of two interleaves, so a configuration carrying block-spread data
+gives up the downstream range check and leaves the fabric's routing as the only
+enforcement. This is a real loss of the check invariant 9 asks for, and it is
+confined to configurations that ask for it: nothing declares standard data by
+default, and every other run keeps the grain-interleaved check. `build()` says
+so on stderr rather than doing it quietly.
+
+**The congruence check had to change its step.** `checkCongruent()` walked every
+region by the grain. A standard region's unit is a cache block, so that checked
+one block in every 16,384 and called the rest congruent without looking.
+
+### 32.2 And then the measurement disagreed with the mapping
+
+The first run passed and reported three migrations for a 4 KiB block-spread
+sum. The mapping calls for sixty-four. The cause was the TLB: its entry cached
+the owning tile beside the frame, which is right for every type whose page sits
+on one tile and wrong for the one type whose owner changes *within* a page.
+Every access after the first reused one entry and stayed home.
+
+The tile is derived from the frame now -- `tileOfPhysical(frame)`, the same
+function the fabric routes by -- and never cached beside it. For every other
+type the two are equal by construction, which is what `checkCongruent()`
+asserts, so the change is a no-op everywhere except where it was wrong.
+
+| tiles | migrations, 1,024 loads | |
+|---|---|---|
+| 1 | 0 | every block is local; there is one channel |
+| 2 | 65 | |
+| 4 | 65 | |
+
+Sixty-five, and the same at two tiles as at four, is exactly what the mapping
+predicts and a good check that the model is not approximating it: a sequential
+scan crosses a block boundary every 64 bytes, and with two tiles or more
+consecutive blocks are *always* on different tiles, so the count does not depend
+on how many there are. Sixty-four boundaries in 4 KiB, plus one arrival, and the
+same array declared grain contributes the one.
+
+**That is §5.3's argument stated as a measurement rather than as a claim.** The
+same 512 words cost 64 migrations block-spread and 1 grain-striped. The mode is
+not a worse version of the NMFC mapping; it is the mapping for data that has no
+function core to own it, and its cost when a function core does touch it is the
+reason the other mapping exists.
