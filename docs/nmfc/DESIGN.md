@@ -3059,42 +3059,84 @@ The memory-operation count is unchanged -- the program does the same work -- so
 the 52,000 migrations that disappeared were entirely artefact. Instructions fell
 30% because a migration re-executes the instruction that caused it.
 
-**And the comparison that should have been made first.** §14.0 already measured
-this machine's predecessor on the real kernel, and the parity target for a
-*chase* decomposition is there in the table:
+**And the graph was too small to mean anything.** At 4096 vertices the whole
+working set is about 420 KiB -- one grain, therefore one tile. Placement had
+nothing to decide and migration nowhere to go, and with `first_touch` the run
+recorded *zero* migrations, which is not a result, it is a degenerate
+configuration. `tile_bfs_big.exe` sizes the graph at 131,072 vertices so its
+data spans roughly thirteen grains across the tiles and exceeds the LLC slices.
+
+On that graph, four tiles, with translation fixed (§27.2):
+
+| | instructions | memory ops | migrations | per instruction | per memory op |
+|---|---|---|---|---|---|
+| round-robin | 10,941,373 | 3,299,133 | 1,638,325 | 0.150 | 0.497 |
+| first-touch | 10,842,812 | 3,299,777 | 1,539,777 | 0.142 | 0.467 |
+
+and the parity target §14.0 already measured for a chase:
 
 | | migrations per instruction |
 |---|---|
 | ChampSim, chase, GAP BFS | 0.7428 |
+| ChampSim, chase, synthetic scattered | 0.384 |
+| **Rev, chase, this BFS** | **0.150** |
 | ChampSim, chase, oracle placement | 0.020 |
-| **Rev, chase, this BFS** | **0.0101** |
 | ChampSim, spawn | 0.0015 |
 
-Invariant 5's "one per thousand" is the budget a *well-shaped* function meets;
-§14.0's spawn decomposition is what reaches it. Comparing a chase against it and
-declaring a 129x failure was the mistake invariant 8 warns about in the other
-direction -- judging the machine against the wrong reference. Rev's chase now
-sits between ChampSim's oracle-placed chase and its spawn, which is where a
-chase on a scattered placement should sit.
+Rev's chase is better than ChampSim's chase and the same order of magnitude,
+which is what it should be: it is the same shape of function.
+
+**Placement cannot fix a shape.** `first_touch` dispatched 131,034 of 131,072
+invocations to the tile holding the first address they would touch -- as close
+to a perfect first placement as the policy can get -- and bought **6%**. The
+NUCA policy, meanwhile, examined 818 co-access components and declined to move
+every one of them, because each was larger than a tile's fair share of the
+grains: on this graph everything touches everything, the co-access graph is
+fully connected, and collapsing it is the failure an offline minimum cut already
+demonstrated. Both results say the same thing §14.0 said -- "the spawn
+decomposition under a *scattered* placement beats the chase decomposition under
+the *oracle* placement" -- and this model now reproduces it independently.
 
 What survives from the original conclusion is only this: a chase migrates
 because it reaches for data it does not own, and the remedy is a differently
 shaped unit of work. That was true before the bug and is true after it. It just
 was not what these numbers were showing.
 
-### 27.2 Arrival is not free once translation is real
+### 27.2 Retracted: translation was not expensive, the TLB was unusable
 
-Invariant 11 says arrival costs 2.2-2.3 cycles with a 100% instruction-cache hit
-rate. That was measured on the ChampSim model, **where translation was an
-oracle** (§13's known gaps say so outright). With the walk issuing real
-references, 12,738 of tile 0's 13,423 arrivals -- **95%** -- took a cold walk,
-because §7.1 drops a context's translations when it migrates.
+**Retracted twice over.** This subsection reported that 95% of arrivals took a
+cold walk and that page-table traffic ran at 0.61 references per instruction,
+"comparable to the program's own". Both were artefacts, and of two separate
+mistakes in the same area.
 
-So a migration costs 72 bytes on the fabric *and* three local memory references
-per distinct page the arriving context then touches. At this migration rate the
-walk traffic (0.61 references per instruction) is comparable to the program's
-own. Invariant 11's "arrival is not costly" holds for the fabric and does not
-hold for translation, and the two were never measured together before.
+**The page size did not follow the page type.** §5.4 says NMFC data uses G-sized
+huge pages and *everything else* keeps 4 KiB. `pageOf()` keyed grain and
+duplicate regions at G but keyed REGULAR pages -- which are NMFC-mode -- at
+4 KiB. That is wrong twice: it throws away the translation reach the huge page
+exists to provide, and it silently demands the OS keep 256 consecutive 4 KiB
+frames adjacent to make one G-sized silo, which is the contiguity requirement
+the grain page was introduced to remove.
+
+**And the TLB was indexed by the low bits of a sparse key.** A region-typed page
+is tagged in bits 40 and above, so `page % entries` is *zero for every grain and
+duplicate page in the machine*. They all landed in slot 0 and evicted each other
+on every alternation between an instruction fetch and a data access. No table
+size changes that -- 64 entries and 4096 entries gave bit-identical results,
+because a larger table indexed the same way is the same table. The index is a
+hash now.
+
+Same graph, four tiles, before and after:
+
+| | before | after |
+|---|---|---|
+| walks | 14,260 | **12** |
+| TLB hits | 66 | 14,320 |
+| page-table references | 42,780 | **36** |
+
+On the large graph, a ten-million-instruction run does **38 to 51 walks in
+total**. Translation is not a cost worth reporting here; it was a bug worth
+finding. Invariant 11's "arrival is not costly" stands, and this model no longer
+contradicts it.
 
 ### 27.3 The hand-off chain does not fire on this workload
 
