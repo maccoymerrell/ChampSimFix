@@ -3152,37 +3152,77 @@ is a gap, not a decision, unless it says so.
 | **Per-context fetch and data slots** | `ibufValid/ibufPC/ibufInsn` and `dbufValid/dbufReg/dbufValue` per context; the shared BTB drives `requestFetch` a re-issue window ahead (`btbLookups`, `btbCorrect`). Separate `fc I$` and `fc D$` components per tile, both above that tile's LLC slice. |
 | **512 bits, no stack** | Every register access goes through `RegLayout::defines()`, and a function touching a register the layout does not define is refused at issue. The default layout is eight 64-bit lanes over 64 bytes. |
 
-### 28.2 What is not
+### 28.2 Closed since
 
-**The out-of-order host is not the default.** Five configurations run on Rev and
-one on Vanadis. Rev is in-order, so every number taken on it understates what a
-real host would do to the fabric. The OoO configuration is the reference machine
-and should be what a measurement runs on; the Rev configurations are the fast
-functional path.
+**The placement policy exists (invariant 6).** `NMFCCoherenceFabric` runs
+R-NUCA's classification behind Carrefour's gate, ported from `nuca_router.cc`
+and adapted where Rev differs:
 
-**No NUCA/NUMA policy.** ChampSim has `nuca_router.cc` and `adaptive_router.cc`
-with `remap_grain()` and `honour_remaps()`. Rev has round-robin, least-loaded,
-by-entry-pc and random -- and invariant 6 says in as many words that those are
-*not substitutes* for a placement policy. This is the largest missing piece, and
-§14.0's oracle-placement row is what it would be measured against.
+* the fabric is where it lives, because it is the only thing that sees every
+  migration -- and a migration is the evidence (invariant 5);
+* a migration unites *two* grains rather than pulling one, and a component
+  moves as a unit. Placing grains singly cannot escape a random start: a
+  cluster scattered over N tiles pulls uniformly from all N, so the dominant
+  puller is noise until a majority already sits somewhere;
+* a component larger than a tile's fair share of the grains is the working set,
+  not a hot set, and stays interleaved -- R-NUCA's answer for shared read-write
+  data, and the failure an offline minimum cut already demonstrated;
+* the imbalance gate is measured over a **window**. A lifetime average starts
+  even and responds to nothing, which in the model this came from let the
+  fourteen hottest grains be co-located before the gate noticed;
+* a grain that has just moved sits still, for longer the more often it has
+  moved. Without that the policy oscillates -- it reacts to a pull, and the
+  pull reverses because the migrations now come from where the grain used to
+  be. Measured: at a 50-migration epoch, 29 moves and 60 MB copied became 3
+  moves and 6 MB, with 56 attempts withheld.
 
-**No mode bit and no mixed page sizes.** `nmfc_vmem.cc` (668 lines) and
-`nmfc_mmu.cc` (478) implement §5.3's mapping-mode bit and §5.4's G-sized huge
-pages beside 4 KiB pages. Rev's `PageTable` is 281 lines with one page size and
-no mode bit -- which is *why* §27.1's bug was possible: with only one mapping
-implemented in the memory system, the second mapping in the page table had
-nothing to be consistent with.
+**A remap moves the data.** This is where Rev and the trace-driven model part
+company: `nmfc_vmem.cc` changes `nmfc_grains_[key]` and is done, because nothing
+there reads page contents. The tiles here execute against real memory, so a
+mapping change without a copy is corruption. The fabric copies the grain --
+`nucaCopyBytes` is a megabyte read and a megabyte written per move -- and only
+then broadcasts. That cost is why the gates matter rather than being decoration.
 
-**Congruence is only checked for grain regions.** `checkCongruent()` skips
-REGULAR pages, which is how a partition mismatch on exactly those pages survived
-every run. Invariant 9 says check it on every run; it checks a third of it.
+**A move reaches every copy of the table.** There is one page table and it lives
+on duplicate pages (invariant 3), so in this model there are N+1 `PageTable`
+objects that must agree: one per tile, one in the host's MMU, one in the fabric
+that decides. A `RemapEvent` goes to all of them and each flushes its cached
+translations for that grain. A copy that missed one would resolve to a frame
+that has been given back -- the same class of disagreement as §27.1, which is
+why it is broadcast rather than recomputed.
 
-**No spawn.** ChampSim's `function_core.cc` has `issue_spawn`, and §14.0's
-headline results depend on it. Invariant 10 forbids it here. That is a decision,
-not a gap -- but it means §14.0's 0.0015 migrations per instruction is not a
-target this machine can reach by that route, and the successor form (`CONT`) has
-not been measured as a substitute.
+**Congruence is checked for every region type**, not only grain.
 
-**The trace path does not exist and does not need to.** `nmfc_producer.cc` and
-`nmfc_trace.h` exist because ChampSim is trace-driven. Rev and Vanadis execute
-real binaries.
+**Mixed page sizes were already there** and this audit got that wrong the first
+time: `pageOf()` keys grain and duplicate regions at G -- those are §5.4's huge
+pages -- and regular regions at 4 KiB.
+
+**The measurement path is the out-of-order host.** `run_workload.sh` runs the
+BFS and its baseline on Vanadis and prints migrations per instruction against
+§14.0's ChampSim figures. The Rev configurations remain the fast functional
+path, which is what they are good for.
+
+### 28.3 What is still not
+
+**No mapping-mode bit (§5.3).** The bit exists so a STANDARD allocation and an
+NMFC one can coexist without contending for the same bank and column slots
+(§5.2). Implementing it means the memory controller must read the bit, strip it
+and apply one of *two* address mappings; memHierarchy's does one. Everything
+here is NMFC-mapped, so nothing is currently wrong -- but a machine running an
+ordinary program beside an offloaded one is not modelled, and that is the case
+the bit exists for.
+
+**No spawn, and no measured substitute.** ChampSim's `function_core.cc` has
+`issue_spawn` and §14.0's 0.0015 migrations per instruction depends on it.
+Invariant 10 forbids it here, which is a decision. What has not been done is
+measuring the sanctioned alternative: §20.2 says reshape the unit of work, and
+for this BFS that means bucketing a vertex's neighbours by tile on the host and
+forking one invocation per (vertex, tile) -- so an invocation only ever touches
+data it owns and never migrates at all. That experiment is the one §27.1's
+surviving conclusion asks for, and it is workload design rather than machine
+work.
+
+**The device declares more banks than §5.2's arithmetic uses.** 2 ranks x 8
+groups x 4 banks = 64 per channel; the grain formula uses 32, which is the
+per-rank count. They should be reconciled before any bank-conflict number is
+quoted.
