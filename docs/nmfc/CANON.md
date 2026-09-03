@@ -40,23 +40,35 @@ participates. **Migration stays 72 B.** Full statement: **H.10**; invariants sha
 | | question | the user's words, verbatim | status |
 |---|---|---|---|
 | **Q1** | where to stop — A, or a richer scheme? | "*No idea what this means.*" | **RULED as: A now; A2 and B reserved as hatches, built only if a truly hard constraint appears** (**H.10.9**). The ladder notation the question used is not used in this canon. Ledger **L53** |
-| **Q2** | does `f`*n* ≡ `x`*n*? | "*I don't know what that means.*" | **RULED as: YES — one pool, type from the opcode** (**H.10.5**). Carries the base-ISA spelling amendment: `RV64IMA` + Zfinx/Zdinx semantics on the tile; **O4's substance untouched, float is in**. `[USER TO CONFIRM]` Ledger **L51** |
+| **Q2** | does `f`*n* ≡ `x`*n*? | "*I don't know what that means.*" | **RULED as: YES — one pool, type from the opcode** (**H.10.5**). Carries the base-ISA spelling amendment: `RV64IMA` + Zfinx/Zdinx semantics on the tile; **O4's substance untouched, float is in**. **`[CONFIRMED — user, 2026-09-03, verbatim: "Unless there are any advantages to non-equivalency (for example, the min size of a float is 32 bits), then keep them the same." There are none — under A the smallest name is already 32 bits, so every `f` name has a 32- or 64-bit slice; the reasoning is at H.10.5. Tag RETIRED, reading STANDS.]`** Ledger **L51** |
 | **Q3** | supersede I.7 item 3? | "*I don't know what CANON I.7 is.*" | **RULED as: SUPERSEDE, and price the divergence** — a function-core binary is **not host-executable** (**I.7 item 3**, **H.10.8**). `[USER TO CONFIRM]` Ledger **L50** |
-| **Q4** | is the run-time undefined-register trap a requirement or a preference? | "**Requirement.**" | **RULED: REQUIREMENT.** The illegal-name trap is **built and free** (**I7**, **H.10.4**). **What A cannot trap is MISUSE of a legal name — that is admission's job (K.6 test 3).** `[USER TO CONFIRM the scope]` Ledger **L52** |
+| **Q4** | is the run-time undefined-register trap a requirement or a preference? | "**Requirement.**" | **RULED: REQUIREMENT.** The illegal-name trap is **built and free** (**I7**, **H.10.4**). **What A cannot trap is MISUSE of a legal name — that is admission's job (K.6 test 3).** **`[SCOPE CONFIRMED — user, 2026-09-03, verbatim: "I think that is okay." The requirement is the trap on an ILLEGAL NAME; misuse of a legal name is ADMISSION'S job (K.6 test 3). Tag RETIRED at every point of use; the choice of A stands.]`** Ledger **L52** |
 | **W1b** | should the integer-ALU width rule be *"from the widest register operand; `*W` forms 32"*, as this revision's drafting instruction worded it? | *(no user words — this is a departure from a DRAFTING INSTRUCTION, not from a ruling)* | **STRUCK, following `register-map-final.md` §3.3**; H.10.3 carries the amended rule (execute at 64, W3 truncates into the destination name). `[USER TO CONFIRM]` — **if W1b was meant literally this reverts, and SW2 plus §10.5's execution-unit work come back with it** (**H.10.3**). Ledger **L54** |
 
-**SO THE HONEST COUNT IS: ZERO QUESTIONS OPEN, FOUR THINGS AWAITING CONFIRMATION** — three
-readings of Q1–Q4 rulings (**L50**, **L51**, **L52**) and one struck drafting instruction
+**SO THE HONEST COUNT IS: ZERO QUESTIONS OPEN, TWO THINGS AWAITING CONFIRMATION** — **one**
+reading of a Q1–Q4 ruling (**L50**, Q3 and I.7 item 3) and one struck drafting instruction
 (**W1b**, **L54**), which is not a ruling at all but needs the same act from the reader and so
-carries the same tag. `[CORRECTED — an earlier revision of this line counted THREE and omitted
+carries the same tag. `[UPDATED — user confirmations of 2026-09-03: **Q2** ("*Unless there are
+any advantages to non-equivalency (for example, the min size of a float is 32 bits), then keep
+them the same.*") and **Q4** ("*I think that is okay.*") are CONFIRMED, so the readings-awaiting
+count drops from THREE to ONE and the total from FOUR to TWO. Both tags are retired at every
+point of use — H.10.4, H.10.5, I7, I.0 — and at ledger rows **L51** and **L52**.]`
+`[A DISCREPANCY RECORDED RATHER THAN RESOLVED, because this document does not retire a tag on an
+expectation: the instruction that carried those two confirmations expected the single remaining
+item to be **W1b**. It is not. **L50 (Q3 — that a function-core binary is not host-executable)
+was not in that batch**, its `[ASSISTANT'S READING … — user may overturn]` flag at **I.7 item 3**
+is still live, and confirming Q3 is what would take the count to one. Nothing was retired on the
+strength of the expected count.]`
+`[CORRECTED — an earlier revision of this line counted THREE and omitted
 W1b, which had a live tag at H.10.3, no row in this table and no ledger row; a reader auditing by
 this count or by the ledger would not have found it.]` Every one
-of the four questions was ruled and every ruling is applied. What is flagged is not a question the user
+of the four questions was ruled and every ruling is applied. What is still flagged is not a question the user
 declined to answer — it is **the assistant's reading of an answer given in words that did not
 address the question as posed**, recorded so it can be overturned rather than inherited silently.
-**The one that could still change the design is Q4's scope:** if "Requirement" was meant to cover
-misuse of a legal name as well as an illegal name, **Design A does not satisfy it and only design
-B does**, which would contradict the choice of A (**L52**).
+**AND THE ONE THAT COULD HAVE CHANGED THE DESIGN IS NOW CLOSED:** Q4's scope was confirmed as the
+illegal-name half — "*I think that is okay*" — so the reading that misuse of a legal name is
+**admission's** job (K.6 test 3) stands, **Design A is not in tension with the requirement**, and
+the wider reading that would have forced design B is a record rather than a question (**L52**).
 
 **THE 2026-09-02 SET.** Twenty-one numbered rulings (`R1`–`R21`) plus one on the
 instruction count, one on the memory geometry and one on the stress workload **closed
@@ -163,7 +175,7 @@ else is a regression, not a new question.
 | **O9** | "*Whichever can scale best. the maximal targeted system is a substantially beefy multi-core system with up to 32 memory tiles. We should expect a LOT of traffic.*" | **RULED by criterion**, and the choice the criterion forces is stated in the body with its scaling argument and prior art, tagged **[derived from ruling O9]**: **an EXACT BIT VECTOR over host cores and tiles, INCLUSIVE of the private caches above the fabric, with BACK-INVALIDATE on eviction.** The alternative (limited pointers with coarse-vector overflow, non-inclusive) loses at this scale and the reason is given. **The sizing target is now a stated number: up to 32 memory tiles plus a substantial host core count.** | **C.5**, SELECTED CONFIGURATION |
 | **O12** | "*I think bimodal is fine, since it only ever speculatively issues a single fetch, never executes. It is also essentially free (built into the btb table, tracks a particular branch).*" | **RULED — option (a): ADOPTED.** A **block-granular BTB with a bimodal bit per entry**, used **ONLY** to issue a **single** speculative instruction-stream fetch. **It never executes on the prediction.** It is essentially free because it lives in the BTB entry that already exists. **H.1's clause narrows to "no predictor in the EXECUTION path".** The **never-mispredicts caveat on every measured function-core number in this document STANDS** — nothing about this changes what was measured. | **H.1**, **H.5**, D.6 |
 | **O15** | "*a.*" | **RULED — option (a).** Parts **G, K, L and N are HISTORICAL OBSERVATIONS** of an earlier tree. Their **configurations are unreproducible from git**, they are **labelled as such** at every Part preamble and at N.0, and **ChampSim stays frozen** (R3). They are never quoted as evidence about the machine, only as observations of a run that happened. | **G**, **K**, **L**, **N** preambles; N.0; ledger L28c |
-| **O16** | "*Yes, privileged.*" | **RULED — option (a): `RESUME` IS PRIVILEGED.** The **kernel** delivers the fault through the FTU and the **kernel** resumes the context — the `sret`/`mret` shape: the party that took delivery of the trap is the party that returns from it. `FORK`, `JOIN` and the rest stay user-level. **Every `[USER TO CONFIRM …]` tag carrying the `RESUME`-PRIVILEGE subject is REMOVED**, because `RESUME`'s privilege level was the only clause that carried one *when this row was written*. `[CORRECTED — this row used to read "every tag in this document is REMOVED". The 2026-09-03 (morning) revision reinstated the tag with a new subject and four live instances (L50, L51, L52, L54); see the notation table. O16 closed a subject, not the vocabulary.]` | **I.3**, **I.6**, **I.9**, **C.4**, A.2 |
+| **O16** | "*Yes, privileged.*" | **RULED — option (a): `RESUME` IS PRIVILEGED.** The **kernel** delivers the fault through the FTU and the **kernel** resumes the context — the `sret`/`mret` shape: the party that took delivery of the trap is the party that returns from it. `FORK`, `JOIN` and the rest stay user-level. **Every `[USER TO CONFIRM …]` tag carrying the `RESUME`-PRIVILEGE subject is REMOVED**, because `RESUME`'s privilege level was the only clause that carried one *when this row was written*. `[CORRECTED — this row used to read "every tag in this document is REMOVED". The 2026-09-03 (morning) revision reinstated the tag with a new subject and four live instances (L50, L51, L52, L54) — of which **L51 and L52 were confirmed by the user later on 2026-09-03 and retired, leaving TWO: L50 and L54**; see the notation table. O16 closed a subject, not the vocabulary.]` | **I.3**, **I.6**, **I.9**, **C.4**, A.2 |
 
 **NO RULINGS REMAIN OPEN.** There is no eleventh item, no residue of any of the ten, and
 no `[FOR THE USER TO RULE]` tag left live anywhere in this document — the two that were
@@ -329,7 +341,7 @@ being qualified or merely annotated.**
 | **[RULED — user ruling 2026-09-02 R\<n\>]** | **the user has ruled and the statement is now settled at tier 1, newest.** The ruling's own words are quoted with the tag. **This is the strongest tag in the document**; a `[CONFLICT]`, `[UNRESOLVED]` or `[FOR THE USER TO RULE]` in the same passage is superseded by it. | no — it settles |
 | **[RULED — user ruling 2026-09-03 O\<n\>]** | **the same thing, for the ten residual questions the user closed on 2026-09-03.** Tier 1, newest, binding, and it supersedes every `[STILL OPEN]`, `[FOR THE USER TO RULE]` and `[USER TO CONFIRM]` in the same passage. **This and the R-tag are jointly the strongest tags in the document.** | no — it settles |
 | **[derived from ruling O\<n\>]** | a consequence the user did **not** spell out, drawn in this document from a ruling plus an existing tier-1 rule. **It is marked so it is never mistaken for the user's own words**, and the derivation is always shown beside it. | no — but it is the document's inference, not a quotation |
-| **[USER TO CONFIRM …]** | **RETIRED ONCE, THEN REINSTATED WITH A DIFFERENT SUBJECT — read both halves before using this tag or auditing it.** `[CORRECTED — an earlier revision of this row declared the tag retired and gave a grep check calling any live instance "a regression"; the SAME revision then added live instances. This row is rewritten rather than patched, because it is the document's authority mechanism and it stated the opposite of the body.]` **First subject (RETIRED, and it stays retired):** the tag marked exactly one clause — `RESUME`'s privilege level, which R20 left as a question — and **user ruling 2026-09-03 O16 ("*Yes, privileged.*") answered it.** Every instance of that form (the label followed by the word *privileged*) was removed and **none survives.** **Second subject (LIVE as of user ruling 2026-09-03, morning):** the tag now marks **the assistant's READING of a ruling given in words that did not answer the question as posed**, or **a drafting instruction this document struck on a proposal's authority.** The user DID rule and the ruling IS applied; what is offered for overturn is the reading. It is NOT `[FOR THE USER TO RULE]`. **The check is now a MEMBERSHIP check, not an absence check: every live tag must sit on one of exactly four subjects — Q3/I.7 (`L50`), Q2/`f`*n* ≡ `x`*n* (`L51`), Q4's scope (`L52`), W1b (`L54`) — and each of those four must have a row in the RULINGS table, a row in Appendix 1, and a flag at its point of use, spelled either `[USER TO CONFIRM …]` or, where what is offered for overturn is a reading rather than a question, `[ASSISTANT'S READING … — user may overturn]` (I.7 item 3 is the one that takes the second spelling). A live tag on a fifth subject, or a subject missing any of the three, is the regression.** | n/a — live, four subjects |
+| **[USER TO CONFIRM …]** | **RETIRED ONCE, THEN REINSTATED WITH A DIFFERENT SUBJECT — read both halves before using this tag or auditing it.** `[CORRECTED — an earlier revision of this row declared the tag retired and gave a grep check calling any live instance "a regression"; the SAME revision then added live instances. This row is rewritten rather than patched, because it is the document's authority mechanism and it stated the opposite of the body.]` **First subject (RETIRED, and it stays retired):** the tag marked exactly one clause — `RESUME`'s privilege level, which R20 left as a question — and **user ruling 2026-09-03 O16 ("*Yes, privileged.*") answered it.** Every instance of that form (the label followed by the word *privileged*) was removed and **none survives.** **Second subject (LIVE as of user ruling 2026-09-03, morning):** the tag now marks **the assistant's READING of a ruling given in words that did not answer the question as posed**, or **a drafting instruction this document struck on a proposal's authority.** The user DID rule and the ruling IS applied; what is offered for overturn is the reading. It is NOT `[FOR THE USER TO RULE]`. **TWO OF THOSE SUBJECTS WERE CONFIRMED BY THE USER ON 2026-09-03 — Q2/`f`*n* ≡ `x`*n* (`L51`, "*…then keep them the same*") and Q4's scope (`L52`, "*I think that is okay*") — and their tags are RETIRED; a live tag on either of those two is now itself the regression.** **The check is a MEMBERSHIP check, not an absence check: every live tag must sit on one of exactly two remaining subjects — Q3/I.7 (`L50`) and W1b (`L54`) — and each of those two must have a row in the RULINGS table, a row in Appendix 1, and a flag at its point of use, spelled either `[USER TO CONFIRM …]` or, where what is offered for overturn is a reading rather than a question, `[ASSISTANT'S READING … — user may overturn]` (I.7 item 3 is the one that takes the second spelling). A live tag on a third subject, or a subject missing any of the three, is the regression.** | n/a — live, two subjects |
 
 **HOW A TAG IS DELIMITED — a rendering rule, and it has already broken tags in this
 document.** `[ADDED. A Markdown code span (single backticks) ENDS AT THE NEXT BACKTICK and
@@ -1233,15 +1245,17 @@ compiler-discipline invariant with a decode tripwire** (H.10.4 rule 4).
 > `zero` term is load-bearing: without it the check traps `x0`, and with `x0` go `beqz`, `li`,
 > `mv`, `snez` and `j`.**
 
-> **WHAT THE TRAP CANNOT SEE IS ADMISSION'S JOB, AND THIS IS THE FLAG.** `[USER TO CONFIRM —
-> this is the assistant's reading of the Q4 ruling, recorded for overturn; Appendix 1 **L52**.]`
+> **WHAT THE TRAP CANNOT SEE IS ADMISSION'S JOB, AND THAT READING IS NOW CONFIRMED.**
+> `[CONFIRMED — user, 2026-09-03, verbatim: "I think that is okay." The `[USER TO CONFIRM]` tag
+> that stood here is RETIRED; Appendix 1 **L52**.]`
 > The trap fires on an **illegal NAME**. It cannot fire on **MISUSE OF A LEGAL NAME** — a 64-bit
 > value put in a 32-bit name, or `d`*k* and `w`*2k*/`w`*2k+1* live at the same time — because a
 > total map leaves nothing undefined to fire on. That class is named **SW1 —
 > overlapping-name over-liveness** — and it is caught **at admission/compile time or not at
-> all** (K.6 test 3, H.10.4, H.10.6). **If "requirement" was
-> meant to cover misuse as well, Design A does not satisfy it and only design B does — which
-> would contradict the choice of A.** The reading is put to the user rather than resolved here.
+> all** (K.6 test 3, H.10.4, H.10.6). **The scope of "Requirement" is therefore settled: the
+> illegal-name trap is the requirement, misuse of a legal name is admission's job, and the
+> counterfactual — that a wider reading would have left only design B satisfying it — is kept
+> as a record of what was decided, not as an open question.**
 > *(Two qualifications the record requires: design B does not catch SW1 either, so it separates
 > no candidate; and the usually-cited instance is unreachable on either specified toolchain path
 > — H.10.4.)*
@@ -6104,6 +6118,25 @@ allocatable**; `a0`–`a5` land as 64-bit names, the right default for pointers;
 two OR'd bits; and reserving `x1`–`x7` makes `ra` and `sp` **illegal names**, which is an I7
 tripwire rather than a convention.
 
+> **WHAT `x1`–`x7` ARE HELD FOR — A NOTE, NOT A DECISION.** `[user, 2026-09-03, verbatim: "I
+> feel like 7 extra regs could be useful, how they would be mapped I am not sure. Maybe keep them
+> reserved in case there are some common 512-bit encodings which could make use of them."]`
+> **They stay RESERVED and ILLEGAL, and the trap on them is the confirmed requirement of Q4
+> (H.10.4, ledger L52) — nothing here changes that.** This note exists so that seven free
+> encodings are not spent casually on something worth less than what they could carry.
+> **The candidates, and NOTHING IS CHOSEN:**
+> - **the wider-than-64-bit views the Heap Rule already names** — `x1` the whole 512 bits,
+>   `x2`/`x3` its 256-bit halves, `x4`–`x7` its 128-bit quarters. The map assigns them those
+>   meanings already; what is missing is any operation in the subset wider than 64 bits to
+>   compute on them. **A whole-context operation** (move, compare, zero) **or a SIMD-style tier**
+>   is what would give them work — and either is an ISA extension, not a naming change;
+> - **"common 512-bit encodings which could make use of them"** — the user's own framing: if an
+>   established 512-bit encoding wants seven extra names, these are the seven that are free.
+>
+> **Any future use must re-derive the trap.** Legality today is `legal = n[4] | n[3] | zero`
+> (H.10.2); giving any of `x1`–`x7` a meaning changes that equation, and the illegal-name trap is
+> a REQUIREMENT (Q4, **L52**) — so whatever stays reserved must still trap.
+
 #### H.10.2 Decode — the whole map is combinational
 
 ```
@@ -6273,8 +6306,9 @@ operation whose result is canonicalised into a 64-bit register", and when the re
 that canonicalisation is the identity, so `addw w0,w1,w2` computes exactly what `add w0,w1,w2`
 computes. **This is why stock `int` codegen works under register-class assignment alone.**
 
-> **WHAT THE TRAP CANNOT SEE, AND WHOSE JOB IT IS INSTEAD.** `[USER TO CONFIRM — this is the
-> assistant's reading of ruling Q4.]` The required trap fires on an **illegal NAME**. It cannot
+> **WHAT THE TRAP CANNOT SEE, AND WHOSE JOB IT IS INSTEAD.** `[CONFIRMED — user, 2026-09-03,
+> verbatim: "I think that is okay." This was the assistant's reading of ruling Q4's scope; the
+> tag is RETIRED, Appendix 1 **L52**.]` The required trap fires on an **illegal NAME**. It cannot
 > fire on **MISUSE OF A LEGAL NAME**, and under a total map nothing at run time can:
 > - a 64-bit value placed in a 32-bit name — `add w0, d1, d2` is a legal encoding that truncates;
 > - `d`*k* and `w`*2k*/`w`*2k+1* live **at the same time** — the same bits under two names, with
@@ -6292,16 +6326,20 @@ computes. **This is why stock `int` codegen works under register-class assignmen
 > `W`-tier path declares `W` as sub-register indices of `D`. **The class is real; its published
 > example is not.**
 >
-> **THE FLAG.** Ruling Q4 was "**Requirement**", and this section satisfies it for illegal names.
-> **If "requirement" was meant to cover misuse of a legal name as well, then Design A does not
-> satisfy it and only design B does — which would contradict the choice of A.** That reading is
-> put to the user rather than resolved here (Appendix 1 **L52**).
+> **THE FLAG, NOW LOWERED.** Ruling Q4 was "**Requirement**", and this section satisfies it for
+> illegal names. **The SCOPE was CONFIRMED on 2026-09-03 — "*I think that is okay*" — so the
+> requirement is the illegal-name trap, and misuse of a legal name is admission's job (K.6 test
+> 3).** The counterfactual is kept as a record, not as a question: had "requirement" been meant
+> to cover misuse as well, Design A would not have satisfied it and only design B would have,
+> which would have contradicted the choice of A (Appendix 1 **L52**).
 
 #### H.10.5 `f`*n* ≡ `x`*n* — one pool, and what it supersedes
 
-`[ADOPTED — ASSISTANT'S READING of the user's 2026-09-03 ruling on Q2; the user's answer to the
-question as posed was "I don't know what that means", so **USER TO CONFIRM** and the reading is
-recorded for overturn. Appendix 1 **L51**; RULINGS table, row Q2.]`
+`[ADOPTED, AND CONFIRMED. The assistant's reading of the user's 2026-09-03 ruling on Q2 — whose
+answer to the question as posed was "I don't know what that means" — was put to the user and
+CONFIRMED the same day, verbatim: "**Unless there are any advantages to non-equivalency (for
+example, the min size of a float is 32 bits), then keep them the same.**" The `[USER TO CONFIRM]`
+tag is RETIRED here and at every point of use. Appendix 1 **L51**; RULINGS table, row Q2.]`
 
 > **`f`*n* names exactly the same bits as `x`*n*. The TYPE comes from the OPCODE, never from the
 > name.** `f8`–`f15` carry `.d` operands, `f16`–`f31` carry `.s` operands, and `f0` reads `+0.0`.
@@ -6309,6 +6347,21 @@ recorded for overturn. Appendix 1 **L51**; RULINGS table, row Q2.]`
 This is the user's own formulation — *"utilizing a float reg implies the type, while the number
 of the reg implies the slice"* — and it is **Zfinx/Zdinx's ratified rule** for the case where the
 two namespaces coexist (Unpriv. Ch. 26 §26.1).
+
+> **WHY THERE IS NO ADVANTAGE TO NON-EQUIVALENCE — the reasoning the confirmation turns on,
+> recorded so it is not re-derived.** The confirmation is conditional: keep the names the same
+> *unless* non-equivalence buys something, and the user named the one real candidate — **a
+> float's minimum size is 32 bits.** Design A already meets that condition in the map itself:
+> **the smallest name in this machine is 32 bits** (`x16`–`x31`, the `w` tier — H.10.1), so
+> **every `f` name already denotes a slice of exactly the size floating point needs** — an
+> `f32` in a `w` name, an `f64` in a `d` name — and no float is ever asked to live in a slice
+> too narrow for it. **Non-equivalence would pay only if float slices needed a different SIZE
+> CLASS or a different ALIGNMENT than integer ones, and they need neither:** F operands are 32
+> bits and D operands 64 — exactly the two naturally-aligned tiers A already places. A separate
+> `f` namespace would therefore buy no new width and no new alignment. What it would buy is **32
+> more encodings and a second allocation pool**, which is precisely the thing that makes K.6's
+> "third wrong answer" representable again (*What it buys*, below). **The condition is not met,
+> so the names stay the same.**
 
 **What it buys:** one allocation pool. K.6's "third wrong answer" — an allocator drawing
 `f`-names from a pool separate from `x`-names and admitting a function twice the legal size — is
@@ -6726,9 +6779,10 @@ What changes is the four-letter spelling, and it changes because of a different 
 **Write it as `RV64IMA_Zfinx_Zdinx` where a machine-readable spelling is needed** (the day-one
 toolchain path uses it). **Where this document says "the `IMAFD` subset" as shorthand for which
 OPERATIONS are admissible, that is still correct** — integer, multiply/divide, atomics and both
-floating-point widths — and only the *encoding claim* is amended. `[ASSISTANT'S READING of the
-user's Q2 answer, which to the question as posed was "I don't know what that means"; recorded for
-overturn at Appendix 1 **L51**.]`
+floating-point widths — and only the *encoding claim* is amended. `[CONFIRMED — this was the
+assistant's reading of the user's Q2 answer; it was put to the user and confirmed on 2026-09-03:
+"Unless there are any advantages to non-equivalency (for example, the min size of a float is 32
+bits), then keep them the same." There are none — H.10.5. Appendix 1 **L51**.]`
 
 **AND NOW THE CONSEQUENCE, STATED CORRECTLY, BECAUSE THE OBVIOUS READING OF IT IS THE
 DEFECT INVARIANT 2 EXISTS TO STOP.** The `O4` row as it was written said floating point
@@ -9752,7 +9806,8 @@ resolve on its own authority.
 **Count: 54 conflicts (L1–L54, no gaps).** **[UPDATED — L50–L53 added 2026-09-03 (morning): the
 four register-naming questions and their rulings. L54 added in the same revision's correction
 pass: W1b, the struck drafting instruction, which had a live `[USER TO CONFIRM]` tag at H.10.3
-and no row here to find it by. Four subjects carry that tag: L50, L51, L52, L54.
+and no row here to find it by. Four subjects took that tag; **L51 and L52 were confirmed by the
+user later on 2026-09-03 and retired, so TWO carry it now — L50 and L54.**
 They sit at the END of this appendix, after L49.]** [CORRECTED — this header read "37" while the
 file carried 42 rows, so a reader auditing the ledger by its own count stopped five rows
 early. `grep -cE '^\*\*L[0-9]+ —' docs/nmfc/CANON.md` is the check; run it after
@@ -9768,13 +9823,17 @@ them; two more — L2 (R12) and L13 — were closed in editing; and **three rows
 `[FOR THE USER TO RULE]` — the user DID rule, and the ruling is applied; what is recorded for
 confirmation is the ASSISTANT'S READING of a ruling given in words that did not answer the
 question as posed — **or, in one case, a DRAFTING INSTRUCTION this document struck on a
-proposal's authority.** **FOUR rows carry it: L50 (Q3, in its own wording), L51 (Q2, `f`*n* ≡
-`x`*n*), L52 (Q4, the scope of the trap requirement), and L54 (W1b, the integer-ALU width rule).**
+proposal's authority.** **FOUR rows took it: L50 (Q3, in its own wording), L51 (Q2, `f`*n* ≡
+`x`*n*), L52 (Q4, the scope of the trap requirement), and L54 (W1b, the integer-ALU width rule).
+TWO REMAIN.** **L51 and L52 were CONFIRMED by the user on 2026-09-03 — "*…then keep them the
+same*" and "*I think that is okay*" — and their tags are retired everywhere, so only **L50** and
+**L54** still await the reader's act.**
 `[CORRECTED — this note used to say TWO rows plus L50, and omitted L54 entirely; W1b had a live
-tag at H.10.3 with no ledger row and no front-matter row to find it by.]` They are the only
+tag at H.10.3 with no ledger row and no front-matter row to find it by.]` Those two are the only
 unsettled things in this document, and each is flagged again at its point of use. **The tag is
-not retired** — the notation table's retirement applies to its old `RESUME`-privilege subject
-only, and that table is rewritten to say so.]`
+not retired as a vocabulary** — the notation table's first retirement applies to its old
+`RESUME`-privilege subject, and the 2026-09-03 confirmations retire two of its four
+second-subject instances; that table is the authority.]`
 
 **NO `[FOR THE USER TO RULE]` TAG IS STILL LIVE ANYWHERE IN THIS APPENDIX.** The last two
 — L38 (`O1`) and L43 (`O3`) — were closed by the 2026-09-03 rulings; L47's was stale, since
@@ -10857,8 +10916,11 @@ H.10.3.]` **These are NOT conflicts between sources.** L50–L53 are the four qu
 register-naming proposals put to the user, the rulings that closed them, and — for **three** of
 them — the assistant's reading of a ruling the user gave in words that did not answer the question
 as posed. **L54 is not a ruling at all**: it is a drafting instruction this document struck on a
-proposal's authority. **Those FOUR — L50, L51, L52, L54 — are the only things in this document
-that are not settled**, and each is tagged `[USER TO CONFIRM]` here and at its point of use.
+proposal's authority. **TWO OF THE FOUR ARE NOW CONFIRMED — L51 (Q2) and L52 (Q4's scope), by the
+user later on 2026-09-03 — so the two still unsettled are L50 and L54**, and each of those two is
+tagged `[USER TO CONFIRM]` here and at its point of use. **[UPDATED — this paragraph read "Those
+FOUR — L50, L51, L52, L54 — are the only things in this document that are not settled". Two have
+since been confirmed and the rows below carry the user's words verbatim.]**
 
 **THE RULING THAT GOVERNS ALL FOUR, verbatim: "Okay, lets go with A."** Design A is adopted: the
 register number **is** the bit range of the 512-bit context (**H.10**).
@@ -10885,7 +10947,7 @@ register number **is** the bit range of the 512-bit context (**H.10**).
   same class, and both are recorded at I.7** rather than guessing which was meant. **CLOSED,
   pending confirmation.**
 
-**L51 — Q2: does `f`*n* ≡ `x`*n*? [RULED — reading recorded, USER TO CONFIRM]**
+**L51 — Q2: does `f`*n* ≡ `x`*n*? [RULED — reading recorded; CONFIRMED by the user 2026-09-03]**
 - *What was asked:* do the `f` names denote the same bits as the `x` names (one pool, **24**
   nameable slices — 8 `d` plus 16 `w` — two complete tiers), or different bits (two pools, 56 names, a third complete tier at
   16 bits with **no arithmetic in the subset to run on it**)?
@@ -10906,11 +10968,23 @@ register number **is** the bit range of the 512-bit context (**H.10**).
 - **It supersedes four statements**, all kept in place with their dispositions: I.0's four-point
   answer points 1 and 4, the `O4` row's "*the namespaces do NOT alias*", and **L46's `RULED`
   bullet restating it**. The half that survives and is strengthened everywhere: **512 bits of
-  live storage, not 64 architectural slots.** `[ASSISTANT'S READING — user may overturn.]`
-  **CLOSED, pending confirmation.**
+  live storage, not 64 architectural slots.**
+- **CONFIRMED — user, 2026-09-03, verbatim: "Unless there are any advantages to non-equivalency
+  (for example, the min size of a float is 32 bits), then keep them the same."** The confirmation
+  is conditional and **the condition is not met**; this is the reasoning it turns on, recorded so
+  it is not re-derived. **Under Design A the smallest name is 32 bits** (`x16`–`x31`, the `w`
+  tier — H.10.1), so **every `f` name already has a slice of the size floating point needs** —
+  an `f32` in a `w` name, an `f64` in a `d` name — and no float is ever asked to live in a slice
+  too narrow for it. **Non-equivalence would pay only if float slices needed a different SIZE
+  CLASS or a different ALIGNMENT than integer ones, and they need neither**: F operands are 32
+  bits and D operands 64, exactly the two naturally-aligned tiers A already places. A separate
+  `f` pool would buy no new width and no new alignment — it would buy **32 more encodings and a
+  second allocation pool**, which is precisely what makes K.6's "third wrong answer"
+  representable again. **The `[USER TO CONFIRM]` tag is RETIRED here and at H.10.5, I.0 and the
+  RULINGS table; the reading STANDS as written.** Written at **H.10.5**. **CLOSED.**
 
 **L52 — Q4: is the run-time undefined-register trap a requirement or a preference? [RULED —
-requirement; the SCOPE of the requirement is USER TO CONFIRM]**
+requirement; the SCOPE of the requirement CONFIRMED by the user 2026-09-03]**
 - *What was asked:* SST's per-function map traps at run time on a name the map leaves **undefined**
   (`RegLayout::illegal()`, `NMFCTile.cc:464`, `:472`). Under a total map there is nothing to fire
   on. Is that trap a **requirement** — which would eliminate Design A and force the per-function
@@ -10926,15 +11000,19 @@ requirement; the SCOPE of the requirement is USER TO CONFIRM]**
   in a 32-bit name, or `d`*k* and `w`*2k*/`w`*2k+1* live at once. That is **SW1**, and it is
   caught **at admission/compile time or not at all** (K.6 test 3 — the verified non-overlapping
   placement, which is where the deleted run-time check re-homes).
-- **THE FLAG, PUT TO THE USER: if "Requirement" was meant to cover misuse of a legal name as
-  well, then Design A does NOT satisfy it and only design B does — which would contradict the
-  choice of A.** `[USER TO CONFIRM the reading.]` **Two qualifications the record requires
+- **THE FLAG, PUT TO THE USER AND ANSWERED: if "Requirement" was meant to cover misuse of a legal
+  name as well, then Design A does NOT satisfy it and only design B does — which would contradict
+  the choice of A.** `[CONFIRMED — user, 2026-09-03, verbatim: "**I think that is okay.**" The
+  requirement is the trap on an ILLEGAL NAME, which is built and free; **misuse of a legal name is
+  ADMISSION'S job** (K.6 test 3). The tag is RETIRED here, at **H.10.4**, at **I7** and in the
+  RULINGS table, and **the choice of A stands.**]` **Two qualifications the record requires
   whenever this is argued:** design **B does not catch SW1 either** — a bit-exhausted allocator
   that coalesces two simultaneously-live values onto one name emits a legal, non-overlapping map
   and the tile accepts it — so SW1 separates no candidate; and the instance usually cited
   (`s0` = `x8` = `d0` clobbered by a seventh/eighth integer argument in `a6`/`a7`) **is
-  unreachable on either specified toolchain path.** **CLOSED in its illegal-name half; the scope
-  question is the one thing in this document a ruling could still change.**
+  unreachable on either specified toolchain path.** **CLOSED IN BOTH HALVES — the illegal-name
+  trap by the ruling, the scope by the confirmation. It is no longer the one thing in this
+  document a ruling could still change.**
 
 **L53 — Q1: where do you stop — A, or one of the richer schemes? [RULED — A now, both hatches
 reserved]**
@@ -11263,7 +11341,9 @@ These are not divergences; they are the scars, and each is a test the canon shou
    - **O16 — `RESUME` is PRIVILEGED.** Fault resumption is a kernel operation; every
      `[USER TO CONFIRM]` tag **on the `RESUME`-privilege subject** is gone. **[CORRECTED — this
      line used to read "every `[USER TO CONFIRM]` tag is gone". The 2026-09-03 (morning) revision
-     REINSTATED the tag with a different subject and four live instances — L50, L51, L52, L54.
+     REINSTATED the tag with a different subject and four live instances — L50, L51, L52, L54;
+     **L51 and L52 were CONFIRMED by the user later on 2026-09-03 and their tags retired, so TWO
+     remain: L50 and L54.**
      The notation table is the authority and it is rewritten to say so.]**
    - **O5 — three message classes on the one fabric: COHERENCE, MIGRATION, FILL**,
      per-destination queues, **coherence strictly first, then migration and fill at EQUAL
