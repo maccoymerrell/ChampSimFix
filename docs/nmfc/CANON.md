@@ -41,34 +41,50 @@ participates. **Migration stays 72 B.** Full statement: **H.10**; invariants sha
 |---|---|---|---|
 | **Q1** | where to stop — A, or a richer scheme? | "*No idea what this means.*" | **RULED as: A now; A2 and B reserved as hatches, built only if a truly hard constraint appears** (**H.10.9**). The ladder notation the question used is not used in this canon. Ledger **L53** |
 | **Q2** | does `f`*n* ≡ `x`*n*? | "*I don't know what that means.*" | **RULED as: YES — one pool, type from the opcode** (**H.10.5**). Carries the base-ISA spelling amendment: `RV64IMA` + Zfinx/Zdinx semantics on the tile; **O4's substance untouched, float is in**. **`[CONFIRMED — user, 2026-09-03, verbatim: "Unless there are any advantages to non-equivalency (for example, the min size of a float is 32 bits), then keep them the same." There are none — under A the smallest name is already 32 bits, so every `f` name has a 32- or 64-bit slice; the reasoning is at H.10.5. Tag RETIRED, reading STANDS.]`** Ledger **L51** |
-| **Q3** | supersede I.7 item 3? | "*I don't know what CANON I.7 is.*" | **RULED as: SUPERSEDE, and price the divergence** — a function-core binary is **not host-executable** (**I.7 item 3**, **H.10.8**). `[USER TO CONFIRM]` Ledger **L50** |
+| **Q3** | supersede I.7 item 3? | "*I don't know what CANON I.7 is.*" | **RULED as: SUPERSEDE, and price the divergence** — a function-core binary is **not host-executable** (**I.7 item 3**, **H.10.8**). **`[CONFIRMED — user, 2026-09-03, verbatim: "Q3: Accepted, function should not be host-executable. Functions may need to have preambles to prevent incorrectness (so fetch refuses to execute a function on host)." Tag RETIRED at every point of use; the reading STANDS. AND THE CONFIRMATION CARRIED A NEW REQUIREMENT WITH IT — the machine must REFUSE to execute a function on a host core, and it must refuse AT FETCH — stated at **I.7a**, where the one mechanism recorded (an ENTRY MARKER) is marked PROPOSAL — NOT RULED.]`** Ledger **L50** |
 | **Q4** | is the run-time undefined-register trap a requirement or a preference? | "**Requirement.**" | **RULED: REQUIREMENT.** The illegal-name trap is **built and free** (**I7**, **H.10.4**). **What A cannot trap is MISUSE of a legal name — that is admission's job (K.6 test 3).** **`[SCOPE CONFIRMED — user, 2026-09-03, verbatim: "I think that is okay." The requirement is the trap on an ILLEGAL NAME; misuse of a legal name is ADMISSION'S job (K.6 test 3). Tag RETIRED at every point of use; the choice of A stands.]`** Ledger **L52** |
 | **W1b** | should the integer-ALU width rule be *"from the widest register operand; `*W` forms 32"*, as this revision's drafting instruction worded it? | *(no user words — this is a departure from a DRAFTING INSTRUCTION, not from a ruling)* | **STRUCK, following `register-map-final.md` §3.3**; H.10.3 carries the amended rule (execute at 64, W3 truncates into the destination name). `[USER TO CONFIRM]` — **if W1b was meant literally this reverts, and SW2 plus §10.5's execution-unit work come back with it** (**H.10.3**). Ledger **L54** |
 
-**SO THE HONEST COUNT IS: ZERO QUESTIONS OPEN, TWO THINGS AWAITING CONFIRMATION** — **one**
-reading of a Q1–Q4 ruling (**L50**, Q3 and I.7 item 3) and one struck drafting instruction
+**SO THE HONEST COUNT IS: ZERO QUESTIONS OPEN, ONE THING AWAITING CONFIRMATION** — **NO
+reading of a Q1–Q4 ruling is still flagged**, and what remains is one struck drafting instruction
 (**W1b**, **L54**), which is not a ruling at all but needs the same act from the reader and so
 carries the same tag. `[UPDATED — user confirmations of 2026-09-03: **Q2** ("*Unless there are
 any advantages to non-equivalency (for example, the min size of a float is 32 bits), then keep
-them the same.*") and **Q4** ("*I think that is okay.*") are CONFIRMED, so the readings-awaiting
-count drops from THREE to ONE and the total from FOUR to TWO. Both tags are retired at every
-point of use — H.10.4, H.10.5, I7, I.0 — and at ledger rows **L51** and **L52**.]`
-`[A DISCREPANCY RECORDED RATHER THAN RESOLVED, because this document does not retire a tag on an
-expectation: the instruction that carried those two confirmations expected the single remaining
-item to be **W1b**. It is not. **L50 (Q3 — that a function-core binary is not host-executable)
-was not in that batch**, its `[ASSISTANT'S READING … — user may overturn]` flag at **I.7 item 3**
-is still live, and confirming Q3 is what would take the count to one. Nothing was retired on the
-strength of the expected count.]`
+them the same.*"), **Q4** ("*I think that is okay.*") and now **Q3** ("*Q3: Accepted, function
+should not be host-executable. Functions may need to have preambles to prevent incorrectness (so
+fetch refuses to execute a function on host).*") are CONFIRMED, so the readings-awaiting count
+drops from THREE to ZERO and the total from FOUR to ONE. All three tags are retired at every
+point of use — H.10.4, H.10.5, H.10.8, I7, I.0, I.7 item 3 — and at ledger rows **L50**, **L51**
+and **L52**.]`
+`[THE DISCREPANCY THAT STOOD HERE IS CLOSED BY THE Q3 RULING, and it is closed rather than
+deleted so the audit trail survives. It read: this document does not retire a tag on an
+expectation — the instruction that carried the Q2 and Q4 confirmations expected the single
+remaining item to be **W1b**, and it was not, because **L50 (Q3 — that a function-core binary is
+not host-executable) was not in that batch** and its `[ASSISTANT'S READING … — user may overturn]`
+flag at **I.7 item 3** was still live. **The user ruled on Q3 on 2026-09-03 — "*Q3: Accepted,
+function should not be host-executable*" — so the count is now what that instruction expected:
+the one remaining item IS W1b.** The expectation was met by a RULING, not by a retirement, which
+is the whole of the difference the note existed to preserve.]`
 `[CORRECTED — an earlier revision of this line counted THREE and omitted
 W1b, which had a live tag at H.10.3, no row in this table and no ledger row; a reader auditing by
 this count or by the ledger would not have found it.]` Every one
-of the four questions was ruled and every ruling is applied. What is still flagged is not a question the user
-declined to answer — it is **the assistant's reading of an answer given in words that did not
-address the question as posed**, recorded so it can be overturned rather than inherited silently.
+of the four questions was ruled, every ruling is applied, and **all four readings are now
+confirmed.** What is still flagged is not a question the user declined to answer, and it is no
+longer a reading either — it is **a DRAFTING INSTRUCTION this document struck on a proposal's
+authority**, recorded so it can be overturned rather than inherited silently.
 **AND THE ONE THAT COULD HAVE CHANGED THE DESIGN IS NOW CLOSED:** Q4's scope was confirmed as the
 illegal-name half — "*I think that is okay*" — so the reading that misuse of a legal name is
 **admission's** job (K.6 test 3) stands, **Design A is not in tension with the requirement**, and
 the wider reading that would have forced design B is a record rather than a question (**L52**).
+
+**AND THE Q3 CONFIRMATION CARRIED A NEW REQUIREMENT WITH IT, WHICH IS NOT A CONFIRMATION OF
+ANYTHING AND MUST NOT BE READ AS ONE.** The user's words, verbatim: "*Q3: Accepted, function
+should not be host-executable. Functions may need to have preambles to prevent incorrectness (so
+fetch refuses to execute a function on host).*" **The first sentence confirms L50. The second adds
+a requirement this document did not have: the machine must REFUSE to execute a function on a host
+core, and it must refuse AT FETCH.** It is stated at **I.7a**, cross-referenced from **H.10.8**
+and Part B **I7**, and the one mechanism recorded there — an **ENTRY MARKER** — is marked
+**PROPOSAL — NOT RULED**, because "*may need to have preambles*" names a shape and not a design.
 
 **THE 2026-09-02 SET.** Twenty-one numbered rulings (`R1`–`R21`) plus one on the
 instruction count, one on the memory geometry and one on the stress workload **closed
@@ -175,7 +191,7 @@ else is a regression, not a new question.
 | **O9** | "*Whichever can scale best. the maximal targeted system is a substantially beefy multi-core system with up to 32 memory tiles. We should expect a LOT of traffic.*" | **RULED by criterion**, and the choice the criterion forces is stated in the body with its scaling argument and prior art, tagged **[derived from ruling O9]**: **an EXACT BIT VECTOR over host cores and tiles, INCLUSIVE of the private caches above the fabric, with BACK-INVALIDATE on eviction.** The alternative (limited pointers with coarse-vector overflow, non-inclusive) loses at this scale and the reason is given. **The sizing target is now a stated number: up to 32 memory tiles plus a substantial host core count.** | **C.5**, SELECTED CONFIGURATION |
 | **O12** | "*I think bimodal is fine, since it only ever speculatively issues a single fetch, never executes. It is also essentially free (built into the btb table, tracks a particular branch).*" | **RULED — option (a): ADOPTED.** A **block-granular BTB with a bimodal bit per entry**, used **ONLY** to issue a **single** speculative instruction-stream fetch. **It never executes on the prediction.** It is essentially free because it lives in the BTB entry that already exists. **H.1's clause narrows to "no predictor in the EXECUTION path".** The **never-mispredicts caveat on every measured function-core number in this document STANDS** — nothing about this changes what was measured. | **H.1**, **H.5**, D.6 |
 | **O15** | "*a.*" | **RULED — option (a).** Parts **G, K, L and N are HISTORICAL OBSERVATIONS** of an earlier tree. Their **configurations are unreproducible from git**, they are **labelled as such** at every Part preamble and at N.0, and **ChampSim stays frozen** (R3). They are never quoted as evidence about the machine, only as observations of a run that happened. | **G**, **K**, **L**, **N** preambles; N.0; ledger L28c |
-| **O16** | "*Yes, privileged.*" | **RULED — option (a): `RESUME` IS PRIVILEGED.** The **kernel** delivers the fault through the FTU and the **kernel** resumes the context — the `sret`/`mret` shape: the party that took delivery of the trap is the party that returns from it. `FORK`, `JOIN` and the rest stay user-level. **Every `[USER TO CONFIRM …]` tag carrying the `RESUME`-PRIVILEGE subject is REMOVED**, because `RESUME`'s privilege level was the only clause that carried one *when this row was written*. `[CORRECTED — this row used to read "every tag in this document is REMOVED". The 2026-09-03 (morning) revision reinstated the tag with a new subject and four live instances (L50, L51, L52, L54) — of which **L51 and L52 were confirmed by the user later on 2026-09-03 and retired, leaving TWO: L50 and L54**; see the notation table. O16 closed a subject, not the vocabulary.]` | **I.3**, **I.6**, **I.9**, **C.4**, A.2 |
+| **O16** | "*Yes, privileged.*" | **RULED — option (a): `RESUME` IS PRIVILEGED.** The **kernel** delivers the fault through the FTU and the **kernel** resumes the context — the `sret`/`mret` shape: the party that took delivery of the trap is the party that returns from it. `FORK`, `JOIN` and the rest stay user-level. **Every `[USER TO CONFIRM …]` tag carrying the `RESUME`-PRIVILEGE subject is REMOVED**, because `RESUME`'s privilege level was the only clause that carried one *when this row was written*. `[CORRECTED — this row used to read "every tag in this document is REMOVED". The 2026-09-03 (morning) revision reinstated the tag with a new subject and four live instances (L50, L51, L52, L54) — of which **L50, L51 and L52 were all confirmed by the user later on 2026-09-03 and retired, leaving ONE: L54**; see the notation table. O16 closed a subject, not the vocabulary.]` | **I.3**, **I.6**, **I.9**, **C.4**, A.2 |
 
 **NO RULINGS REMAIN OPEN.** There is no eleventh item, no residue of any of the ten, and
 no `[FOR THE USER TO RULE]` tag left live anywhere in this document — the two that were
@@ -341,7 +357,7 @@ being qualified or merely annotated.**
 | **[RULED — user ruling 2026-09-02 R\<n\>]** | **the user has ruled and the statement is now settled at tier 1, newest.** The ruling's own words are quoted with the tag. **This is the strongest tag in the document**; a `[CONFLICT]`, `[UNRESOLVED]` or `[FOR THE USER TO RULE]` in the same passage is superseded by it. | no — it settles |
 | **[RULED — user ruling 2026-09-03 O\<n\>]** | **the same thing, for the ten residual questions the user closed on 2026-09-03.** Tier 1, newest, binding, and it supersedes every `[STILL OPEN]`, `[FOR THE USER TO RULE]` and `[USER TO CONFIRM]` in the same passage. **This and the R-tag are jointly the strongest tags in the document.** | no — it settles |
 | **[derived from ruling O\<n\>]** | a consequence the user did **not** spell out, drawn in this document from a ruling plus an existing tier-1 rule. **It is marked so it is never mistaken for the user's own words**, and the derivation is always shown beside it. | no — but it is the document's inference, not a quotation |
-| **[USER TO CONFIRM …]** | **RETIRED ONCE, THEN REINSTATED WITH A DIFFERENT SUBJECT — read both halves before using this tag or auditing it.** `[CORRECTED — an earlier revision of this row declared the tag retired and gave a grep check calling any live instance "a regression"; the SAME revision then added live instances. This row is rewritten rather than patched, because it is the document's authority mechanism and it stated the opposite of the body.]` **First subject (RETIRED, and it stays retired):** the tag marked exactly one clause — `RESUME`'s privilege level, which R20 left as a question — and **user ruling 2026-09-03 O16 ("*Yes, privileged.*") answered it.** Every instance of that form (the label followed by the word *privileged*) was removed and **none survives.** **Second subject (LIVE as of user ruling 2026-09-03, morning):** the tag now marks **the assistant's READING of a ruling given in words that did not answer the question as posed**, or **a drafting instruction this document struck on a proposal's authority.** The user DID rule and the ruling IS applied; what is offered for overturn is the reading. It is NOT `[FOR THE USER TO RULE]`. **TWO OF THOSE SUBJECTS WERE CONFIRMED BY THE USER ON 2026-09-03 — Q2/`f`*n* ≡ `x`*n* (`L51`, "*…then keep them the same*") and Q4's scope (`L52`, "*I think that is okay*") — and their tags are RETIRED; a live tag on either of those two is now itself the regression.** **The check is a MEMBERSHIP check, not an absence check: every live tag must sit on one of exactly two remaining subjects — Q3/I.7 (`L50`) and W1b (`L54`) — and each of those two must have a row in the RULINGS table, a row in Appendix 1, and a flag at its point of use, spelled either `[USER TO CONFIRM …]` or, where what is offered for overturn is a reading rather than a question, `[ASSISTANT'S READING … — user may overturn]` (I.7 item 3 is the one that takes the second spelling). A live tag on a third subject, or a subject missing any of the three, is the regression.** | n/a — live, two subjects |
+| **[USER TO CONFIRM …]** | **RETIRED ONCE, THEN REINSTATED WITH A DIFFERENT SUBJECT — read both halves before using this tag or auditing it.** `[CORRECTED — an earlier revision of this row declared the tag retired and gave a grep check calling any live instance "a regression"; the SAME revision then added live instances. This row is rewritten rather than patched, because it is the document's authority mechanism and it stated the opposite of the body.]` **First subject (RETIRED, and it stays retired):** the tag marked exactly one clause — `RESUME`'s privilege level, which R20 left as a question — and **user ruling 2026-09-03 O16 ("*Yes, privileged.*") answered it.** Every instance of that form (the label followed by the word *privileged*) was removed and **none survives.** **Second subject (LIVE as of user ruling 2026-09-03, morning):** the tag now marks **the assistant's READING of a ruling given in words that did not answer the question as posed**, or **a drafting instruction this document struck on a proposal's authority.** The user DID rule and the ruling IS applied; what is offered for overturn is the reading. It is NOT `[FOR THE USER TO RULE]`. **THREE OF THOSE SUBJECTS WERE CONFIRMED BY THE USER ON 2026-09-03 — Q2/`f`*n* ≡ `x`*n* (`L51`, "*…then keep them the same*"), Q4's scope (`L52`, "*I think that is okay*") and Q3/I.7 item 3 (`L50`, "*Q3: Accepted, function should not be host-executable*") — and their tags are RETIRED; a live tag on any of those three is now itself the regression.** **The check is a MEMBERSHIP check, not an absence check: every live tag must sit on the ONE remaining subject — W1b (`L54`) — which must have a row in the RULINGS table, a row in Appendix 1, and a flag at its point of use, spelled `[USER TO CONFIRM …]`. The second spelling, `[ASSISTANT'S READING … — user may overturn]`, has NO live instance left: its last one was at I.7 item 3 and the user's Q3 confirmation of 2026-09-03 retired it. The spelling is kept in this table as VOCABULARY, because a future reading may need it — but a live instance of it today is a regression, exactly as a live tag on a second subject is, or the one subject missing any of the three.** | n/a — live, ONE subject |
 
 **HOW A TAG IS DELIMITED — a rendering rule, and it has already broken tags in this
 document.** `[ADDED. A Markdown code span (single backticks) ENDS AT THE NEXT BACKTICK and
@@ -1259,6 +1275,19 @@ compiler-discipline invariant with a decode tripwire** (H.10.4 rule 4).
 > *(Two qualifications the record requires: design B does not catch SW1 either, so it separates
 > no candidate; and the usually-cited instance is unreachable on either specified toolchain path
 > — H.10.4.)*
+
+`[REQUIREMENT — user, 2026-09-03, verbatim: "Q3: Accepted, function should not be host-executable.
+Functions may need to have preambles to prevent incorrectness (so fetch refuses to execute a
+function on host)."]`
+> **AND THE CONVERSE OF I7 IS NOW A REQUIREMENT TOO: A FUNCTION MUST NOT BE HOST-EXECUTABLE, AND
+> THE MACHINE MUST ENFORCE IT AT FETCH.** I7 says a stock host binary is not admissible on a
+> function core. The requirement above says the other direction: **a function-core binary must not
+> run on a host core, and the host's FETCH is what refuses it.** The reason is Design A — identical
+> encodings mean different things on the two cores (`x16` is a 32-bit half-tile here and a 64-bit
+> register there; the tile does not NaN-box and the host does) and **nothing at run time can
+> otherwise detect a function compiled for the wrong core.** **The requirement, its reason, one
+> proposed mechanism (an ENTRY MARKER, marked PROPOSAL — NOT RULED) and the alternative are at
+> I.7a**; the divergence it protects against is priced at **H.10.8** and **I.7 item 3**.
 
 ---
 
@@ -6634,6 +6663,18 @@ statement: **identical instruction bytes mean different things on the host and o
 NaN-box and the host does), **and nothing at run time can detect a function compiled for the
 wrong core.** A function-core binary is **not host-executable.**
 
+`[CONFIRMED — user, 2026-09-03, verbatim: "Q3: Accepted, function should not be host-executable.
+Functions may need to have preambles to prevent incorrectness (so fetch refuses to execute a
+function on host)." The `[USER TO CONFIRM]` tag this supersession carried is RETIRED here, at
+I.7 item 3, in the RULINGS table and at ledger **L50**; the reading STANDS.]`
+
+**AND IT IS NO LONGER ONLY A PRICED DIVERGENCE — IT IS A REQUIREMENT WITH AN ENFORCEMENT POINT.**
+The second half of the user's words adds one: **the machine must REFUSE to execute a function on a
+host core, and it must refuse AT FETCH.** This section prices what goes wrong if it does not;
+**I.7a** states the requirement, records one proposed mechanism — an **ENTRY MARKER**, a single
+NMFC-opcode word at the function's first instruction — marked **PROPOSAL — NOT RULED**, and gives
+the alternative it was ranked against. Part B **I7** carries the same cross-reference.
+
 #### H.10.9 RESERVED HATCHES — not built unless a truly hard constraint appears
 
 `[RESERVED, NOT BUILT. Neither of these is a decision; both are recorded so that a future
@@ -7415,14 +7456,28 @@ change what "deliberately absent" covers.]`
    > `fesetround` gate above, and treating a function-core object as a **distinct target** that
    > is never linked into host-executable text.
    >
-   > `[ASSISTANT'S READING OF THE USER'S CHOICE — user may overturn. Appendix 1 **L50**. The user
-   > said of the question as posed: "I don't know what CANON I.7 is." The reading applied is that
-   > choosing Design A entails this supersession, because A is what makes identical bytes mean
-   > different things. **A drafting note the user should see: the question was put naming item 3
-   > as "the property that function code is host-executable unchanged", while item 3's actual
-   > text is the dynamic-rounding clause above. Both divergences are real, both are of the same
-   > "identical encoding, different result" class, and BOTH are recorded here rather than
-   > guessing which was meant.**]`
+   > `[CONFIRMED — user, 2026-09-03, verbatim: "Q3: Accepted, function should not be
+   > host-executable. Functions may need to have preambles to prevent incorrectness (so fetch
+   > refuses to execute a function on host)." THE ASSISTANT'S-READING FLAG THAT STOOD HERE IS
+   > RETIRED AND THE READING STANDS. Appendix 1 **L50**; RULINGS table row Q3; H.10.8.
+   >
+   > **What the flag recorded, kept because it is the record of WHAT was confirmed:** the user had
+   > said of the question as posed "I don't know what CANON I.7 is", and the reading applied was
+   > that choosing Design A entails this supersession, because A is what makes identical bytes
+   > mean different things.
+   >
+   > **AND THE DRAFTING DISCREPANCY IS RESOLVED BY THE CONFIRMING WORDS THEMSELVES.** The question
+   > had been put naming item 3 as "the property that function code is host-executable unchanged",
+   > while item 3's actual text is the dynamic-rounding clause above; the flag recorded both
+   > rather than guessing which was meant. **The user confirmed in the HOST-EXECUTABILITY wording
+   > — "function should not be host-executable" — so that half is now ruled outright.** Both
+   > divergences are real, both are of the same "identical encoding, different result" class, and
+   > BOTH remain recorded here.
+   >
+   > **AND THE CONFIRMATION CARRIED A NEW REQUIREMENT, WHICH IS NOT PART OF THIS ITEM'S
+   > SUPERSESSION:** the second sentence — "so fetch refuses to execute a function on host" — makes
+   > non-host-executability a thing the MACHINE ENFORCES rather than a property the record prices.
+   > It is stated at **I.7a**, where the one mechanism recorded is marked PROPOSAL — NOT RULED.]`
 
 **`KILL`.** *User #224, 2026-09-01T04:32:31Z:* "**Lets not build a KILL instruction
 though. The idea that a context could be ended in an unsafe state is real, so the
@@ -7484,6 +7539,114 @@ identified need. *This document's own argument, offered as such and NOT as the u
 workload that can read a tile id can compute with it, which is the shape R8 and R9 forbid
 — so if these are proposed again, that objection must be answered alongside the user's
 two. **Do not attribute the leakage argument to the user.**
+
+### I.7a A FUNCTION MUST NOT BE HOST-EXECUTABLE — AND THE MACHINE ENFORCES IT AT FETCH
+
+`[NEW REQUIREMENT — user, 2026-09-03, verbatim: "Q3: Accepted, function should not be
+host-executable. Functions may need to have preambles to prevent incorrectness (so fetch refuses
+to execute a function on host)." The FIRST sentence confirms Q3 / ledger **L50** and is applied at
+**I.7 item 3** and **H.10.8**. The SECOND sentence is what this section exists for: it is a
+requirement the document did not have, and it is recorded here rather than folded into I.7 item 3
+because item 3 is about the FLOATING-POINT absences and this is about FETCH.]`
+
+**THE REQUIREMENT, in the user's own words: "*function should not be host-executable*", and
+"*fetch refuses to execute a function on host*".** Stated as this document states rules:
+
+> **A FUNCTION MUST NOT BE HOST-EXECUTABLE, AND THE MACHINE MUST ENFORCE IT AT FETCH.** That a
+> function-core binary is not host-executable was already true as a PROPERTY of the encoding
+> (**I.7 item 3**, **H.10.8**). It is now a REQUIREMENT ON THE MACHINE: **a host core must refuse
+> to execute function text, and the refusal must happen at FETCH** — before any body instruction
+> executes. A function may therefore have to carry a **preamble** for fetch to refuse it by.
+
+**THE REASON, and it is why this cannot be left to documentation.** Under **Design A**, **identical
+instruction encodings mean different things on the host and on the tile** — `x16` is a **32-bit
+half-tile** on the tile and a **64-bit register** on the host; the tile **does not NaN-box and does
+not check boxes**, the host does both (**H.10.3**, **H.10.8**) — **and nothing at run time can
+otherwise detect a function compiled for the wrong core.** A host that fetches function text does
+not fault. It **computes a different answer, silently**, which the proposals rank the worst failure
+mode in either design. The remedies that existed before this ruling are all **build-time** — the
+distinct-target rule at I.7 item 3, the admission tool at **K.6** — and **a build-time check cannot
+see a jump taken at run time.** So the check has to be in the machine, and **the earliest place it
+can be is fetch**, because fetch is the last point before the first wrong result.
+
+**WHAT IS RULED HERE AND WHAT IS NOT.** The requirement above is **RULED**. **The mechanism is
+NOT.** The user's words name a likely shape — "*functions may need to have preambles*" — and one
+mechanism of that shape is recorded below **for the user to accept, amend or replace.** It is not
+canon and nothing else in this document depends on it.
+
+---
+
+> ### `[PROPOSAL — NOT RULED]` THE ENTRY MARKER
+>
+> **THE MECHANISM.** **A function's first instruction word is an NMFC-opcode instruction** — the
+> **`custom-0`** space the tile already decodes (**I.9**). It is a marker, not work, and **three
+> parties read it**:
+>
+> **(a) A HOST CORE DECODES IT AS AN ILLEGAL INSTRUCTION AND TRAPS — before any body instruction
+> executes.** `custom-0` is unimplemented on a core that does not implement the NMFC extension, so
+> the trap is **the base ISA's own behaviour**: nothing is added to the host, and no host decoder
+> is modified. The trap fires **at the entry**, which is the property that matters — the divergence
+> never gets the chance to produce a wrong answer.
+>
+> **(b) THE TILE'S FETCH RECOGNISES IT AT THE ENTRY PC AND EXECUTES IT AS A NO-OP** (equivalently,
+> skips it). **One decode compare, at the entry PC only.** No architectural effect: no register
+> written, no context bit consumed, no scoreboard entry (H.10.7).
+>
+> **(c) `FORK`'s DISPATCH CHECKS IT AT THE TARGET PC, so a `FORK` to a NON-FUNCTION ADDRESS IS
+> REFUSED RATHER THAN RUN.** The FTU allocates nothing and **`FORK` answers 0** — which is the
+> refusal shape **I.2** already defines ("`rH` = handle, or 0 if no FTU entry is free") and
+> therefore costs no new architectural surface — or, where the refusal must be distinguishable
+> from a full FTU, it takes the fault path of **I.6** / ruling **O7** (the entry closes with a
+> zeroed file and an error flag, and `JOIN` returns the error immediately).
+>
+> **WHICH `funct7` VALUE IT TAKES IS AN IMPLEMENTATION CHOICE, NOT CANON.** User ruling 2026-09-03
+> **O3** makes **every** `funct7`/`funct3` value an implementation choice (**I.9**, ledger
+> **L43**), so **the canon would say only that ONE value is reserved for the entry marker.** The
+> natural home is a **variant slot inside the reserved `0x6`/`0x7` groups** that already hold
+> `KILL`, mailboxes and `RESUME`; the number itself belongs in **SELECTED CONFIGURATION** alongside
+> the rest of `nmfc_isa.h`'s, exactly as every other field value does.
+>
+> **THE COST.**
+>
+> | what | how much |
+> |---|---|
+> | text | **one 4-byte word per function**, once |
+> | tile fetch | **one decode compare**, at the entry PC only |
+> | per instruction | **zero** — nothing is added to the body |
+> | the 512 bits, a migration, the scoreboard | **zero** — the marker is not state |
+> | the host | **zero** — the trap is the base ISA's existing illegal-instruction behaviour |
+>
+> **WHAT IT DOES NOT CATCH, stated because a marker at the entry is not a marker everywhere.** **A
+> host that jumps into the MIDDLE of a function** lands past the marker and executes body text
+> unchecked. **If that ever matters, the same marker can be required at every BASIC-BLOCK HEAD** —
+> **4 bytes per block** instead of 4 bytes per function — **and the admission tool can verify the
+> placement at build time** (**K.6**), which is where a placement rule belongs. **That is not
+> proposed now**, because the entry is where a `FORK` and a mislinked call actually land, and
+> paying per block buys protection against a jump nothing in the system is trying to make.
+>
+> **PRIOR ART — this is a known construction, not a new one.** **RISC-V `Zicfilp` landing pads:**
+> `lpad` is an instruction placed at every indirect-branch target which **the front end checks**,
+> trapping when a target lacks one. **That is the same shape** — a one-word marker at an entry,
+> read by fetch, with the check in the machine rather than in the toolchain. **ARM BTI** (a `BTI`
+> instruction at branch targets, checked by the PE) is the same construction in the other ISA.
+> **Neither is adopted wholesale**; what is borrowed is the demonstration that **an entry marker
+> checked at fetch is cheap, deployed and understood.**
+>
+> **THE ALTERNATIVE, AND WHY IT IS SECOND. A PAGE-TABLE OR SEGMENT ATTRIBUTE — "NMFC-only code".**
+> A bit on the translation which a **host** core's fetch **honours** (a fetch from such a page
+> traps) and a **tile's** fetch **ignores**. It is a real mechanism and it catches the
+> mid-function jump the marker does not, at zero bytes of text. **It is second because it moves the
+> check to TRANSLATION:** it needs an **attribute bit** in the page-table entry, it needs **OS
+> support** to set the bit and preserve it across mapping, and it makes a correctness property of
+> the **ISA** depend on how the **memory** happened to be mapped — which also puts it in the way of
+> **I3** (one page table per address space, duplicated per tile) and **F**'s translation path.
+> **The marker needs neither an attribute nor an OS**: it travels with the code, so a function is
+> refused on the host even when the page it was mapped through says nothing about it. **The two are
+> not exclusive** — the attribute is the natural SECOND layer if mid-function entry ever becomes a
+> real threat. It is recorded here rather than in **Part P** because **it was not rejected; it was
+> ranked.**
+
+---
 
 ### I.8 Context registers
 
@@ -9806,8 +9969,8 @@ resolve on its own authority.
 **Count: 54 conflicts (L1–L54, no gaps).** **[UPDATED — L50–L53 added 2026-09-03 (morning): the
 four register-naming questions and their rulings. L54 added in the same revision's correction
 pass: W1b, the struck drafting instruction, which had a live `[USER TO CONFIRM]` tag at H.10.3
-and no row here to find it by. Four subjects took that tag; **L51 and L52 were confirmed by the
-user later on 2026-09-03 and retired, so TWO carry it now — L50 and L54.**
+and no row here to find it by. Four subjects took that tag; **L50, L51 and L52 were all confirmed by the
+user later on 2026-09-03 and retired, so ONE carries it now — L54.**
 They sit at the END of this appendix, after L49.]** [CORRECTED — this header read "37" while the
 file carried 42 rows, so a reader auditing the ledger by its own count stopped five rows
 early. `grep -cE '^\*\*L[0-9]+ —' docs/nmfc/CANON.md` is the check; run it after
@@ -9825,14 +9988,15 @@ confirmation is the ASSISTANT'S READING of a ruling given in words that did not 
 question as posed — **or, in one case, a DRAFTING INSTRUCTION this document struck on a
 proposal's authority.** **FOUR rows took it: L50 (Q3, in its own wording), L51 (Q2, `f`*n* ≡
 `x`*n*), L52 (Q4, the scope of the trap requirement), and L54 (W1b, the integer-ALU width rule).
-TWO REMAIN.** **L51 and L52 were CONFIRMED by the user on 2026-09-03 — "*…then keep them the
-same*" and "*I think that is okay*" — and their tags are retired everywhere, so only **L50** and
-**L54** still await the reader's act.**
+ONE REMAINS.** **L50, L51 and L52 were all CONFIRMED by the user on 2026-09-03 — "*Q3: Accepted,
+function should not be host-executable*", "*…then keep them the same*" and "*I think that is
+okay*" — and their tags are retired everywhere, so only **L54** still awaits the reader's act.**
 `[CORRECTED — this note used to say TWO rows plus L50, and omitted L54 entirely; W1b had a live
-tag at H.10.3 with no ledger row and no front-matter row to find it by.]` Those two are the only
-unsettled things in this document, and each is flagged again at its point of use. **The tag is
+tag at H.10.3 with no ledger row and no front-matter row to find it by.]` **[UPDATED AGAIN —
+L50 was confirmed on 2026-09-03 and the count fell from TWO to ONE.]** That one is the only
+unsettled thing in this document, and it is flagged again at its point of use. **The tag is
 not retired as a vocabulary** — the notation table's first retirement applies to its old
-`RESUME`-privilege subject, and the 2026-09-03 confirmations retire two of its four
+`RESUME`-privilege subject, and the 2026-09-03 confirmations retire three of its four
 second-subject instances; that table is the authority.]`
 
 **NO `[FOR THE USER TO RULE]` TAG IS STILL LIVE ANYWHERE IN THIS APPENDIX.** The last two
@@ -10916,16 +11080,19 @@ H.10.3.]` **These are NOT conflicts between sources.** L50–L53 are the four qu
 register-naming proposals put to the user, the rulings that closed them, and — for **three** of
 them — the assistant's reading of a ruling the user gave in words that did not answer the question
 as posed. **L54 is not a ruling at all**: it is a drafting instruction this document struck on a
-proposal's authority. **TWO OF THE FOUR ARE NOW CONFIRMED — L51 (Q2) and L52 (Q4's scope), by the
-user later on 2026-09-03 — so the two still unsettled are L50 and L54**, and each of those two is
-tagged `[USER TO CONFIRM]` here and at its point of use. **[UPDATED — this paragraph read "Those
-FOUR — L50, L51, L52, L54 — are the only things in this document that are not settled". Two have
-since been confirmed and the rows below carry the user's words verbatim.]**
+proposal's authority. **THREE OF THE FOUR ARE NOW CONFIRMED — L51 (Q2), L52 (Q4's scope) and L50 (Q3), all by the
+user later on 2026-09-03 — so the ONE still unsettled is L54**, which is
+tagged `[USER TO CONFIRM]` here and at its point of use. **[UPDATED TWICE — this paragraph read
+"Those FOUR — L50, L51, L52, L54 — are the only things in this document that are not settled",
+then that "two have since been confirmed". THREE have; the rows below carry the user's words
+verbatim. L50's confirmation also carried a NEW REQUIREMENT — that the machine refuse to execute
+a function on a host core, at FETCH — which is not a ledger matter at all and is stated at
+**I.7a**.]**
 
 **THE RULING THAT GOVERNS ALL FOUR, verbatim: "Okay, lets go with A."** Design A is adopted: the
 register number **is** the bit range of the 512-bit context (**H.10**).
 
-**L50 — Q3: does Design A supersede CANON I.7 item 3? [RULED — reading recorded, USER TO CONFIRM]**
+**L50 — Q3: does Design A supersede CANON I.7 item 3? [RULED — reading recorded; CONFIRMED by the user 2026-09-03]**
 - *What was asked:* I.7 item 3 ends "*a function needing dynamic rounding modes … **cannot be
   offloaded**.*" Both candidate designs define `rm = DYN` as RNE instead, because every stock FP
   instruction carries DYN and rejecting it makes all stock FP codegen illegal. The proposals rank
@@ -10939,13 +11106,24 @@ register number **is** the bit range of the 512-bit context (**H.10**).
   supersession is **ACCEPTED**: a **function-core binary is not host-executable**; the divergence
   is documented and priced rather than denied.
 - **RULING APPLIED: SUPERSEDE, and price it.** Written at **I.7 item 3** (clause by clause, with
-  the item kept in full) and **H.10.8**. `[ASSISTANT'S READING OF THE USER'S CHOICE — user may
-  overturn.]`
-- **A drafting discrepancy the user should see, recorded rather than resolved:** the question was
-  put naming item 3 as *"the property that function code is host-executable unchanged"*, while
-  item 3's actual text is the **dynamic-rounding** clause. **Both divergences are real and of the
-  same class, and both are recorded at I.7** rather than guessing which was meant. **CLOSED,
-  pending confirmation.**
+  the item kept in full) and **H.10.8**.
+- **CONFIRMED — user, 2026-09-03, verbatim:** "**Q3: Accepted, function should not be
+  host-executable. Functions may need to have preambles to prevent incorrectness (so fetch refuses
+  to execute a function on host).**" **The `[ASSISTANT'S READING … — user may overturn]` flag is
+  RETIRED** — at **I.7 item 3**, at **H.10.8**, in the **RULINGS table** row Q3, in the notation
+  table's membership check, and here. **The reading STANDS.**
+- **The drafting discrepancy is RESOLVED, not merely recorded:** the question had been put naming
+  item 3 as *"the property that function code is host-executable unchanged"*, while item 3's actual
+  text is the **dynamic-rounding** clause, and the flag recorded both rather than guessing which
+  was meant. **The user confirmed in the HOST-EXECUTABILITY wording** — "*function should not be
+  host-executable*" — so that half is ruled outright. **Both divergences are real, both are of the
+  same class, and both remain recorded at I.7.**
+- **AND THE CONFIRMATION CARRIED A NEW REQUIREMENT, WHICH IS NOT A LEDGER ROW AND MUST NOT BE READ
+  AS ONE:** the second sentence makes non-host-executability a thing **the machine enforces at
+  FETCH**, not a property the record prices. It is stated at **I.7a**, with one mechanism — an
+  **ENTRY MARKER** — recorded as **PROPOSAL — NOT RULED**, and cross-referenced from **H.10.8** and
+  Part B **I7**. **This ledger row is about the SUPERSESSION only.**
+- **CLOSED.**
 
 **L51 — Q2: does `f`*n* ≡ `x`*n*? [RULED — reading recorded; CONFIRMED by the user 2026-09-03]**
 - *What was asked:* do the `f` names denote the same bits as the `x` names (one pool, **24**
@@ -11342,8 +11520,8 @@ These are not divergences; they are the scars, and each is a test the canon shou
      `[USER TO CONFIRM]` tag **on the `RESUME`-privilege subject** is gone. **[CORRECTED — this
      line used to read "every `[USER TO CONFIRM]` tag is gone". The 2026-09-03 (morning) revision
      REINSTATED the tag with a different subject and four live instances — L50, L51, L52, L54;
-     **L51 and L52 were CONFIRMED by the user later on 2026-09-03 and their tags retired, so TWO
-     remain: L50 and L54.**
+     **L50, L51 and L52 were all CONFIRMED by the user later on 2026-09-03 and their tags
+     retired, so ONE remains: L54.**
      The notation table is the authority and it is rewritten to say so.]**
    - **O5 — three message classes on the one fabric: COHERENCE, MIGRATION, FILL**,
      per-destination queues, **coherence strictly first, then migration and fill at EQUAL
