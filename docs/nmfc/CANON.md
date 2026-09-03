@@ -2460,6 +2460,26 @@ rules the size.
 `nmfcPaysSnoop` 24 — is **no longer a directory question**: it is ruled a **suspected bug in
 the simulated environment** (user ruling 2026-09-02 R5; see I14 and ledger L14/L15).
 
+**[RESOLVED 2026-09-03 — and the evidence is still NOT in the permitted direction.]** The
+suspected bug was real and is fixed in SST commit
+**`82357d0e7f92ac437ac45fce230efcde258139d4`**, with follow-up
+`5e5fa669ce5041d0a366190f6cef61ebbdd7b400`: the program image is now placed by the host
+MMU on the untimed init path instead of being executed store-by-store through the host's
+caches by `RevLoader`. **The loader was not the explanation of the ratio.** It moved
+`nmfcPaysSnoop` on `tile_bfs`/4 only 13 627 → 13 147 (−3.5 %) against `hostPaysSnoop`
+270 → 273, i.e. 50.5× → 48.2×; and once `5e5fa66` stopped charging a clean `E` holder as a
+dirty one, the same run reads `hostPaysSnoop` **62** against `nmfcPaysSnoop` **12 910** —
+**208:1, worse.** So the caution stands and is now a measured statement rather than a
+suspicion: **do not quote the snoop-direction table as evidence for or against I14.**
+On the evidence the dominant term is the workload (a host producing into `.bss` and
+function cores consuming it), and the second is a directory that sets `d.global = O` and
+**never clears `d.owner`** (`NMFCCoherenceFabric.cc:603-609`), so the host L2 remains owner
+of record for the rest of the run — 8 500 of 13 627 events find the entry already in `O`
+and 64 % are repeat snoops of a line already snooped once. **That second term is a protocol
+decision for this section, and it is open**; classic MOESI does keep the owner on a read,
+so moving ownership to the reader is architecture and was not changed under R5. Ledger
+**L14**/**L15** carry the full before/after.
+
 ---
 
 #### C.5a THE FABRIC'S MESSAGE CLASSES AND THEIR ARBITRATION — RULED
@@ -9090,6 +9110,11 @@ wrong way.** **[RULED 2026-09-02 — see the RULED bullet at the end of this row
   For the user: is this a real violation of I14 or an artefact of a program whose static
   data arrives Modified (see L15)?**
 - **RULED — user ruling 2026-09-02 R5: "That sounds like a bug. Needs investigation. The image being written into memory should itself be trivial, done by the OS at load. Amortized on any reasonable-length-running program. If it is impacting us in any way, that suggests a bug."** The 9-vs-24 ratio is a **suspected defect in the simulated environment** (the loader writing the image through the host cache — L15), **not** a counter-example to invariant 14. **I14 stands; investigation queued.** Do not quote the table as evidence either way until the loader path is fixed. **CLOSED as a design question; open as a BUG.**
+- **[RESOLVED 2026-09-03] The bug was real, it was found and fixed, and it was NOT the explanation of the ratio.** Fixed in SST commit **`82357d0e7f92ac437ac45fce230efcde258139d4`** (`nmfc: the program image is placed by the loader, not executed by the core`), corrected by follow-up **`5e5fa669ce5041d0a366190f6cef61ebbdd7b400`**. **Root cause:** on Rev's memH path `RevLoader` executes one store per cache line of `.text`, `.rodata`, `.data` and the whole `.bss` zero-fill through the host's own L1/L2, queued during `RevCPU` construction, so the first 945 ns of every run is the loader — 40 of the first 45 cold host `GetX` on `tile_coh`/1 were the image itself. **Fix:** `NMFCHostMMU` performs the OS's half — it places every `PT_LOAD` (file bytes and zero-fill) on SST's untimed init path, translated, with a copy on every channel for a duplicate page, and retires `RevLoader`'s own writes of those same bytes; new counters `imageBytesPlaced` / `imageWritesRetired`. **No Rev source changed** (`src/rev` byte-identical) and **no architecture changed**; all three suites PASS.
+- **Counters, before → after (`82357d0`):** `tile_bfs`/4 `nmfcPaysSnoop` **13 627 → 13 147** (−3.5 %), `hostPaysSnoop` **270 → 273**; `tile_bfs`/1 **12 962 → 12 572** (−3.0 %) and **271 → 273**; `tile_coh`/2 **22 → 20** and **9 → 9**. Simulated time: `tile_bfs`/4 1.633 22 → 1.609 79 ms (−1.43 %), `tile_bfs`/1 1.633 06 → 1.570 02 ms (−3.86 %), `tile_coh`/2 6.158 59 → 6.164 00 ms (**+0.09 %** — the loader had been pre-warming the host L2 with the whole image).
+- **The ratio survived the fix: 50.5× → 48.2× on `tile_bfs`/4.** The follow-up `5e5fa66` then closed the counter defect that charged a clean `E` holder as a dirty one (the increment now happens after the state is known): `tile_bfs`/4 becomes `hostPaysSnoop` **62**, `nmfcPaysSnoop` **12 910**, with the clean cases split off into `hostPaysCleanSnoop` **211** / `nmfcPaysCleanSnoop` **237** (the old totals are the sums). **That makes the direction worse, not better — 208:1.**
+- **What the measurement now says the ratio is.** (i) **Workload shape** — `tile_bfs`'s host builds the graph in `.bss` and the function cores consume it; 13 620 of 13 627 events land on `.bss`, 12 066 on `col` alone. (ii) **An ownership-policy defect**: the directory sets `d.global = O` and never clears `d.owner` (`NMFCCoherenceFabric.cc:603-609`), so the host L2 stays owner of record — 0 evictions and 0 writebacks on `tile_bfs`/4 — and 8 500 of 13 627 events find the directory already in `O`, 64 % of them repeat snoops of a line already snooped once. **That is a protocol decision, a C.5 matter, and it was deliberately left open** (R5: do not change architecture). (iii) The loader, now gone, was the **smallest** term. Ablation with no architecture changed — host L2 at 64 KiB, fc D-cache at 512 KiB — inverts the direction to **5 007 `hostPaysSnoop` against 1 405 `nmfcPaysSnoop`, 3.6:1 the permitted way**, which says the number is environment and policy, not the invariant.
+- **STATUS: the bug half of this row is CLOSED. I14 stands, untouched. The instruction not to quote the snoop-direction table as evidence for or against I14 STANDS** — the loader path is fixed and the direction did not flip. Still open: the ownership policy above (C.5), and a workload in which the function core owns its working set.
 
 **L15 — "A program's static data arrives Modified", which makes `F` unreachable early.**
 - *Tier 3, measured:* the loader writes the whole image — text, rodata and bss — through
@@ -9102,6 +9127,11 @@ wrong way.** **[RULED 2026-09-02 — see the RULED bullet at the end of this row
   architecture.** It plausibly explains L14's ratio and should be checked against it
   before I14 is doubted.
 - **RULED — user ruling 2026-09-02 R5, same statement.** "The image being written into memory should itself be trivial, done by the OS at load. Amortized on any reasonable-length-running program." **A model in which static data arrives Modified and stays costly is a BUG**, and it is the suspected cause of L14's ratio. **Investigation queued.**
+- **[RESOLVED 2026-09-03] Confirmed at source and fixed in SST commit `82357d0e7f92ac437ac45fce230efcde258139d4`** (follow-up `5e5fa669ce5041d0a366190f6cef61ebbdd7b400`). The mechanism was exactly as recorded: `RevLoader.cc:379` writes each `PT_LOAD`'s file bytes and `:381-382` the `p_memsz - p_filesz` zero-fill through `RevMem`'s memH path (`RevMem.cc:528-530`), one cache line at a time. `NMFCHostMMU` now places those bytes untimed before the clock starts, so **the image no longer arrives in a host cache at all**.
+- **Before → after:** leading cold host `GetX` on `tile_coh`/1 **45 → 4**, and the first non-loader record moves from t = 1 265 000 ps to t = 257 000 ps. The 4 that remain are the ELF program headers and `argv` `RevLoader` puts on the stack — process setup a real OS also performs through its own cache — plus 5 later `GetX` that are the program's own stores. Directory on `tile_coh`/2: `reqGetX` **99 → 30**, host L2 writebacks **80 → 11**, evictions **95 → 53**. `imageWritesRetired` equals the loader's line count exactly every time (40 on `tile_coh`, 6 697 on `tile_bfs`).
+- **What did NOT change: `F` did not become more reachable.** `fwdFromF` is **8 → 8** on `tile_coh`/2 and **219 → 212** on `tile_bfs`/4; `fwdFromO` **13 → 11** and **12 642 → 12 448**. `O` still carries essentially all host-to-function traffic, for the reasons now recorded in L14 — the workload shape and the directory never releasing `d.owner`, not the loader.
+- **Two consequences recorded rather than acted on.** (i) `tile_coh.c:29-41` points its `F` phase at `__heap_start` explicitly to reach around this bug; that comment is now false and the workaround unnecessary, but it is left in place so the suite's `fwdFromF` check measures the same thing before and after. (ii) The loader's duplicate-page stores were the tree's **only** run-time exercise of invariant 3's write path (`duplicateWrites`/`duplicateCopies` 34/34 on `tile_coh`/2 before, 0/0 after); `5e5fa66` restores that coverage with `tile_bfs_dup`, whose host builds a duplicate page at run time — **32 768 / 32 768**, gated by `run_coherent.sh`.
+- **STATUS: CLOSED as a bug.** The property this row recorded is no longer true of the simulated environment.
 
 **L16 — `NUCA_ROUTER`'s header describes a classifier the code does not contain.**
 - *Tier 2:* the file's comment describes an R-NUCA PRIVATE/SHARED classification with
