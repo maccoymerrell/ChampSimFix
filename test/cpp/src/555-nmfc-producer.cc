@@ -5,10 +5,8 @@
  * assumed, the reserved window the host core reads as an offload, and which
  * calls the host actually issues.
  *
- * All of those have already failed in this branch. A spawned definition counted
- * as a host instruction credits the compute tile with work that never reached
- * it; a call the host issues but never waits for ends a measurement with its
- * work in flight.
+ * All of those have already failed in this branch: a call the host issues but
+ * never waits for ends a measurement with its work in flight.
  */
 
 #include <catch.hpp>
@@ -116,55 +114,6 @@ TEST_CASE("A call becomes a load from the aperture slot that names its token")
 
   // And the body it named is published, or the core would have nothing to run.
   REQUIRE(r.image->lookup(5) != nullptr);
-}
-
-TEST_CASE("A spawned definition publishes a body but issues no host instruction")
-{
-  // The host never starts this work, so charging it a host instruction would
-  // credit the compute tile with work that by construction never reached it --
-  // and inflate the baseline it is being compared against.
-  std::vector<nmfc::record> recs;
-  auto def = blank_rec(nmfc::op::CALL, 9);
-  def.aux1 = nmfc::encode_call_aux1(2, 1);
-  def.flag_bits = nmfc::FLAG_SPAWNED;
-  recs.push_back(def);
-  recs.push_back(blank_rec(nmfc::op::BODY, 9));
-  recs.push_back(blank_rec(nmfc::op::RET, 9));
-
-  auto host = blank_rec(nmfc::op::HOST, 0);
-  host.instr.ip = 0x400;
-  recs.push_back(host);
-  recs.push_back(blank_rec(nmfc::op::HOST, 0));
-
-  producer_rig r{write_trace("spawned", recs), "_spawned"};
-
-  const auto* first = r.producer->peek();
-  REQUIRE(first != nullptr);
-  REQUIRE(first->ip.to<std::uint64_t>() == 0x400); // the host instruction, not the definition
-  REQUIRE(r.image->lookup(9) != nullptr);          // but the body is available to spawn
-}
-
-TEST_CASE("A spawn record survives into the body it belongs to")
-{
-  std::vector<nmfc::record> recs;
-  auto call = blank_rec(nmfc::op::CALL, 11);
-  call.aux1 = nmfc::encode_call_aux1(1, 1);
-  recs.push_back(call);
-  auto spawn = blank_rec(nmfc::op::SPAWN, 11);
-  spawn.aux0 = 77; // the invocation it starts
-  recs.push_back(spawn);
-  recs.push_back(blank_rec(nmfc::op::RET, 11));
-  recs.push_back(blank_rec(nmfc::op::HOST, 0));
-  recs.push_back(blank_rec(nmfc::op::HOST, 0));
-
-  producer_rig r{write_trace("spawnrec", recs), "_spawnrec"};
-  (void)r.producer->peek();
-
-  const auto* body = r.image->lookup(11);
-  REQUIRE(body != nullptr);
-  REQUIRE(body->instrs.size() == 1);
-  REQUIRE(body->instrs.front().is_spawn);
-  REQUIRE(body->instrs.front().spawn_token == 77);
 }
 
 TEST_CASE("Host instructions pass through in order")

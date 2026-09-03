@@ -577,9 +577,13 @@ def main():
     parser.add_argument("--placement", default="round_robin")
     parser.add_argument("--walk-routing", default="local", choices=["local", "fabric"],
                         help="page-table walks stay on the tile (partitioned table) or route over the fabric (shared table)")
-    parser.add_argument("--router", default="CONGRUENT_ROUTER",
-                        choices=["CONGRUENT_ROUTER", "RELOCATION_ROUTER", "PHYSICAL_ROUTER", "ADAPTIVE_ROUTER", "NUCA_ROUTER"],
-                        help="when the owning tile is decided, relative to translation")
+    parser.add_argument("--router", default="NUCA_ROUTER",
+                        choices=["NUCA_ROUTER", "PHYSICAL_ROUTER", "ADAPTIVE_ROUTER", "CONGRUENT_ROUTER"],
+                        help="when the owning tile is decided, relative to translation. The design routes on "
+                             "the PHYSICAL address: translate, then read the tile out of the frame "
+                             "(NUCA_ROUTER, PHYSICAL_ROUTER, ADAPTIVE_ROUTER). CONGRUENT_ROUTER is the policy "
+                             "where vmem places tiles -- the tile is a field of the virtual address; supported "
+                             "as a control, not used (user ruling 2026-09-02 R2)")
     parser.add_argument("--llc-banks", type=int, default=1,
                         help="LLC banks per memory tile, routed by DRAM bank so misses reach ramulator "
                              "already sorted into the per-bank queue that will serve them (1 = unbanked)")

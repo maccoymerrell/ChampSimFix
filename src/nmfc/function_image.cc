@@ -82,7 +82,7 @@ struct function_image_store : public nmfc::function_image_module, public champsi
     // that work, and every rate derived from it is wrong in the flattering
     // direction. This happened: a top-level invocation marked fire-and-forget
     // let the host run off the end of its own instruction stream, 3,051 of
-    // 45,285 spawns had executed when the trace ended, and the result read as a
+    // 45,285 invocations had executed when the trace ended, and the result read as a
     // 207x speedup. The number was already in this line; it needed to be an
     // accusation rather than a statistic.
     if (bodies_.size() > 100 && bodies_.size() * 4 > published_) {

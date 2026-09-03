@@ -1,40 +1,47 @@
 /*
  * Who decides which memory tile owns an address — and, crucially, *when*.
  *
- * Everything else in this design follows from that one question. Route on the
- * virtual address and the decision is a shift and a mask, taken before any
- * translation, so a context always knows where it belongs; but then the
- * allocator has no freedom, because the frame must sit on the tile the virtual
- * address already named. Route on the physical address and the OS gains total
- * freedom to place and re-place a page, at the cost of having to translate
- * before it can route.
+ * The design routes on the *physical* address: translate first, then read the
+ * tile out of the frame. The OS therefore has total freedom to place a grain on
+ * any tile and to move it later, which is what makes repartitioning expressible
+ * at all; the price is that routing waits on translation. That price is smaller
+ * than it looks, because the page table is *one table per address space,
+ * duplicated on every tile* rather than partitioned N ways — each tile walks
+ * its own copy, so the walk is local even though the root is not chosen by the
+ * address. See nmfc_vmem.h and user ruling 2026-09-02 R2.
  *
- * These are not variations on a policy, they are different machines, and they
- * pull different parts of the design with them:
- *
- *   CONGRUENT_ROUTER   tile_of_virtual(va). No translation on the routing path.
- *                      Page tables stay partitioned N ways, one root per
- *                      channel over compacted virtual addresses, so every walk
- *                      is local. The allocator has no placement freedom at all.
- *
- *   RELOCATION_ROUTER  The same, except for grains the OS has deliberately
- *                      moved, which are listed in a table consulted on the
- *                      routing path. The per-channel roots survive untouched:
- *                      the root is chosen by the virtual address, which does
- *                      not change, so only the frame moves. Costs one table
- *                      lookup and one entry per relocated grain -- which is
- *                      the right trade only while relocations stay rare.
+ * The registered models:
  *
  *   PHYSICAL_ROUTER    Translate, then read the tile out of the physical
- *                      address. The allocator may put any grain on any tile and
- *                      move it later, which is what makes adaptive repartioning
- *                      possible. The price is structural, not incidental: a
- *                      context cannot choose which per-channel page-table root
- *                      to walk without already knowing the tile, so the N roots
- *                      collapse to one and walk references may cross the
- *                      fabric.
+ *                      address. Placement of a newly faulted grain is a free
+ *                      choice and therefore an actual policy; round-robin is
+ *                      the neutral control an adaptive policy has to beat.
  *
- * The interface is deliberately not a uniform abstraction over the three.
+ *   NUCA_ROUTER        The same routing rule, with a policy attached: a new
+ *                      grain starts on the tile its address names, and balance
+ *                      is applied afterwards by remapping whole components in
+ *                      remap_grain() rather than by where a grain was first
+ *                      touched. The default.
+ *
+ *   ADAPTIVE_ROUTER    The same routing rule with a pull-based policy.
+ *
+ *   CONGRUENT_ROUTER   A CONTROL, not the design. tile_of_virtual(va): the tile
+ *                      is a field of the *virtual* address, so no translation
+ *                      sits on the routing path and the page table can be
+ *                      partitioned N ways, one root per channel over compacted
+ *                      virtual addresses. The allocator then has no placement
+ *                      freedom at all — a grain must be backed on the tile its
+ *                      own address already named, and it can never be moved
+ *                      without changing an address the program can see. This is
+ *                      the policy where vmem places tiles; it is supported so
+ *                      the two can be measured against each other, and it is
+ *                      not used. No default may select it.
+ *
+ * (A RELOCATION_ROUTER — congruence plus a table of grains the OS has
+ * deliberately moved — has been described but is *not implemented* and is not
+ * registered. Do not offer it as a choice.)
+ *
+ * The interface is deliberately not a uniform abstraction over these.
  * `order()` exposes the difference rather than hiding it, because the whole
  * point of the comparison is that translation happens at a different time.
  */
@@ -56,9 +63,13 @@ namespace nmfc
 
 /** When the owning tile is decided, relative to translation. */
 enum class routing_order {
-  /** Decide from the virtual address; translate afterwards, always locally. */
+  /**
+   * The control (CONGRUENT_ROUTER only): decide from the virtual address and
+   * translate afterwards, through a table partitioned one root per channel.
+   * Kept selectable for comparison; nothing in the design chooses it.
+   */
   VIRTUAL_FIRST,
-  /** Translate first; the physical address names the tile. */
+  /** The design: translate first; the physical address names the tile. */
   TRANSLATE_FIRST,
 };
 
@@ -96,9 +107,12 @@ struct tile_router_module : public champsim::modules::module_base<tile_router_mo
   /**
    * How many page-table roots the address space is split into.
    *
-   * N under VIRTUAL_FIRST, because the tile is known before the walk starts and
-   * each channel can own its own partition of the table. 1 under
-   * TRANSLATE_FIRST, because choosing the root *is* the routing decision.
+   * 1 under TRANSLATE_FIRST -- the design -- because choosing a root would
+   * require the answer the walk produces. That single logical table is one
+   * table per address space, *duplicated* on every tile, so each tile still
+   * walks locally; see nmfc_vmem.h. N under VIRTUAL_FIRST (the control),
+   * because the tile is known before the walk starts and each channel can own
+   * its own partition instead.
    */
   [[nodiscard]] virtual std::size_t page_table_roots() const = 0;
 

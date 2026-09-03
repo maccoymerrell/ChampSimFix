@@ -10,6 +10,20 @@
  * The huge-page accessor exists for the same reason on the other side: the MMU
  * wants the grain-granular mapping so a single TLB entry can cover a whole
  * grain, while the page-table walker below it still asks 4 KiB questions.
+ *
+ * THE TRANSLATION SURFACE (user ruling 2026-09-02 R2, R12). The design routes
+ * on the *physical* address: translate first, then read the owning tile out of
+ * the frame. It walks ONE PAGE TABLE PER ADDRESS SPACE, and that table is
+ * DUPLICATED on every tile -- each tile holds its own copy of the page-table
+ * pages, so the root is not chosen by the address (it cannot be: choosing it
+ * would need the answer the walk produces) and yet every walk is still served
+ * from local memory. TLBs above it are shared; the tables are not.
+ *
+ * The alternative -- one table PARTITIONED N ways, one root per channel over
+ * compacted virtual addresses, so the address picks the root -- belongs to
+ * CONGRUENT_ROUTER, which is a CONTROL and is chosen by no default. Everything
+ * below that reads `page_table_roots() > 1` is serving that control; the `== 1`
+ * arm is the design.
  */
 
 #ifndef NMFC_VMEM_H
@@ -117,12 +131,16 @@ struct page_placement_sink {
   /**
    * Where the page-table entry for this walk lives, asked as `tile`.
    *
-   * An ordinary address sits in exactly one channel's partition of the table,
-   * so the root follows the address and the walk is local. A *replicated*
-   * address sits in every partition -- each channel has its own entry naming
-   * its own copy -- so the root has to follow the asker instead. Getting this
-   * wrong sends one tile walking through another tile's table, which a tile
-   * port catches as a locality violation a long way from the cause.
+   * Under the design the table is duplicated, so the entry the asker wants is
+   * in the asker's own copy: the answer follows `tile`, not the address, and
+   * that is what keeps a walk local without letting the address pick the root.
+   * Under the CONGRUENT control the table is partitioned instead, so an
+   * ordinary address sits in exactly one channel's slice and the root follows
+   * the address -- except for a *replicated* address, which sits in every
+   * slice with each channel naming its own copy, and there too the answer must
+   * follow the asker. Getting this wrong sends one tile walking through
+   * another tile's table, which a tile port catches as a locality violation a
+   * long way from the cause.
    */
   [[nodiscard]] virtual std::pair<champsim::address, champsim::chrono::clock::duration> pte_address_on(champsim::origin origin, std::uint64_t vpage,
                                                                                                       std::size_t level, std::size_t tile) = 0;

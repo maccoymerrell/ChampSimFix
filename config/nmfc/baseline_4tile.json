@@ -382,7 +382,7 @@
       "_comment": "Who owns an address, and when that is known. See inc/nmfc/tile_router.h.",
       "name": "ROUTER",
       "module": "tile_router",
-      "model": "CONGRUENT_ROUTER",
+      "model": "NUCA_ROUTER",
       "clock_period": {
         "time": "250p"
       }

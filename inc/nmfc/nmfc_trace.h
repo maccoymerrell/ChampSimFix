@@ -98,20 +98,17 @@ enum class op : std::uint8_t {
    * reorder buffer will hold.
    */
   JOIN = 6,
-  /**
-   * Create another invocation, from inside a function body.
-   *   aux0 = the token of the invocation to start
+  /*
+   * There is deliberately no fan-out opcode here.
    *
-   * The point of the architecture, and the thing a host-driven decomposition
-   * cannot express. When a function needs an address on another tile it has two
-   * options: carry itself there, or send work there. Migration moves a context
-   * and everything it has accumulated; a spawn moves a token. If the work at
-   * the far end is short -- a compare-and-swap on one word, say -- sending the
-   * work is strictly better, and it is also what removes the host from the
-   * critical path of a traversal: a function that discovers new work creates it
-   * in place instead of returning it to be re-dispatched.
+   * An invocation may extend into a successor -- the context carries forward,
+   * its slot is reserved in place, one becomes one -- but it may never create a
+   * second live invocation. Fan-out is unbounded by construction: it needs a
+   * per-core tracking unit and a depth bound, and "you may only fan out one
+   * deep" is not a design, it is a constraint nobody can honour. Work a
+   * function cannot carry out itself means the unit of work is shaped wrong;
+   * reshape it. See DESIGN.md invariant 10 and user ruling 2026-09-02 R1.
    */
-  SPAWN = 7,
 };
 
 /**
@@ -179,16 +176,14 @@ enum flags : std::uint8_t {
    * invocations at what the reorder buffer can hold past it.
    */
   FLAG_DEFERRED_JOIN = 1U << 2,
-  /**
-   * This CALL defines a body without dispatching it (CALL only).
-   *
-   * The invocation exists in the trace so its body can be published, but the
-   * host does not start it -- a SPAWN elsewhere does. Without this the reader
-   * would emit a host instruction for work the host never issued, and the
-   * host's instruction count would include work that by construction never
-   * touched it.
+  /*
+   * 1U << 3 was FLAG_SPAWNED -- a CALL that defined a body without dispatching
+   * it, because something else in the trace was going to start it. Removed with
+   * the fan-out opcode (user ruling 2026-09-02 R1): with no way to start such a
+   * body, a definition nothing dispatches is dead weight in the image. The bit
+   * is left unused rather than reassigned, so an old trace carrying it is
+   * inert rather than silently reinterpreted.
    */
-  FLAG_SPAWNED = 1U << 3,
 };
 
 /**

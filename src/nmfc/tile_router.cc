@@ -1,16 +1,22 @@
 /*
- * CONGRUENT_ROUTER — the routing rule the design was built on.
+ * CONGRUENT_ROUTER — A CONTROL. This is not the design; it is the arrangement
+ * the design was measured against, kept selectable so the comparison can be
+ * re-run. No default config may name it (user ruling 2026-09-02 R2).
  *
- * The tile is a field of the virtual address, so answering costs a shift and a
- * mask and needs no translation, no lookup and no state. That is the property
- * everything else leans on: a context decides local-vs-migrate before it has
- * translated anything, page tables split N ways with every walk local, and the
- * allocator is left with no placement freedom whatsoever -- a frame must sit on
- * the tile its own virtual address already named.
+ * This is the policy where vmem places tiles. The tile is a field of the
+ * virtual address, so answering costs a shift and a mask and needs no
+ * translation, no lookup and no state: a context decides local-vs-migrate
+ * before it has translated anything, and page tables split N ways with every
+ * walk local.
  *
- * That last clause is the whole of the trade. It is why placement here is a
- * compile-time decision, and why nothing can be re-placed at runtime without
- * changing an address the program can see.
+ * The price is the whole of why it was rejected as the design. The allocator is
+ * left with no placement freedom whatsoever -- a frame must sit on the tile its
+ * own virtual address already named -- so placement becomes a compile-time
+ * decision, nothing can be re-placed at runtime without changing an address the
+ * program can see, and a program can steer its own placement by choosing
+ * addresses. The design instead translates first and reads the tile out of the
+ * physical address, over one page table per address space duplicated on every
+ * tile; see inc/nmfc/tile_router.h and nmfc_vmem.h.
  *
  * Parameters: the standard nmfc geometry (nmfc_num_tiles, nmfc_grain_bits,
  * nmfc_mode_bit, log2_block_size).

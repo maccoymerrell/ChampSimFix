@@ -295,7 +295,7 @@ private:
         body.live_regs = static_cast<std::uint8_t>(rec.aux0);
         break;
       }
-      if (kind != nmfc::op::BODY && kind != nmfc::op::ATOMIC && kind != nmfc::op::SPAWN) {
+      if (kind != nmfc::op::BODY && kind != nmfc::op::ATOMIC) {
         fmt::print("[NMFC_PRODUCER] ERROR: record kind {} interrupts the body of token {}; bodies must be contiguous\n", rec.kind, call.token);
         std::exit(-1);
       }
@@ -317,15 +317,6 @@ private:
       std::exit(-1);
     }
 
-    // A spawned body is defined here and started elsewhere, by a SPAWN inside
-    // another function. The host never issues it, so it contributes no host
-    // instruction -- counting one would credit the compute tile with work that
-    // by construction never reached it.
-    if ((call.flag_bits & nmfc::FLAG_SPAWNED) != 0) {
-      ++spawned_definitions_;
-      return;
-    }
-
     // The call becomes a load from the aperture slot that names this token, so
     // the host core's tracking unit recognises it with no change to the
     // instruction type everything else already speaks.
@@ -342,8 +333,6 @@ private:
     out.cls = static_cast<nmfc::op_class>(rec.op_class);
     out.flag_bits = rec.flag_bits;
     out.is_atomic = (static_cast<nmfc::op>(rec.kind) == nmfc::op::ATOMIC);
-    out.is_spawn = (static_cast<nmfc::op>(rec.kind) == nmfc::op::SPAWN);
-    out.spawn_token = out.is_spawn ? rec.aux0 : 0;
 
     for (std::size_t i = 0; i < nmfc::NUM_SOURCES; ++i) {
       if (rec.instr.source_memory[i] != 0) {
@@ -389,7 +378,6 @@ private:
   std::uint64_t calls_ = 0;
   std::uint64_t hints_ = 0;
   std::uint64_t joins_ = 0;
-  std::uint64_t spawned_definitions_ = 0;
 };
 
 static champsim::modules::instruction_producer::register_module<nmfc_producer> nmfc_producer_reg("NMFC_PRODUCER");

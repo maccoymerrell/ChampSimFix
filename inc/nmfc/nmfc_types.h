@@ -52,9 +52,6 @@ struct body_instr {
   op_class cls = op_class::ALU;
   std::uint8_t flag_bits = 0;
   bool is_atomic = false;
-  /** SPAWN only: the invocation this instruction starts. */
-  std::uint64_t spawn_token = 0;
-  bool is_spawn = false;
 
   [[nodiscard]] std::size_t num_mem_ops() const { return static_cast<std::size_t>(num_loads) + num_stores; }
   [[nodiscard]] bool taken_target() const { return (flag_bits & FLAG_TAKEN_TARGET) != 0; }
