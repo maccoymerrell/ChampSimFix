@@ -43,9 +43,15 @@ participates. **Migration stays 72 B.** Full statement: **H.10**; invariants sha
 | **Q2** | does `f`*n* ≡ `x`*n*? | "*I don't know what that means.*" | **RULED as: YES — one pool, type from the opcode** (**H.10.5**). Carries the base-ISA spelling amendment: `RV64IMA` + Zfinx/Zdinx semantics on the tile; **O4's substance untouched, float is in**. `[USER TO CONFIRM]` Ledger **L51** |
 | **Q3** | supersede I.7 item 3? | "*I don't know what CANON I.7 is.*" | **RULED as: SUPERSEDE, and price the divergence** — a function-core binary is **not host-executable** (**I.7 item 3**, **H.10.8**). `[USER TO CONFIRM]` Ledger **L50** |
 | **Q4** | is the run-time undefined-register trap a requirement or a preference? | "**Requirement.**" | **RULED: REQUIREMENT.** The illegal-name trap is **built and free** (**I7**, **H.10.4**). **What A cannot trap is MISUSE of a legal name — that is admission's job (K.6 test 3).** `[USER TO CONFIRM the scope]` Ledger **L52** |
+| **W1b** | should the integer-ALU width rule be *"from the widest register operand; `*W` forms 32"*, as this revision's drafting instruction worded it? | *(no user words — this is a departure from a DRAFTING INSTRUCTION, not from a ruling)* | **STRUCK, following `register-map-final.md` §3.3**; H.10.3 carries the amended rule (execute at 64, W3 truncates into the destination name). `[USER TO CONFIRM]` — **if W1b was meant literally this reverts, and SW2 plus §10.5's execution-unit work come back with it** (**H.10.3**). Ledger **L54** |
 
-**SO THE HONEST COUNT IS: ZERO QUESTIONS OPEN, THREE READINGS AWAITING CONFIRMATION.** Every one
-of the four was ruled and every ruling is applied. What is flagged is not a question the user
+**SO THE HONEST COUNT IS: ZERO QUESTIONS OPEN, FOUR THINGS AWAITING CONFIRMATION** — three
+readings of Q1–Q4 rulings (**L50**, **L51**, **L52**) and one struck drafting instruction
+(**W1b**, **L54**), which is not a ruling at all but needs the same act from the reader and so
+carries the same tag. `[CORRECTED — an earlier revision of this line counted THREE and omitted
+W1b, which had a live tag at H.10.3, no row in this table and no ledger row; a reader auditing by
+this count or by the ledger would not have found it.]` Every one
+of the four questions was ruled and every ruling is applied. What is flagged is not a question the user
 declined to answer — it is **the assistant's reading of an answer given in words that did not
 address the question as posed**, recorded so it can be overturned rather than inherited silently.
 **The one that could still change the design is Q4's scope:** if "Requirement" was meant to cover
@@ -150,14 +156,14 @@ else is a regression, not a new question.
 |---|---|---|---|
 | **O1** | "*Unhinted grains are up to the OS/hardware to place. So, presumably the OS could map it wherever was most convenient.*" | **RULED.** An unhinted grain's placement is the **address-space owner's free choice** — allocator convenience, nothing more. **No partition semantics attach to its virtual address.** `(va >> grain_bits) % num_tiles` is therefore permitted as *one* convenient default a placer may use and is **not** a rule, not a guarantee, and not something any other mechanism may rely on; F.3's delete-on-sight list stops naming it as an architectural partition and keeps naming it as a router. **#269's rejection of virtual-address partitioning stands untouched** — that is about the architecture reading the VA, not about an allocator picking a convenient frame. | **F.3**, **F.8**, A.4a, ledger **L38** |
 | **O3** | "*I think this is just a simulator thing and not a meaningful design choice, so I say we describe it as implementation choice.*" | **RULED — option (a).** `funct7`/`funct3` values are **implementation choice**; **the canon does not fix them.** The canon fixes only the **count** (twelve base plus a privileged `RESUME`), the **membership** of the groups, and that `RESUME` gets a slot. SST's `nmfc_isa.h` is **one implementation's** choice, recorded in **SELECTED CONFIGURATION** and never quoted as canon. | **I.9**, SELECTED CONFIGURATION, ledger **L43** |
-| **O4** | "*I think we want float, so C.*" | **RULED — option (c): RV64IMAFD.** Floating point is in the subset. **AND THE CONSEQUENCE, STATED CORRECTLY: it does NOT widen the context.** The context is **512 bits, BIT-PACKED** (#232, #238) — *not* eight 64-bit registers, so there is no per-register set to widen. A float occupies bits of the same 512 like any other value (`f64` = 64 bits, `f32` = 32); **the compiler packs them.** Invariants 2 and 11 and the 72-byte migration are **untouched**. A RISC-V encoding names `f0`–`f31` separately from `x0`–`x31`, so the packed file is presented under **two register namespaces over the same 512 bits** — a naming convention, never a second file. **And the namespaces do NOT alias, because a register name is not a fixed bit offset here:** the core implements **512 bits of live storage, not 64 architectural slots**, and the compiler binds each simultaneously-live name — `f` or `x` — to a **disjoint bit range** within them. What is bounded is **liveness in bits across both namespaces together** (invariant 2), never the size of the name space. **Consequence: the machine is an RV64IMAFD target under a register-pressure constraint, not a general-purpose RV64IMAFD core** — a stock unconstrained binary is rejected by the admission test, exactly as one with a stack or a spill already was (I7). **The admission test checks the IMAFD subset and counts liveness in BITS.** | **I.0**, I.7, **K.6**, ledger **L46** |
+| **O4** | "*I think we want float, so C.*" | **RULED — option (c): RV64IMAFD.** Floating point is in the subset. **AND THE CONSEQUENCE, STATED CORRECTLY: it does NOT widen the context.** The context is **512 bits, BIT-PACKED** (#232, #238) — *not* eight 64-bit registers, so there is no per-register set to widen. A float occupies bits of the same 512 like any other value (`f64` = 64 bits, `f32` = 32); **the compiler packs them.** Invariants 2 and 11 and the 72-byte migration are **untouched**. A RISC-V encoding names `f0`–`f31` separately from `x0`–`x31`, so the packed file is presented under **two register namespaces over the same 512 bits** — a naming convention, never a second file. ~~**And the namespaces do NOT alias, because a register name is not a fixed bit offset here:**~~ **[SUPERSEDED IN PART — user ruling 2026-09-03 (morning), Design A; H.10.5, ledger L51. THE STRUCK CLAUSE IS KEPT IN PLACE, NOT DELETED, so a reader who was quoting it can see what replaced it. Under Design A a register name IS a fixed bit offset — that is the whole design — and `f`*n* IS `x`*n*, identical bits, type from the opcode. The half that survives and is STRENGTHENED is the next clause: 512 bits of live storage, not 64 architectural slots. Disjointness of simultaneously-live VALUES is still required, but it is verified at admission (K.6 test 3), not asserted by the compiler's naming.]** the core implements **512 bits of live storage, not 64 architectural slots**, and ~~the compiler binds each simultaneously-live name — `f` or `x` — to a **disjoint bit range** within them~~ *(struck with the clause above; the binding is fixed at tape-out — H.10.2)*. What is bounded is **liveness in bits across both namespaces together** (invariant 2), never the size of the name space. **Consequence: the machine is an RV64IMAFD target under a register-pressure constraint, not a general-purpose RV64IMAFD core** — a stock unconstrained binary is rejected by the admission test, exactly as one with a stack or a spill already was (I7). **The admission test checks the IMAFD subset and counts liveness in BITS.** | **I.0**, I.7, **K.6**, ledger **L46** |
 | **O5** | "*a.*" | **RULED — option (a).** **Three message classes on the ONE fabric — COHERENCE, MIGRATION, FILL — with per-destination queues (H.8).** Arbitration: **COHERENCE strictly first** (I14 makes NMFC priority an ORDER, not a tie-break, and a coherence response the order depends on may not sit behind a fill), **then MIGRATION and FILL at EQUAL WEIGHT** — and that equal weight is exactly what makes invariant 11's 72 B / 64 B byte parity hold. | **C.5**, **H.8**, **J.2** |
 | **O6** | "*Presumably the vtile's home would be where we first tried to place it and discovered we couldn't. It should therefore be placed where the next-largest cluster of similar vtiles are, and if none exist, the least-loaded.*" | **RULED.** The spill target is **the tile holding the next-largest cluster of the same vtile**; **if no such cluster exists, the least-loaded tile.** Vocabulary is **tile** (R18). The simulator **warns and never hard-errors** (R18). | **F.8** |
 | **O7** | "*I think B, anything else could delay quit until the user program decides to join, which could be forever.*" | **RULED — option (b).** On a **FATAL** fault, the program's outstanding FTU entries **close with a zeroed register file and an error flag**. `JOIN` returns **immediately** with the error. **Nothing waits on the user program**, which is the whole reason: any teardown that waits for a join can wait forever. I.4's "a join-expected entry never closes without returning its values" is satisfied **literally** — a zeroed file plus an error flag *is* a well-formed return. | **I.4**, **I.5**, **I.6**, C.4 |
 | **O9** | "*Whichever can scale best. the maximal targeted system is a substantially beefy multi-core system with up to 32 memory tiles. We should expect a LOT of traffic.*" | **RULED by criterion**, and the choice the criterion forces is stated in the body with its scaling argument and prior art, tagged **[derived from ruling O9]**: **an EXACT BIT VECTOR over host cores and tiles, INCLUSIVE of the private caches above the fabric, with BACK-INVALIDATE on eviction.** The alternative (limited pointers with coarse-vector overflow, non-inclusive) loses at this scale and the reason is given. **The sizing target is now a stated number: up to 32 memory tiles plus a substantial host core count.** | **C.5**, SELECTED CONFIGURATION |
 | **O12** | "*I think bimodal is fine, since it only ever speculatively issues a single fetch, never executes. It is also essentially free (built into the btb table, tracks a particular branch).*" | **RULED — option (a): ADOPTED.** A **block-granular BTB with a bimodal bit per entry**, used **ONLY** to issue a **single** speculative instruction-stream fetch. **It never executes on the prediction.** It is essentially free because it lives in the BTB entry that already exists. **H.1's clause narrows to "no predictor in the EXECUTION path".** The **never-mispredicts caveat on every measured function-core number in this document STANDS** — nothing about this changes what was measured. | **H.1**, **H.5**, D.6 |
 | **O15** | "*a.*" | **RULED — option (a).** Parts **G, K, L and N are HISTORICAL OBSERVATIONS** of an earlier tree. Their **configurations are unreproducible from git**, they are **labelled as such** at every Part preamble and at N.0, and **ChampSim stays frozen** (R3). They are never quoted as evidence about the machine, only as observations of a run that happened. | **G**, **K**, **L**, **N** preambles; N.0; ledger L28c |
-| **O16** | "*Yes, privileged.*" | **RULED — option (a): `RESUME` IS PRIVILEGED.** The **kernel** delivers the fault through the FTU and the **kernel** resumes the context — the `sret`/`mret` shape: the party that took delivery of the trap is the party that returns from it. `FORK`, `JOIN` and the rest stay user-level. **Every `[USER TO CONFIRM …]` tag in this document is REMOVED**, because `RESUME`'s privilege level was the only clause that carried one. | **I.3**, **I.6**, **I.9**, **C.4**, A.2 |
+| **O16** | "*Yes, privileged.*" | **RULED — option (a): `RESUME` IS PRIVILEGED.** The **kernel** delivers the fault through the FTU and the **kernel** resumes the context — the `sret`/`mret` shape: the party that took delivery of the trap is the party that returns from it. `FORK`, `JOIN` and the rest stay user-level. **Every `[USER TO CONFIRM …]` tag carrying the `RESUME`-PRIVILEGE subject is REMOVED**, because `RESUME`'s privilege level was the only clause that carried one *when this row was written*. `[CORRECTED — this row used to read "every tag in this document is REMOVED". The 2026-09-03 (morning) revision reinstated the tag with a new subject and four live instances (L50, L51, L52, L54); see the notation table. O16 closed a subject, not the vocabulary.]` | **I.3**, **I.6**, **I.9**, **C.4**, A.2 |
 
 **NO RULINGS REMAIN OPEN.** There is no eleventh item, no residue of any of the ten, and
 no `[FOR THE USER TO RULE]` tag left live anywhere in this document — the two that were
@@ -323,7 +329,7 @@ being qualified or merely annotated.**
 | **[RULED — user ruling 2026-09-02 R\<n\>]** | **the user has ruled and the statement is now settled at tier 1, newest.** The ruling's own words are quoted with the tag. **This is the strongest tag in the document**; a `[CONFLICT]`, `[UNRESOLVED]` or `[FOR THE USER TO RULE]` in the same passage is superseded by it. | no — it settles |
 | **[RULED — user ruling 2026-09-03 O\<n\>]** | **the same thing, for the ten residual questions the user closed on 2026-09-03.** Tier 1, newest, binding, and it supersedes every `[STILL OPEN]`, `[FOR THE USER TO RULE]` and `[USER TO CONFIRM]` in the same passage. **This and the R-tag are jointly the strongest tags in the document.** | no — it settles |
 | **[derived from ruling O\<n\>]** | a consequence the user did **not** spell out, drawn in this document from a ruling plus an existing tier-1 rule. **It is marked so it is never mistaken for the user's own words**, and the derivation is always shown beside it. | no — but it is the document's inference, not a quotation |
-| **[USER TO CONFIRM …]** | **RETIRED. The vocabulary no longer contains this tag and no occurrence remains in the document.** It marked exactly one clause — `RESUME`'s privilege level, which R20 left as a question — and **user ruling 2026-09-03 O16 ("*Yes, privileged.*") answered it**. Every occurrence was removed in this revision. **The check is `grep -n 'USER TO CONFIRM' CANON.md`: every surviving hit must be a place that NAMES the retired tag in order to say it was removed — this row, the `[RULED — 2026-09-03]` row above it, the O16 ruling row, I.3's removal note, and Appendix 3 item 6. Any hit that is an actual bracketed tag sitting on a statement is a regression. The exact form the tag took was the label followed by the word *privileged*; no instance of that form survives.** | n/a — retired |
+| **[USER TO CONFIRM …]** | **RETIRED ONCE, THEN REINSTATED WITH A DIFFERENT SUBJECT — read both halves before using this tag or auditing it.** `[CORRECTED — an earlier revision of this row declared the tag retired and gave a grep check calling any live instance "a regression"; the SAME revision then added live instances. This row is rewritten rather than patched, because it is the document's authority mechanism and it stated the opposite of the body.]` **First subject (RETIRED, and it stays retired):** the tag marked exactly one clause — `RESUME`'s privilege level, which R20 left as a question — and **user ruling 2026-09-03 O16 ("*Yes, privileged.*") answered it.** Every instance of that form (the label followed by the word *privileged*) was removed and **none survives.** **Second subject (LIVE as of user ruling 2026-09-03, morning):** the tag now marks **the assistant's READING of a ruling given in words that did not answer the question as posed**, or **a drafting instruction this document struck on a proposal's authority.** The user DID rule and the ruling IS applied; what is offered for overturn is the reading. It is NOT `[FOR THE USER TO RULE]`. **The check is now a MEMBERSHIP check, not an absence check: every live tag must sit on one of exactly four subjects — Q3/I.7 (`L50`), Q2/`f`*n* ≡ `x`*n* (`L51`), Q4's scope (`L52`), W1b (`L54`) — and each of those four must have a row in the RULINGS table, a row in Appendix 1, and a flag at its point of use, spelled either `[USER TO CONFIRM …]` or, where what is offered for overturn is a reading rather than a question, `[ASSISTANT'S READING … — user may overturn]` (I.7 item 3 is the one that takes the second spelling). A live tag on a fifth subject, or a subject missing any of the three, is the regression.** | n/a — live, four subjects |
 
 **HOW A TAG IS DELIMITED — a rendering rule, and it has already broken tags in this
 document.** `[ADDED. A Markdown code span (single backticks) ENDS AT THE NEXT BACKTICK and
@@ -888,7 +894,10 @@ with every live value narrower than 32 bits CHARGED 32 at admission."**
 > **THE ATTRIBUTION, BECAUSE IT WAS GOT WRONG ONCE AND MUST NOT BE REPEATED. The byte tier is
 > unreachable because the REGISTER FIELD IS FIVE BITS — not because of the user's ruling.**
 > Complete coverage at width *w* costs 512/*w* names: 8 at 64, 16 at 32, 32 at 16, **64 at 8**.
-> With `f`*n* ≡ `x`*n* there are **31** nameable slices. The ruling forbade *a third referenced
+> With `f`*n* ≡ `x`*n* Design A has **24** nameable slices — 8 `d` (`x8`–`x15`) plus 16 `w`
+> (`x16`–`x31`), two complete tiers (H.10.1; `proposals/register-map-final.md:297`).
+> **[CORRECTED — an earlier revision wrote 31 here, which is the CAP of a five-bit field
+> (32 encodings less `x0`), not A's count.]** The ruling forbade *a third referenced
 > object*; it said nothing about where the geometry is written, and **design A2 (H.10.9) respects
 > the ruling in full and reaches the byte tier**, which settles the attribution by counterexample.
 > The **charge-32 rule** is separately **Design A's own choice** and a real regression against
@@ -1220,7 +1229,9 @@ compiler-discipline invariant with a decode tripwire** (H.10.4 rule 4).
 `[REQUIREMENT — user ruling 2026-09-03 (morning), Q4, verbatim: "Requirement."]`
 > **THE ILLEGAL-NAME TRAP IS A REQUIREMENT, AND IT IS BUILT.** A reference to `x1`–`x7` or
 > `f1`–`f7` as any operand **traps at decode**. Under Design A the check is free — `legal =
-> n[4] | n[3]`, one OR gate (H.10.2) — so the requirement costs nothing.
+> n[4] | n[3] | zero`, one three-input OR gate (H.10.2) — so the requirement costs nothing. **The
+> `zero` term is load-bearing: without it the check traps `x0`, and with `x0` go `beqz`, `li`,
+> `mv`, `snez` and `j`.**
 
 > **WHAT THE TRAP CANNOT SEE IS ADMISSION'S JOB, AND THIS IS THE FLAG.** `[USER TO CONFIRM —
 > this is the assistant's reading of the Q4 ruling, recorded for overturn; Appendix 1 **L52**.]`
@@ -6100,9 +6111,25 @@ tripwire rather than a convention.
     offset[8:6] = n[4] ? n[3:1] : n[2:0]             // 3 x 2:1 mux
     offset[5]   = n[4] & n[0]                        // 1 AND
     offset[4:0] = 0                                  // wires
-    legal       = n[4] | n[3]                        // 1 OR
     zero        = ~(n[4]|n[3]|n[2]|n[1]|n[0])        // 1 five-input NOR
+    legal       = n[4] | n[3] | zero                 // 1 three-input OR
 ```
+
+> **`[CORRECTED — the published equation was wrong and it trapped every branch in the machine.]`
+> An earlier revision of this section wrote `legal = n[4] | n[3]`, which evaluates to 0 at
+> *n* = 0 and therefore made `x0` an illegal name.** That contradicts H.10.1's own map row
+> (`x0` "reads 0 at whatever width the instruction needs") and H.10.4's `x0`/`f0` exemption, and
+> an implementer who built the equation as published would have trapped `beqz`, `li`, `mv`,
+> `snez`, `j` and `jr` — **every branch, move and immediate-load this machine's loops are made
+> of.** The `zero` term must be folded in, which is why `zero` is now computed *first* and
+> `legal` is a **three-input** OR of `n[4]`, `n[3]` and `zero`. The gate count is unchanged (a
+> 2-input OR becomes a 3-input OR, reusing the five-input NOR the map already needs for `x0`),
+> **but "one OR gate" was an understatement of the dependency, not of the area**: the legality
+> signal now waits on the NOR. *(SST implements the correct rule and always did:
+> `NMFCRegLayout.h:91` sets `legal` from `n[3:4]` alone, meaning "*names bits*", and every caller
+> tests `zero` first — `NMFCTile.cc:492-495`, `:537-540`, `:559-562`, and `:589-591`, where
+> `requireLegalName` traps only on `!legal && !zero`. **The defect was in this document, not in
+> the tree**, and `NMFCRegLayout.h`'s comment now carries the corrected equation.)*
 
 **≈7 primitive gates, one logic level after the select** — or, as a ROM, **31 × (9-bit offset +
 1 class bit) = 310 bits, once per tile**, shared by every context and every function on it
@@ -6199,7 +6226,9 @@ narrow→wide float is `fcvt.d.s`, the correct instruction on a stock core too.
 #### H.10.4 Legality — what the decoder traps
 
 **The trap on an ILLEGAL NAME is a REQUIREMENT** (user ruling 2026-09-03, Q4: "**Requirement.**")
-**and under Design A it is free**: `legal = n[4] | n[3]` is one OR gate (H.10.2). The seven
+**and under Design A it is free**: `legal = n[4] | n[3] | zero` is one three-input OR gate over
+signals the map already computes (H.10.2 — and note the `zero` term, without which the equation
+traps `x0` and every branch with it). The seven
 reserved names `x1`–`x7` / `f1`–`f7` trap **as any operand**, which makes `sp` (`x2`) and `ra`
 (`x1`) illegal names — so `addi sp, sp, -16` and `sd ra, 8(sp)` are decode-illegal, and
 **`ret` = `jalr x0, 0(x1)` is illegal.** A body ends with `END`/`RETC`.
@@ -6270,8 +6299,9 @@ computes. **This is why stock `int` codegen works under register-class assignmen
 
 #### H.10.5 `f`*n* ≡ `x`*n* — one pool, and what it supersedes
 
-`[ADOPTED — assistant's reading of the user's 2026-09-03 ruling on Q2; the user's answer to the
-question as posed was "I don't know what that means", and the reading is recorded for overturn.]`
+`[ADOPTED — ASSISTANT'S READING of the user's 2026-09-03 ruling on Q2; the user's answer to the
+question as posed was "I don't know what that means", so **USER TO CONFIRM** and the reading is
+recorded for overturn. Appendix 1 **L51**; RULINGS table, row Q2.]`
 
 > **`f`*n* names exactly the same bits as `x`*n*. The TYPE comes from the OPCODE, never from the
 > name.** `f8`–`f15` carry `.d` operands, `f16`–`f31` carry `.s` operands, and `f0` reads `+0.0`.
@@ -6298,6 +6328,8 @@ so C*", float is in the subset — **only its opcode-list spelling changes.** Se
 | **I.0**, four-point answer, points 2 and 4 | "the compiler assigns **disjoint bit ranges** to every simultaneously-live name, **across both namespaces**"; "**the `f`-names do not overlay the `x`-names**" | **SUPERSEDED in the second clause, PRESERVED in the first.** The `f`-names *are* the `x`-names. Disjointness of **simultaneously-live values** is still required — it has moved from the compiler's naming to admission's placement check (H.10.6 test 3) |
 | **the `O4` ruling row** (front matter) | "**the namespaces do NOT alias**, because a register name is not a fixed bit offset here" | **SUPERSEDED.** A register name **is** a fixed bit offset here, and that is the whole design. **The half that survives and is strengthened: 512 bits of live storage, not 64 architectural slots** |
 | **Appendix 1 L46's `RULED` bullet** | the same clause restated | **SUPERSEDED**, same disposition; the L46 row is not deleted and its ruling on the subset stands |
+| **Appendix 3's `O4` summary line** | "`F`/`D` values pack into the **same 512 bits** under a **second register namespace**" | **AMENDED.** `[ADDED — this row was missing, and Appendix 3 is a summary readers quote.]` The packing is right; **there is no second namespace** and the spelling is `RV64IMA` + Zfinx/Zdinx |
+| **I.0's two paragraphs BEFORE the four-point answer** — "*THE ONE THING O4 DOES CHANGE*" and "*They do not collide…*" | "**the compiler's packing decides which bits an `f`-name and which bits an `x`-name resolve to**"; "**a register NAME is not a fixed bit offset in this machine**" | **SUPERSEDED.** **[ADDED — the `[SUPERSEDED IN PART]` block in I.0 was scoped to the four-point answer only and did not reach these two paragraphs, which state the deleted mechanism affirmatively in the Part that governs the ISA.]** Both are marked in place at **I.0** |
 
 **The reason a tier-1 clause can be superseded here is itself tier 1:** every one of those
 sentences describes **the compiler doing the binding**, and the 2026-09-03 ruling took the
@@ -6310,8 +6342,12 @@ binding away from the compiler ("*a third piece of memory every context needs…
 
 **Limit 1 — no name is narrower than 32 bits.** A register field is **five bits**, so a
 namespace affords 32 encodings and `x0` cannot be a slice; complete coverage at width *w* costs
-512/*w* names — 8 at 64, 16 at 32, 32 at 16, **64 at 8**. Under `f`*n* ≡ `x`*n* there are **31**
-nameable slices, so I2's "64 1-byte regs" misses by 33 names.
+512/*w* names — 8 at 64, 16 at 32, 32 at 16, **64 at 8**. **The five-bit field caps the namespace
+at 31 usable encodings** (32 less `x0`), and **Design A spends them on 24 nameable slices** — 8
+`d` plus 16 `w`, two complete tiers, `x1`–`x7` reserved (H.10.1). Either way the byte tier is out
+of reach: **I2's "64 1-byte regs" needs 64 names, so it misses the cap by 33 and Design A's
+actual count by 40.** `[CORRECTED — an earlier revision reported A's count as 31, conflating it
+with the field cap, and then did the subtraction from the wrong number.]`
 
 > **PROVENANCE, AND IT MATTERS: this is the 5-BIT REGISTER FIELD's limit, NOT the user's
 > ruling's.** `[CORRECTED — an earlier proposal revision attributed it to the ruling and the
@@ -6378,6 +6414,19 @@ and "*the context is always asleep when its load returns*".
 > any other name, no overlap to reduce over, and no growth. On the fill, the pending name
 > resolves through H.10.2's decode and is written at that name's width.
 
+> **AND IT IS TRUE BY CONSTRUCTION, NOT BY MEASUREMENT — the distinction matters because the
+> tree briefly claimed otherwise.** `[CORRECTED.]` SST carries a counter
+> (`statLoadTileOverlaps`, `/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCTile.cc:516-517`) that reads **0** in
+> every configuration, and its comments used to call that "*the claim being measured rather than
+> assumed*". **It is not a measurement.** The load sets the pending mask and `state = SLEEPING`
+> in the same breath (`NMFCTile.cc:900-901`, `:1257-1258`) and the scheduler never picks a sleeping
+> context, so **the counter's check is unreachable in that build**: it would read 0 whether or
+> not the property held, because the state gate that makes the property true is also what keeps
+> control away from the probe. **The blocked-window property is a consequence of H.4 — one
+> outstanding load per context, and the context is asleep for it — and nothing in the tree is
+> evidence for it.** The counter is kept as a regression tripwire for a future non-blocking core,
+> with its blind spot stated at `NMFCTile.cc:497-515`, and **it is not cited as support anywhere.**
+
 **That structure already exists in the tree:** `dbufReg` (a 5-bit name) and `dbufValue`
 (`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCTile.h:85-86`), written at `NMFCTile.cc:827-828`, replayed
 at `NMFCTile.cc:1504`. **What Design A adds to it is THREE BITS** — the fill's width/extension
@@ -6390,10 +6439,33 @@ what DESIGN §7's `scoreboard[≤8]` belongs to — the design is **sixteen read
 tile.** A read of a `d` name ORs its two; a pending load resolves its destination through the
 decode and marks exactly the tiles it will write. **This is exact: no name stalls on a load it
 does not depend on.** Cost: 16 × 1024 = **2 KiB per tile = 3.1% of 64 KiB of context state**, of
-which the delta against an eight-bit form is **+1 KiB = 1.5%**, plus **one byte of migration
-ENVELOPE**. **The 72-byte payload is unchanged in every configuration** — I11's 72 B is "64 bytes
-of register file plus an 8-byte program counter", and `token`, `origin`, `home_host` and the
-scoreboard are envelope, not payload.
+which the delta against an eight-bit form is **+1 KiB = 1.5%**. **Migration: still exactly 72 B,
+and the scoreboard is NOT in it.**
+
+> **`[CORRECTED — an earlier revision kept "72 B" here by inventing a PAYLOAD/ENVELOPE split and
+> putting the scoreboard on the envelope side. NO CITED AUTHORITY SUPPORTS THAT SPLIT, and the
+> arithmetic it licenses gives a 73-byte wire message, against the user's binding "Migration
+> stays 72 B" (ruling 2026-09-03, morning).]`** I11 (**I11**) says what is transmitted is "**72
+> bytes of register file and PC**"; **J.1 is titled "The payload, exactly"** and gives 72 B as
+> **the whole message**, on the user's own arithmetic (#91: "*512-bit vector + 8-byte pc is 72
+> bytes… All of those messages are roughly the same size, **72 bytes or less**.*"). `token`,
+> `origin` and `home host` appear at **C.4** in the **INVOCATION** packet — a different message —
+> and nowhere in a migration. **There is no envelope for a scoreboard to ride on.**
+>
+> **SO THE SIXTEEN READY BITS DO NOT TRAVEL, AND HERE IS WHY THEY DO NOT HAVE TO.** They describe
+> **loads in flight to THIS tile's slice**, and a migrating context cannot carry one: the
+> migration is decided **at the load's translation**, before the access issues (**C.4**: the slot
+> is released *at departure*, before the fabric is even asked), and a context that already has a
+> load outstanding **drains it before departing.** So the scoreboard is **empty by construction at
+> departure and reconstructed as empty on arrival** — zero bits on the wire, and the arriving
+> tile does not have to trust a bit vector describing another tile's slice.
+>
+> **THE PRICE, STATED RATHER THAN HIDDEN:** on the ChampSim core model — the only configuration
+> where a context can have a load outstanding *and* keep issuing — **a migration waits for its
+> outstanding fills.** That is a latency the canon barrel core never pays (H.4: one outstanding
+> load, and the context is asleep for it, so there is nothing to drain). **It is a real cost of
+> keeping the wire at 72 B, and it is the cost this document chooses**, because 72 B is a tier-1
+> ruling and a drain is an implementation delay.
 
 **The eight-bit lane-granular alternative is REJECTED, and not because eight is inconvenient:** a
 load into `w0` would stall a read of `w1`, so the false dependency falls **exactly between the
@@ -6679,21 +6751,43 @@ function is holding. Concretely, and all three of these are untouched by O4:
   and `D` adds ZERO bytes to a migration.**
 - **H.3's state cost is untouched.** 64 bytes × contexts; 64 KiB per tile at 1024.
 
-**THE ONE THING O4 DOES CHANGE ABOUT THE FILE IS ITS NAMING, NOT ITS SIZE.** A RISC-V
+`[SUPERSEDED IN PART — user ruling 2026-09-03 (morning), Design A; H.10.5, ledger L51. **READ
+THIS BEFORE QUOTING THE NEXT TWO PARAGRAPHS, NOT ONLY THE FOUR-POINT ANSWER BELOW THEM.** An
+earlier revision scoped its supersession block to the four-point answer alone and left these two
+paragraphs stating the deleted mechanism affirmatively — in the Part that governs the ISA. They
+are kept in place, struck clause by clause, because the four-point answer is kept the same way.]`
+
+**THE ONE THING O4 DOES CHANGE ABOUT THE FILE IS ITS NAMING, NOT ITS SIZE.** ~~A RISC-V
 encoding names `f0`–`f31` in fields that are *separate* from `x0`–`x31`, so an
 `fadd.d f3, f1, f2` and an `add x3, x1, x2` reach the compiled context through **two
-register namespaces**. `[derived from ruling O4]` **Those two namespaces are a naming
-convention over the SAME 512 bits, not two files.** The compiler's packing decides which
+register namespaces**.~~ `[derived from ruling O4]` **[SUPERSEDED: there is ONE namespace.
+`f`*n* IS `x`*n* — identical bits, type taken from the opcode. The tile's base-ISA spelling is
+`RV64IMA` + Zfinx/Zdinx semantics: F/D opcodes, `x`-file operands (H.10.5). O4's substance is
+untouched; float is in.]** **The naming is a convention over the SAME 512 bits, not two
+files** — that half stands and is strengthened. ~~The compiler's packing decides which
 bits an `f`-name and which bits an `x`-name resolve to, exactly as it already decides that
-for two `x`-names of different widths. **An implementation that builds a separate
+for two `x`-names of different widths.~~ **[SUPERSEDED, and this is the sentence H.10.5 deletes:
+the compiler decides NOTHING here. The register number IS the bit range, fixed at tape-out —
+`x8`–`x15` the eight 64-bit tiles, `x16`–`x31` the sixteen 32-bit ones (H.10.1) — carried by
+nothing and costing ≈7 gates or a 310-bit ROM per tile (H.10.2). What the compiler still owes is
+a non-overlapping PLACEMENT of simultaneously-live values, and that is VERIFIED at admission
+(K.6 test 3), not asserted by naming.]** **An implementation that builds a separate
 floating-point register file has built a second context, has broken invariant 2, and has
-made a migration bigger than 72 bytes.**
+made a migration bigger than 72 bytes** — that stands unchanged.
 
 `[THE OBVIOUS OBJECTION, ANSWERED, BECAUSE IT IS ARITHMETIC AND IT LOOKS FATAL.]`
 **"RV64IMAFD names 32 `x` plus 32 `f` architectural registers. At 64 bits each that is
 4096 bits. Over one 512-bit file the two namespaces must alias, so `fadd.d f3,f1,f2` and
-an integer use of `x1`/`x2`/`x3` collide."** **They do not collide, and the reason is that
-a register NAME is not a fixed bit offset in this machine.**
+an integer use of `x1`/`x2`/`x3` collide."** ~~**They do not collide, and the reason is that
+a register NAME is not a fixed bit offset in this machine.**~~
+
+**[SUPERSEDED, AND REVERSED — user ruling 2026-09-03 (morning), Design A; H.10.5. A register
+name IS a fixed bit offset in this machine; that is the whole design. The objection's arithmetic
+half is answered differently now: the namespaces DO alias — deliberately and totally, `f`*n* ≡
+`x`*n* — and `x1`/`x2`/`x3` do not collide with anything because `x1`–`x7` are ILLEGAL NAMES
+that trap at decode (H.10.1, H.10.4). What is bounded is still LIVENESS in bits, never the name
+space. The four points below are kept as the record of how the objection was answered *before
+there was a map*; two of them still stand, and the table after them says which.]**
 
 1. **The function core does not implement 64 architectural registers. It implements 512
    bits of live storage.** There is no array of 64 slots for names to index into, so there
@@ -8291,7 +8385,14 @@ whenever this is cited: design **B** does not catch SW1 either, so it separates 
 the instance usually named — `s0` = `x8` = `d0` clobbered by a seventh/eighth integer argument in
 `a6`/`a7` = `w0`/`w1` — **is unreachable on either specified toolchain path.**)*
 
-`[CONFLICT — TEST 3's VERIFIER DOES NOT EXIST, AND NEITHER DOES THE TABLE TEST 1 NEEDS.]` The
+`[CONFLICT — TEST 3's VERIFIER DOES NOT EXIST, AND NEITHER DOES THE TABLE TEST 1 NEEDS.]` **So
+SW1 is caught NOWHERE — not by the decoder, which has nothing to fire on, and not by any tool
+that exists.** **[SHARPENED — the SST tree's `test/admit.py` runs H.10.6 test 1 and the parts
+of test 3 that are visible in one instruction, and its own docstring says the disjointness
+check over live ranges is not there; two files in that tree cited it as the place SW1 *is* caught
+and have been corrected (`test/tile_illegal.c`, `src/NMFCTile.cc`), and its PASS line now names
+what it did not check. A PASS from that script is not a clean bill on SW1 and must never be
+quoted as one.]** The
 ~40-line disjointness verifier is unwritten and **its owner is undecided** — the placement pass
 needs an emitter the admission tool does not have, so either the tool grows one or placement moves
 to the compiler back end. The per-opcode required-width column that legality rule 2 *is*, and the
@@ -9648,9 +9749,11 @@ Every place the sources disagree, which authority won, and why. Authority order:
 user-vs-ChampSim conflicts, or genuinely open questions, that this document does not
 resolve on its own authority.
 
-**Count: 53 conflicts (L1–L53, no gaps).** `[UPDATED — L50–L53 added 2026-09-03 (morning): the
-four register-naming questions, their rulings, and the two readings tagged `[USER TO CONFIRM]`.
-They sit at the END of this appendix, after L49.]` [CORRECTED — this header read "37" while the
+**Count: 54 conflicts (L1–L54, no gaps).** **[UPDATED — L50–L53 added 2026-09-03 (morning): the
+four register-naming questions and their rulings. L54 added in the same revision's correction
+pass: W1b, the struck drafting instruction, which had a live `[USER TO CONFIRM]` tag at H.10.3
+and no row here to find it by. Four subjects carry that tag: L50, L51, L52, L54.
+They sit at the END of this appendix, after L49.]** [CORRECTED — this header read "37" while the
 file carried 42 rows, so a reader auditing the ledger by its own count stopped five rows
 early. `grep -cE '^\*\*L[0-9]+ —' docs/nmfc/CANON.md` is the check; run it after
 adding a row. Seven rows are new this revision — **L43**–**L49**, all from Part I and the
@@ -9664,9 +9767,14 @@ them; two more — L2 (R12) and L13 — were closed in editing; and **three rows
 `[AND A NEW TAG EXISTS AS OF 2026-09-03 (morning): `[USER TO CONFIRM]`. It is NOT
 `[FOR THE USER TO RULE]` — the user DID rule, and the ruling is applied; what is recorded for
 confirmation is the ASSISTANT'S READING of a ruling given in words that did not answer the
-question as posed. **Two rows carry it — L51 (Q2, `f`*n* ≡ `x`*n*) and L52 (Q4, the scope of the
-trap requirement) — and L50 (Q3) carries the same flag in its own wording.** They are the only
-unsettled things in this document, and each is flagged again at its point of use.]`
+question as posed — **or, in one case, a DRAFTING INSTRUCTION this document struck on a
+proposal's authority.** **FOUR rows carry it: L50 (Q3, in its own wording), L51 (Q2, `f`*n* ≡
+`x`*n*), L52 (Q4, the scope of the trap requirement), and L54 (W1b, the integer-ALU width rule).**
+`[CORRECTED — this note used to say TWO rows plus L50, and omitted L54 entirely; W1b had a live
+tag at H.10.3 with no ledger row and no front-matter row to find it by.]` They are the only
+unsettled things in this document, and each is flagged again at its point of use. **The tag is
+not retired** — the notation table's retirement applies to its old `RESUME`-privilege subject
+only, and that table is rewritten to say so.]`
 
 **NO `[FOR THE USER TO RULE]` TAG IS STILL LIVE ANYWHERE IN THIS APPENDIX.** The last two
 — L38 (`O1`) and L43 (`O3`) — were closed by the 2026-09-03 rulings; L47's was stale, since
@@ -10664,7 +10772,7 @@ from two different ones. [RULED 2026-09-02 — see the RULED bullet at the end o
   decides whether an offloadable function may multiply, divide or use floating point at
   all, which the admission test does not currently check. **Open item O4.**
 - **PARTLY RULED — user ruling 2026-09-02 R11: "Lets do RISCV. x86 was chosen initially since initial develop was on PIN. RISCV is easier."** **The target is RISC-V; x86-64 is the PIN toolchain's host and is history, not an alternative.** Invariant 7's consequences are restated on RV64 (no `fp`, no `jal` from a body, a ninth argument on the stack, any stack store is a spill).
-- **FULLY RULED — user ruling 2026-09-03 O4, verbatim: "I think we want float, so C."** **The subset is `RV64IMAFD`**, option (c) of that row. `I` is the base; `M` because integer multiply and divide appear in ordinary index arithmetic; **`A` is not optional**, because H.7's atomic table and R15's hand-off chain are an architectural feature the ISA must be able to name; **`F` and `D` because the user ruled them in.** **AND THE CONSEQUENCE, STATED CORRECTLY, BECAUSE THE O4 ROW STATED IT WRONG:** the row said float "*widens the 512-bit context register file's per-context save set*". **It does not.** The context is **512 bits, BIT-PACKED** (#232, #238, restated as a correction on 2026-09-03) — **not eight 64-bit registers** — so there is no per-register set to widen. An `f64` costs **64 bits** and an `f32` **32 bits** of the same 512, and the compiler packs them. **Invariant 2, invariant 11 and the 72-byte migration are untouched; `F`/`D` add ZERO bytes to a migration.** What O4 *does* change is naming: a RISC-V encoding names `f0`–`f31` separately from `x0`–`x31`, so **the packed file is presented under two register namespaces over the same 512 bits** — a naming convention, never a second file `[derived from ruling O4]`. **The namespaces do not alias**: the core implements 512 bits of live storage rather than 64 architectural slots, and the compiler binds every simultaneously-live `f`- or `x`-name to a **disjoint bit range**, so `f3` and `x3` are different names at different offsets, not one slot. **What is bounded is liveness in bits across both namespaces together (invariant 2), not the name space — so the machine is an RV64IMAFD target under a register-pressure constraint, and a stock unconstrained binary is REJECTED by the admission test, as one with a stack or a spill already was** (I.0's four-point answer, I7). **An implementation that builds a separate FP register file has built a second context and broken invariant 2.** **The admission test now checks the `IMAFD` subset and counts liveness in BITS** (K.6). Tier 4's `S6` (RV64IM+A only) is overruled and becomes a divergence. Applied at **I.0**, **I.7**, **K.6**. **CLOSED.**
+- **FULLY RULED — user ruling 2026-09-03 O4, verbatim: "I think we want float, so C."** **The subset is `RV64IMAFD`**, option (c) of that row. `I` is the base; `M` because integer multiply and divide appear in ordinary index arithmetic; **`A` is not optional**, because H.7's atomic table and R15's hand-off chain are an architectural feature the ISA must be able to name; **`F` and `D` because the user ruled them in.** **AND THE CONSEQUENCE, STATED CORRECTLY, BECAUSE THE O4 ROW STATED IT WRONG:** the row said float "*widens the 512-bit context register file's per-context save set*". **It does not.** The context is **512 bits, BIT-PACKED** (#232, #238, restated as a correction on 2026-09-03) — **not eight 64-bit registers** — so there is no per-register set to widen. An `f64` costs **64 bits** and an `f32` **32 bits** of the same 512, and the compiler packs them. **Invariant 2, invariant 11 and the 72-byte migration are untouched; `F`/`D` add ZERO bytes to a migration.** What O4 *does* change is naming: a RISC-V encoding names `f0`–`f31` separately from `x0`–`x31`, so **the packed file is presented under two register namespaces over the same 512 bits** — a naming convention, never a second file `[derived from ruling O4]`. ~~**The namespaces do not alias**: … the compiler binds every simultaneously-live `f`- or `x`-name to a **disjoint bit range**, so `f3` and `x3` are different names at different offsets, not one slot.~~ **[SUPERSEDED — user ruling 2026-09-03 (morning), Design A; H.10.5, ledger L51. Kept in place with its disposition rather than dropped. `f3` IS `x3`: one name, one bit range, fixed at tape-out; the type comes from the opcode (Zfinx/Zdinx). What survives and is strengthened: the core implements 512 bits of live storage rather than 64 architectural slots. What moves: disjointness of simultaneously-live VALUES is now verified at admission (K.6 test 3). L46's ruling on the SUBSET is untouched — float is in.]** **What is bounded is liveness in bits across both namespaces together (invariant 2), not the name space — so the machine is an RV64IMAFD target under a register-pressure constraint, and a stock unconstrained binary is REJECTED by the admission test, as one with a stack or a spill already was** (I.0's four-point answer, I7). **An implementation that builds a separate FP register file has built a second context and broken invariant 2.** **The admission test now checks the `IMAFD` subset and counts liveness in BITS** (K.6). Tier 4's `S6` (RV64IM+A only) is overruled and becomes a divergence. Applied at **I.0**, **I.7**, **K.6**. **CLOSED.**
 
 **L47 — One of the two official invocation loops has no instructions.** **[RULED 2026-09-02 — see the RULED bullet at the end of this row]**
 - *Tier 1 (#130, #131, #132, 2026-08-29T03:56-03:59):* the memory-committing loop needs a
@@ -10743,11 +10851,14 @@ depend on them. [RULED 2026-09-02 — see the RULED bullet at the end of this ro
 
 ---
 
-**FOUR ROWS ADDED 2026-09-03 (morning) — L50–L53. These are NOT conflicts between sources. They
-are the four questions the register-naming proposals put to the user, the rulings that closed
-them, and — for two of them — the assistant's reading of a ruling the user gave in words that did
-not answer the question as posed. **Those two are the only things in this document that are not
-settled**, and they are tagged `[USER TO CONFIRM]` here and at the point of use.**
+**FIVE ROWS ADDED 2026-09-03 (morning) — L50–L54.** `[CORRECTED — this header said FOUR and
+covered L50–L53 only; **L54 (W1b) is the fifth**, and it was missing while its tag was live at
+H.10.3.]` **These are NOT conflicts between sources.** L50–L53 are the four questions the
+register-naming proposals put to the user, the rulings that closed them, and — for **three** of
+them — the assistant's reading of a ruling the user gave in words that did not answer the question
+as posed. **L54 is not a ruling at all**: it is a drafting instruction this document struck on a
+proposal's authority. **Those FOUR — L50, L51, L52, L54 — are the only things in this document
+that are not settled**, and each is tagged `[USER TO CONFIRM]` here and at its point of use.
 
 **THE RULING THAT GOVERNS ALL FOUR, verbatim: "Okay, lets go with A."** Design A is adopted: the
 register number **is** the bit range of the 512-bit context (**H.10**).
@@ -10775,8 +10886,8 @@ register number **is** the bit range of the 512-bit context (**H.10**).
   pending confirmation.**
 
 **L51 — Q2: does `f`*n* ≡ `x`*n*? [RULED — reading recorded, USER TO CONFIRM]**
-- *What was asked:* do the `f` names denote the same bits as the `x` names (one pool, 31 nameable
-  slices, two complete tiers), or different bits (two pools, 56 names, a third complete tier at
+- *What was asked:* do the `f` names denote the same bits as the `x` names (one pool, **24**
+  nameable slices — 8 `d` plus 16 `w` — two complete tiers), or different bits (two pools, 56 names, a third complete tier at
   16 bits with **no arithmetic in the subset to run on it**)?
 - *What the user said, verbatim:* "**I don't know what that means.**"
 - *What the assistant explained:* same slices for the `f` and `x` names, with the **type taken
@@ -10807,7 +10918,9 @@ requirement; the SCOPE of the requirement is USER TO CONFIRM]**
 - *What the user said, verbatim:* "**Requirement.**"
 - **RULING APPLIED, in the half Design A satisfies:** the trap on an **ILLEGAL NAME** — `x1`–`x7`
   / `f1`–`f7` as any operand — is **REQUIRED and IS BUILT.** Under A it is **free**: `legal =
-  n[4] | n[3]`, one OR gate. Written at **I7** and **H.10.4**; the admission tool checks it too
+  n[4] | n[3] | zero`, one three-input OR gate — **the `zero` term included, because the form
+  published in an earlier revision omitted it and so trapped `x0` and every branch built on it
+  (corrected at H.10.2).** Written at **I7** and **H.10.4**; the admission tool checks it too
   (K.6 test 4) so the failure can arrive at build time.
 - **WHAT A CANNOT TRAP, AND THE FLAG.** A cannot trap **misuse of a LEGAL name**: a 64-bit value
   in a 32-bit name, or `d`*k* and `w`*2k*/`w`*2k+1* live at once. That is **SW1**, and it is
@@ -10842,6 +10955,29 @@ reserved]**
   the PC mask the travelling PC locates the map, and a `CONT` successor's PC locates its own**
   (J.1: the PC does not change on migration). **What remains of B's cost is segment alignment and
   padding**, plus the object still existing. Verbatim at **H.10.9**. **CLOSED.**
+
+**L54 — W1b: the integer-ALU width rule this revision was instructed to write, and struck.
+[STRUCK on a proposal's authority — USER TO CONFIRM]** **[ADDED — this row did not exist while a
+live `[USER TO CONFIRM]` tag on W1b sat at H.10.3 with no front-matter row and no ledger row.
+That is why it is here: an item nobody can find by the document's own audit paths is not
+flagged, it is buried.]**
+- *What was asked, and by whom:* **this is not one of the four questions the proposals put to the
+  user, and no user words bear on it.** The drafting instruction for this revision named the
+  integer-ALU width rule as *"from the widest register operand; `*W` forms 32"* — **rule W1b of
+  `final-A-aliasing.md` §3.**
+- *What this document did:* **STRUCK it and wrote the amended rule instead** — execute at 64 on
+  sign-extended sources, W3 truncates into the destination name — on the authority of
+  `register-map-final.md` §3.3, for three reasons stated in full at **H.10.3**: W1b is not
+  expressible in a standard back end (an LLVM `RegisterClass` carries one `RegSizeInBits`); it is
+  redundant for the ten opcodes where 64-then-truncate is exact; and it creates **SW2 — XLEN as a
+  function of register allocation**, a silent wrong answer of its own.
+- *What striking it bought:* **the only execution-unit work Design A was carrying is deleted** —
+  the second 32-bit comparator tap, the width-dependent shift-amount mask, the second `mulh*`
+  product tap, the divider's 32-bit overflow sentinel (`final-A-aliasing.md` §10.5, deleted in
+  full). **Ten ISA deviations become nine; execution-unit cost becomes zero.**
+- **THE FLAG: if W1b was meant literally, say so — H.10.3's row reverts, SW2 comes back, and
+  §10.5's execution-unit work comes back with it.** `[USER TO CONFIRM.]` **OPEN as a
+  confirmation; the amended rule is what is written and implemented meanwhile.**
 
 ---
 
@@ -11114,13 +11250,21 @@ These are not divergences; they are the scars, and each is a test the canon shou
    - **O1 (L38) — the vmem default for an unhinted grain: the OS's FREE CHOICE.** "*Map it
      wherever was most convenient*"; **no partition semantics attach to the VA.** All
      placement work below it is now well-defined.
-   - **O4 (L46) — the RISC-V subset: `RV64IMAFD`.** The admission test checks that subset
-     **and counts liveness in BITS**; `F`/`D` values pack into the **same 512 bits** under a
-     second register namespace, and add **zero** bytes to a migration.
+   - **O4 (L46) — the RISC-V subset: float is IN.** The admission test checks that subset
+     **and counts liveness in BITS**; `F`/`D` values pack into the **same 512 bits** and add
+     **zero** bytes to a migration. **[AMENDED — user ruling 2026-09-03 (morning), Q2/L51;
+     H.10.5. This line used to say `RV64IMAFD` and "a second register namespace". There is
+     ONE namespace: `f`*n* is `x`*n*, identical bits, type from the opcode, so the tile's
+     base-ISA spelling is `RV64IMA` + Zfinx/Zdinx semantics. O4's substance is untouched —
+     "I think we want float, so C" — only the four-letter spelling and the namespace count
+     change.]**
    - **O3 (L43) — the canon assigns `funct7`/`funct3` NOTHING.** Field values are
      implementation choice; `nmfc_isa.h`'s are recorded in SELECTED CONFIGURATION.
    - **O16 — `RESUME` is PRIVILEGED.** Fault resumption is a kernel operation; every
-     `[USER TO CONFIRM]` tag is gone.
+     `[USER TO CONFIRM]` tag **on the `RESUME`-privilege subject** is gone. **[CORRECTED — this
+     line used to read "every `[USER TO CONFIRM]` tag is gone". The 2026-09-03 (morning) revision
+     REINSTATED the tag with a different subject and four live instances — L50, L51, L52, L54.
+     The notation table is the authority and it is rewritten to say so.]**
    - **O5 — three message classes on the one fabric: COHERENCE, MIGRATION, FILL**,
      per-destination queues, **coherence strictly first, then migration and fill at EQUAL
      WEIGHT** — the precondition of invariant 11's parity.
