@@ -26,6 +26,32 @@ Everything after them is the document proper.
 REVISION, AND NOTHING IS LEFT OPEN.** They are tier 1, they are the newest words in the
 record, and they are binding.
 
+`[A THIRD SET WAS RULED ON 2026-09-03 (MORNING) — THE REGISTER-NAMING QUESTIONS — AND IT IS THE
+ONE PLACE THIS SECTION'S "NOTHING IS LEFT OPEN" NEEDS A QUALIFIER. Read this before quoting the
+count as zero.]`
+
+**THE RULING: "*Okay, lets go with A.*" DESIGN A IS ADOPTED — the register number IS the bit
+range of the 512-bit context.** `x8`–`x15` are the eight 64-bit tiles, `x16`–`x31` the sixteen
+32-bit tiles, the halves of `x`*n* are `x`*2n* and `x`*2n+1*, `x0` reads zero at any width, and
+**`x1`–`x7` are illegal and trap.** Nothing outside the instruction encoding and the 512 bits
+participates. **Migration stays 72 B.** Full statement: **H.10**; invariants sharpened at
+**I2** and **I7**; admission at **K.6**; rejected alternatives at **P.5 R111–R113**.
+
+| | question | the user's words, verbatim | status |
+|---|---|---|---|
+| **Q1** | where to stop — A, or a richer scheme? | "*No idea what this means.*" | **RULED as: A now; A2 and B reserved as hatches, built only if a truly hard constraint appears** (**H.10.9**). The ladder notation the question used is not used in this canon. Ledger **L53** |
+| **Q2** | does `f`*n* ≡ `x`*n*? | "*I don't know what that means.*" | **RULED as: YES — one pool, type from the opcode** (**H.10.5**). Carries the base-ISA spelling amendment: `RV64IMA` + Zfinx/Zdinx semantics on the tile; **O4's substance untouched, float is in**. `[USER TO CONFIRM]` Ledger **L51** |
+| **Q3** | supersede I.7 item 3? | "*I don't know what CANON I.7 is.*" | **RULED as: SUPERSEDE, and price the divergence** — a function-core binary is **not host-executable** (**I.7 item 3**, **H.10.8**). `[USER TO CONFIRM]` Ledger **L50** |
+| **Q4** | is the run-time undefined-register trap a requirement or a preference? | "**Requirement.**" | **RULED: REQUIREMENT.** The illegal-name trap is **built and free** (**I7**, **H.10.4**). **What A cannot trap is MISUSE of a legal name — that is admission's job (K.6 test 3).** `[USER TO CONFIRM the scope]` Ledger **L52** |
+
+**SO THE HONEST COUNT IS: ZERO QUESTIONS OPEN, THREE READINGS AWAITING CONFIRMATION.** Every one
+of the four was ruled and every ruling is applied. What is flagged is not a question the user
+declined to answer — it is **the assistant's reading of an answer given in words that did not
+address the question as posed**, recorded so it can be overturned rather than inherited silently.
+**The one that could still change the design is Q4's scope:** if "Requirement" was meant to cover
+misuse of a legal name as well as an illegal name, **Design A does not satisfy it and only design
+B does**, which would contradict the choice of A (**L52**).
+
 **THE 2026-09-02 SET.** Twenty-one numbered rulings (`R1`–`R21`) plus one on the
 instruction count, one on the memory geometry and one on the stress workload **closed
 thirty-three of the forty-nine questions this section used to carry outright, and reduced
@@ -185,6 +211,17 @@ here is a point in a study, never a property of the machine.**
 `[HOW TO USE IT]` If the body says *configuration; see SELECTED CONFIGURATION*, the
 number is here. If you are writing a new configuration, the **design constraint** column
 is what binds you; the two value columns are what has been run.
+
+`[NOTHING WAS ADDED HERE BY THE 2026-09-03 (morning) RULING, AND THAT IS DELIBERATE.]` Design A
+— the register number **is** the bit range of the 512-bit context (**H.10**) — is **design, not
+configuration.** It is a property of the ISA, fixed at tape-out, identical in every
+configuration, and **it gets no row in this table.** Under R6–R10 the test is *"do ISAs define
+how many cores they support?"*, and a register map is on the ISA side of that line: **`x8`–`x15`
+are the 64-bit tiles in every configuration or the machine is a different machine.** The
+implementation *choices* around it — the admission tool's opcode→width table, who owns the
+placement pass, the ChampSim-model scoreboard's width — are **engineering items, not configured
+values**, and they live at `docs/nmfc/proposals/register-map-final.md` §9.1 (**U1**–**U7**) and
+are pointed at from **K.6** and Appendix 2 **S40**.
 
 | value | ChampSim (file:line) | SST/Rev (file:line) | design constraint — this is the part that binds |
 |---|---|---|---|
@@ -836,6 +873,34 @@ and hurts regfile latency and usability. **Quote 64 KiB when sizing the array; q
 doubling when arguing why 512 bits is the ceiling. Never quote "8 KiB" as the register
 file.** Same reconciliation at H.3.
 
+`[SHARPENED — user ruling 2026-09-03 (morning), verbatim: "Okay, lets go with A." This is the
+one place I2 has ever been narrowed, and the narrowing must be attributed correctly.]`
+**The 512 bits are BIT-PACKED — that is unchanged and is not up for revision.** What the ruling
+settled is a different question that I2 never answered: **how a name DENOTES bits.** The answer is
+**Design A — the register number IS the bit range** (**H.10**): `x8`–`x15` are the eight 64-bit
+tiles, `x16`–`x31` the sixteen 32-bit tiles, `x0` reads zero at any width, `x1`–`x7` are illegal
+and trap. Nothing outside the instruction encoding and the 512 bits participates.
+
+**AND THE LIMIT THIS PLACES ON I2, STATED PLAINLY AS DESIGN A's LIMIT.** #232's *"64 1-byte regs,
+or ANY combination"* becomes, for **named** values, **"any combination of 64- and 32-bit values,
+with every live value narrower than 32 bits CHARGED 32 at admission."**
+
+> **THE ATTRIBUTION, BECAUSE IT WAS GOT WRONG ONCE AND MUST NOT BE REPEATED. The byte tier is
+> unreachable because the REGISTER FIELD IS FIVE BITS — not because of the user's ruling.**
+> Complete coverage at width *w* costs 512/*w* names: 8 at 64, 16 at 32, 32 at 16, **64 at 8**.
+> With `f`*n* ≡ `x`*n* there are **31** nameable slices. The ruling forbade *a third referenced
+> object*; it said nothing about where the geometry is written, and **design A2 (H.10.9) respects
+> the ruling in full and reaches the byte tier**, which settles the attribution by counterexample.
+> The **charge-32 rule** is separately **Design A's own choice** and a real regression against
+> K.6's actual-width charging — three worked shapes that K.6 admits and A rejects are tabulated at
+> **H.10.6**, and under K.6 that rejection is **fatal**.
+> *(`docs/nmfc/proposals/register-map-final.md` §0, §5.2; `final-A-aliasing.md` §2.)*
+
+**What is NOT narrowed:** the admission test is still a test on **BITS**, in **one pool**, on
+**peak simultaneous liveness** — never a count of registers touched (K.6). The context is still
+**512 bits, not 8 registers**; the reversion #238 forbids is forbidden exactly as before, and
+**H.10.7 refuses lane granularity in the scoreboard for that reason.**
+
 ---
 
 **I3 — Every tile walks locally. There is ONE page table PER ADDRESS SPACE, duplicated
@@ -1132,6 +1197,43 @@ tracing an x86-64 binary through PIN.** On an RV64 target the equivalent drops a
 consequences — "no frame pointer, `push %rbp` is a stack write"; "a seventh x86-64 argument
 arrives on the stack" — is kept here only as the record of what the toolchain reads. Full
 account in **I.0**.)*
+
+`[SHARPENED — user ruling 2026-09-03 (morning): "Okay, lets go with A." I7 says the function core
+HAS A REGISTER FILE. Until this ruling the document never said what a register NAME meant on it,
+and every attempt to say so reached for a per-function map. It has one now.]`
+
+> **THE REGISTER FILE IS THE 512 BITS, AND THE REGISTER NUMBER IS THE BIT RANGE.** `x8`–`x15`
+> name the eight 64-bit tiles; `x16`–`x31` name the sixteen 32-bit tiles; the halves of `x`*n*
+> are `x`*2n* and `x`*2n+1*; `x0` reads zero at any width; **`x1`–`x7` are illegal names.**
+> `f`*n* ≡ `x`*n* — the same bits, with the **type taken from the opcode**. The full map, its
+> decode equations, its width rules and its costs are **H.10**.
+
+**AND THE THIRD CONSEQUENCE OF NO STACK, WHICH THE MAP MAKES STRUCTURAL RATHER THAN
+CONVENTIONAL.** `sp` is `x2` and `ra` is `x1`, and **both are illegal names** — so
+`addi sp, sp, -16` and `sd ra, 8(sp)` are **decode-illegal**, and **`ret` = `jalr x0, 0(x1)` is
+illegal**. A body ends with `END`/`RETC`. **Stated honestly, because the record must not
+overclaim enforcement:** the decoder's check on `jal`/`jalr` with `rd` ≠ `x0` catches every call a
+compiler emits; it does **not** make a call impossible, because `auipc`/`addi`/`jr` forms a link
+by hand and banning `auipc` would cost every PC-relative constant. **I7 remains a
+compiler-discipline invariant with a decode tripwire** (H.10.4 rule 4).
+
+`[REQUIREMENT — user ruling 2026-09-03 (morning), Q4, verbatim: "Requirement."]`
+> **THE ILLEGAL-NAME TRAP IS A REQUIREMENT, AND IT IS BUILT.** A reference to `x1`–`x7` or
+> `f1`–`f7` as any operand **traps at decode**. Under Design A the check is free — `legal =
+> n[4] | n[3]`, one OR gate (H.10.2) — so the requirement costs nothing.
+
+> **WHAT THE TRAP CANNOT SEE IS ADMISSION'S JOB, AND THIS IS THE FLAG.** `[USER TO CONFIRM —
+> this is the assistant's reading of the Q4 ruling, recorded for overturn; Appendix 1 **L52**.]`
+> The trap fires on an **illegal NAME**. It cannot fire on **MISUSE OF A LEGAL NAME** — a 64-bit
+> value put in a 32-bit name, or `d`*k* and `w`*2k*/`w`*2k+1* live at the same time — because a
+> total map leaves nothing undefined to fire on. That class is named **SW1 —
+> overlapping-name over-liveness** — and it is caught **at admission/compile time or not at
+> all** (K.6 test 3, H.10.4, H.10.6). **If "requirement" was
+> meant to cover misuse as well, Design A does not satisfy it and only design B does — which
+> would contradict the choice of A.** The reading is put to the user rather than resolved here.
+> *(Two qualifications the record requires: design B does not catch SW1 either, so it separates
+> no candidate; and the usually-cited instance is unreachable on either specified toolchain path
+> — H.10.4.)*
 
 ---
 
@@ -2162,6 +2264,18 @@ bodies can be aliased this way **and the data they chase cannot**
 (`inc/nmfc/nmfc_trace.h:139-145`).
 
 ### C.4 An invocation's lifecycle
+
+`[CHECKED AGAINST DESIGN A, 2026-09-03 (morning) — NO CHANGE WAS NEEDED, and the check is
+recorded so it is not re-run blind.]` Every mermaid block in this document was scanned for a
+statement about registers or lanes. **The only two are correct as they stand and Design A
+strengthens both:** C.1's `512b regfile each, no stack`, and this diagram's Note — *"context =
+PC + 512-bit regfile. The 512 bits are the context's WHOLE capacity, how many are LIVE is the
+function's business (K.6)."* **No diagram asserts a lane count or a register count**, which is
+what a Design A revision would have had to repair. **What the diagrams do NOT show, and must not
+be read as denying: how a register NAME resolves to bits.** That is **H.10** — the register
+number **is** the bit range — and it changes nothing on this page: the payload is still 512 bits,
+the migration is still 72 B, and `CXW`/`CXR` still move one 64-bit lane, which is exactly tile
+`d`*k* (H.10.8).
 
 ```mermaid
 sequenceDiagram
@@ -5927,6 +6041,535 @@ about 5.8 GB/s. Adding contexts to t1 bought latency, not throughput.**
 
 ---
 
+### H.10 Register naming over the 512-bit context — DESIGN A
+
+`[RATIFIED — user ruling 2026-09-03 (morning), verbatim: "Okay, lets go with A." This section
+is the ratified statement of that design. Its derivations, gate counts, enumerations and
+rejected alternatives are in the proposals — `docs/nmfc/proposals/register-map-final.md` §3
+(Design A) and `docs/nmfc/proposals/final-A-aliasing.md` — which remain PROPOSALS and are cited,
+never quoted as decisions except where this section adopts them.]`
+
+**THE ONE SENTENCE. The register number IS the bit range of the 512-bit context.** Nothing
+outside the instruction encoding and the 512 bits participates in resolving a name: no
+per-function map, no per-context map, no map cache, no handle→address translation, no
+post-migration fetch. **Migration stays 72 B** (I11, J.1).
+
+> **THE HEAP RULE (the generative statement).** The two halves of `x`*n* are `x`*2n* (low) and
+> `x`*2n+1* (high). **`x8`–`x15` are the eight 64-bit tiles of the context, in order.** Applied
+> once to `x8`–`x15` it generates `x16`–`x31` as the sixteen 32-bit tiles. Read upward it says
+> what `x1`–`x7` are — `x1` the whole 512 bits, `x2`/`x3` its 256-bit halves, `x4`–`x7` its
+> 128-bit quarters — and **no operation in the subset is wider than 64 bits**, so those seven
+> names denote nothing this machine can compute on. They are **illegal, and they trap.**
+> *(`register-map-final.md` §3.1; `final-A-aliasing.md` §1.1.)*
+
+#### H.10.1 The map
+
+| encoding | tile name | width | bit range | note |
+|---|---|---|---|---|
+| `x0` / `f0` | `zero` | **any** | **none** | reads 0 at whatever width the instruction needs (`f0` reads **+0.0**); writes discarded; **costs none of the 512**. `x0` is ratified RISC-V (Unpriv. Ch. 2); **`f0` reading zero is a deviation**, and it is what makes `f`*n* ≡ `x`*n* work |
+| `x1`–`x7` / `f1`–`f7` | — | — | **none** | **RESERVED — ILLEGAL as any operand, and the decoder TRAPS.** They are the tree nodes wider than 64 bits |
+| `x8`–`x15` / `f8`–`f15` | `d0`–`d7` | **64** | `[64k, 64k+64)`, *k* = *n* − 8 | the **D** tiling — complete, 512 of 512 |
+| `x16`–`x31` / `f16`–`f31` | `w0`–`w15` | **32** | `[32m, 32m+32)`, *m* = *n* − 16 | the **W** tiling — complete, 512 of 512 |
+
+```
+bit 0                                                                                         511
+    |-----d0----|-----d1----|-----d2----|-----d3----|-----d4----|-----d5----|-----d6----|-----d7----|
+    |  w0 |  w1 |  w2 |  w3 |  w4 |  w5 |  w6 |  w7 |  w8 |  w9 | w10 | w11 | w12 | w13 | w14 | w15 |
+    |lane0|     |lane1|     |lane2|     |lane3|     |lane4|     |lane5|     |lane6|     |lane7|
+```
+
+**Composition, verified:** `x8`–`x15` tile the 512 bits exactly; `x16`–`x31` tile them exactly;
+`w`*2k* ∪ `w`*2k+1* = `d`*k* for every *k*; every slice is naturally aligned and **no slice
+crosses a 64-bit word boundary** — which is what buys the single-word read and the write-enable
+path in any implementation (`register-map-final.md` §9 Step 1).
+
+**`d`/`w` are DOCUMENTATION NAMES.** The assembler accepts `x8`…`x31`; every ABI table and
+compiler flag recipe is spelled in `x` numbers. Writing `d3` in a source file is a convenience
+this document uses to keep bit ranges readable.
+
+**Why the anchoring is `x8`/`x16`, and not `x1`** (`final-A-aliasing.md` §1.3): `x8`–`x15` =
+`s0, s1, a0`–`a5` — nothing ABI-fixed, nothing clobbered by a jump, so **every D name is
+allocatable**; `a0`–`a5` land as 64-bit names, the right default for pointers; decode falls to
+two OR'd bits; and reserving `x1`–`x7` makes `ra` and `sp` **illegal names**, which is an I7
+tripwire rather than a convention.
+
+#### H.10.2 Decode — the whole map is combinational
+
+```
+    width64     = ~n[4]                              // 1 inverter
+    offset[8:6] = n[4] ? n[3:1] : n[2:0]             // 3 x 2:1 mux
+    offset[5]   = n[4] & n[0]                        // 1 AND
+    offset[4:0] = 0                                  // wires
+    legal       = n[4] | n[3]                        // 1 OR
+    zero        = ~(n[4]|n[3]|n[2]|n[1]|n[0])        // 1 five-input NOR
+```
+
+**≈7 primitive gates, one logic level after the select** — or, as a ROM, **31 × (9-bit offset +
+1 class bit) = 310 bits, once per tile**, shared by every context and every function on it
+(`register-map-final.md` §3.2; `final-A-aliasing.md` §1.4).
+
+**What it replaces, for scale:** SST's `RegLayout` is 32 × (`uint16` offset + `uint8` width) =
+**768 bits per resident function**, fetched at every register access
+(`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCRegLayout.h:40-42`; `NMFCTile.cc:461-475`). **310 bits once
+per tile against 768 bits per resident function, and nothing fetched.**
+
+`[TIMING — NOT A RESULT.]` The proposals label the decode "+2 mux levels, +0 cycles". That is an
+**assumption**: there is no fmax, no process node, no FO4 figure, and **no demonstration anywhere
+in the record that the register-read stage has two levels of slack** — and the two levels sit
+after the context SRAM output, on the data path into the ALU, conventionally the tight path.
+**A timing budget for the register-read stage is the cheapest measurement that would retire it**
+(`register-map-final.md` §5.3, §9.1 U7). Quote it as an assumption or not at all.
+
+#### H.10.3 Width comes from the operand's ROLE, not from the name
+
+> **W1 — OPERAND WIDTH IS PER OPERAND, AND ITS SOURCE IS THE ROLE.**
+>
+> | role | width | name required |
+> |---|---|---|
+> | **address / base** of any load, store, atomic, or `jalr` | **always 64** | a `d` name |
+> | **data destination of a LOAD** | the opcode's width | **any name** — the loaded value is extended into it by W3 (sign for `lb`/`lh`/`lw`, zero for `lbu`/`lhu`/`lwu`) |
+> | **data source of a STORE** | the opcode's width | **a name at least as wide as the opcode**: `sd` needs a `d` name; `sw`/`sh`/`sb` take any name and store its low bits |
+> | any **FP** source or destination | the width the **mnemonic** names (`.s` = 32, `.d` = 64; `fcvt.*` names each operand separately) | **exactly** that width |
+> | the **integer** operand of an FP instruction | the width the mnemonic names (`.w` = 32, `.l` = 64); a compare/`fclass` **result** is 0/1 and fits any name | as the mnemonic names, except the 0/1 result |
+> | **branch** sources | **always 64** | any name |
+> | **integer ALU / shift / M** operands and destination | **32 iff the opcode is a `*W` form, else 64 — stock RV64's own rule** | any name |
+>
+> **W2 — READ PORT.** Each source is read from **exactly its own name's bits**, then adjusted to
+> the operand width: an **integer** source narrower than the operand width is **sign-extended**
+> (RV64's ratified invariant, Unpriv. Ch. 5); one wider is **truncated**, which arises only for a
+> `*W` opcode and is exactly what a stock RV64 core does. A **floating-point** source is read at
+> exactly its operand width with **no extension and no NaN-box check**, because W1 requires the
+> name to be exactly that width.
+>
+> **W3 — WRITE PORT.** A write puts the result into **exactly the destination name's bits and
+> NEVER modifies a bit outside them.** Where the execution width is narrower than the destination
+> name, the result is sign-extended (zero-extended for `lbu`/`lhu`/`lwu`) to fill it — ratified
+> RV64 behaviour verbatim. **It never NaN-boxes.**
+
+**Why W2 sign-extends rather than storing sign-extended.** Ch. 5's invariant ("all 32-bit values
+are held in a sign-extended format in 64-bit registers") and bit-packing are not in opposition;
+they are in different *places*. **W2 maintains the invariant at the read port instead of in the
+register file.** The ALU sees exactly the bits a stock RV64 core would present; the storage costs
+32 bits instead of 64; every compiler assumption about sign-extended 32-bit operands survives.
+
+**W3 is FORCED, not chosen.** x86 preserves the upper bits on a narrow write; AArch64 zeroes
+them. **This map can do neither, because the bits above `w`*2k* are another architectural value
+named `w`*2k+1*, not spare room.** W3 confines every ratified extension mechanism inside the
+destination name.
+
+**NaN-boxing is ABOLISHED ON THE TILE, in both directions.** There is no wider container, so
+nothing to box on write and nothing to check on read. Without this, a valid positive `f32` in
+`w3` — zeros above it — fails the ratified box check and is read as canonical NaN. **The host
+still boxes and checks**, because the host is a stock RV64GC core with FLEN = 64. That is a
+real host/tile divergence and it is priced in H.10.8.
+
+**Width conversions need no new instruction** (R84 stands): narrow→wide signed is `mv d1, w3`;
+narrow→wide unsigned is the `slli`/`srli`-by-32 idiom RV64 already emits, **written on a `d`
+destination**; **wide→narrow is free**, because the low half of `d`*k* **is** `w`*2k*;
+narrow→wide float is `fcvt.d.s`, the correct instruction on a stock core too.
+
+> `[FLAGGED FOR THE USER — the integer-ALU row, and the one place this section departs from the
+> drafting instruction for this revision.]` The instruction that ordered this section named the
+> integer ALU rule as *"from the widest register operand; `*W` forms 32"*. **That is rule W1b of
+> `final-A-aliasing.md` §3, and `register-map-final.md` §3.3 STRIKES it.** The row above carries
+> the amended rule instead. **W1b is recorded, not deleted**, and here is why it was struck, in
+> the proposal's order:
+> 1. **Not expressible in a standard back end.** An LLVM `RegisterClass` carries a single
+>    `RegSizeInBits` and an instruction's operand class is fixed at its definition, so there is
+>    no selectable form for an R-type drawing `rd` from a 64-bit class and its sources from a
+>    32-bit one.
+> 2. **Redundant** — but the argument first given for that was false and was corrected by
+>    enumeration over 200,169 operand pairs per opcode: computing at 64 on sign-extended 32-bit
+>    names and truncating is **exact** for `add`, `sub`, `and`, `or`, `xor`, `slt`, `sltu`,
+>    `mul`, `div`, `rem`, and **diverges** for `sll`, `srl`, `sra`, `mulh`, `mulhu`, `mulhsu`,
+>    `divu`, `remu`. *That is a restatement of why RV64 has `*W` opcodes at all*, not a tile bug.
+> 3. **It created a silent-wrong-answer class of its own (SW2): XLEN as a function of register
+>    allocation.** Recompile with different pressure, the allocator picks a `d` where it once
+>    picked a `w`, and the same source computes at 64 bits where it computed at 32 — **a
+>    different answer from an unchanged program, with nothing in the machine able to see it.**
+>
+> **Striking W1b also deletes the only execution-unit work Design A was carrying** — the second
+> 32-bit comparator tap for `slt`/`sltu`, the width-dependent shift-amount mask, the second
+> product tap for `mulh*`, and the 32-bit sentinel in the divider's overflow path
+> (`final-A-aliasing.md` §10.5, *"the part that is NOT free"*, deleted in full). **Ten ISA
+> deviations become nine and the execution-unit cost becomes zero.**
+> **[USER TO CONFIRM]** — if W1b was meant literally, say so and this row reverts, and SW2 and
+> §10.5's execution-unit work come back with it. *(`register-map-final.md` §3.3, §3.6a SW2.)*
+
+#### H.10.4 Legality — what the decoder traps
+
+**The trap on an ILLEGAL NAME is a REQUIREMENT** (user ruling 2026-09-03, Q4: "**Requirement.**")
+**and under Design A it is free**: `legal = n[4] | n[3]` is one OR gate (H.10.2). The seven
+reserved names `x1`–`x7` / `f1`–`f7` trap **as any operand**, which makes `sp` (`x2`) and `ra`
+(`x1`) illegal names — so `addi sp, sp, -16` and `sd ra, 8(sp)` are decode-illegal, and
+**`ret` = `jalr x0, 0(x1)` is illegal.** A body ends with `END`/`RETC`.
+
+The decoder's full rule set (`register-map-final.md` §3.4), stated so an implementer does not
+rediscover it:
+
+1. **An address/base operand that is not a `d` name.** `lw w3, 0(w5)` illegal.
+2. **An operand-class disagreement**, from a per-opcode required-width column total over the
+   subset. `fadd.d w0, w1, w2` is illegal — the mnemonic names 64-bit operands and a `w` name is
+   32. `fcvt.s.w d1, w3` is illegal — the `.s` result is 32 bits, so `rd` must be a `w` name.
+   `sc.w`/`sc.d`'s `rd` is a 0/1 flag and may be any width, as may `feq`/`flt`/`fle` and
+   `fclass` results. **This column does not exist yet and is on the critical path**
+   (`register-map-final.md` §9.1 **U1**).
+3. **`x1`–`x7` / `f1`–`f7` as any operand** — the required trap above.
+4. **`jal` or `jalr` with `rd` ≠ `x0`.** A check on the *link register*, not on the name `x1`.
+   It kills every link-forming form while leaving `j`, `jr` and every conditional branch legal,
+   so switch tables and computed jumps still work. **Stated honestly: this catches every call a
+   compiler emits; it does not make a call impossible** — `auipc`/`addi`/`jr` forms a link by
+   hand, and banning `auipc` would cost every PC-relative constant. **I7 stays a
+   compiler-discipline invariant with a decode tripwire, and is not claimed as enforcement.**
+5. **Anything outside the subset**: CSR access, `FENCE`, RVC, `ecall`, anything from `V`.
+6. **A `w`-named operand where W1 requires 64 and no rule above caught it** — the catch-all that
+   makes the decoder total, so an unlisted encoding fails closed rather than executing at a
+   guessed width.
+7. **A `w`-named source on a non-`*W` `sll`, `srl`, `sra`, `slli`, `srli`, `srai`, `mulh`,
+   `mulhu`, `mulhsu`, `divu` or `remu`** — the eleven forms whose 64-bit result truncated to 32
+   is **not** the 32-bit result (measured, H.10.3). A compiler wanting the 32-bit answer emits
+   `sllw`/`srlw`/`sraw`/`divuw`/`remuw`, legal on any name; one wanting the 64-bit answer widens
+   into a `d` name first. **One comparison against an eleven-entry set converts a silent wrong
+   answer into a build-time rejection.**
+
+**Exempt: `x0` and `f0` denote no bits**, so they have no width to disagree with. Load-bearing —
+without the exemption `beqz`, `li`, `mv`, `snez` and `j` would all be illegal, and this machine's
+loops are built from them.
+
+**Deliberately legal: mixed-width integer ALU operands.** `add d1, w3, w4` executes at 64, reads
+both sources sign-extended, writes `d1`. `add w0, d1, d2` also executes at 64 and W3 keeps the
+low 32 bits — the truncation the programmer asked for by naming a 32-bit destination.
+**Deliberately legal: `*W` opcodes on a `w` destination** — Ch. 5 defines `*W` as "a 32-bit
+operation whose result is canonicalised into a 64-bit register", and when the register is 32 bits
+that canonicalisation is the identity, so `addw w0,w1,w2` computes exactly what `add w0,w1,w2`
+computes. **This is why stock `int` codegen works under register-class assignment alone.**
+
+> **WHAT THE TRAP CANNOT SEE, AND WHOSE JOB IT IS INSTEAD.** `[USER TO CONFIRM — this is the
+> assistant's reading of ruling Q4.]` The required trap fires on an **illegal NAME**. It cannot
+> fire on **MISUSE OF A LEGAL NAME**, and under a total map nothing at run time can:
+> - a 64-bit value placed in a 32-bit name — `add w0, d1, d2` is a legal encoding that truncates;
+> - `d`*k* and `w`*2k*/`w`*2k+1* live **at the same time** — the same bits under two names, with
+>   no instruction able to tell that both are live.
+>
+> This is **SW1 — overlapping-name over-liveness** (`register-map-final.md` §3.6a), and **it is
+> caught at ADMISSION/COMPILE TIME or not at all** (H.10.6 test 3). It is the one place Design A
+> is less safe than the per-function map it replaces, and it must not be described as trapped.
+> **Two honest qualifications the record requires:** design **B** does not catch it either — a
+> bit-exhausted allocator that coalesces two simultaneously-live values onto one name emits a
+> perfectly legal, non-overlapping map and the tile accepts it — so SW1 is not a reason to prefer
+> any candidate over any other; and the concrete instance usually cited (`s0` = `x8` = `d0`
+> clobbered by a seventh/eighth integer argument in `a6`/`a7` = `w0`/`w1`) **is not reachable on
+> either specified toolchain path**, because the day-one path `-ffixed`es `x16`–`x31` out and the
+> `W`-tier path declares `W` as sub-register indices of `D`. **The class is real; its published
+> example is not.**
+>
+> **THE FLAG.** Ruling Q4 was "**Requirement**", and this section satisfies it for illegal names.
+> **If "requirement" was meant to cover misuse of a legal name as well, then Design A does not
+> satisfy it and only design B does — which would contradict the choice of A.** That reading is
+> put to the user rather than resolved here (Appendix 1 **L52**).
+
+#### H.10.5 `f`*n* ≡ `x`*n* — one pool, and what it supersedes
+
+`[ADOPTED — assistant's reading of the user's 2026-09-03 ruling on Q2; the user's answer to the
+question as posed was "I don't know what that means", and the reading is recorded for overturn.]`
+
+> **`f`*n* names exactly the same bits as `x`*n*. The TYPE comes from the OPCODE, never from the
+> name.** `f8`–`f15` carry `.d` operands, `f16`–`f31` carry `.s` operands, and `f0` reads `+0.0`.
+
+This is the user's own formulation — *"utilizing a float reg implies the type, while the number
+of the reg implies the slice"* — and it is **Zfinx/Zdinx's ratified rule** for the case where the
+two namespaces coexist (Unpriv. Ch. 26 §26.1).
+
+**What it buys:** one allocation pool. K.6's "third wrong answer" — an allocator drawing
+`f`-names from a pool separate from `x`-names and admitting a function twice the legal size — is
+**structurally unrepresentable**, not merely checked for.
+
+**What it costs:** 32 of the 63 nameable encodings, and **it means this machine is not
+implementing `F`/`D` in the ratified sense.** The spec makes F/D and Zfinx mutually exclusive, so
+**the base-ISA spelling on the tile becomes `RV64IMA` + Zfinx/Zdinx semantics** — `F`/`D`
+*opcodes*, `x`-file operands. **Ruling O4's substance is untouched** — "*I think we want float,
+so C*", float is in the subset — **only its opcode-list spelling changes.** See **I.0**.
+
+**It supersedes four statements in this document**, none of which may be quietly dropped:
+
+| where | what it said | disposition |
+|---|---|---|
+| **I.0**, four-point answer, point 1 | "a **per-function binding from register name to bit range**, produced by the compiler … **carried with the offload**" | **SUPERSEDED.** Design A deletes that object outright. The binding is fixed at tape-out and carried by nothing |
+| **I.0**, four-point answer, points 2 and 4 | "the compiler assigns **disjoint bit ranges** to every simultaneously-live name, **across both namespaces**"; "**the `f`-names do not overlay the `x`-names**" | **SUPERSEDED in the second clause, PRESERVED in the first.** The `f`-names *are* the `x`-names. Disjointness of **simultaneously-live values** is still required — it has moved from the compiler's naming to admission's placement check (H.10.6 test 3) |
+| **the `O4` ruling row** (front matter) | "**the namespaces do NOT alias**, because a register name is not a fixed bit offset here" | **SUPERSEDED.** A register name **is** a fixed bit offset here, and that is the whole design. **The half that survives and is strengthened: 512 bits of live storage, not 64 architectural slots** |
+| **Appendix 1 L46's `RULED` bullet** | the same clause restated | **SUPERSEDED**, same disposition; the L46 row is not deleted and its ruling on the subset stands |
+
+**The reason a tier-1 clause can be superseded here is itself tier 1:** every one of those
+sentences describes **the compiler doing the binding**, and the 2026-09-03 ruling took the
+binding away from the compiler ("*a third piece of memory every context needs… foolish*").
+
+#### H.10.6 What A cannot name — the stated limit, and where the check moved
+
+> **A NARROWS WHAT IS NAMEABLE. The 512 bits are still bit-packed and still divided however the
+> function likes; what changed is that only two divisions have NAMES.**
+
+**Limit 1 — no name is narrower than 32 bits.** A register field is **five bits**, so a
+namespace affords 32 encodings and `x0` cannot be a slice; complete coverage at width *w* costs
+512/*w* names — 8 at 64, 16 at 32, 32 at 16, **64 at 8**. Under `f`*n* ≡ `x`*n* there are **31**
+nameable slices, so I2's "64 1-byte regs" misses by 33 names.
+
+> **PROVENANCE, AND IT MATTERS: this is the 5-BIT REGISTER FIELD's limit, NOT the user's
+> ruling's.** `[CORRECTED — an earlier proposal revision attributed it to the ruling and the
+> record must not repeat that.]` The ruling forbade a **third referenced object**; it said
+> nothing about where the geometry is written. **Design A2 (H.10.9) respects the ruling in full
+> and reaches the byte tier**, because its extents are named by an immediate rather than by a
+> register field — a counterexample that settles the attribution. **The cap binds every scheme in
+> which the operand is named by the 5-bit register field**, Design A and design B's free map
+> alike. *(`register-map-final.md` §0, §5.2.)*
+
+**Limit 2 — every live value narrower than 32 bits is CHARGED 32 at admission.** This one **is
+Design A's own choice**, and it is a genuine regression against K.6, which charges a value its
+actual width. The concrete cases:
+
+| function shape | under K.6 as written | under Design A | verdict |
+|---|---|---|---|
+| 7 × 64-bit + 8 × 8-bit | 448 + 64 = **512** → admitted at exactly 512 of 512 | 448 + 8×32 = **704** → **rejected** | a function K.6 admits cannot run |
+| 9 × 48-bit (432 bits of data) | 432 → admitted | needs nine 64-bit tiles; only eight exist → **rejected** | ditto |
+| 12 × 16-bit + 5 × 64-bit | 192 + 320 = **512** → admitted | 12×32 + 320 = **704** → **rejected** | ditto |
+
+**Rejection is fatal** (K.6): the function is rewritten, split into a `CONT` chain, or refused.
+**The ceiling on live values is sixteen, whatever their widths** — a boolean, a byte counter and
+a 3-bit tag each cost 32 bits.
+
+**What the two limits cost, stated with the correction the record needs.** Counted like for like
+over one universe of width-multisets, **A places 2,685 of the 13,091 a one-namespace free map
+reaches — a factor of 4.9, a 79.5% loss.** `[CORRECTED — `final-A-aliasing.md` §2.3's "81 of
+13,091, a factor of 162" is a CATEGORY ERROR of 33× in the pessimistic direction: the 81 counts
+(a, b) pairs over a two-width alphabet, the 13,091 counts multisets over a four-width one. Do not
+quote 81, 162, 657 or 969. `register-map-final.md` §5.2.]` **The two measured functions still
+fit:** `nmfc_bu` at 8 values / 480 bits (*a*=7, *b*=1 → 480 ≤ 512, one `w` tile spare) and
+`nmfc_expand` at 8 values / 384 bits (*a*=4, *b*=4 → 128 bits spare). **Both decompositions need
+re-measuring** once the admission tool has a working width input on a RISC-V target
+(`register-map-final.md` §9.1 **U2**); neither uses a sub-32-bit value, **so nothing in the
+record yet measures the cost of Limit 2 on real code.**
+
+**Admission gains a third test, and it is where the deleted run-time check re-homes.** See
+**K.6** for the ratified statement; in summary: (1) the **subset** test; (2) the **bits** test,
+`64a + 32b ≤ 512` with *a* ≤ 8, *b* ≤ 16, *b* counting values of 32 bits **or fewer, each charged
+32**; (3) **a verified non-overlapping placement over the live ranges.**
+
+**Test 3 is not redundant with test 2, and that is proved rather than asserted.** The
+single-instant lemma says a set of {64, 32} widths summing to ≤ 512, placed largest-first at the
+lowest free offset, always lands aligned and non-overlapping. **But allocation is over time.**
+Counterexample: place eight 32-bit values into `w0`–`w7`; let those in `w0`, `w2`, `w4`, `w6`
+survive and the rest die; five 64-bit values are then born. Peak liveness is 4×32 + 5×64 = **448
+≤ 512**, so the sum admits — but `w0` blocks `d0`, `w2` blocks `d1`, `w4` blocks `d2`, `w6`
+blocks `d3`, leaving **four free `d` tiles for five values.** The function does not fit.
+**The allocator is first-fit-decreasing by width at each birth, with a disjointness check over
+the whole placement and relocation moves permitted — a HEURISTIC, not an exact allocator.**
+In the counterexample `mv w1, w2` and `mv w5, w6` compact the survivors and free six `d` tiles.
+**Relocation repairs every gap at one instruction per move ONLY while the live sum is strictly
+below 512**; at exactly 512 of 512 there is no free tile to move into and the placement must be
+right the first time. **When FFD fails the tool must not admit** — it may backtrack, or reject;
+it may not guess. *(`register-map-final.md` §3.6 and its amendment.)*
+
+#### H.10.7 The scoreboard, and the overlap hazard
+
+**On the canon core there is no bit vector.** H.4 is decisive — one outstanding load per context,
+and "*the context is always asleep when its load returns*".
+
+> **The scoreboard is ONE pending destination and a one-slot data buffer.** The context is
+> `BLOCKED` while the load is in flight and issues nothing, so there is no readiness to test on
+> any other name, no overlap to reduce over, and no growth. On the fill, the pending name
+> resolves through H.10.2's decode and is written at that name's width.
+
+**That structure already exists in the tree:** `dbufReg` (a 5-bit name) and `dbufValue`
+(`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCTile.h:85-86`), written at `NMFCTile.cc:827-828`, replayed
+at `NMFCTile.cc:1504`. **What Design A adds to it is THREE BITS** — the fill's width/extension
+class (`{b,h,w,d}` × `{signed, unsigned}`), which a stock in-order core already carries and which
+`writeReg(c, c.dbufReg, c.dbufValue)` does not have today. **Per-context state added by the map
+itself: ZERO. Migration payload: 72 B, unchanged.**
+
+**On the ChampSim core model** — whose contexts keep issuing past an outstanding load, which is
+what DESIGN §7's `scoreboard[≤8]` belongs to — the design is **sixteen ready bits, one per 32-bit
+tile.** A read of a `d` name ORs its two; a pending load resolves its destination through the
+decode and marks exactly the tiles it will write. **This is exact: no name stalls on a load it
+does not depend on.** Cost: 16 × 1024 = **2 KiB per tile = 3.1% of 64 KiB of context state**, of
+which the delta against an eight-bit form is **+1 KiB = 1.5%**, plus **one byte of migration
+ENVELOPE**. **The 72-byte payload is unchanged in every configuration** — I11's 72 B is "64 bytes
+of register file plus an 8-byte program counter", and `token`, `origin`, `home_host` and the
+scoreboard are envelope, not payload.
+
+**The eight-bit lane-granular alternative is REJECTED, and not because eight is inconvenient:** a
+load into `w0` would stall a read of `w1`, so the false dependency falls **exactly between the
+two halves of a lane** — the case bit-packing exists to create. Choosing lane granularity because
+`scoreboard[≤8]` says eight would be using the 8-register artefact as a design constraint, on the
+one structure in the machine where a register name is visible. **That is the reversion I2
+forbids** (#238: "*Once again, NO. 512 bits of context. The context is not 8 regs.*").
+
+**THE OVERLAP HAZARD — moot here, priced for anyone who leaves the barrel.** Under aliasing,
+dependence is no longer 5-bit name equality: it is **bit-range overlap**, and it factors into
+five bits per operand:
+
+```
+    lane[2:0] = n[4] ? n[3:1] : n[2:0]          // FREE -- it IS offset[8:6]
+    mask[1:0] = n[4] ? {n[0], ~n[0]} : 2'b11    // 1 inverter + 2 mux
+    overlap(a,b) = (lane_a == lane_b) && |(mask_a & mask_b)
+```
+
+**≈7 gates against ≈6 for the 5-bit equality it replaces, at the same number of logic levels.**
+
+**On the canon barrel core the cost is ZERO** — C.1/H.2, verbatim: "*Because at most one
+instruction per context is ever in flight, no two instructions in the pipe can be dependent — so
+there is no forwarding, no interlocking, no hazard detection, no ROB, no rename, no load/store
+queue, and no speculative execution.*" **There is no bypass network to make partial-width and no
+comparator to widen.** On a bypassed, non-barrel implementation there are three costs, and the
+record states them so a later implementer does not discover them:
+
+| | delta against a name-equality bypass |
+|---|---|
+| mux bits | **+0.** Two 32-bit selects are the same 64 bits of mux as one 64-bit select. **The merge granularity is the minimum NAME width, 32 bits — never the byte**, so an earlier "eight 2:1 byte muxes" over-states it by 4× |
+| select logic | **×2 per source** — two priority encoders over the forwarding depth instead of one — plus the lane+mask comparator above `[ESTIMATE — the record specifies no pipeline for a non-barrel implementation]` |
+| **the structural cost** | **one 64-bit read can take its two halves from two different producers.** A name-equality bypass never composes a result from more than one source; this one does. **That composition IS x86's partial-register merge** — inherited here in its mild form, because the merge is 32-bit-aligned and never sub-word |
+
+**And the write port genuinely has no read-modify-write:** the minimum name is 32 bits, 32-bit
+aligned, so a neighbour's bytes are simply not written. **Write port +0; bypass network is the
+cost, and only on a core that has one.** *(`register-map-final.md` §3.5 and its amendment.)*
+
+#### H.10.8 The host side — `CXW`/`CXR`, and what packing costs per lane
+
+**The aperture already lines up, and nothing moved to make it so.** `CXW`/`CXR` move one 64-bit
+lane, the lane number in `funct7[3:1]`
+(`/mnt/md0/NMFC-Rev/src/nmfc/include/nmfc_isa.h:101-102`).
+
+> **Lane *k* is exactly tile `d`*k* = `x`(8+*k*), and its halves are `w`*2k* and `w`*2k+1*.**
+
+Because **no tile straddles a lane, every named value is reachable in exactly one `CXR`** — the
+two-`CXR`-and-splice case an arbitrary bit-packed map would have required cannot arise, and
+`NMFC_CX_LANE_SHIFT`/`MASK` keep their values.
+
+**The idiom: build the lane, then write it once.** Only the **low** half needs zero-extending —
+a 32-bit argument arrives in `a0` **sign**-extended (Ch. 5), so a naive `slli`/`add` propagates
+ones across bits 63:32 and destroys `w`*2k+1* whenever bit 31 is set.
+
+```
+    slli  t0, a0, 32
+    srli  t0, t0, 32            # zero-extend the LOW argument   (Zbb: zext.w t0, a0)
+    slli  t1, a1, 32            # high argument, bits 63:32 discarded by the shift
+    or    t0, t0, t1            # { w_2k+1 : w_2k }
+    CXW   c1, k, t0
+```
+
+| what the host does | stock RV64GC | with `Zbb` |
+|---|---:|---:|
+| stage one 64-bit argument | **1** (`CXW`) | 1 |
+| stage **two** 32-bit arguments into one lane | **5** = 2.5 per argument | 4 |
+| stage one 32-bit argument, paired tile **dead** in the callee | **1** | 1 |
+| stage one 32-bit argument, paired tile must read as **zero** | **3** | 2 |
+| stage one 32-bit argument into a lane whose other half is **already live** | **7** — read-modify-write | 6 |
+| read back one 64-bit result or `f64` | **1** (`CXR`) | 1 |
+| read back a 32-bit result from the **low** half, signed | 2 | 2 |
+| read back a 32-bit result from the **low** half, unsigned | 3 | 2 |
+| read back a 32-bit result from the **high** half, either sign | 2 | 2 |
+
+**The ABI rule, because the 7-instruction case is avoidable and the 1-instruction case is easy to
+miss: stage a lane's two halves TOGETHER, and never patch one half of a live lane.**
+
+**Per FORK:** eight 64-bit arguments cost **8** instructions; eight 32-bit arguments cost **20**
+(4 `CXW` + 16 shift/or), **+12**; with `Zbb`, 16, **+8**. **Per bit moved, packing is a tax and
+the record must say so** — 64 bits/instruction unpacked against 12.8 packed. `[WITHDRAWN — an
+earlier proposal concluded packing was cheaper per bit; that was an artefact of the missing
+zero-extension.]` **The comparison that matters is not packed-versus-unpacked staging — it is
+offloading versus not being able to.** A function needing nine live values does not fit 512 bits
+unpacked. **+12 instructions per FORK in the worst realistic case, paid once, in the caller's
+frame, on a host with a stack and 31 real registers**, against a round trip that crosses the
+fabric twice and executes a body at near-memory latency.
+
+**I2 is preserved literally.** The ISA fixes the **GEOMETRY** — which bits a name denotes. It does
+**not** fix the **ASSIGNMENT** — which value a function put in which name. That stays the
+function's own ABI, known to its caller; **register positions carry no architectural meaning
+across the boundary** and all 512 bits come back whole and uninterpreted. What genuinely changes
+is that caller and callee must now agree on **width** as well as position, so a convention is
+published with the function.
+
+> **THE TRAP IN THE STOCK ABI MAPPING, stated as a rule.** Read through H.10.1, the stock RV64
+> convention gives `a0`–`a5` = `x10`–`x15` = `d2`–`d7`, and **`a6`, `a7` = `x16`, `x17` =
+> `w0`, `w1` — the two halves of `d0` = `s0`.** So **lane 0 is scratch ONLY for a function taking
+> six or fewer integer arguments.** With a seventh and eighth, `d0` is fully occupied and the
+> only free 64-bit tile is `d1`. An allocator treating `s0` as scratch in that case silently
+> clobbers two arguments, **and no decode check can see it** — this is SW1 (H.10.4). **Neither
+> specified toolchain path can reach it; a third path could.** The convention itself is
+> unresolved (`register-map-final.md` §9.1 **U5**).
+
+**A ninth argument is still inadmissible for the reason I7 gives — there is no stack — and NOT
+because nine exceeds eight.** Under a custom convention packing into `w` names, **nine 32-bit
+arguments are 288 bits and are admissible**; sixteen are 512 and are the ceiling.
+
+**Where the map lives on the host: nowhere referenced.** The offsets appear in the caller's code
+as immediates in `slli`/`srli`, exactly as a struct field offset does.
+
+**AND THE DIVERGENCE THIS BUYS, PRICED RATHER THAN NOTED.** See **I.7 item 3** for the ratified
+statement: **identical instruction bytes mean different things on the host and on the tile**
+(`x16` is a 32-bit half-tile on the tile and a 64-bit register on the host; the tile does not
+NaN-box and the host does), **and nothing at run time can detect a function compiled for the
+wrong core.** A function-core binary is **not host-executable.**
+
+#### H.10.9 RESERVED HATCHES — not built unless a truly hard constraint appears
+
+`[RESERVED, NOT BUILT. Neither of these is a decision; both are recorded so that a future
+constraint is met by reading rather than by re-deriving. User ruling 2026-09-03, Q1, applied:
+"A now, and reserve both hatches." The user's words on the ladder question itself were "No idea
+what this means", so the ladder notation is not used in this canon.]`
+
+**HATCH 1 — A2: extent instructions.** Two instructions in `custom-1` carrying an immediate
+`{index, width}`, which names an operand's extent **outside the register field** and so reaches
+the byte tier at any aligned offset. It taxes **only the functions that use it**, references no
+third object, and places 13,809 of the 17,361 width-multisets against Design A's 2,685
+(`register-map-final.md` §3A, §5.2). **Its price is two tier-1 reopenings** — **R84**
+(bit-field insert/extract with an offset and a width, rejected at #233) and **the settled
+instruction count** — twelve user-level instructions plus the privileged `RESUME` (I.3, I.9) — and the user's #233 words stand against it
+until then: "*We need to make sure EXTRACTION from the regs is possible. Regular bit manipulation
+can take you the rest of the way … Let's not overdesign.*" **The narrow, extract-only form
+(A2-r) satisfies #233 literally at one instruction instead of two.**
+
+**HATCH 2 — B, in the PC-masked-segment form. The user's words, verbatim
+(user ruling 2026-09-03):**
+
+> "*I think B, with the idea that each instruction page (or segment, it might require large empty
+> sections if we do a whole page per function) encodes the regmap at the beginning. Each nmfc
+> function instruction segment loses a few bytes, but the regmap when in one of these segments is
+> at a constant mask of the PC, meaning migrated contexts can mask the lower pc bits and get the
+> regmap location. That makes B more tenable, but unless we start running into some truly hard
+> constraints lets avoid it.*"
+
+**THE FINDING THIS FORM EARNS, and it is why the hatch is worth reserving rather than closing:
+the PC-masked-segment form REMOVES design B's worst finding.** Plain B needed a
+**handle→address translation** and an identity tag to find a migrated context's map — a
+directory updated on every migration, which is the shape I.1 and R78 forbid, and the thing that
+made B's third object expensive rather than merely present. **Under the PC mask there is no
+translation and no identity tag: the travelling PC locates the map, and a `CONT` successor's PC
+locates its own.** A context that migrates carries its PC (J.1 — the PC does not change on
+migration), so masking its low bits yields the map's address on the arriving tile, out of the
+duplicate page the code itself is on. **What remains of B's cost is segment alignment and
+padding** — the user's own "*it might require large empty sections if we do a whole page per
+function*" — plus the object still existing, still having to be filled, kept, invalidated and
+got wrong.
+
+**Neither hatch is built.** The reservations cost: 2 free bits of envelope for a class field, and
+one `custom-1` opcode that `nmfc_isa.h:18-20` already holds free. **Nothing in the record
+measures a demand for either.**
+
+#### H.10.10 What this section does NOT change
+
+- **The context is 512 bits and the migration payload is 72 B.** Both untouched (I2, I11, J.1).
+- **There is no stack** (I7), no spill, no call from a body.
+- **ChampSim is FROZEN** (user ruling 2026-09-02 **R3**). **Nothing in H.10 is a ChampSim work
+  item.** The build order is SST-side and is in `register-map-final.md` §9; its unresolved
+  engineering items — the per-opcode width column, the opcode→width table for the admission
+  tool, the owner of the placement pass, the post-RA no-spill gate, the tile calling convention,
+  the ChampSim-model scoreboard, and a timing budget — are **U1**–**U7** of §9.1 and are
+  **engineering decisions, not user rulings**.
+- **Nothing in H.10 is a design constant.** The map is design; **SELECTED CONFIGURATION gains no
+  row** (user ruling 2026-09-02 **R6–R10**: "*Do ISAs define how many cores they support? NO!*").
+
+
+---
+
 ## PART I — THE ISA
 
 **TWO NAMING NOTES, BOTH OF WHICH HAVE ALREADY MISLED A READER.**
@@ -5995,6 +6638,26 @@ letter is decoration:**
 | **`A`** | **`A` is not optional.** H.7's atomic table and R15's hand-off chain are an **architectural feature the ISA must be able to name**; an atomic the ISA cannot express is a table with no instruction reaching it | the whole of H.7 |
 | **`F` `D`** | **user ruling 2026-09-03 O4.** Float is in | any kernel with a floating-point weight — PageRank, SSSP with real weights, most of the rest of GAPBS beyond BFS — is inadmissible |
 
+`[SPELLING AMENDED — user ruling 2026-09-03 (morning), Design A. O4's SUBSTANCE IS UNTOUCHED:
+"I think we want float, so C." Float is in, and every reason in the table above still holds.
+What changes is the four-letter spelling, and it changes because of a different ruling.]`
+
+> **THE TILE'S BASE ISA IS `RV64IMA` + Zfinx/Zdinx SEMANTICS: `F`/`D` OPCODES, `x`-FILE
+> OPERANDS.** Under Design A, **`f`*n* ≡ `x`*n*** — the same bits, with the type taken from the
+> opcode (**H.10.5**, and the user's own formulation, *"utilizing a float reg implies the type,
+> while the number of the reg implies the slice"*). The ratified spec makes **F/D and Zfinx
+> mutually exclusive**, so a machine in which the two namespaces are one **is not implementing
+> `F`/`D` in the ratified sense** and must not claim `RV64IMAFD` as its spelling.
+> **`f0` reads `+0.0` and is a deviation from Zfinx**, recorded at H.10.1.
+> **The host is unaffected: it stays a stock RV64GC core with a real `f` file and FLEN = 64.**
+
+**Write it as `RV64IMA_Zfinx_Zdinx` where a machine-readable spelling is needed** (the day-one
+toolchain path uses it). **Where this document says "the `IMAFD` subset" as shorthand for which
+OPERATIONS are admissible, that is still correct** — integer, multiply/divide, atomics and both
+floating-point widths — and only the *encoding claim* is amended. `[ASSISTANT'S READING of the
+user's Q2 answer, which to the question as posed was "I don't know what that means"; recorded for
+overturn at Appendix 1 **L51**.]`
+
 **AND NOW THE CONSEQUENCE, STATED CORRECTLY, BECAUSE THE OBVIOUS READING OF IT IS THE
 DEFECT INVARIANT 2 EXISTS TO STOP.** The `O4` row as it was written said floating point
 "*widens the 512-bit context register file's per-context save set and must be priced
@@ -6060,6 +6723,23 @@ a register NAME is not a fixed bit offset in this machine.**
 the context is not wider than 512 bits.** The name space is large and the live set is
 small — which is the ordinary situation for any register allocator, only with a bit budget
 instead of a slot count.
+
+`[SUPERSEDED IN PART — user ruling 2026-09-03 (morning), Design A. READ THIS BEFORE QUOTING THE
+FOUR POINTS ABOVE. The four-point answer is KEPT, because it is the record of how the objection
+was answered before there was a map, and because two of its four points are still exactly right.
+Two clauses of it are now wrong, and a reader who quotes them will build the wrong machine.]`
+
+| clause of the four-point answer | disposition under Design A |
+|---|---|
+| point 1 — "*there is no array of 64 slots for names to index into*", "*what exists is 512 bits of live storage*" | **STANDS, and is strengthened.** It is the whole premise of H.10 |
+| point 1 — "*a **per-function binding from register name to bit range**, produced by the compiler … and **carried with the offload**"* | **SUPERSEDED. That object does not exist.** The binding is fixed at tape-out, is ≈7 gates or a 310-bit ROM per tile, and is carried by nothing (H.10.2). Deleting it is what the 2026-09-03 ruling asked for: "*a third piece of memory every context needs… foolish*" |
+| point 2 — "*the compiler assigns DISJOINT bit ranges to every simultaneously-live name, **across both namespaces***" | **HALF SUPERSEDED.** Disjointness of **simultaneously-live values** is still required — but it is no longer achieved by *naming*, and it is no longer the compiler's to assert. It is **verified at admission** as a non-overlapping placement over the live ranges (K.6 test 3). "Across both namespaces" is now vacuous: there is one namespace |
+| point 3 — "*what IS bounded is LIVENESS, not the name space*" | **STANDS**, and is what K.6 tests |
+| point 4 / the closing sentence — "***the `f`-names do not overlay the `x`-names***" | **SUPERSEDED, and reversed.** `f`*n* **is** `x`*n*: identical bits, type from the opcode (H.10.5). **The other horn is still not taken** — the context is not wider than 512 bits, and that half of the sentence stands |
+| point 4 — "*a stock, unconstrained binary is not admissible as-is*" | **STANDS, and hardens.** It is now also true of the *names*: a stock body using `sp`, `ra` or any of `x1`–`x7` is **decode-illegal**, not merely inadmissible (I7, H.10.4) |
+
+**And the consequence the supersession creates, which is stated at I.7 item 3 and priced at
+H.10.8: identical instruction bytes now mean different things on the host and on the tile.**
 
 **And the admission test follows from that** — it checks **the `IMAFD` subset** (an opcode
 outside it is inadmissible) and it counts **liveness in BITS**, with an `f64` costing 64
@@ -6545,6 +7225,56 @@ change what "deliberately absent" covers.]`
    offloaded.** Recorded here rather than in Part P because it was never proposed and
    rejected — it is a consequence of O4 that has to be stated before someone implements
    `F` the ordinary way.
+
+   `[ITEM 3 IS SUPERSEDED — user ruling 2026-09-03 (morning), Q3, applied. THE ITEM IS KEPT
+   ABOVE IN FULL; this block says which clauses survive and which do not. Nothing here is
+   deleted, because a reader who finds only the replacement cannot tell what was traded.]`
+
+   **WHAT STANDS, unchanged and strengthened:** there is **no separate floating-point register
+   file**, no `fcsr`, no rounding-mode state and no floating-point exception state. A second
+   file would be a second context, would break invariant 2 and would grow a migration past
+   72 B. **Under Design A this is now structural rather than argued:** `f`*n* ≡ `x`*n*, so there
+   is no second file to build (**H.10.5**).
+
+   **WHAT IS SUPERSEDED — clause by clause:**
+
+   | clause | disposition |
+   |---|---|
+   | "*`f0`–`f31` and `x0`–`x31` are **two NAMESPACES** over the same 512 bits*" | **SUPERSEDED.** There is **one** namespace. `f`*n* names exactly the bits `x`*n* names, and the **type comes from the opcode** (H.10.5) |
+   | "*the **compiler's packing** decides which bits each name resolves to*" | **SUPERSEDED.** The **register number** decides, fixed at tape-out (H.10.1). The compiler decides which *value* goes in which name, which is a different thing |
+   | "*A function needing dynamic rounding modes … **cannot be offloaded**.*" | **SUPERSEDED, and this is the softening the user was asked to weigh.** The tile defines **`rm = DYN` (`0b111`) as RNE** instead, because GCC and LLVM emit no rounding suffix in ordinary codegen and the assembler encodes DYN by default — rejecting DYN would make **all** stock FP codegen illegal. The replacement remedy is a **build-time gate**: the admission tool rejects any function reaching `fesetround`/`fegetround`, or any translation unit compiled `-frounding-math` |
+
+   > **AND THE PRICE, STATED WHERE IT CANNOT BE MISSED, BECAUSE THE PROPOSALS RANK IT THE WORST
+   > FAILURE MODE IN EITHER DESIGN: THE SAME INSTRUCTION ENCODING COMPUTES DIFFERENT RESULTS ON
+   > THE HOST AND ON THE TILE, AND NOTHING AT RUN TIME CAN SEE IT.**
+   >
+   > **(a) Rounding.** Every stock FP instruction carries DYN and is indistinguishable from one
+   > that genuinely wanted RNE. A program that called `fesetround()` and then offloaded gets a
+   > different answer, silently. **The build-time gate cannot see the case that matters**: the
+   > divergence is caused by the **caller's** `fcsr.frm`, in another translation unit, which the
+   > admission tool never walks. The gate is **weaker than the clause it replaces**, and saying
+   > so is the point of this row.
+   >
+   > **(b) Naming and boxing — the broader divergence Design A creates.** `x16` is a **32-bit
+   > half-tile** on the tile and a **64-bit register** on the host; the tile **does not NaN-box
+   > and does not check boxes**, the host does both (H.10.3). **So a FUNCTION-CORE BINARY IS NOT
+   > HOST-EXECUTABLE**, identical bytes notwithstanding, and **nothing at run time can detect a
+   > function compiled for the wrong core.**
+   >
+   > **THE RULING: ACCEPT THE SUPERSESSION, DOCUMENT AND PRICE THE DIVERGENCE** — because the
+   > alternative rejects every stock floating-point function, which is a larger loss than a gated
+   > divergence. **The remedies are build-time and they are the only ones there are:** the
+   > `fesetround` gate above, and treating a function-core object as a **distinct target** that
+   > is never linked into host-executable text.
+   >
+   > `[ASSISTANT'S READING OF THE USER'S CHOICE — user may overturn. Appendix 1 **L50**. The user
+   > said of the question as posed: "I don't know what CANON I.7 is." The reading applied is that
+   > choosing Design A entails this supersession, because A is what makes identical bytes mean
+   > different things. **A drafting note the user should see: the question was put naming item 3
+   > as "the property that function code is host-executable unchanged", while item 3's actual
+   > text is the dynamic-rounding clause above. Both divergences are real, both are of the same
+   > "identical encoding, different result" class, and BOTH are recorded here rather than
+   > guessing which was meant.**]`
 
 **`KILL`.** *User #224, 2026-09-01T04:32:31Z:* "**Lets not build a KILL instruction
 though. The idea that a context could be ended in an unsafe state is real, so the
@@ -7427,6 +8157,11 @@ A function is admissible iff **every opcode in it is in `RV64IMAFD`** *and* its 
 simultaneous liveness fits in 512 bits.** Two tests, both mandatory, and until this
 revision the document stated only the second.
 
+`[NOW FOUR TESTS — read to the end of this section before implementing. User ruling 2026-09-03
+(morning) added a legality clause to the subset test and two tests after it: a **verified
+non-overlapping placement** over the live ranges, and an **illegal-name** check. The full
+statement is the boxed rule below the CONFLICT blocks; H.10.6 carries the derivations.]`
+
 **THE SUBSET TEST IS NEW AND IT IS RULED.** [RULED — user ruling 2026-09-03 **O4**,
 verbatim: "**I think we want float, so C.**" The subset is `RV64IMAFD`; the family was
 already RISC-V under R11. I.0 carries the full statement and the per-letter reasons.]
@@ -7495,6 +8230,77 @@ And **SST's tile is `RV64IM+A` only** (Appendix 2 **S6**), so it would *trap* on
 floating-point instructions O4 admits. **Both are gaps against the ruled subset**; the
 tool must gain the subset test and the tile must gain `F`/`D` — packed into the one
 512-bit context, never into a second file.
+
+`[THE TEST GAINS ITS THIRD AND FOURTH PARTS — user ruling 2026-09-03 (morning), Design A
+(H.10). The two tests above are NOT replaced; they are joined. Everything above this block
+stands, including the three wrong answers and both CONFLICT blocks.]`
+
+> **A function is admissible iff ALL FOUR hold:**
+> **(1) THE SUBSET TEST** — every opcode is in the ruled subset (integer, `M`, `A`, and both
+> floating-point widths), **and its body satisfies the decoder's legality rules** (H.10.4),
+> which is the part that is new: an opcode can be in the subset and its *operands* still
+> illegal.
+> **(2) THE BITS TEST** — peak simultaneous liveness satisfies **`64a + 32b ≤ 512` with
+> *a* ≤ 8 and *b* ≤ 16**, where ***b* counts values of 32 bits OR FEWER, EACH CHARGED 32.**
+> **(3) A VERIFIED NON-OVERLAPPING PLACEMENT** exists over the function's live ranges.
+> **(4) NO ILLEGAL NAME** — `x1`–`x7` / `f1`–`f7` as any operand. This one is **also** trapped
+> at decode (I7, H.10.4), and the admission tool checks it so the failure arrives at build time.
+
+**Test 2 is K.6's own test with ONE change, and the change is a regression that must be named.**
+It is still on **bits**, in **ONE pool**, and it is still **peak simultaneous liveness**, not a
+count of registers touched — so R30's error is not re-introduced, #99's never-read register still
+costs nothing, and rejection is still fatal. **The change is the charge-32 rule**: K.6's own
+worked example prices "eight live 64-bit values plus one 8-bit value" at 520 bits — **eight** bits
+for the byte, not thirty-two. Under Design A that byte costs **32**. **Three shapes K.6 admits and
+Design A rejects are tabulated at H.10.6**, and this is stated as **Design A's limit**, not as
+something the user's ruling cost (H.10.6 carries the attribution and the counterexample).
+**One pool is now structural rather than checked:** with `f`*n* ≡ `x`*n* (H.10.5) the "third wrong
+answer" above — two pools admitting a function twice the legal size — is **unrepresentable.**
+
+**TEST 3 IS NOT REDUNDANT WITH TEST 2, AND THAT IS PROVED, NOT ASSERTED.** The sum admits sets
+the geometry cannot place, because **allocation happens over time and the lemma is about one
+instant.** Verified counterexample: eight 32-bit values placed first-fit into `w0`–`w7`; those in
+`w0`, `w2`, `w4`, `w6` survive and the rest die; five 64-bit values are then born. Peak liveness
+is 4×32 + 5×64 = **448 ≤ 512**, so test 2 passes — but `w0` blocks `d0`, `w2` blocks `d1`, `w4`
+blocks `d2`, `w6` blocks `d3`, leaving **four free `d` tiles for five values.** The function does
+not fit. *(Full statement and the single-instant lemma at H.10.6;
+`docs/nmfc/proposals/register-map-final.md` §3.6.)*
+
+> **THE PLACEMENT PASS IS A HEURISTIC AND THE RECORD SAYS SO.** **First-fit-decreasing by width
+> at each birth, plus a disjointness check over the whole placement, with relocation moves
+> permitted.** In the counterexample `mv w1, w2` and `mv w5, w6` compact the survivors and free
+> six `d` tiles. **Relocation repairs every gap at one instruction per move ONLY while the live
+> sum is strictly below 512**; at exactly 512 of 512 there is no free tile to move into and the
+> placement must be right the first time. **The general problem is mixed-width allocation with
+> alignment over an interval graph — the register-pairing problem — and this document neither
+> reproduces nor claims a hardness result.** What is proved is the only thing the design needs:
+> **the sum is not sufficient.** **When FFD fails, the tool MUST NOT ADMIT** — it may retry with
+> bounded backtracking, or reject. **It may not guess** — this section's own rule,
+> *rejection is fatal and must not be softened*, applied to the tool: **fail closed.**
+
+**AND TEST 3 IS WHERE A DELETED RUN-TIME CHECK RE-HOMES, WHICH IS THE REASON IT IS MANDATORY.**
+The per-function map SST builds today has a run-time trap on an **undefined** register name
+(`RegLayout::illegal()`, `/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCTile.cc:464`, `:472`). **Design A's
+map is total, so that trap has nothing to fire on** — every name is always defined. **The check is
+not deleted; it moves to build time as test 3.** What it defends against is **SW1**: `d0` and
+`w0`/`w1` are the same bits, and an allocator that makes one value live in `d0` and another in
+`w1` clobbers, **with nothing in the machine able to see it** (I7's flag; H.10.4).
+**This is a build-time obligation with no run-time counterpart, and it is the one place Design A
+is less safe than the mechanism it replaces.** *(Two honest qualifications, both required
+whenever this is cited: design **B** does not catch SW1 either, so it separates no candidate; and
+the instance usually named — `s0` = `x8` = `d0` clobbered by a seventh/eighth integer argument in
+`a6`/`a7` = `w0`/`w1` — **is unreachable on either specified toolchain path.**)*
+
+`[CONFLICT — TEST 3's VERIFIER DOES NOT EXIST, AND NEITHER DOES THE TABLE TEST 1 NEEDS.]` The
+~40-line disjointness verifier is unwritten and **its owner is undecided** — the placement pass
+needs an emitter the admission tool does not have, so either the tool grows one or placement moves
+to the compiler back end. The per-opcode required-width column that legality rule 2 *is*, and the
+~150-entry opcode→width table the tool needs to charge widths on a RISC-V target, are both
+unwritten. **Until a width input lands, the tool must charge every value 64 bits AND SAY SO** — a
+conservative gate that rejects some admissible functions is sound; a silent fall-through that
+looks like a measurement is not. **Consequence: the two measured decompositions in H.10.6 are not
+currently reproducible from the tool and must be re-measured.** These are **engineering items, not
+user rulings** — `register-map-final.md` §9.1 **U1**, **U2**, **U3**.
 
 **Tier 1 wins: the test is on BITS** (#232: "It could be 16 4-byte regs, 64 1-byte regs,
 or ANY combination. **Bit-packing is the name of the game**"; #99: a register never read
@@ -8811,6 +9617,9 @@ Marked `[REBUILT]` where the record shows it was rejected and then built again a
 | R94 | **A per-context branch predictor on the function core** | Would multiply by the context count and be **cold on every invocation** — the wrong shape twice over. The BTB is **shared** | DESIGN §25.3 D:2409-2416 |
 | R95 | **Multiple outstanding loads per context** | Needs disambiguation of which return is which and a way to keep the register file coherent across them; **neither is needed for correctness.** "I doubt it will make a difference, just adding excessive state and complexity with no benefit" | #239 (2026-09-01T06:27) |
 | R96 | **Treating a 100% instruction hit rate as an invariant** | "**100% instruction hit rate is not an invariant. that is something you fabricated.**" Model the cache | #250 (2026-09-01T17:38) |
+| R111 | **A PER-FUNCTION REGISTER MAP FETCHED AT DECODE** — a table binding each register name to an (offset, width), held per resident function or per context and consulted on every register access `[ADDED — user ruling 2026-09-03. This is the mechanism the ruling killed, and it is the one the record kept re-deriving.]` | "***a third piece of memory every context needs… foolish***". It is a **third referenced object** alongside the instruction and the data: it must be filled, kept, invalidated and got wrong — four run-time failure modes the map does not have. Replaced by **Design A**, where the register number **is** the bit range: ≈7 gates or a 310-bit ROM per tile, against SST's `RegLayout` at **768 bits per resident function** fetched at every access. **What is deleted with it:** `RegLayout` and the handle→address translation a migrated context would have needed to find its map | user ruling 2026-09-03; **H.10**, I2, I7; `/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCRegLayout.h:40-42`, `NMFCTile.cc:461-475`; `proposals/register-map-final.md` §7.1 |
+| R112 | **CUSTOM TYPED INSTRUCTIONS** — new opcodes whose encoding carries the operand's *type* (or a per-operand width class) so that a name plus a type names a slice | **The type comes from the OPCODE the ISA already has.** `lw`/`ld`, `addw`/`add`, `flw`/`fld`, `.s`/`.d` and the `*W` forms already name every width this machine computes at, and an FP mnemonic already names its operand's type — so a typed instruction re-encodes information the opcode carries. **Width is taken from the operand's ROLE** (H.10.3 W1), never from a new field. **NOT rejected: the A2 hatch**, which carries an *extent* immediate `{index, width}` rather than a type, and is reserved unbuilt at **H.10.9** | user ruling 2026-09-03; **H.10.3**, H.10.9; `proposals/register-map-final.md` §7.2, §3A |
+| R113 | **SINGLE-WIDTH ALIASING** — one complete tier of eight 64-bit names over the context (`x1`–`x8` as eight 64-bit slices), with no narrower tier | **It is the SST 8×64 layout wearing an architectural hat** (`NMFC_CTX_WORDS = 8`, `in[0..7]`, Appendix 2 **S4**) — a tier-4 implementation convenience, and adopting it would make the 8-register artefact the design. **That is the reversion I2 forbids** (#238: "*Once again, NO. 512 bits of context. The context is not 8 regs.*"): with one 64-bit tier a 32-bit value costs 64 bits and bit-packing buys nothing, which is the whole point of I2. **And anchoring such a tier at `x1` costs four of its eight names** — `ra`, `sp`, `gp`, `tp`, which no stock allocator will use — so it yields at most four usable names, not eight. **Design A keeps both complete tilings** (H.10.1) | user ruling 2026-09-03; **I2**, **H.10.1**, Appendix 2 **S4**; `proposals/final-A-aliasing.md` §1.3; `proposals/register-map-final.md` §7.3 |
 
 ### P.6 Method and evaluation
 
@@ -8839,7 +9648,9 @@ Every place the sources disagree, which authority won, and why. Authority order:
 user-vs-ChampSim conflicts, or genuinely open questions, that this document does not
 resolve on its own authority.
 
-**Count: 49 conflicts (L1–L49, no gaps).** [CORRECTED — this header read "37" while the
+**Count: 53 conflicts (L1–L53, no gaps).** `[UPDATED — L50–L53 added 2026-09-03 (morning): the
+four register-naming questions, their rulings, and the two readings tagged `[USER TO CONFIRM]`.
+They sit at the END of this appendix, after L49.]` [CORRECTED — this header read "37" while the
 file carried 42 rows, so a reader auditing the ledger by its own count stopped five rows
 early. `grep -cE '^\*\*L[0-9]+ —' docs/nmfc/CANON.md` is the check; run it after
 adding a row. Seven rows are new this revision — **L43**–**L49**, all from Part I and the
@@ -8849,6 +9660,13 @@ mechanisms Part I depends on.]
 them; two more — L2 (R12) and L13 — were closed in editing; and **three rows carry a
 `RULED` bullet dated 2026-09-03**: **L38** (`O1`, the unhinted-grain default), **L43**
 (`O3`, the encoding), and **L46** (`O4`, the RISC-V subset). **No row has been deleted.**
+
+`[AND A NEW TAG EXISTS AS OF 2026-09-03 (morning): `[USER TO CONFIRM]`. It is NOT
+`[FOR THE USER TO RULE]` — the user DID rule, and the ruling is applied; what is recorded for
+confirmation is the ASSISTANT'S READING of a ruling given in words that did not answer the
+question as posed. **Two rows carry it — L51 (Q2, `f`*n* ≡ `x`*n*) and L52 (Q4, the scope of the
+trap requirement) — and L50 (Q3) carries the same flag in its own wording.** They are the only
+unsettled things in this document, and each is flagged again at its point of use.]`
 
 **NO `[FOR THE USER TO RULE]` TAG IS STILL LIVE ANYWHERE IN THIS APPENDIX.** The last two
 — L38 (`O1`) and L43 (`O3`) — were closed by the 2026-09-03 rulings; L47's was stale, since
@@ -9923,15 +10741,120 @@ depend on them. [RULED 2026-09-02 — see the RULED bullet at the end of this ro
 ---
 - **RULED — user ruling 2026-09-02 R12: "I am fairly certain real machines have separate page tables per address space? TLBs are shared, page tables themselves should not be shared between address spaces?"** **One page table PER ADDRESS SPACE, duplicated on every tile. TLBs are shared** (ASID-tagged). The `asid` is part of every translation, remap and shootdown. See I3, C.2, F.5a, F.8. **CLOSED.**
 
+---
+
+**FOUR ROWS ADDED 2026-09-03 (morning) — L50–L53. These are NOT conflicts between sources. They
+are the four questions the register-naming proposals put to the user, the rulings that closed
+them, and — for two of them — the assistant's reading of a ruling the user gave in words that did
+not answer the question as posed. **Those two are the only things in this document that are not
+settled**, and they are tagged `[USER TO CONFIRM]` here and at the point of use.**
+
+**THE RULING THAT GOVERNS ALL FOUR, verbatim: "Okay, lets go with A."** Design A is adopted: the
+register number **is** the bit range of the 512-bit context (**H.10**).
+
+**L50 — Q3: does Design A supersede CANON I.7 item 3? [RULED — reading recorded, USER TO CONFIRM]**
+- *What was asked:* I.7 item 3 ends "*a function needing dynamic rounding modes … **cannot be
+  offloaded**.*" Both candidate designs define `rm = DYN` as RNE instead, because every stock FP
+  instruction carries DYN and rejecting it makes all stock FP codegen illegal. The proposals rank
+  this **the worst failure mode in either design**: *"the same encoding computes different results
+  on host and tile, and nothing can see it"* (`proposals/register-map-final.md` §10, Q3).
+- *What the user said, verbatim:* "**I don't know what CANON I.7 is.**"
+- *What the assistant explained, and what is applied:* under A, **identical instruction bytes mean
+  different things on the host and on the tile** — `x16` is a 32-bit half-tile on the tile and a
+  64-bit register on the host, the tile does not NaN-box and the host does — and **nothing at run
+  time can detect a function compiled for the wrong core**. Since the user chose A, the
+  supersession is **ACCEPTED**: a **function-core binary is not host-executable**; the divergence
+  is documented and priced rather than denied.
+- **RULING APPLIED: SUPERSEDE, and price it.** Written at **I.7 item 3** (clause by clause, with
+  the item kept in full) and **H.10.8**. `[ASSISTANT'S READING OF THE USER'S CHOICE — user may
+  overturn.]`
+- **A drafting discrepancy the user should see, recorded rather than resolved:** the question was
+  put naming item 3 as *"the property that function code is host-executable unchanged"*, while
+  item 3's actual text is the **dynamic-rounding** clause. **Both divergences are real and of the
+  same class, and both are recorded at I.7** rather than guessing which was meant. **CLOSED,
+  pending confirmation.**
+
+**L51 — Q2: does `f`*n* ≡ `x`*n*? [RULED — reading recorded, USER TO CONFIRM]**
+- *What was asked:* do the `f` names denote the same bits as the `x` names (one pool, 31 nameable
+  slices, two complete tiers), or different bits (two pools, 56 names, a third complete tier at
+  16 bits with **no arithmetic in the subset to run on it**)?
+- *What the user said, verbatim:* "**I don't know what that means.**"
+- *What the assistant explained:* same slices for the `f` and `x` names, with the **type taken
+  from the opcode** — which is **RISC-V Zfinx/Zdinx's ratified rule** for the case where the two
+  namespaces coexist. **The recommendation is SAME POOL**, and it is consistent with the user's
+  own earlier words: "*utilizing a float reg implies the type, while the number of the reg
+  implies the slice*."
+- **RULING APPLIED: `f`*n* ≡ `x`*n*, ONE POOL.** It makes K.6's "third wrong answer" — two pools
+  admitting a function twice the legal size — **structurally unrepresentable**. Written at
+  **H.10.5**, **I.0**, **K.6**.
+- **What it carries with it, and this is the part that must not be dropped:** the ratified spec
+  makes **F/D and Zfinx mutually exclusive**, so the tile's base-ISA spelling becomes
+  **`RV64IMA` + Zfinx/Zdinx semantics** — F/D *opcodes*, `x`-file operands. **Ruling O4's
+  substance is untouched: "I think we want float, so C" — float is in.** Only the four-letter
+  spelling changes, and **L46's ruling on the subset stands.**
+- **It supersedes four statements**, all kept in place with their dispositions: I.0's four-point
+  answer points 1 and 4, the `O4` row's "*the namespaces do NOT alias*", and **L46's `RULED`
+  bullet restating it**. The half that survives and is strengthened everywhere: **512 bits of
+  live storage, not 64 architectural slots.** `[ASSISTANT'S READING — user may overturn.]`
+  **CLOSED, pending confirmation.**
+
+**L52 — Q4: is the run-time undefined-register trap a requirement or a preference? [RULED —
+requirement; the SCOPE of the requirement is USER TO CONFIRM]**
+- *What was asked:* SST's per-function map traps at run time on a name the map leaves **undefined**
+  (`RegLayout::illegal()`, `NMFCTile.cc:464`, `:472`). Under a total map there is nothing to fire
+  on. Is that trap a **requirement** — which would eliminate Design A and force the per-function
+  map back — or a **preference**?
+- *What the user said, verbatim:* "**Requirement.**"
+- **RULING APPLIED, in the half Design A satisfies:** the trap on an **ILLEGAL NAME** — `x1`–`x7`
+  / `f1`–`f7` as any operand — is **REQUIRED and IS BUILT.** Under A it is **free**: `legal =
+  n[4] | n[3]`, one OR gate. Written at **I7** and **H.10.4**; the admission tool checks it too
+  (K.6 test 4) so the failure can arrive at build time.
+- **WHAT A CANNOT TRAP, AND THE FLAG.** A cannot trap **misuse of a LEGAL name**: a 64-bit value
+  in a 32-bit name, or `d`*k* and `w`*2k*/`w`*2k+1* live at once. That is **SW1**, and it is
+  caught **at admission/compile time or not at all** (K.6 test 3 — the verified non-overlapping
+  placement, which is where the deleted run-time check re-homes).
+- **THE FLAG, PUT TO THE USER: if "Requirement" was meant to cover misuse of a legal name as
+  well, then Design A does NOT satisfy it and only design B does — which would contradict the
+  choice of A.** `[USER TO CONFIRM the reading.]` **Two qualifications the record requires
+  whenever this is argued:** design **B does not catch SW1 either** — a bit-exhausted allocator
+  that coalesces two simultaneously-live values onto one name emits a legal, non-overlapping map
+  and the tile accepts it — so SW1 separates no candidate; and the instance usually cited
+  (`s0` = `x8` = `d0` clobbered by a seventh/eighth integer argument in `a6`/`a7`) **is
+  unreachable on either specified toolchain path.** **CLOSED in its illegal-name half; the scope
+  question is the one thing in this document a ruling could still change.**
+
+**L53 — Q1: where do you stop — A, or one of the richer schemes? [RULED — A now, both hatches
+reserved]**
+- *What was asked:* whether to build Design A, or one of the schemes that place more width
+  shapes: **A2** (extent instructions carrying an immediate `{index, width}`, reaching the byte
+  tier), **B2** (width classes), or **B1** (the per-function map restored).
+- *What the user said, verbatim:* "**No idea what this means.**" — *the ladder notation the
+  question used is therefore NOT used anywhere in this canon.*
+- **RULING APPLIED: A NOW. A2 and B are RESERVED HATCHES, built only if a real constraint
+  appears.** Written at **H.10.9**, in the user's own framing: "*unless we start running into some
+  truly hard constraints lets avoid it.*" The reservations cost 2 free envelope bits and one
+  `custom-1` opcode that `nmfc_isa.h:18-20` already holds free.
+- **AND THE FINDING THE USER'S OWN FORM OF B EARNS, recorded because it changes B's standing if
+  it is ever built:** the user proposed B as a **map at a constant mask of the PC**, written at
+  the head of each function's instruction segment. **That form removes B's worst finding** — plain
+  B needed a **handle→address translation and an identity tag** to let a migrated context find its
+  map, which is a directory updated on every migration and the shape I.1 and R78 forbid. **Under
+  the PC mask the travelling PC locates the map, and a `CONT` successor's PC locates its own**
+  (J.1: the PC does not change on migration). **What remains of B's cost is segment alignment and
+  padding**, plus the object still existing. Verbatim at **H.10.9**. **CLOSED.**
+
+---
+
 ## APPENDIX 2 — DIVERGENCES: SST IMPLEMENTATION vs CANON
 
 `/mnt/md0/NMFC-Rev/src/nmfc`, read 2026-09-02, file mtimes 2026-09-01T00:31 →
 2026-09-02T18:32. **Authority tier 4 — lowest. Nothing here decides anything.** This is
 a checklist for the next work session, not a description of the machine.
 
-**Count: 39 divergences** (S39 added; **S13 re-tagged from `[WRONG]` to `[NOTE]`** — it is
-a documented, scoped, announced trade-off, not a defect; **S18 re-tagged from `[WRONG]` to
-`[ARTEFACT]`** — its warning tests a hardcoded constant, not the geometry).
+**Count: 40 divergences** (**S40 added 2026-09-03 (morning) — register naming**; S39 added;
+**S13 re-tagged from `[WRONG]` to `[NOTE]`** — it is a documented, scoped, announced trade-off,
+not a defect; **S18 re-tagged from `[WRONG]` to `[ARTEFACT]`** — its warning tests a hardcoded
+constant, not the geometry).
 
 **READ D0 FIRST.** `[ADDED this revision — user ruling 2026-09-02 R3: "ChampSim updates
 stop until we deem it a good idea to go back."]` **ChampSim is frozen**, so "fix it in
@@ -10054,6 +10977,7 @@ SST or it is not measured, and this document says which.
 | **S17** `[WRONG]` | Rev has a source-operand interlock and a stall statistic; **Vanadis has neither** (documented as by design). Rev's mismatch statistics have no RoCC equivalents. | M.2 — one instruction set on two hosts; statistics should be comparable |
 | **S18** `[ARTEFACT — re-tagged; the warning fires on a HARDCODED CONSTANT, not on the geometry]` | SST warns that `G = 256 KiB × ntiles` is "not a whole number of bank sweeps at 1 or 3 tiles" and proceeds. **That warning presupposes `sweep := 512 KiB fixed`.** On the checked-in reference device a sweep is `row_bytes × banks_per_channel` = `4096 × 64` = **256 KiB**, so `G / sweep = total_channels = N` **exactly, at every tile count** — G(3) = 768 KiB = 3 sweeps. **The condition the warning tests is never true for this device; it is testing SST's own constant.** Fix the constant (derive the sweep from the device) or delete the warning. | **E.5**, which now defines `sweep` and records that the odd-tile-count caveat was an artefact of the same fixed 512 KiB — it does not exist for either device in the tree |
 | **S19** `[WRONG]` | The per-tile entry-point rewrite (`pc + t·G`) documented at `NMFCFabricComponent.h:60` is **implemented nowhere** — correctly, because code is on duplicate pages, but the doc still asserts it. | J.1 — the PC does not change on migration |
+| **S40** `[GAP — the implementation step, added 2026-09-03 (morning)]` | **REGISTER NAMING: SST models 8 × 64-bit lanes; DESIGN A IS TO BE IMPLEMENTED.** SST resolves a register name through a **per-function `RegLayout`** — 32 × (`uint16` offset + `uint8` width) = **768 bits per resident function** (`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCRegLayout.h:40-42`), read at **every** register access (`NMFCTile.cc:461-475`, `return c.regs.read( layout_.field[r] );`), and nothing in the tree produces a layout other than the hard-coded `x1..x8 × 64-bit` default (see **S4**, **S5**). **The canon is now Design A** (H.10): the register number **is** the bit range, resolved by ≈7 gates or a 310-bit ROM per tile, with **nothing fetched**. **This is the largest single divergence in this appendix and it is a BUILD ITEM, not a defect to argue about.** The build order — steps, files and line counts — is `docs/nmfc/proposals/register-map-final.md` **§9**, and its unresolved engineering items are **§9.1 U1–U7**. In outline: delete `struct RegLayout` and `defaultLayout()`, keep `RegField` and `Context512`, **delete `Context512`'s straddle branches** (provably dead — no slice crosses a 64-bit word), add the ~8-line `constexpr` decoder, delete `RegLayout layout_` from `NMFCTile.h:448-450`, add the three width/extension-class bits to the `dbufReg`/`dbufValue` pair (`NMFCTile.h:85-86`), and add the decoder's legality rules. **Net ≈ −60/+15 lines in the layout header alone.** **`RegLayout::illegal()`'s run-time trap (`NMFCTile.cc:464`, `:472`) does not survive** — a total map leaves it nothing to fire on — and **its replacement is the admission-time placement verifier**, which does not exist yet and whose owner is undecided (**U3**). **ChampSim is FROZEN (R3): none of this is a ChampSim work item.** | **H.10** (the whole section), **I2**, **I7**, **K.6**; and **S4**/**S5**, which this supersedes as the *reason* the 8×64 layout must not be read as the design |
 
 ### D3 — Accounting and modelling artefacts that distort numbers
 
