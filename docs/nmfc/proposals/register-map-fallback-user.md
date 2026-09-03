@@ -47,3 +47,27 @@ scrutiny. It is recorded here so the words survive verbatim.
 
 Survivor-or-fallback determination, with the reasons each aliasing variant did
 or did not survive, is written in `register-map.md` §7/§10.
+
+## Clarification (user, 2026-09-03, verbatim)
+
+"I want to clarify, the map is best thought of as an extension of the context.
+Ideally it doesn't follow with migration, it is retrieved post-migration on the
+new core. However, if the handle-index cache doesn't seem viable (it would need a
+port for the width of the machine or we would need contexts aligned to widths so
+the entire system could be banked-per-width (potentially necessary anyway)). All
+things to consider. I would prefer a proposal for 1 or 2 suggested designs is
+written up for the end of this, with full consideration of implementation
+complexity, performance impact, and overall simplicity."
+
+Consequences for the proposal pass:
+- The map is context state that is NOT part of the 72-byte migration payload;
+  it is re-acquired on the destination core (first visit fetch, then cached by
+  handle; handle reuse must detect a different function).
+- The handle-indexed per-core cache must be costed honestly: either a read port
+  per context width the machine supports, or contexts aligned to a width class
+  so the register file, the map cache and possibly the whole datapath are banked
+  per width. "Banked per width" is to be evaluated as a design in its own right,
+  since it may be necessary regardless of which map/aliasing scheme wins.
+- DELIVERABLE: one or two recommended designs, each with implementation
+  complexity, performance impact, and overall simplicity assessed; the aliasing
+  variants and this map are candidates on equal footing under that rubric.
