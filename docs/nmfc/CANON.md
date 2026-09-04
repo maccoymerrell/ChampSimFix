@@ -11826,8 +11826,8 @@ wrong way.** **[RULED 2026-09-02 — see the RULED bullet at the end of this row
   | **nmfcPaysSnoop** | 8,471 | **3,888** (−54.1%) |
   | **nmfcOwnershipTransfers** | 0 | **3,888** — equal to `nmfcPaysSnoop`: **one snoop per LINE, not per read** |
   | **fwdFromO** | 7,989 | **38** (−99.5%) |
-  | dirty-snoop ratio nmfc : host | 206.6 : 1 | **92.6 : 1** |
-  | hostPaysSnoop | 41 | 42 |
+  | dirty-snoop ratio nmfc : host | 206.6 : 1 | **14.3 : 1** *(corrected 2026-09-04 — this cell read 92.6 : 1; see the bullet below)* |
+  | hostPaysSnoop | 41 | 42 *(mislabelled: the same snoops read **271** once the holder's dirty bit is believed — see below)* |
   | nmfcPaysCleanSnoop | 236 | 755 |
   | fwdFromF | 243 | 2,232 |
   | downgrades | 8,232 | 6,158 |
@@ -11837,6 +11837,23 @@ wrong way.** **[RULED 2026-09-02 — see the RULED bullet at the end of this row
   | **simulated time** | 2.08294 ms | **2.08294 ms — no regression** |
 
   On `tile_coh`/2: `fwdFromO` **11 → 2**, transfers **0 → 9**, every other MOESIF counter and the simulated time unmoved. **`nmfcPaysCleanSnoop` rising is not a regression in I14's terms** — it counts snoops of a holder that modified nothing, and it is the host's now-clean `S` copy being taken back when a function core writes the line; I14 is about paying for the other side's *modifications*. **The residual is now structural and bounded:** 3,888 is the number of distinct lines the function cores take from the host, so it can no longer grow with traffic, and what survives in `fwdFromO` is the **permitted** direction.
+- **[CORRECTED 2026-09-04 — THE AFTER-RATIO IN THE TABLE ABOVE WAS 92.6 : 1; IT IS 14.3 : 1.]**
+  `[CLOSED — IMPLEMENTATION EVIDENCE - tier 4, SST 69e5739]` The `hostPaysSnoop` figure the ratio
+  divides by was **mislabelled, not mismeasured.** The directory classified a holder as clean by
+  reading its own `d.global`, and a host that READS a line and then WRITES it sits in `E` while
+  holding it `M` — `E` permits a silent write, so `d.global == E` means "clean, or modified, and I
+  have no way to tell". On this run **226-227 snoops of a DIRTY host holder were being counted as
+  clean ones.** With the holder answering instead of the directory guessing (ledger **L61**, SST
+  `69e5739`), the same `tile_bfs`/4 run reads `hostPaysSnoop` **271** against
+  `nmfcOwnershipTransfers` **3,888** — **14.3 : 1** — with `hostPaysCleanSnoop` 240 → 13 and
+  `fwdFromO` / `fwdFromF` 40 → 266 / 2,298 → 2,072 for the same reason and by the same count.
+  **Every other number in the table stands:** transfers, simulated time, `bytesCoherence`,
+  `hopCycles`, `downgrades` and `invalidations` are bit-identical across the fix (0.00 %), so this
+  corrects a LABEL and not the traffic — the direction of the imbalance is unchanged and the gate
+  below still passes (266 against 3,888). **The knob-0 column's 206.6 : 1 is subject to the same
+  mislabelling and no corrected value was measured for it**; it is left as recorded, and neither
+  column may now be quoted as a count of dirty snoops on the fixed machine. **Anywhere this
+  document quoted 92.6 : 1, it is 14.3 : 1.**
 - **Gates added** (`run_coherent.sh`): `nmfcOwnershipTransfers` required in the MOESIF block, and a new `tile_bfs`/4 section gated on `nmfcOwnershipTransfers > 0` **and** `fwdFromO < nmfcOwnershipTransfers` — the structural check, since after a transfer no host owns anything a function core reads. **The implementer flags that this gate's margin on `tile_coh`/2 is 2** (the test's own two host reads of `result`) **and is therefore thin.**
 - **`[IMPLEMENTATION CHOICE — user to ratify or overturn]` (i) — THE LINE IS NOT WRITTEN TO THE SLICE AT THE MOMENT OF TRANSFER.** The ruling's letter is "*the host writes back to the tile's slice and drops to S*"; two of its three clauses are implemented exactly and this one is not. **As built, the writeback duty moves with the ownership** and the line reaches the tile's slice when the tile evicts it. **The reason:** writing it back at the transfer is a DRAM write that `O` exists to avoid, and it would be paid **twice** for any line the tile never modifies — once at the transfer and again at the tile's eviction — so `memWrites` would rise by roughly one per transferred line (**about 3,900 on this run**) to buy nothing. As built `memWrites` is flat, and the effect the ruling asks for still holds: after the tile evicts, its writeback puts the line in the slice under its own stack and its next read is a local slice access — which is what the +6.3% `memReads` and the +0.84 pt slice hit rate are. **The ruling stands as written until the user rules on this.**
 - **`[IMPLEMENTATION CHOICE — user to ratify or overturn]` (ii) — THE GRANT IS `O`, NOT `E`/`M`.** The ruling's letter is "*the directory records the tile as owner (E/M)*". **`(E/M)` cannot be granted while the host keeps its copy:** `E` in this protocol permits a **silent** local upgrade to `M` (`writable(E)` is a local hit in `NMFCCache`, with no message to the directory), so granting `E` while the host holds `S` would lose the host's copy on the tile's first write. **`O` is the state that gives the tile the ownership AND the dirty copy while keeping the host's `S` copy correct** — the tile's first write becomes an **upgrade**, which invalidates the host properly. `E` would be reachable only by dropping the host to `I`, which contradicts the ruling's own "*drops to S*". **The two clauses of the ruling are in tension and the build resolved it in favour of "drops to S"; the user may rule the other way.**
@@ -13169,7 +13186,7 @@ QUESTION. Added 2026-09-03 (evening) by the SST sweeps; in the class user ruling
 **R5** established for L14/L15 — "*that sounds like a bug*" — so it asked the user for nothing
 and this row was never `[FOR THE USER TO RULE]`. It is the LAST open row in this appendix, and
 with it closed the appendix has NO open rows.]**
-`[IMPLEMENTATION EVIDENCE - tier 4, SST]`
+`[CLOSED — IMPLEMENTATION EVIDENCE - tier 4, SST 69e5739]`
 - *What it is, in the words of the run that found it (RESULTS.md caveats, verbatim):*
   "**BFS F1, tagged for the user and unresolved: a host-dirty line can lose bytes a function
   core did not write.** Reproducible at 1, 2 and 4 tiles on the frozen library. A 64-byte
@@ -13202,14 +13219,34 @@ with it closed the appendix has NO open rows.]**
 - **THE FIX: the directory never infers what a cache is holding; the cache says.** Every snoop
   response carries a `dirty` bit; the directory classifies the holder from that answer; a
   plain `Inv` can no longer discard a dirty line (`snoopDirtyInvalidated` counts any attempt);
-  and **R-F now covers `E`**, because `E` is the state a silent write hides in.
+  and **R-F now covers `E`**, because `E` is the state a silent write hides in. **An
+  invalidation that reaches a line the cache holds dirty now RETURNS THE DATA instead of
+  discarding it** — the event is counted (`snoopDirtyInvalidated`) and **gated at zero**, so it
+  is a tripwire on the directory rather than a repair of it — and **a writeback crossing a live
+  request hands that request its bytes** instead of letting the transaction read the slice, which
+  closes the eviction/snoop crossing by construction rather than by link ordering.
   **`ownershipTransfer` was NOT weakened** — it stays on and now fires on strictly *more*
   lines. This does not disturb **L14**: it widens the same path L14 records.
 - **STATUS: CLOSED — FIXED**, in `69e5739`, verified rather than asserted.
   **`test/tile_dirty_xfer.c` FAILs on the parent commit `272eb20` and PASSes at 1, 2 and 4
   tiles on `69e5739`**, with `snoopDirtyInvalidated` = **0** on every cache in every run, and
-  the coherent suite gates that counter at zero. `NMFC SUITE`, `NMFC COHERENT SUITE` and
+  the coherent suite gates that counter at zero. The test is **gated in `run_coherent.sh` at 1, 2
+  and 4 tiles**, and on the parent it fails **deterministically and identically** —
+  `NMFC DIRTYXFER: FAIL (21)`, twenty-one lost words, with the tile's OWN stored word correct in
+  every case, which is the shape of the defect. `NMFC SUITE`, `NMFC COHERENT SUITE` and
   `NMFC VANADIS SUITE` all pass on a clean rebuild.
+- **AND ON THE DIRECTED SUITE NOTHING MOVED BUT FOUR LABELS — WHICH CORRECTS A NUMBER AT L14.**
+  On `tile_bfs`/4, the run L14's ownership-transfer table reports, `nmfcOwnershipTransfers` is
+  **3,888 before and 3,888 after (0.00 %)** and the simulated time is **2.08302 ms both ways
+  (0.00 %)**; `bytesCoherence`, `hopCycles`, `reqGetS`, `reqGetX`, `downgrades` and
+  `invalidations` are bit-identical. **Four counters moved, and all four by the same ~226-227
+  events**: `hostPaysCleanSnoop` 240 → **13**, `hostPaysSnoop` 44 → **271**, `fwdFromF`
+  2,298 → **2,072**, `fwdFromO` 40 → **266**. Those snoops were **always** snoops of a DIRTY host
+  holder; the directory was reading `d.global == E` and **labelling them clean**.
+  **CONSEQUENCE: L14's after-ratio of "92.6 : 1" was computed from the mislabelled counters, and
+  it is CORRECTED THERE to 14.3 : 1** (3,888 against 271). The traffic is the same traffic and the
+  direction of the imbalance is unchanged; the number was flattering. L14's structural gate,
+  `fwdFromO < nmfcOwnershipTransfers`, still passes wide — 266 against 3,888.
 - **WHAT THE FIX DOES NOT DO, AND THIS IS THE RULE THAT REPLACES "NOTHING MAY SAY IT IS
   FIXED".** The fix is **NOT in the frozen library** `4cd0e0599b4a147f8d56399e71606c8a5e977abd`
   that every number at **N.9** was measured on — nine commits separate `4cd0e05` from
