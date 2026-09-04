@@ -186,7 +186,7 @@ them. **The ids are NOT renumbered and NOT retired**: every existing body citati
 | **R21** | "*Undecided, once again something that must be experimentally derived. We start at common and implement tuning/algorithm adjustments as needed.*" | old q40 | **G.4**, SELECTED CONFIGURATION |
 | **INSTRUCTION COUNT** | "*RETC and ENDC are the same instruction, with a return bit.*" → **twelve** base instructions; **RESUME** (R20) makes thirteen, one of them privileged; and **`KILL`** — user ruling 2026-09-03, "*we probably need an instruction specifically to kill a failed program's contexts*" — makes **fourteen**, unprivileged. **The count is now stated as 12 base + RESUME (privileged) + KILL = 14.** | old q18, **L44**, **L57** | **I.3**, **I.3a**, I.6, I.9, A.2, C.4 |
 | **GEOMETRY** | "*Ranks are included. 32 banks per channel assumes DDR5 and one rank. … the entire system must adapt to an arbitrary bank count, tile-memory-sizing, grain-sizing. Please do not lock in any bank/rank/column/row/channel counts as if they were the only ones supported. **WE MUST SUPPORT ALL POSSIBLE VALUES FOR EACH, WITHIN A FULL 48-bit PHYSICAL ADDRESS SPACE.***" | old q28, **L8** | **I12**, E.3, E.4, D.2 |
-| **L32** | the reshaped stress workload **works**: sum verified against the host, loads / migrations / instructions **25.0% on every tile**, zero stores, **196,904 migrations for 262,143 loads**. The rejected chase shape's 2.5:1 spread was predicted exactly from its addresses (12.5 / 37.5 / 37.5 / 12.5) — congruent routing, not a broken machine. | old q1, **L32** | **G.6**, H.9, N.4, L32 |
+| **L32** | the reshaped stress workload **works**: sum verified against the host, loads / migrations / instructions **25.0% on every tile**, zero stores, **196,904 migrations for 262,143 loads**. The rejected chase shape's 2.5:1 spread was predicted exactly from its addresses (12.5 / 37.5 / 37.5 / 12.5) — congruent routing, not a broken machine. `[RE-READ — user 2026-09-04: the workload's PASS is untouched, but the occupancy and sweep numbers this row makes quotable were measured on the IN-ORDER host, which limits forks and joins alike; "FTU full, tiles idle" is a starved feed, and whether the FTU binds on the out-of-order host is being measured and is not known. H.9, L63.]` | old q1, **L32** | **G.6**, H.9, N.4, L32, **L63** |
 
 ---
 
@@ -376,7 +376,7 @@ are pointed at from **K.6** and Appendix 2 **S40**.
 | **DRAM device geometry** | DDR5 `[1, 2, 8, 4, 65536, 1024]` — `config/nmfc/ramulator/tile_ddr5.yaml:33`; HBM3 in `tile_hbm3.yaml` | DDR5, timings generated — `config/tile_ddr5.yaml` | the same rule. The **32 banks/channel** figure in older text is DDR5 **at one rank** and is not a spec (GEOMETRY ruling). |
 | **LLC slice size** | **512 KiB** — 512 sets × 16 ways × 64 B, `nmfc_4tile.json:730-731`; aggregate pinned at 2 MiB by `--llc-sets 2048` (D.5). **Part L and N.1 were measured at 4 MiB, which was never committed** (L28c) | **4 MiB** — `test/coherent_memory.py:175` (`slice_size`) | **"*modern LLC size / DRAM channel* as our indicator for LLC size per tile"** (#76) and "*the same magnitude as modern processors*" (#288). That rule yields **single-digit MiB per tile**; 512 KiB is about an order of magnitude below it. |
 | **LLC slice banking** | **1** — `--llc-banks` defaults to 1 (`make_config.py:583`) and **no shipped config banks the slice**. **Under R3 this flag is INERT**: banking is derived from the DRAM device geometry ramulator declares, not from a flag. | banked to the channel's **per-rank** bank count (**32**, not the flat 64) — `test/coherent_memory.py:249-265` | **A cache bank and its DRAM bank must be the same partition of the address space** (#76, #144, #291 item 1). Bank on the **per-rank** count: two flat banks differing only in rank are the same bank index at the same address position (D.2, DESIGN §30.2). The count follows the device; **it is not a design constant.** |
-| **FTU entries** | **1024** — `nmfc_4tile.json:2128`; **64** — `nmfc_4tile_ramulator.json:1835`; 2048/4096 sweeps in `phys_ft/` | — | it **refuses rather than evicts** (I.5), so it must be large enough not to bound the machine artificially — and **a full FTU is not evidence that the FTU binds** (#180, #171, H.9). §23.2's derivation prices 64 and 256 entries at ~65 B each. |
+| **FTU entries** | **1024** — `nmfc_4tile.json:2128`; **64** — `nmfc_4tile_ramulator.json:1835`; 2048/4096 sweeps in `phys_ft/` | — | it **refuses rather than evicts** (I.5), so it must be large enough not to bound the machine artificially — and **a full FTU is not evidence that the FTU binds** (#180, #171, H.9). `[RE-READ — user 2026-09-04: the run that produced the full-FTU numbers was on the IN-ORDER host, which throttles the NMFC side as well as the baseline — FORK and JOIN retire in order at one per cycle, so the HOST'S ISSUE RATE was the admission limit and "FTU full, tiles idle" is a starved feed. Whether the FTU binds on the out-of-order host is BEING MEASURED and is NOT KNOWN — do not size this row from either answer yet. H.9, L63.]` §23.2's derivation prices 64 and 256 entries at ~65 B each. |
 | **function-core I$ / D$** | I$ 16 sets × 4 ways, D$ 64 sets × 8 ways — `nmfc_4tile.json:851-852, 903-904` | I$ 32 KiB / D$ 16 KiB, 8-way — `test/coherent_memory.py:102-103`; per-tile slice banking in `test/tile_memory.py:243-265` | **both exist, separate, and heavily banked** (L6, D.3, #291 item 6). Capacity belongs in the **slice**, not in the function core's D$ (D.4). |
 | **atomic-table capacity** | `lock_waiters_` is **unbounded and uncounted** — `src/nmfc/function_core.cc:404-467` | per-line hold state — `src/NMFCTile.h:415` region | **R15: capacity is sized from experimentation.** The constraint is absolute: **a full table must be unachievable by construction, or the context sleeps until an entry is free** — it must never be a resource held while waiting for a resource (I.1). |
 | **atomic hand-off chain bound** | **unbounded**, no counter | **8** — `src/NMFCTile.h:142` (`maxAtomicForwards`), `src/NMFCTile.cc:32` | **R15: experimentally derived.** The bound itself is a **coherency guarantee, not an optimisation** — a word passed context to context is a word the rest of the machine cannot see, so after a fixed number of hand-offs it goes back to the data cache whether or not anyone is waiting (H.7). |
@@ -1483,7 +1483,13 @@ claim shape stayed. Nothing about the run is retracted; it is filed where runs a
 figure was measured with the ChampSim core model, whose contexts kept issuing past an
 outstanding load; the Rev core sleeps on one. The two have different memory-level
 parallelism at the same context count, so **the number is not a target Rev should be
-expected to hit without saying which core produced it.**" See Part M.
+expected to hit without saying which core produced it.**" See Part M. **And the caveat is
+TWO-SIDED: an in-order host model constrains the NMFC side of a comparison as well as the
+baseline side** — `FORK`, `JOIN`, `CXW` and `CXR` retire in program order at one per cycle,
+so the host's issue rate bounds how many invocations can be admitted and drained, and a
+speedup, an occupancy figure or a "not the bottleneck" ablation taken there is a statement
+about a host-fed machine and not only about an under-driven baseline (user 2026-09-04; H.9,
+N.4, ledger **L63**).
 
 `[CARRIED, SECOND CAVEAT — the branch-honesty caveat, DESIGN §12 D:1016]` The function
 core **replays resolved control flow, so it never mispredicts**; `FLAG_TAKEN_TARGET` plus
@@ -6467,6 +6473,29 @@ saturate the machine (DESIGN §31.3 D:3631-3638):
 | tile 2 contexts | 12.57 of 128 | 35 | |
 | tile 3 contexts | 5.61 of 128 | 24 | |
 
+`[RE-READ — user 2026-09-04. THIS TABLE WAS MEASURED ON THE IN-ORDER HOST, AND THE
+CONCLUSION IS RE-LABELLED, NOT DELETED.]` *User, 2026-09-04, verbatim, correcting this
+document's reading of the table above:*
+
+> "**You understand in-order throttles nmfc just like it throttles the host right? It limits the number of joins/forks that can happen, and thus the amount of hosts that can be active at once.**"
+
+**Every row above was taken on the IN-ORDER Rev host, where `FORK`, `JOIN`, `CXW` and `CXR`
+retire in PROGRAM ORDER at one per cycle. On that host the ADMISSION LIMIT is the host's
+NMFC-instruction ISSUE RATE, not the FTU** — and the in-order host throttles **BOTH SIDES
+of the machine, not just the baseline**: it cannot retire `JOIN`s fast enough to free
+entries, so the FTU sits full, and it cannot issue `FORK`s fast enough to fill the tiles,
+so the tiles sit at 4–10%. **"FTU full, tiles idle" is the signature of a STARVED FEED,
+not of a small FTU** — which is why the eightfold context sweep below moves nothing: the
+resource being multiplied was never the one being waited on.
+
+**THE FINDING STANDS, RE-LABELLED: on an in-order host the host's NMFC-instruction issue
+rate IS the machine's admission rate.** What is WITHDRAWN is the generalisation — "the
+tracking unit is the concurrency of the whole machine" was a statement about *the whole
+machine* drawn from *one host model*, and it is a statement about the in-order host only.
+**Whether the FTU binds on the OUT-OF-ORDER host is BEING MEASURED** — the host-feed table
+in the Vanadis sweeps — **and is NOT KNOWN.** Do not carry either answer into a sentence
+about Vanadis. Ledger **L63**.
+
 **The tracking unit is 99% full while the tiles are 4–10% full.** Sweeping contexts per
 tile 64 / 128 / 256 / 512 produced **identical** results in every statistic the tiles
 emit — 11.3048 ms, 524,288 loads, 396,161 migrations, 2,625,144 instructions at every
@@ -6476,7 +6505,10 @@ contexts and 136.143 ms at 512.**
 **The reading this document previously drew from the table — "the tracking unit is the
 concurrency of the whole machine" — is a TIER-3 inference from DESIGN.md measurements,
 and TWO TIER-1 STATEMENTS SAY IT IS THE WRONG READING OF A FULL FTU. Both were absent
-from this document. Tier 1 governs.**
+from this document. Tier 1 governs.** `[RE-READ — user 2026-09-04: and a THIRD tier-1
+statement says the inference is also SCOPED TO ONE HOST MODEL — see the box under the
+table. The in-order host limits forks and joins alike, so this table's shape is what an
+under-fed machine looks like from the host side. L63.]`
 
 *User #180, 2026-08-29T19:32:15Z, verbatim and directly on this:*
 
@@ -6566,6 +6598,21 @@ the same line is the real one.)
 headline config sizes the FTU at **1024 against 4096 context slots**, so a full FTU there
 is partly an artefact of a 4:1 undersizing its own generator warns about. **Both readings
 say the same thing: do not conclude "the FTU binds" from fullness.**
+
+`[RE-READ — user 2026-09-04, and it names the THIRD artefact in the same measurement.]`
+**This discriminator was also run on the IN-ORDER host, and the in-order host is why
+`DISPATCH STALLS` could be 0 with the unit full.** *User, 2026-09-04, verbatim:*
+
+> "**You understand in-order throttles nmfc just like it throttles the host right? It limits the number of joins/forks that can happen, and thus the amount of hosts that can be active at once.**"
+
+`FORK`, `JOIN`, `CXW` and `CXR` retire in program order at ≤ 1 per cycle, **so the forks
+arrive slowly enough that an entry is always free when one asks** — zero dispatch stalls is
+then a statement about the ARRIVAL RATE, not about the unit's capacity, and peak live bodies
+665 of 1024 is the feed's ceiling showing through. **The reading "returned-and-unjoined, not
+outstanding" SURVIVES and its cause is named: the host cannot retire `JOIN`s fast enough.**
+What does NOT survive is reading these three counters as a verdict on the machine rather
+than on the in-order host — **on an out-of-order host the same three counters have not been
+taken**, and the host-feed table in the Vanadis sweeps is where they will be. Ledger **L63**.
 
 ### H.9b Concurrency's real limit on the measured workload: THE BATCH BARRIER, and the fix that worked
 
@@ -10395,6 +10442,22 @@ the run "seems like a failure", is withdrawn.** What still stands is **#180**
 "**Despite the FTU being full, most of it is still pending results. A larger FTU doesn't
 fix that problem.**" Full discussion in **H.9**; the section heading reflects it.
 
+`[RE-READ — user 2026-09-04. A SECOND reason to hold this result carefully, and it is a
+HOST-MODEL reason rather than a workload reason.]` *User, verbatim:*
+
+> "**You understand in-order throttles nmfc just like it throttles the host right? It limits the number of joins/forks that can happen, and thus the amount of hosts that can be active at once.**"
+
+**Every measurement in this section was taken on the IN-ORDER Rev host**, where `FORK`,
+`JOIN`, `CXW` and `CXR` retire in program order at one per cycle, **so the machine's
+admission rate was the host's NMFC-instruction issue rate on BOTH sides** — joins too slow
+to free the FTU, forks too slow to fill the tiles. **That is why the 64/128/256/512 sweep
+is flat to seven figures**: contexts were never the resource being waited on, because the
+feed never asked for them. **The section's thesis — "contexts are not a lever THIS HOST can
+pull" — is exactly right and is now explained rather than merely observed**; what is
+re-labelled is any reading of it as a statement about the architecture. **On the
+out-of-order host neither the sweep nor the occupancy split has been taken** (the host-feed
+table in the Vanadis sweeps), so **whether the FTU binds there is NOT KNOWN.** Ledger **L63**.
+
 **The section's own thesis, which is stronger than "the sweep was flat".** DESIGN §31
 D:3566-3570: §20 named "**contexts, and the shape of a function**" as the two levers left.
 "**The first of those is not reachable from this host, and it took a workload built to
@@ -10413,7 +10476,9 @@ Full table in H.9. The findings, as measured:
 - Direct instrument: **the host tracking unit was 63.61 of 64, full 98.5% of the time it
   was in use, while the tiles were 4–10% full** and the fabric control queue was empty
   with zero refusals. **That separates what the sweep could not**: whatever is binding,
-  it is not the fabric queue.
+  it is not the fabric queue. `[RE-READ — user 2026-09-04: on the IN-ORDER host, and the
+  63.61/64-with-idle-tiles shape is what a host-throttled FEED looks like, not what a
+  small FTU looks like. The negative result about the fabric queue is unaffected. L63.]`
 - **What a full FTU does NOT establish.** Per #180, entries can be full of *completed*
   results waiting for a `JOIN`, in which case the constraint is the host's consumption
   rate and the shape of the fork/join code — **and a larger FTU makes it worse, not
@@ -10752,6 +10817,25 @@ Parts G, K, L and N — **their provenance is recorded** — is true of these.]*
 > otherwise satisfied — each baseline is the reference algorithm compiled from the same source
 > over the same data with the same placement, and the comparison is on identical work.
 
+`[RE-READ — user 2026-09-04. CLAIM-SHAPE ITEM 1 IS INCOMPLETE AS WRITTEN, AND THE MISSING
+HALF CHANGES WHICH STRUCTURE THESE SWEEPS INDICT.]` Item 1 above applies the in-order caveat
+to the **baseline** only. *User, 2026-09-04, verbatim:*
+
+> "**You understand in-order throttles nmfc just like it throttles the host right? It limits the number of joins/forks that can happen, and thus the amount of hosts that can be active at once.**"
+
+**The in-order host throttles the NMFC side too, and by the same mechanism**: `FORK`,
+`JOIN`, `CXW` and `CXR` retire in program order at one per cycle, so the host's
+NMFC-instruction issue rate bounds how many invocations can be admitted and how fast
+completed ones can be drained. **Every statement below of the form "the FTU is NOT the
+bottleneck" or "the concurrency ceiling is the FABRIC, not the tracking unit" is therefore
+a statement about an IN-ORDER-FED machine** — a structure cannot report itself binding
+while it is being fed below its capacity, and the FTU/window ablations that "changed
+nothing" were ablations of a resource nobody was queueing for. **Those results are NOT
+withdrawn and they are NOT evidence about the out-of-order host.** The measurement that
+decides it is the **host-feed table in the Vanadis sweeps**, which is being taken; until it
+lands, **whether admission on an out-of-order host is bounded by the FTU, by the fabric, or
+by neither is NOT KNOWN.** H.9, H.9a, N.4, ledger **L63**.
+
 ---
 
 #### SWEEP 1 — BFS (direction-optimising; the bottom-up step is what was offloaded)
@@ -10844,7 +10928,10 @@ machine**, and from 4 G upward the **control traffic of moving the computation i
 data traffic of the computation itself** (169 + 144 × migrations bytes per invocation, which
 reproduces every row). **The FTU sits at 59.7 of 60 everywhere and is NOT the bottleneck**:
 quadrupling the window (FTU 256, window 248) at 16 MiB made it **2.6% slower** with every other
-counter unchanged — the fourth independent instance of **H.9a**'s finding.
+counter unchanged — the fourth independent instance of **H.9a**'s finding. `[RE-READ — user
+2026-09-04: on the IN-ORDER host, which bounds admission on the NMFC side as well as the
+baseline side, so all four instances say "not the bottleneck WHEN FED IN ORDER". See the
+re-read box under this subsection's claim shape; L63.]`
 
 ---
 
@@ -10891,6 +10978,9 @@ the record for **I14**'s direction. Nothing here is bandwidth-bound: the busiest
 0.08% (755.20 against 755.82 MiB at P4). **The concurrency ceiling is the FABRIC, not the
 tracking unit:** re-running P3 with FTU 256 / credits 256 / ring 128 changed the answer by
 −2.0% and +4.9% and left `tileOutstanding` identical to four significant figures.
+`[RE-READ — user 2026-09-04: measured with an IN-ORDER host feeding it, so "the fabric, not
+the tracking unit" is ranked under a bounded feed. On the out-of-order host the ranking is
+being measured and is not known; see this subsection's claim-shape re-read box and L63.]`
 
 ---
 
@@ -11238,6 +11328,23 @@ additive" rule).
 | **placement** | invocations per tile under each policy; migration rate |
 | **fabric** | messages by class; queue occupancy; link utilisation; back-pressure stalls |
 | **FTU** | offloads issued; in-flight mean and max; cycles stalled on back-pressure; **fire-and-forget share**; **CLOSURES BY KIND — at a `JOIN`, at a fire-and-forget ACK, by FATAL-FAULT teardown (ruling O7), and by `KILL` — with the last two counted SEPARATELY** (**I.4**, **I.6**, **I.3a**); both mismatch counts (**I.4**) `[ADDED - user ruling 2026-09-03, KILL. This row carried NO closure statistic of any kind, while THREE other places asserted that it did: I.4 says "KILL closures are counted separately from fatal-fault closures ... [RULED - user ruling 2026-09-03; I.3a, O.4.]", the front-matter KILL row lists O.4 among the places the ruling is applied, and ledger L57 says the ruling is written at "A.2 and O.4 (the statistic)". The KILL ruling's O.4 edit was UNAPPLIED and those three citations dangled. They are made true here. The reason the two teardown closures are counted SEPARATELY is I.4's: they take the same path but say different things about the run - one is the machine killing a program, the other is a program ending its own work.]` |
+
+`[RE-READ — user 2026-09-04. THE FTU ROW NEEDS A FIFTH COUNTER, AND IT IS ON THE HOST, NOT
+IN THE UNIT.]` The occupancy result this register was written to interpret — FTU 63.61 of 64
+while tiles sat at 4–10% (H.9) — **was measured on the in-order host.** *User, 2026-09-04,
+verbatim:*
+
+> "**You understand in-order throttles nmfc just like it throttles the host right? It limits the number of joins/forks that can happen, and thus the amount of hosts that can be active at once.**"
+
+**So the machine must report its ADMISSION RATE, and admission is a HOST statistic:
+NMFC-instruction retirements per cycle, split `FORK` / `FORK.R` / `JOIN` / `JOINQ` / `CXW` /
+`CXR`, alongside FTU in-flight mean and max.** Without it, a full FTU beside idle tiles
+cannot be told apart from a starved feed — which is the same failure as reading occupancy
+without the outstanding-vs-returned split (**O.1**), one level further out. **On an in-order
+host the answer is known in advance: the issue rate IS the admission rate, ≤ 1 NMFC
+instruction per cycle in program order.** On an out-of-order host it is the number the
+host-feed table in the Vanadis sweeps is being taken to get, and **it is not known.** H.9,
+H.9a, N.4, ledger **L63**.
 
 **Four of these are load-bearing for questions this document leaves open, and three of the
 four are not currently produced:**
@@ -12264,6 +12371,14 @@ had lost the requirement entirely.**
   produced the answer**: it was the annotation half, i.e. the workload's shape. Recorded in
   G.6, H.9, N.1 and N.4.
 - **RULED — user ruling 2026-09-02 on the stress workload: it WORKS.** The sum is verified against the host; loads, migrations and instructions are **25.0% on every tile**; zero stores; **196,904 migrations for 262,143 loads**. The original 2.5:1 spread came from the **rejected chase shape** (own an index range, chase data) and was **predicted exactly from the addresses — 12.5 / 37.5 / 37.5 / 12.5 — i.e. congruent routing doing its job on a workload shaped wrong**. Reshaped (host resolves seven indices into the 512-bit context; the function does seven data loads and returns the sum via **END with the return bit**; the `FORK.R`/`JOIN` ring is the size of the FTU) it is even. **"It seems like a failure" was the trigger for the reshape, not a ruling that the machine is broken.** The invariance and occupancy numbers are **settled**, quoted with their build and binary (working tree at HEAD `21df518d`, `tools/nmfc/kernels/bfs_nmfc` and `bfs_base`, uncommitted). See G.6, H.9, N.4. **CLOSED.**
+- `[RE-READ — user 2026-09-04, and it does NOT reopen this row.]` **The workload works; what
+  is re-labelled is what its occupancy numbers are ABOUT.** They were taken on the **in-order**
+  Rev host, whose `FORK`/`JOIN`/`CXW`/`CXR` retire in program order at ≤ 1/cycle, **so the
+  host's NMFC-instruction issue rate — not the FTU — was the admission limit on BOTH sides**,
+  and the FTU sat full because the host could not retire `JOIN`s fast enough to free it while
+  the tiles were starved by the feed. **"Settled" still means settled: the run is real, its
+  build and binary are recorded, and no number here is withdrawn.** It means those numbers are
+  settled AS IN-ORDER-HOST NUMBERS. See **L63**, H.9, N.4.
 
 **L33 — "The FTU is the concurrency of the whole machine": a tier-3 inference that two
 tier-1 statements refuse.**
@@ -12284,6 +12399,17 @@ tier-1 statements refuse.**
   document; H.9, I.5, N.4 and O.1 are corrected. Note this compounds with L32 — the run in
   question is the suspect one.
 - **CONSEQUENTLY RESOLVED.** The stress numbers are settled (L32, RULED), so the inference this row polices is testable rather than provisional — and it is still the wrong inference: **a full FTU is a symptom, and the diagnosis is what the entries are doing** (#180, #171; H.9). The split — outstanding vs returned-and-unjoined — remains the measurement to take.
+- `[RE-READ — user 2026-09-04. THE RULING IS UNCHANGED AND ITS SCOPE IS NARROWED: this row's
+  tier-3 inference was measured on the IN-ORDER HOST.]` *User, verbatim:* "**You understand in-order throttles nmfc just like it throttles the host right? It limits the number of joins/forks that can happen, and thus the amount of hosts that can be active at once.**" **In-order retirement
+  of `FORK`/`JOIN` at ≤ 1/cycle throttles the NMFC side exactly as it throttles the host side, so
+  the admission limit in the measured run was the HOST'S ISSUE RATE**; the FTU was full because
+  `JOIN`s could not retire fast enough to free it, and the tiles were at 4–10% because the feed
+  could not fill them. **"FTU full, tiles idle" is the signature of a STARVED FEED, not of a
+  small FTU** — which is #171's falsifier given a mechanism. **What this row now states, and it
+  is a positive finding rather than only a refusal: ON AN IN-ORDER HOST THE HOST'S
+  NMFC-INSTRUCTION ISSUE RATE IS THE MACHINE'S ADMISSION RATE.** **What is NOT KNOWN — and must
+  not be asserted in either direction — is whether the FTU binds on the OUT-OF-ORDER host**; that
+  is being measured (the host-feed table in the Vanadis sweeps). Carried at **L63**.
 
 **L34 — Three different baseline migration counts for one nominal workload, unreconciled.**
 - *Tier 3:* DESIGN §27.1 D:3084 gives **1,638,325** at **0.150**/instr, and that 0.150 is
@@ -13274,6 +13400,47 @@ with it closed the appendix has NO open rows.]**
   directed suite and **false of the 4G sweep**, per the row above. A pushed commit message is
   not rewritten; the correction of record is in `src/nmfc/README.md` under
   **Corrections of record**, and here.
+
+**L63 — THE FTU OCCUPANCY FINDING IS AN IN-ORDER-HOST ARTEFACT. Re-labelled, not deleted.
+[RE-READ — user 2026-09-04]**
+- *What this document said (tier 3, DESIGN §31.3, carried at H.9, H.9a, N.4, O.4 and L33):*
+  the FTU at **63.61 of 64, full 98.5% of the time**, while tile contexts sat at **4–10% of
+  128** and the fabric control queue was empty with zero refusals; an eightfold context sweep
+  (64/128/256/512) identical to seven figures. The reading drawn from it was "**the tracking
+  unit is the concurrency of the whole machine**" — and, after #180 and #171, "**the FTU, not
+  tile contexts, binds**" was refused but the table was still read as a statement about *the
+  machine*.
+- *Tier 1 — user, 2026-09-04, verbatim, and it is the mechanism the document was missing:*
+  "**You understand in-order throttles nmfc just like it throttles the host right? It limits the number of joins/forks that can happen, and thus the amount of hosts that can be active at once.**"
+- **THE ARTEFACT.** Every one of those runs used the **IN-ORDER Rev host**. On it `FORK`,
+  `FORK.R`, `JOIN`, `JOINQ`, `CXW` and `CXR` retire **in program order at ≤ 1 per cycle**, so
+  the host cannot **issue** forks fast enough to fill the tiles and cannot **retire** joins
+  fast enough to free FTU entries. **The admission limit was the host's NMFC-instruction issue
+  rate on BOTH sides of the machine.** The in-order host does not merely under-drive the
+  baseline (which I8's core-model caveat already said); **it under-drives NMFC by the same
+  mechanism**, and that half was absent from I8, from N.9's claim shape and from every reading
+  of the table.
+- **WHAT "FTU FULL, TILES IDLE" ACTUALLY IS: the signature of a STARVED FEED, not of a small
+  FTU.** It also explains the two counters H.9a leans on — `DISPATCH STALLS: 0` with the unit
+  full is what a slow arrival rate produces, and peak live bodies 665 of 1024 is the feed's
+  ceiling, not the unit's.
+- **THE FINDING STANDS, RE-LABELLED:** *on an in-order host, the host's NMFC-instruction issue
+  rate is the machine's admission rate.* Nothing measured is withdrawn: the workload is settled
+  (L32), the fabric-queue negative result is untouched, the context sweep is still flat and is
+  now **explained** — contexts were never the resource being waited on.
+- **WHAT IS NOT KNOWN, AND MUST NOT BE ASSERTED IN EITHER DIRECTION: whether the FTU binds on
+  the OUT-OF-ORDER host.** That is being measured — the **host-feed table in the Vanadis
+  sweeps** — and until it lands, neither "the FTU binds" nor "the FTU is not the bottleneck"
+  may be carried into a sentence about Vanadis. The same prohibition covers N.9's "**the
+  concurrency ceiling is the FABRIC, not the tracking unit**", which was ranked under the same
+  bounded feed.
+- **A STATISTIC FOLLOWS FROM THIS AND IT IS NEW (O.4):** the machine must report its **admission
+  rate as a HOST statistic** — NMFC-instruction retirements per cycle, split by opcode — beside
+  FTU in-flight mean and max. Without it, a starved feed and a bound unit are the same number.
+- **WHERE IT IS APPLIED:** front-matter SELECTED CONFIGURATION (FTU entries row), the RULINGS
+  row for L32, **Part B I8** (the core-model caveat, both-sided), **H.9**, **H.9a**, **N.4**,
+  **N.9** (claim shape, SWEEP 2, SWEEP 3), **O.4**, and ledger rows **L32** and **L33**.
+- **STATUS: the re-label is APPLIED; the out-of-order measurement is OPEN.**
 
 
 ---
