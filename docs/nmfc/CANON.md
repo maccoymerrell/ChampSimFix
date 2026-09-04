@@ -6517,9 +6517,16 @@ is that the function hold **at least one spare name to stage the shifting and ma
 **SO THE ADMISSION ARITHMETIC IS BITS PLUS SCRATCH.** Admission counts **bits of peak simultaneous
 liveness**, plus **the scratch bits the packing needs** — **never a count of values**, and never a
 charge of 32 for a narrow one. Seven live 64-bit values plus eight live bytes is **448 + 64 = 512
-bits of data**; whether it is admissible turns on whether the function can also spare the staging
-room its packing needs. That is a question about **bits and scratch**, not about how many names
-exist. The ratified statement is **K.6**.
+bits of data**, and the eight bytes are packed, so the staging slice **K.6.2** requires puts the
+instant at **512 + 64 = 576 > 512: INADMISSIBLE** — on bits, at 576 against 512, and for no
+other reason. `[ANSWERED — 2026-09-03. This sentence previously ended "whether it is admissible
+turns on whether the function can also spare the staging room its packing needs" and left the
+verdict open; K.6.2 sizes the scratch term and K.6.1 fixes the maximum, so the verdict is now
+determinate. A hundred live bytes with room to stage them remains admissible: the rejection is
+arithmetic, never a count of values.]` That is a question about **bits and scratch**, not about
+how many names exist. The ratified statement is **K.6**, and the packing-alignment rule a
+compiler must respect is **K.6.3** — a packed field sits at any bit offset inside one 64-bit
+anchor and **may not straddle the anchor boundary**.
 
 **WHAT NAMEABILITY DOES COST, STATED HONESTLY: INSTRUCTIONS.** A value with its own name costs one
 instruction to read; a value packed under a shared name costs about three. **That is the whole of
@@ -8683,6 +8690,148 @@ required)." Tests 2 and 3 are rewritten above. What stood here before — test 2
 512` with *a* ≤ 8, *b* ≤ 16 and **every sub-32-bit value CHARGED 32**, and test 3 argued as a
 capacity counterexample — is **STRUCK, not softened**. H.10.6 carries the full statement.]`
 
+`[THE THREE TERMS MADE COMPUTABLE — 2026-09-03, closing four blocking gaps found in review.
+Nothing above is revised; what follows SIZES the terms the four tests name, so that two
+implementers building from this section produce the same verdict. Every rule below is
+subordinate to user ruling 2026-09-03 (liveness): none of them is, or may become, a count of
+values.]`
+
+#### K.6.1 The program-point model, and what "peak" means
+
+**Liveness is computed over the POST-REGISTER-ALLOCATION RISC-V listing of the function body**
+— the same listing test 1 walks (*"walk the disassembly of the body"*), so the tool needs no
+second input and can run on a disassembly. Program points are the instructions of that listing
+in order; a value's live range is **half-open, `[def, last-read)`**, and a register never read
+has an empty range and costs nothing (**#99**).
+
+**"Peak simultaneous liveness plus scratch" is one maximum over points, not two:**
+
+```
+    peak  =  max over program points p of ( live_bits(p) + scratch_bits(p) )
+```
+
+**Not** `max_p live_bits(p) + max_p scratch_bits(p)`. The two differ whenever the busiest
+staging happens away from the fullest instant, and the tighter reading is the correct one: the
+staging slice and the live data occupy **the same 512 bits at the same instant**.
+
+#### K.6.2 The scratch term, sized
+
+The gap this closes: the tests said *"plus the scratch bits the packing needs"* and quantified
+it only as *"at least one spare name"*, which is 32 or 64 bits and unbounded above. It is now
+a function of the instruction, not of the packing in the abstract:
+
+> **A STAGING SLICE IS 64 BITS.** Shift-and-mask on a packed field runs on a full register
+> (`srli`/`slli`/`andi`/`or` are 64-bit operations on RV64), and a stage narrower than the name
+> it unpacks cannot hold the intermediate. **Every staging slice is 64 bits wide and
+> anchor-aligned**, whatever the width of the field being staged.
+>
+> **HOW MANY AT ONCE — per instruction, not per program point.** For each instruction *i* in
+> the listing, let
+> ```
+>     s(i)  =  (number of distinct PACKED source operands of i)
+>              + (1 if i's destination is a PACKED field, else 0)
+> ```
+> and `scratch_bits(p) = 64 · s(p)`. A directly-named operand needs no stage. **RV64 has at
+> most two sources and one destination, so `s(i) ≤ 3` and the scratch term never exceeds 192
+> bits.** A read-modify-write of a packed destination reuses the destination's own stage; it
+> does not need a second.
+>
+> **THE FLOOR.** If any value live at *p* is packed, `s(p) ≥ 1`: the function must hold at
+> least one 64-bit staging slice. If nothing is packed anywhere in the function,
+> `scratch_bits ≡ 0` and the test is K.6's plain bit sum.
+>
+> **SCRATCH IS PLACED, NOT JUST CHARGED.** The staging slices are objects in the 512 bits with
+> a live range of their own — the shift-and-mask sequence of instruction *i* — and **test 3
+> checks them for disjointness against every value live across that sequence**, exactly as it
+> checks data against data. A placement that is disjoint on data while a stage clobbers a live
+> value is **SW1**, by the precise mechanism test 3 exists to catch.
+
+**CONSEQUENCE FOR THIS SECTION'S OWN WORKED ROWS, STATED SO NOBODY HAS TO GUESS.** *Seven live
+64-bit values plus eight live bytes* is 448 + 64 = **512 bits of data**, and the eight bytes
+are packed, so `s ≥ 1` and the sum at any instant that touches one of them is **512 + 64 = 576
+> 512: INADMISSIBLE.** *Twelve 16-bit plus five 64-bit* is 192 + 320 = 512 with the sixteens
+packed: **likewise inadmissible.** Both shapes become admissible the moment the function frees
+one anchor — e.g. by holding one fewer 64-bit value. **This is not a name-count rejection:**
+both are rejected at 576 bits against 512 bits, and a function with a hundred live bytes and
+room to stage them is admitted. Any prose that calls the exactly-512 case *"a scheduling
+question, not a width charge"* is **wrong and superseded by this block** — scratch is inside
+the 512.
+
+#### K.6.3 Packing alignment: a packed field may not cross a 64-bit boundary
+
+The gap this closes: **H.10.1** fixes alignment for **names**; nothing fixed it for **packed
+fields**, so test 2's sum was not a sufficient condition.
+
+> **A PACKED FIELD SITS AT ANY BIT OFFSET INSIDE ONE 64-BIT ANCHOR AND MAY NOT STRADDLE THE
+> ANCHOR BOUNDARY.** No natural alignment is required — the 3-bit tag may start at bit 5 — but
+> a field must lie wholly within `[64k, 64k+64)`. **Why this way:** a non-straddling field is
+> one `srli` plus one `andi` through one stage; a straddling one needs two extracts, two masks,
+> an `or`, and a second stage, which would make the scratch term of K.6.2 instruction-dependent
+> in a way no compiler could predict. **Directly-named values are unaffected** — a name's slice
+> is naturally aligned by H.10.1 and never straddles.
+>
+> **AND THEREFORE TEST 2 GAINS A FEASIBILITY CLAUSE, WHICH IS STILL A BIT TEST.** The sum is
+> necessary but not sufficient: the live values must also **fit into eight 64-bit bins** with
+> no field split across bins. First-fit-decreasing by width is the required packer; because
+> every width is ≤ 64 and the bins are 64, fragmentation only arises at mixed widths that do
+> not divide 64 evenly. **This rejection belongs to TEST 2, not to test 3** — K.6 forbids test
+> 3 from being a capacity check, and bin-infeasibility is capacity.
+
+#### K.6.4 Test 3, operationally
+
+The gap this closes: test 3 said only that *"a verified non-overlapping placement exists"*.
+Three things an implementer must have were absent.
+
+> **(a) IT RUNS OVER BIT RANGES, NEVER OVER NAMES.** Each placed object — a value or a staging
+> slice — is a half-open bit interval `[lo, hi)` in `[0, 512)`. Design A's names **alias by
+> construction** (`d0` *is* `w0`/`w1`), so a name-level check is unsound; a bit-interval check
+> is both sound and simpler. **The one `overlap()` formula elsewhere in this document (H.10.7)
+> is operand dependence on a bypassed non-barrel core and is explicitly moot here — it is not
+> this check, despite the name.**
+>
+> **(b) THE INTERFERENCE RULE, INCLUDING THE OFF-BY-ONE.** Two objects interfere iff their bit
+> intervals overlap **and** their half-open live ranges `[def, last-read)` overlap. **A value
+> whose last read is instruction *i* MAY share bits with a value defined at instruction *i*** —
+> the core is strictly in-order and reads all sources before writeback, so the reuse is safe.
+> Getting this wrong in the conservative direction rejects most reasonable allocations; getting
+> it wrong in the other direction lets SW1 through, which is why it is written here rather than
+> left to the implementer.
+>
+> **(c) STAGING SLICES ARE PLACED OBJECTS.** Per K.6.2: each stage is a 64-bit anchor-aligned
+> interval whose live range is the shift-and-mask sequence that uses it, and it is checked
+> against data and against other stages. **Test 3 fails if any two placed objects interfere.**
+>
+> **AND TEST 3 IS STILL NOT A CAPACITY CHECK.** It answers *"is the layout the compiler emitted
+> a real one?"* — never *"does the function fit?"*. **The first-fit example an earlier revision
+> used to argue test 3 is not a valid argument for it** (H.10.6 marks it CORRECTED under user
+> ruling 2026-09-03 (liveness): the four 32-bit survivors are 128 bits, and the compiler may
+> compact them with a `mv` each **or repack them under one name and stage through scratch**).
+> **The reason test 3 is not redundant with test 2 is aliasing correctness — SW1 — and nothing
+> else.** Any restatement that drops **repacking** from the placement pass's permitted moves
+> has deleted the mechanism that defeats that example and must be corrected, not quoted.
+
+#### K.6.5 Test 1's accept list
+
+The gap this closes: this section spells the subset `RV64IMAFD`, while **H.10.5** and **I.0**
+amend the tile to `RV64IMA` + Zfinx/Zdinx and say the machine *"must not claim `RV64IMAFD` as
+its spelling"*. **The two spellings classify FP load/store oppositely**, and an opcode walker
+matches mnemonics, not operation classes.
+
+> **THE ACCEPT LIST IS `RV64IMA_Zfinx_Zdinx` MNEMONICS, PLUS `f0` = `+0.0` (H.10.1's recorded
+> deviation).** Where this document says *"the `IMAFD` subset"* it names the admissible
+> **operations** — integer, multiply/divide, atomics, and both floating-point widths — and that
+> shorthand stays correct. **The walker matches the Zfinx spelling.**
+>
+> **EXPLICITLY INADMISSIBLE, AND THIS IS THE ONE AN IMPLEMENTER GETS WRONG:** `flw`, `fld`,
+> `fsw`, `fsd`, `fmv.x.w`, `fmv.w.x`, `fmv.x.d`, `fmv.d.x`. Zfinx removes them, and they are
+> unnecessary here because **`f`*n* ≡ `x`*n*** — **float data arrives via `ld`/`lw` like every
+> other value**, and there is no move between files because there is one file. Their presence
+> in a body is a stock-toolchain artefact and a **fatal** admission failure, not a warning.
+>
+> **U2 is an opcode→width table, which is a different artefact from an accept list.** Both are
+> unwritten (`register-map-final.md` §9.1); the accept list is the smaller of the two and does
+> not depend on the width work.
+
 **TEST 2 IS K.6's OWN TEST, UNCHANGED IN KIND AND NOW UNCHANGED IN ARITHMETIC.** It is on
 **bits**, in **ONE pool**, on **peak simultaneous liveness**, and it charges every value **its
 actual width** — which is what this section said before Design A and says again. R30's error is
@@ -8742,7 +8891,27 @@ to the compiler back end. The per-opcode required-width column that legality rul
 ~150-entry opcode→width table the tool needs to charge widths on a RISC-V target, are both
 unwritten. **Until a width input lands, the tool must charge every value 64 bits AND SAY SO** — a
 conservative gate that rejects some admissible functions is sound; a silent fall-through that
-looks like a measurement is not. **Consequence: the two measured decompositions in H.10.6 are not
+looks like a measurement is not.
+
+`[PRECEDENCE STATED — 2026-09-03. Two width-charge mandates coexisted with nothing saying which
+governs, and a reader could take the interim stub for the rule.]` **THE RULE IS TEST 2's
+CHARGE-OWN-WIDTH; THE 64-BIT CHARGE IS AN INTERIM STUB, AND IT APPLIES IF AND ONLY IF U2's
+opcode→width table is absent.** It is not an alternative reading of the rule, and it is not a
+policy choice: the day U2 lands it is deleted. It is sound in one direction only — it **rejects
+functions test 2 admits** (the twelve-live-32-bit function is 384 bits and admissible, and the
+stub rejects it at 768), and it admits nothing test 2 would reject. **And "SAY SO" is a
+specific line, not a disposition**, because two tools both claiming compliance must not differ
+on their whole output:
+
+> ```
+> nmfc: WIDTHS UNAVAILABLE (U2) - every live value charged 64 bits.
+> nmfc: this gate is CONSERVATIVE: it rejects admissible functions. Verdicts are not measurements.
+> ```
+>
+> It goes to stderr **and** into the annotation output, and **the tool MUST NOT emit a bits
+> figure, a peak, or an admit/reject verdict without it.** Any document or artifact that states
+> the charge-own-width rule while omitting the stub is describing a tool that does not exist
+> yet, and must say the charge is stubbed meanwhile. **Consequence: the two measured decompositions in H.10.6 are not
 currently reproducible from the tool and must be re-measured.** These are **engineering items, not
 user rulings** — `register-map-final.md` §9.1 **U1**, **U2**, **U3**.
 

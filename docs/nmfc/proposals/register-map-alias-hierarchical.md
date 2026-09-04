@@ -600,9 +600,11 @@ R30 — the rejected test that counted distinct registers touched, reported 17 a
 the answer is 8, and rejected a ~480-bit function that fits.
 
 **The test above counts no names.** It sums widths in bits, in one pool, over `f`-named and
-`x`-named values alike, and it rejects only on bits. The name set never appears in it. Its
-one departure from K.6's plain sum is the two roundings — up to 8 bits minimum, and the
-`x31` charge — and both are *width* facts about the map, not counts of names. A function
+`x`-named values alike, and it rejects only on bits. The name set never appears in it.
+`[CORRECTED - user ruling 2026-09-03 (liveness)]` ~~*Its one departure from K.6's plain sum
+is the two roundings — up to 8 bits minimum, and the `x31` charge.*~~ **There is no
+departure and there are no roundings.** The corrected test is K.6's plain sum, each value at
+its **own** width, plus the scratch bits the packing needs. A function
 that names twenty registers over its lifetime while holding 480 bits at its peak is
 admitted, which is R30's own failing case.
 
@@ -615,8 +617,14 @@ feeds a stderr line at `:927` and gates nothing. The replacement is:
 1. Delete the slot pool and the `die()` on pool exhaustion.
 2. Keep the existing linear-scan liveness (a value takes a name at first definition and
    gives it back after last read; a register never read takes nothing — C19).
-3. Round each live value's width up to {8, 16, 32, 64} — `reg_bits[reg]` already carries
-   the width, from Pin's partial-width views (DESIGN §22).
+3. `[CORRECTED - user ruling 2026-09-03 (liveness)]` ~~*Round each live value's width up to
+   {8, 16, 32, 64}.*~~ **Struck: rounding up is the charge-32 rule in weaker clothing** — it
+   charges a 48-bit pointer 64 and a 3-bit tag 8, and it contradicts step 4 below, the
+   corrected test box at §7.5, and canon K.6 (*"Every value is charged **its own width**"*).
+   Take each live value's width **as it is**: `reg_bits[reg]` already carries it, from Pin's
+   partial-width views (DESIGN §22). Rounding appears **only** in name assignment further
+   down — a value gets a name at least as wide as itself, or is packed — and that is a
+   directness decision, never a charge.
 4. `[CORRECTED - user ruling 2026-09-03 (liveness)]` Sum each live value at its **own**
    width at each program point, take the peak, add the **scratch bits the packing needs**,
    and test `peak + scratch ≤ 512` with at least one spare name for staging. (The struck
@@ -626,8 +634,11 @@ feeds a stderr line at `:927` and gates nothing. The replacement is:
 6. Rejection stays fatal, with no truncation (C15).
 
 The register-renaming pass at `:560–566`, which rewrites source and destination register
-numbers to slot ids, becomes a rewrite to **map names**: a value of rounded width *w* gets
-a free name of width *w*, chosen in decreasing-width order per §7.2.
+numbers to slot ids, becomes a rewrite to **map names**: a value of width *v* gets a free
+name of the smallest map width *w* ≥ *v*, chosen in decreasing-width order per §7.2, **or is
+packed with others under a shared name and reached through scratch** when no free name of
+that width remains. The widening from *v* to *w* is a **placement** step and is charged
+nowhere — admission already summed *v* (step 4).
 
 ---
 

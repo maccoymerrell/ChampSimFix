@@ -14,6 +14,21 @@ fields per operand (name, lane, width), all three read out of the instruction, n
 read from anywhere else. The particular bits are shown because a proposal that does
 not close its bit budget has not been checked.
 
+> **[SUPERSEDED - user ruling 2026-09-03 (liveness)]** *(dated 2026-09-03; this document was written before the ruling and carried none of its corrections until now)*
+>
+> Everything below that argues from a **cap on live values** is struck, not softened: any statement that a count of names is an admission criterion, the **charge-32** rule, "at most 16 live values", "the byte tier is unreachable", "2,685 of 13,091", "a factor of 4.9", and any claim that Design A **narrows** invariant I2's *"ANY combination"*. The user's ruling, verbatim: *"We are operating on a 512-bit value. Literally every bit is independent because we are strictly in-order. Bit-packing is a thing, so we can have as many live values as we want as long as we have scratch space in the file to manipulate said value (for example, if we want to have 4 8-bit values in one vector, we can, but we must have another reg where we can stage the proper shifting and masking required)."*
+>
+> **The correct rule.**
+> 1. A register map fixes what a 5-bit register field can **NAME DIRECTLY**. It does **not** bound how many values are **LIVE**.
+> 2. A value narrower than a name is **packed** with others inside one name and accessed by shift-and-mask through a **SCRATCH** name - standard RV64I (`srli`/`slli`/`andi`/`or`), no new instructions.
+> 3. Admission counts **BITS OF PEAK LIVENESS plus the scratch bits the packing needs** (at least one spare name for staging). Never a count of values. Never "charge 32".
+> 4. The byte tier and **any** width are **REACHABLE**. Canon I2's *"16 4-byte regs, 64 1-byte regs, or ANY combination"* (#232) stands **unnarrowed**.
+> 5. Nameability affects **INSTRUCTION COUNT ONLY**: a packed sub-name value costs about **2-3 extra ops per access**. **A2 (extent instructions) is a speed optimisation, never a capability fix.**
+> 6. The compiler's job is **packing plus scratch allocation**; the admission tool checks **bits plus scratch**, the `IMAFD` subset, no reserved names, no stack.
+>
+> Where this page said a loss of capability "belongs to the 5-bit register field": it belongs to nothing. There is no loss of capability, only of directness.
+
+
 ---
 
 ## §0 THE PROPOSAL IN ONE PARAGRAPH
@@ -790,10 +805,16 @@ image (its test genuinely would have been a colouring over a fixed interference
 structure); **carrying the width in the instruction is what avoids it**, because the
 interference structure is not fixed.
 
-The one place a name count reappears is **the D-width ceiling: there are exactly eight
-64-bit names.** A function with nine live 64-bit values is inadmissible, but it is
-inadmissible on bits too (9 × 64 = 576 > 512), so the two tests agree and no new
-rejection is created.
+`[STRUCK - user ruling 2026-09-03 (liveness)]` ~~*The one place a name count reappears is
+the D-width ceiling: there are exactly eight 64-bit names. A function with nine live 64-bit
+values is inadmissible…*~~ **A name count is NEVER an admission criterion.** Eight 64-bit
+names is a statement about what is **directly nameable**, not a ceiling on liveness, and the
+self-defence that the case "is inadmissible on bits too" concedes the arithmetic while keeping
+the forbidden framing. Nine live 64-bit values is inadmissible **because 576 > 512 bits**, and
+for no other reason; the name count contributes nothing to that verdict and must not be quoted
+beside it. Admission is **bits of peak liveness plus the scratch bits the packing needs ≤ 512**
+(canon K.6). A tenth, or a hundredth, live value of any width is admissible whenever the bits
+and the staging room are there — it is packed under a shared name and reached through scratch.
 
 ### 10.3 The toolchain gate (M13) — with an honest wrinkle
 
@@ -848,7 +869,7 @@ That is a smaller rewrite than the one a fixed mixed-width table would have forc
 | **M3** | `Context512::read`/`write` bit-offset extract/insert | **Reused unchanged** as storage mechanics. The straddle path is dead: no nameable slice crosses a 64-bit word or even a byte (§1.3). Replace it with `assert(offset % width == 0)` so it cannot silently return. |
 | **M4** | `CXW`/`CXR`, 64-bit lane in `funct7[3:1]` | **Unchanged** — 8 lanes, lane in `funct7`, `NMFC_CX_LANE_SHIFT/MASK` untouched. The core names sub-64-bit slices while the host still addresses 64-bit lanes; the record's independence of the two is preserved. New: lane *n* ≡ anchor *n*, so a host stages an `f32` argument by `fmv.x.w` + mask + shift + `CXW` (§9.4). |
 | **M5** | the `x0` rule | Base tier: `x0` reads zero, `f0` reaches anchor 0. NW tier: name 0 is anchor 0 in both namespaces. The question M5 poses — does `f0` follow `x0`? — is answered **no**, with the 64-bit cost of answering yes stated (§6.3). |
-| **M6** | the illegal-register trap | **Re-homed, not lost.** Its purpose (X-C14: a function needing more than the file holds finds out immediately) moves to (i) decode — base names ≥ 8, `lane ≥ 64/w`, reserved `fn`, `rm`=DYN, all fatal via `NMFCTile::illegal`; and (ii) admission — a ninth 64-bit value fails to build under `-ffixed` (§10.3). Under a fixed grid every well-formed encoding is defined, so the *check* changes shape; the *behaviour* does not. |
+| **M6** | the illegal-register trap | **Re-homed, not lost.** Its purpose (X-C14: a function needing more than the file holds finds out immediately) moves to (i) decode — base names ≥ 8, `lane ≥ 64/w`, reserved `fn`, `rm`=DYN, all fatal via `NMFCTile::illegal`; and (ii) admission — a function whose peak liveness plus staging room exceeds 512 bits fails to build under `-ffixed` (§10.3). `[CORRECTED - user ruling 2026-09-03 (liveness)]` ~~*a ninth 64-bit value fails to build*~~ — the gate is **bits plus scratch**, never a count of values. Under a fixed grid every well-formed encoding is defined, so the *check* changes shape; the *behaviour* does not. |
 | **M7** | `annotate.cc` admission tool | Becomes `peak_bits ≤ 512` in one pool, with each width rounded up to {8,16,32,64}. Stays a sum of bits; does not become an assignment or colouring problem, by the lemma (§6.6, §10.4). |
 | **M8** | the `RETC`/`ENDC` return bit | **Unchanged, and I2 survives.** The ISA fixes the *grid* (anchors, natural alignment, power-of-two widths); it does not fix *which value lives in which slice*, which stays the function's ABI exactly as today. So "register positions carry no meaning across the boundary" is intact: the joiner learns the geometry, never the contents. What it gains is that extraction is a fixed 2-shift idiom (§9.2) rather than an arbitrary one — a narrowing of what the host must know, not a widening of what the ISA promises. |
 | **M9** | `JOIN` as read-modify-write | **Unaffected.** `cDST_new = ok ? ftu_payload : cDST_old` moves 512 bits and never inspects them. Confirmed, not assumed. |
@@ -1166,12 +1187,21 @@ enables (§1.3 property 2) and what keeps every slice inside one byte.
 A value cannot begin at bit 5. Natural alignment is what buys the packing lemma, the dead
 straddle path, and the byte enables; it is paid for here.
 
-### 17.4 More than eight 64-bit values
+### 17.4 Nine 64-bit values — a bit fact, not a name fact
 
-There are exactly eight anchors. A ninth live 64-bit value is inadmissible — but it is
-inadmissible on bits as well (576 > 512), so no new rejection is created (§10.2). What *is*
-new is that the D-width name set is **exactly saturated**: a function using all 512 bits at
-64-bit width has no name left over for anything.
+`[CORRECTED - user ruling 2026-09-03 (liveness)]` ~~*More than eight 64-bit values. There are
+exactly eight anchors. A ninth live 64-bit value is inadmissible…*~~ The heading and the claim
+both stated a **cap on live values**, which the ruling forbids. Nine live 64-bit values is
+inadmissible **on bits: 9 × 64 = 576 > 512.** The eight anchors are what a name reaches
+directly; they cap nothing. Nine live 32-bit values is 288 bits and fits with room to spare,
+and nine live values of mixed width fit whenever their bits plus staging room fit — the ninth
+is packed alongside another under one anchor and reached by shift-and-mask through a scratch
+name, at about 2-3 extra operations per access.
+
+What *is* worth stating, and is a **scratch** fact rather than a name-count one: a function
+that spends all 512 bits on 64-bit data has **no staging room left**, so any value it needs to
+pack has nowhere to be shifted in. That is the real edge, and it is the scratch term of K.6's
+bits test, not a ceiling of eight.
 
 ### 17.5 Instructions that cannot be expressed
 

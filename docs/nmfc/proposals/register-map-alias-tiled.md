@@ -546,16 +546,33 @@ other end.
 
 ### 6.1 The claim
 
-> **For any function whose live values are all 32 or 64 bits wide, admissibility under
-> `alias-tiled` is exactly K.6's rule, unchanged: peak simultaneous liveness ≤ 512 bits.**
+> **[CORRECTED - user ruling 2026-09-03 (liveness)]** ~~*For any function whose live values
+> are all 32 or 64 bits wide, admissibility under `alias-tiled` is exactly K.6's rule,
+> unchanged: peak simultaneous liveness ≤ 512 bits.*~~ Two defects, both struck: the
+> restriction to values "all 32 or 64 bits wide" implied that **narrower values fall under
+> some harsher rule**, which §6.2 below explicitly denies (*"There is no bound on c"*); and
+> it omitted the **scratch term**, which is part of the test in canon K.6 and in every
+> corrected box in this record.
+>
+> **The claim, corrected and unrestricted:**
+> ```
+>   max over program points of ( live bits, each value at its OWN width
+>                                + the scratch bits the packing needs )  <=  512
+>   and at least one spare name is available for staging
+>   and every opcode is in the ruled subset, no reserved name, no stack
+> ```
+> **For any function, at any mix of widths.** Not "approximately", not "with a caveat", and
+> not scoped to 32 and 64.
 
-Not "approximately", not "with a caveat". This is the property a complete tiling buys, and
-it is the reason to buy one.
+What a complete tiling buys is not a different admission rule — the rule above is the same
+one everywhere — but that **the direct-name budget never binds before the bit budget** at
+the tiled widths, so values of those widths need no packing and pay no shift-and-mask.
+That is a statement about **instruction count**, and it is the reason to buy a tiling.
 
-**Why.** At a completely tiled width *w*, the number of names is 512/*w*, so
-*names × w = 512*: the name budget **is** the bit budget, and cannot bind before it. And
-the tiles form a binary buddy system, so a bit-sum-feasible set of values is always
-placeable:
+**Why directness comes free at the tiled widths.** At a completely tiled width *w*, the
+number of names is 512/*w*, so *names × w = 512*: the direct-name budget **is** the bit
+budget, and cannot bind before it. And the tiles form a binary buddy system, so a
+bit-sum-feasible set of values at those widths is always placeable **directly**:
 
 > **Placement lemma.** Let values have widths *w*₁ ≥ *w*₂ ≥ … ≥ *w*ₙ, each a power of two
 > in {64, 32}, with Σ*w*ᵢ ≤ 512. Place them in that order, each at the lowest free bit
@@ -565,8 +582,9 @@ placeable:
 > ≥ *w*ᵢ and a power of two, hence a multiple of it), so the next free offset is already
 > *w*ᵢ-aligned. No gap is ever created, so the total placed equals the total width. ∎
 
-First-fit-decreasing is therefore an **exact** allocator, not a heuristic, and it runs in
-O(*n* log *n*). This is the *opposite* of the usual register-allocation situation, and it
+First-fit-decreasing is therefore an **exact** allocator **for direct name assignment at
+the tiled widths**, not a heuristic, and it runs in O(*n* log *n*). Values outside those
+widths are packed and reached through scratch; they are not rejected. This is the *opposite* of the usual register-allocation situation, and it
 is worth being explicit about why: interference here is purely geometric, and the geometry
 is a buddy tree.
 
@@ -745,14 +763,28 @@ What the counts measure is how many width-multisets each scheme places **without
 those ~2-3 ops per access** — directness, i.e. instruction count. Read every figure in this
 subsection that way; **none of them is an admission bound, and the "max bits placeable"
 column is 512 in every row, which is the point.** Counting every multiset of live-value
-widths over {64, 32, 16, 8} that each scheme can place **directly** (exhaustive enumeration,
-`a ≤ 8`, `b ≤ 16`, total ≤ 64 values):
+widths over {64, 32, 16, 8} that each scheme can place **directly** (exhaustive enumeration
+over the *directly nameable* slices of each map; the enumeration's own bounds — `a ≤ 8`,
+`b ≤ 16`, and a cutoff at 64 values — are **limits of the enumeration, not of the machine**,
+which holds as many live values as 512 bits and their staging room allow):
 
-| scheme | admissible packings | max live values by width (64 / 32 / 16 / 8) | max bits placeable |
-|---|---|---|---|
-| **`alias-tiled` V-A** | **2137** | 8 / 16 / 7 / 7 | 512 |
-| **hierarchical H-a** | **495** | 8 / 8 / 8 / 8 | 512 |
-| *per-function map (rejected)* | *13091* | *8 / 16 / 31 / 31* | *512* |
+`[CORRECTED - user ruling 2026-09-03 (liveness)]` The column headed *"admissible packings"*
+is renamed **directly-nameable width-multisets**, and the column headed *"max live values by
+width"* is renamed **max values nameable directly at that width** — the old headings stated a
+live-value cap verbatim, which the ruling forbids. **The 7 / 7 figures in the V-A row are
+the struck `c ≤ 7` cap** (see §6.2) reappearing as a table entry; they are here only as a
+count of `h`-tier and byte-tier slices that carry their own name, and they bound **nothing**.
+Sixty-four live bytes are 512 bits and are admissible on bits; they are simply packed rather
+than each given a name.
+
+| scheme | directly-nameable width-multisets | max values nameable **directly** by width (64 / 32 / 16 / 8) | max bits placeable | max live values |
+|---|---|---|---|---|
+| **`alias-tiled` V-A** | **2137** | 8 / 16 / 7 / 7 | 512 | **bits + scratch ≤ 512** |
+| **hierarchical H-a** | **495** | 8 / 8 / 8 / 8 | 512 | **bits + scratch ≤ 512** |
+| *per-function map (rejected)* | *13091* | *8 / 16 / 31 / 31* | *512* | ***bits + scratch ≤ 512*** |
+
+The last two columns are **identical in every row**, and that identity is the point: the
+schemes differ in **directness and therefore instruction count**, never in capacity.
 
 H-a's number has a one-line explanation: **within a lane every name contains the next**, so
 no two names in a lane are disjoint, so **at most one value can be named directly in a
