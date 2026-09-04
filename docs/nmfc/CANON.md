@@ -10929,6 +10929,18 @@ they were written.]**
 >   transfer path and the write-back/merge under it. The sweep's measurements are unaffected
 >   (the workload's graph-checksum read pass evicts the host's dirty lines), and the workload
 >   now carries a permanent check for it.
+>   **`[CLOSED — 2026-09-04. F1 IS FIXED, in NMFC-Rev `69e5739` on `main`, pushed. The quote
+>   above is left VERBATIM because it is what the sweep reported; the status it carries is
+>   superseded here and at ledger L61. The suspect named in it was WRONG: the R-F transfer
+>   path was correct all along. The directory decided whether a holder was dirty by reading
+>   its own `d.global`, and a cache holding `E` writes through it with NO MESSAGE — so `E`
+>   means "clean, or modified, and I cannot tell". Every snoop response now carries a `dirty`
+>   bit and the directory classifies the holder from that answer. VERIFIED on this tree:
+>   `test/tile_dirty_xfer.c` FAILs on `272eb20` and PASSes at 1, 2 and 4 tiles on `69e5739`,
+>   with `snoopDirtyInvalidated` = 0 on every cache, gated at zero by the coherent suite.
+>   THE SWEEPS ABOVE ARE STILL THE FROZEN BUILD'S: `4cd0e05` is on the far side of the fix,
+>   no number in them is withdrawn (the 4G answer is byte-identical across it), and their
+>   coherence counters do not carry across it — see L61.]`**
 > - **BFS: the 32G point put a level back on the host.** GAPBS's alpha rule fired one
 >   expansion later there, so a top-down expansion costing 122.25 M cycles ran on the host in
 >   both builds — 66% of the offloaded build's entire traversal. Both builds take the same
@@ -10963,8 +10975,13 @@ they were written.]**
 >   deterministic and the configurations were byte-identical across runs.
 
 **Two of those caveats have their own rows in this document and must be followed there rather
-than argued from here.** **F1** is ledger **L61**, **OPEN** — nothing in this document may
-state or imply that it is fixed. **The R-F deviation** is the pair of
+than argued from here.** **F1** is ledger **L61**, and it is now **CLOSED — FIXED** in
+`69e5739`, verified by a test that fails on the parent commit and passes at 1, 2 and 4 tiles
+on the fix. `[UPDATED — 2026-09-04. This line previously read "**OPEN** — nothing in this
+document may state or imply that it is fixed." That instruction is DISCHARGED: the fix landed,
+was verified, and is recorded at L61 with its before/after. What replaces it is the narrower
+rule at L61 — nothing in this document may state or imply that the fix is IN the numbers
+above, because it is not.]` **The R-F deviation** is the pair of
 `[IMPLEMENTATION CHOICE — user to ratify or overturn]` items at ledger **L14**.
 
 #### WHAT THESE SWEEPS DO AND DO NOT SETTLE — the convergence statements, stated as they may be quoted
@@ -11463,9 +11480,14 @@ Every place the sources disagree, which authority won, and why. Authority order:
 user-vs-ChampSim conflicts, or genuinely open questions, that this document does not
 resolve on its own authority.
 
-**Count: 61 conflicts (L1–L61, no gaps).** **[UPDATED - L61 added 2026-09-03 (evening): the
-BFS **F1 lost-bytes** defect found by the SST sweeps, and it is the ONLY row in this appendix
-that is OPEN. It opens no ruling — it is a defect in the implementation, in the class R5
+**Count: 61 conflicts (L1–L61, no gaps), and NONE of them is open.** **[UPDATED — 2026-09-04:
+**L61 is CLOSED**, fixed in NMFC-Rev `69e5739` and verified by a test that fails on the parent
+commit and passes at 1, 2 and 4 tiles on the fix. It was the only open row in this appendix, so
+**this appendix now has zero open rows.** The closure carries two standing restrictions, both
+stated at L61: the fix is NOT in the frozen library the N.9 sweeps were measured on, and the
+coherence counters do not carry across it.]** **[UPDATED - L61 added 2026-09-03 (evening): the
+BFS **F1 lost-bytes** defect found by the SST sweeps, and it was the ONLY row in this appendix
+that was OPEN. It opens no ruling — it is a defect in the implementation, in the class R5
 established for L14/L15 — so the front matter's "zero questions open" is unaffected.]**
 **[UPDATED - L59 and L60 added 2026-09-03: the
 giant-page semantics of a STRIPED page (U2-U4) and `KILL` delivery and entry lifecycle (U1,
@@ -13142,9 +13164,11 @@ together.]**
 - **CLOSED.**
 
 **L61 — F1: a host-dirty line can LOSE BYTES a function core did not write.**
-**[OPEN — A DEFECT, NOT A DESIGN QUESTION. Added 2026-09-03 (evening) by the SST sweeps;
-in the class user ruling 2026-09-02 **R5** established for L14/L15 — "*that sounds like a
-bug*" — so it asks the user for nothing and this row is not `[FOR THE USER TO RULE]`.]**
+**[CLOSED — FIXED 2026-09-04 in NMFC-Rev `69e5739`, on `main`, pushed. A DEFECT, NOT A DESIGN
+QUESTION. Added 2026-09-03 (evening) by the SST sweeps; in the class user ruling 2026-09-02
+**R5** established for L14/L15 — "*that sounds like a bug*" — so it asked the user for nothing
+and this row was never `[FOR THE USER TO RULE]`. It is the LAST open row in this appendix, and
+with it closed the appendix has NO open rows.]**
 `[IMPLEMENTATION EVIDENCE - tier 4, SST]`
 - *What it is, in the words of the run that found it (RESULTS.md caveats, verbatim):*
   "**BFS F1, tagged for the user and unresolved: a host-dirty line can lose bytes a function
@@ -13164,10 +13188,55 @@ bug*" — so it asks the user for nothing and this row is not `[FOR THE USER TO 
   the caveat gives — the workload's checksum read pass evicts the host's dirty lines before
   the read-back — and every BFS answer in that sweep is bit-identical to its baseline.
   **It is a correctness defect, not a measurement defect.**
-- **STATUS: OPEN.** Frozen library `4cd0e0599b4a147f8d56399e71606c8a5e977abd`. **A fix was
-  being written when this row was recorded and IS NOT recorded here; nothing in this document
-  may state or imply that F1 is fixed.** The row closes when the fix lands, with its own
-  before/after and the permanent check still passing.
+- **THE DIAGNOSIS, AND WHY THE CAVEAT'S SUSPECT WAS WRONG.** The R-F transfer path was
+  **correct all along**: `FetchXfer` hands back the whole line and `complete()` makes the
+  requester the owner. What was wrong was the *decision to use it*. The directory chose
+  between "this holder is dirty" and "this holder is clean" by reading its own `d.global`,
+  and `d.global` **cannot answer that question**: a reader that finds a line nobody holds is
+  granted **`E`**, and a cache holding `E` writes through it with **no message at all**. So
+  `d.global == E` means *"clean, or modified, and I have no way to tell"*. For a line the host
+  **read first and wrote second** the guess was wrong, R-F did not fire, the downgrade's
+  completion recorded the line clean while the holder had put it in `O`, and the next writer's
+  `GetX` sent a plain `Inv` — which **dropped a dirty line with no writeback**. The
+  transaction then read the stale slice copy and merged the tile's 8-byte store into it.
+- **THE FIX: the directory never infers what a cache is holding; the cache says.** Every snoop
+  response carries a `dirty` bit; the directory classifies the holder from that answer; a
+  plain `Inv` can no longer discard a dirty line (`snoopDirtyInvalidated` counts any attempt);
+  and **R-F now covers `E`**, because `E` is the state a silent write hides in.
+  **`ownershipTransfer` was NOT weakened** — it stays on and now fires on strictly *more*
+  lines. This does not disturb **L14**: it widens the same path L14 records.
+- **STATUS: CLOSED — FIXED**, in `69e5739`, verified rather than asserted.
+  **`test/tile_dirty_xfer.c` FAILs on the parent commit `272eb20` and PASSes at 1, 2 and 4
+  tiles on `69e5739`**, with `snoopDirtyInvalidated` = **0** on every cache in every run, and
+  the coherent suite gates that counter at zero. `NMFC SUITE`, `NMFC COHERENT SUITE` and
+  `NMFC VANADIS SUITE` all pass on a clean rebuild.
+- **WHAT THE FIX DOES NOT DO, AND THIS IS THE RULE THAT REPLACES "NOTHING MAY SAY IT IS
+  FIXED".** The fix is **NOT in the frozen library** `4cd0e0599b4a147f8d56399e71606c8a5e977abd`
+  that every number at **N.9** was measured on — six commits separate them and a seventh is
+  the fix. **Nothing in this document may state or imply that the sweeps at N.9 were taken on
+  the fixed machine.** They were not, they are not withdrawn, and the reason they are not is
+  unchanged: the 4G BFS answer is **byte-identical** across the fix (`depthsum`, `parentsum`
+  and `graphsum` all match) and the workload's checksum read pass evicts the host's dirty
+  lines before the read-back.
+- **AND THE COHERENCE COUNTERS DO NOT CARRY ACROSS THE FIX — the fix is a BEHAVIOUR change on
+  the BFS workload, not only a re-labelling.** On the directed suite it is a re-labelling
+  (`tile_bfs`/4 and both `tile_coh` runs are bit-identical but for four counters). On
+  **`bfssw_nmfc_4g` at 4 tiles it is not**: R-F was *effectively dead* there —
+  `nmfcOwnershipTransfers` = **1** — and now fires **23,585** times, with `downgrades`
+  −18.1 %, `fwdFromF` −36.3 %, `bytesCoherence` −2.6 %, `hostL2` writebacks −9.1 %,
+  function-core writebacks **+55 %**, `memReads` +3.8 %, simulated time +0.0015 %. **The
+  direction is favourable and the answer is unchanged**, but a reader must not carry a
+  coherence counter from N.9 across this commit. `[This also RETIRES a stated reason in the
+  sweep report: `bfs.md` explained the 4G value of 1 as "the graph no longer fits and almost
+  nothing is still dirty". **That reasoning is FALSE** — the lines *were* dirty; the directory
+  was recording them as `E` and could not tell. The conclusion the sentence supported (the
+  sweep's measurements are unaffected) is unchanged and was re-checked; the explanation is
+  withdrawn.]`
+- **AND ONE COMMIT MESSAGE IS NARROWED.** `69e5739`'s message says the change is "a
+  re-labelling and not a behaviour change" without naming a workload. That is true of the
+  directed suite and **false of the 4G sweep**, per the row above. A pushed commit message is
+  not rewritten; the correction of record is in `src/nmfc/README.md` under
+  **Corrections of record**, and here.
 
 
 ---
