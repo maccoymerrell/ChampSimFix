@@ -13212,8 +13212,8 @@ with it closed the appendix has NO open rows.]**
   `NMFC VANADIS SUITE` all pass on a clean rebuild.
 - **WHAT THE FIX DOES NOT DO, AND THIS IS THE RULE THAT REPLACES "NOTHING MAY SAY IT IS
   FIXED".** The fix is **NOT in the frozen library** `4cd0e0599b4a147f8d56399e71606c8a5e977abd`
-  that every number at **N.9** was measured on — six commits separate them and a seventh is
-  the fix. **Nothing in this document may state or imply that the sweeps at N.9 were taken on
+  that every number at **N.9** was measured on — nine commits separate `4cd0e05` from
+  `272eb20` and the fix is the tenth. **Nothing in this document may state or imply that the sweeps at N.9 were taken on
   the fixed machine.** They were not, they are not withdrawn, and the reason they are not is
   unchanged: the 4G BFS answer is **byte-identical** across the fix (`depthsum`, `parentsum`
   and `graphsum` all match) and the workload's checksum read pass evicts the host's dirty
