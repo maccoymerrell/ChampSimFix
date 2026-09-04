@@ -10675,6 +10675,11 @@ carrying "*the memory tiles extract 76.9% of the channel*" into a sentence about
 **And this section's own standing warning applies to the fabric claim too:** a structure
 reporting itself the constraint is a hypothesis (**O.1**), no fabric ablation was run, and the
 FTU/window ablations that WERE run came back "not the bottleneck" for the fourth time.
+`[RE-READ — user 2026-09-04: all four of those instances were measured on the IN-ORDER host,
+which bounds admission on the NMFC side as well as the baseline side, so what they establish is
+"not the bottleneck WHEN FED IN ORDER" — an ablation of a resource nobody was queueing for.
+They are not withdrawn and they are not evidence about the out-of-order host. H.9, N.9's
+claim-shape box, ledger L63.]`
 
 ### N.8 WHAT LIMITS BANDWIDTH: ARRIVAL RATE, NOT THE MEMORY SYSTEM
 
@@ -11116,7 +11121,11 @@ when quoting a number, quote its provenance.]`
    saturation above is a **measurement of one configuration**, not a finding about the
    architecture — and the counter-evidence is in the same tables: quadrupling the FTU and the
    window changed the answer by −2.6% and −2.0%/+4.9%, which is what "not the bottleneck"
-   looks like, and no equivalent ablation of the fabric was run.
+   looks like, and no equivalent ablation of the fabric was run. `[RE-READ — user 2026-09-04:
+   and there is a fourth structure to add to the three — the HOST. Every run in item 5 was fed
+   by the IN-ORDER host, whose FORK/JOIN retire in order at ≤ 1/cycle and bound admission on
+   the NMFC side too, so "quadrupling the FTU changed nothing" is what enlarging an unqueued
+   resource looks like. The fabric ranking above is ranked under that bounded feed. L63.]`
 
 
 ---
