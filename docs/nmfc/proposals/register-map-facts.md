@@ -14,6 +14,16 @@ and to the current `riscv/riscv-isa-manual` `main` sources from which it is buil
 (`src/unpriv/vector-common.adoc`). Chapter numbers are those of the v20260120
 rendering. Non-RISC-V prior art is cited to its own vendor documentation.
 
+**Note added 2026-09-03 `[user ruling 2026-09-03 (liveness)]`.** No C-fact in this file
+asserts a cap on live values, and none is superseded. Read C12/C14 as they are written:
+the gap is **naming**, i.e. how *directly* a 5-bit field can denote a slice. It is not a
+capacity limit. The context is 512 independent bits on a strictly in-order core with no
+renaming; a value narrower than a name is bit-packed inside one and reached by
+shift-and-mask through a **scratch** name, so every width — the byte tier included —
+remains reachable and the only cost is **instruction count** (about 2-3 extra ops per
+packed access). Admission is a test on **bits of peak liveness plus the scratch bits the
+packing needs**, never a count of values and never a 32-bit charge on a narrow one.
+
 **Verdict key.** TRUE = the claim is correct as stated. NUANCED = the claim's
 conclusion survives but its statement is imprecise, incomplete, or true only under
 a condition that was not named. FALSE = the claim is wrong.
@@ -233,6 +243,10 @@ proposal and it had not been named.
 fields. What it cannot do is let an instruction's 5-bit register field **denote** one.
 The gap is architectural naming and nothing else — which is a stronger and more useful
 framing of the design problem than "RISC-V can't do narrow registers."
+`[user ruling 2026-09-03 (liveness)]` And "naming" here costs **instructions, not
+capacity**: the shifts, masks and `or`s listed above, staged through a scratch name, reach
+any field at any width, so no width is out of reach and no live value need be charged more
+bits than it occupies.
 
 ---
 

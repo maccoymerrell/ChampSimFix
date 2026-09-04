@@ -1,21 +1,34 @@
 # DESIGN A — FIXED ALIASING
 
-> **[SUPERSEDED IN PART — READ THIS FIRST.]** `register-map-final.md` is the later work and carries
-> this document forward with corrections. **Two of them change numbers that appear below and must
-> not be quoted from here:**
+> **[SUPERSEDED - user ruling 2026-09-03 (liveness)]** *(dated 2026-09-03)*
 >
-> 1. **"81 of 13,091 — a factor of 162" (§2.3, §11, §13.2, QA/QB) is a CATEGORY ERROR.** The 81
->    counts (*a*, *b*) pairs over a **two-width** alphabet; the 13,091 counts multisets over a
->    **four-width** one. Counted like for like — of the 13,091 four-width multisets, how many does
->    design A place under its own charge-32 rule — the answer is **2,685, a factor of 4.9**, and the
->    loss is **79.5%, not 99.4%**. The same defect runs through **657** (= 81 + 8 × 72) and **969**
->    (tuples over {64,32,16}); the like-for-like figures are **4,233** and **9,132**.
->    See `register-map-final.md` §5.2.
-> 2. **§13.1's claim that the byte-tier loss is "a consequence of the 2026-09-03 ruling, not of this
->    design" is WRONG.** It is a consequence of the **name-denotes-slice family**, and binds design
->    A, B2 and design B's free map alike. `register-map-final.md` §3A builds **design A2**, which
->    respects the 2026-09-03 ruling in full *and* reaches the byte tier — a counterexample that
->    settles the attribution.
+> Everything below that argues from a **cap on live values** is struck, not softened: "the byte tier is unreachable", the **charge-32** rule, "at most 16 live values", "2,685 of 13,091", "a factor of 4.9", "a factor of 162", and any claim that Design A **narrows** invariant I2's *"ANY combination"*. The user's ruling, verbatim: *"We are operating on a 512-bit value. Literally every bit is independent because we are strictly in-order. Bit-packing is a thing, so we can have as many live values as we want as long as we have scratch space in the file to manipulate said value (for example, if we want to have 4 8-bit values in one vector, we can, but we must have another reg where we can stage the proper shifting and masking required)."*
+>
+> **The correct rule.**
+> 1. Design A fixes what a 5-bit register field can **NAME DIRECTLY** — eight 64-bit tiles (`x8`-`x15`) and sixteen 32-bit tiles (`x16`-`x31`). It does **not** bound how many values are **LIVE**.
+> 2. A value narrower than a name is **packed** with others inside one name and accessed by shift-and-mask through a **SCRATCH** name — standard RV64I (`srli`/`slli`/`andi`/`or`), no new instructions.
+> 3. Admission counts **BITS OF PEAK LIVENESS plus the scratch bits the packing needs** (at least one spare name for staging). Never a count of values. Never "charge 32".
+> 4. The byte tier and **any** width are **REACHABLE**. Canon I2's *"16 4-byte regs, 64 1-byte regs, or ANY combination"* (#232) stands **unnarrowed**.
+> 5. Nameability affects **INSTRUCTION COUNT ONLY**: a packed sub-name value costs about **2-3 extra ops per access**. **A2 (extent instructions) is a speed optimisation, never a capability fix.**
+> 6. **The expressiveness comparison collapses. A and B have IDENTICAL capacity — 512 bits — under every design.** They differ only in instruction count for sub-name values: **A ≈ 2-3 extra ops per packed access; B a map lookup per access.** The width-multiset counts below measure directness, not capability, and none of them is a capacity bound.
+> 7. The compiler's job is **packing plus scratch allocation**; the admission tool checks **bits plus scratch**, the `RV64IMAFD` subset, no reserved names, no stack.
+>
+> **Consequence for the recommendation: unchanged, and its reasoning is simpler.** Design A still wins — *same capacity as B*, no third object, no per-context state. Where this page said the loss "belongs to the 5-bit register field": it belongs to nothing. There is no loss of capability, only of directness.
+
+> **[SUPERSEDED IN PART — READ THIS FIRST.]** `register-map-final.md` is the later work and carries
+> this document forward with corrections. **The two corrections it used to record here are themselves
+> superseded by the ruling above, and both are struck:**
+>
+> 1. ~~"81 of 13,091 — a factor of 162" is a category error; like for like it is **2,685 of 13,091,
+>    a factor of 4.9**, and the loss is 79.5%.~~ **STRUCK.** *Every* one of these figures — 81, 657,
+>    969, 2,685, 4,233, 9,132, 13,091, factor 162, factor 4.9 — measures **directly nameable
+>    width-multisets**, i.e. instruction count. **There is no loss.** A and the per-function map hold
+>    the same 512 bits and express the same widths; they differ by ~2-3 ops per packed access against
+>    one map lookup.
+> 2. ~~§13.1's claim that the byte-tier loss is "a consequence of the 2026-09-03 ruling, not of this
+>    design" is wrong; it belongs to the name-denotes-slice family, and A2 is the counterexample.~~
+>    **STRUCK — there is no byte-tier loss to attribute.** The byte tier is reachable under design A
+>    itself, by packing. A2 buys **speed** on those accesses, not the tier.
 >
 > Also superseded there: **W1b is struck** (§3 of that document), the `annotate` width-charging
 > claim (Q8) is corrected, `rv64ima_zfinx_zdinx` replaces `rv64ima` as the day-one spelling, and
@@ -37,14 +50,17 @@ document's own review**. Three things change substantively:
 
 1. Its §10 nine open questions are resolved to recommendations; **three remain open**, because
    only three genuinely change the design (§9).
-2. Its two capability limits — the byte-tier cap and the charge-32 rule — are promoted from
-   price-list lines to **stated limits of the design** (§2). They narrow canon I2's *"ANY
-   combination"*, and that is a decision the user must acknowledge, not a footnote.
-3. Its packing-count figure is **corrected**. §9.3 of `register-map.md` claims this map admits
-   "~2,137" width-multisets against the per-function map's "~13,091". The 2,137 belongs to
-   `alias-tiled`'s map, which has narrow-tier fragments this one does not. **The correct
-   number for this design is 81** — reproduced two independent ways in §2.3, alongside the
-   13,091, which does reproduce exactly.
+2. ~~Its two capability limits — the byte-tier cap and the charge-32 rule — are promoted to
+   stated limits of the design (§2), narrowing canon I2's "ANY combination".~~ `[SUPERSEDED - user ruling 2026-09-03 (liveness)]`
+   **Neither is a capability limit and neither narrows I2.** They are restated in §2 as what
+   they are: the byte tier has no **direct name** and a sub-name value is packed and reached by
+   shift-and-mask through a scratch name, ~2-3 ops per access. **Nothing needs acknowledging.**
+3. Its packing-count figure is **corrected**, and the whole family of counts is **demoted**:
+   81, 2,137 and 13,091 all count **directly nameable** width-multisets, never admissible ones
+   `[SUPERSEDED - user ruling 2026-09-03 (liveness)]`. The 2,137 belongs to `alias-tiled`'s map, which has narrow-tier fragments this
+   one does not; **the direct-nameability number for this design is 81**, reproduced two ways in
+   §2.3 alongside the 13,091. **None of them bounds what this design can hold: 512 bits, every
+   width.**
 
 **Prerequisites.** `register-map-facts.md` (fact-C1–C24), `register-map-context.md`
 (M1–M15, cons-C1–C32), `register-map.md` (the synthesis and its review).
@@ -73,8 +89,13 @@ bit  0                                                                          
 
  ADMISSIBLE  <=>  every opcode in RV64IMAFD
                   AND the seven legality rules hold (§4)
-                  AND 64a + 32b <= 512, a <= 8, b <= 16   (b counts values of 32 bits OR FEWER,
-                                                           EACH CHARGED 32 -- a stated limit, §2.2)
+                  AND peak( live bits + scratch bits ) <= 512, each value at its OWN width,
+                      one spare name free for staging   [user ruling 2026-09-03 (liveness)]
+                      -- nothing is charged 32; no cap on the number of live values;
+                         a value with no name of its width is PACKED and reached by
+                         shift-and-mask through a scratch name: ~2-3 extra ops per access
+                      (DIRECT NAMEABILITY, an instruction-count rule and NOT admission:
+                       a <= 8 sixty-fours, b <= 16 thirty-twos, 64a + 32b <= 512)
                   AND a verified non-overlapping placement exists over the live ranges (§7.3)
 
  STATE OUTSIDE THE INSTRUCTION: none.
@@ -157,17 +178,27 @@ at every register access (`NMFCTile.cc:461-475`, `return c.regs.read( layout_.fi
 
 ---
 
-## §2 THE TWO STATED LIMITS
+## §2 THE TWO STATED LIMITS — **BOTH RESTATED AS INSTRUCTION-COUNT COSTS**
 
-These are limits of **this design**, stated here rather than in the price list, because they
-narrow a tier-1 `[SHARPENED]` block (canon I2, quoting user #232: the context *"could be 16
-4-byte regs, **64 1-byte regs**, or ANY combination"*, CANON.md:5215-5233). They have different
-provenance and must not be merged.
+> **[SUPERSEDED - user ruling 2026-09-03 (liveness)]** *(dated 2026-09-03)* **Neither "limit" is a
+> limit on capability, and this section narrows nothing.** Canon I2's *"16 4-byte regs, 64 1-byte
+> regs, or ANY combination"* (#232) **stands unnarrowed**. The context is 512 independent bits on
+> a strictly in-order core with no renaming: a value narrower than a name is **packed** with
+> others inside one name and reached by shift-and-mask through a **scratch** name (plain RV64I),
+> so **every width is reachable, the byte tier included**, and admission counts **bits of peak
+> liveness plus the scratch bits the packing needs** — never a count of values, never a 32-bit
+> charge. What §2.1 and §2.2 actually describe is **directness**, which is **instruction count**:
+> about **2-3 extra ops per access** to a value packed below a name. Nothing here requires the
+> user's acknowledgement; QA is withdrawn (§9).
 
-### 2.1 Limit 1 — the byte tier is unreachable, and that IS arithmetic
+The two limits, restated correctly and kept below in their superseded form for the record.
 
-> **No name is narrower than 32 bits. "64 one-byte registers" cannot be named by any scheme in
-> which the register number alone denotes the slice.**
+### 2.1 Limit 1 — the byte tier has no DIRECT NAME, and that much IS arithmetic
+
+> **No name is narrower than 32 bits, so "64 one-byte registers" cannot be *named* by any scheme
+> in which the register number alone denotes the slice.** `[SUPERSEDED - user ruling 2026-09-03 (liveness)]` **They can still be held
+> and computed on** — eight bytes per 64-bit name, reached by shift-and-mask through a scratch
+> name, ~2-3 ops per access. The arithmetic below counts **names**, not capacity.
 
 A register field is five bits (Ch. 2), so each namespace affords 32 encodings; `x0` is hardwired
 zero and cannot be a slice without invalidating `nop`, `j` and the HINT space (fact-C17), leaving
@@ -175,9 +206,10 @@ zero and cannot be a slice without invalidating `nop`, `j` and the HINT space (f
 at width *w* costs 512/*w* names: 8 at 64, 16 at 32, 32 at 16, **64 at 8**. Sixty-four names do
 not exist. fact-C17 reaches the same result from the other side: 512/63 ≈ 8.1 bits per name.
 
-**Provenance: this is a consequence of the 2026-09-03 ruling**, not of this design — it holds for
-every name-denotes-slice scheme, and the ruling's stated reason was the third referenced object
-(cons-C32). It is the price of deleting the map.
+**Provenance, corrected** `[SUPERSEDED - user ruling 2026-09-03 (liveness)]`**:** the shortage of *names* belongs to the 5-bit field and
+holds for every name-denotes-slice scheme; but **it is not a loss and belongs to nothing** — there
+is no capability the map delivered that this design does not. The price of deleting the map is
+**~2-3 ops per sub-name access instead of a map lookup** (cons-C32).
 
 **What is NOT forbidden by counting, and must not be claimed to be:** 8 + 16 + 32 = **56 ≤ 63**.
 A complete 16-bit tier is arithmetically available (e.g. `f0`–`f31` as thirty-two 16-bit tiles).
@@ -186,43 +218,55 @@ arithmetic below 32 bits (no RV16I; `F`'s narrowest operation is 32 bits; `Zfh` 
 O4), and §1.2 spends the `f` namespace on identity aliasing. **That second reason is retained
 question QB.**
 
-### 2.2 Limit 2 — every sub-32-bit value is charged 32 bits, and that is a REGRESSION
+### 2.2 ~~Limit 2 — every sub-32-bit value is charged 32 bits, and that is a REGRESSION~~ **WITHDRAWN**
 
-> **Admission charges every live value narrower than 32 bits a full 32 bits. This is not K.6
-> verbatim.**
+> **[SUPERSEDED - user ruling 2026-09-03 (liveness)]** **There is no charge-32 rule.** Admission
+> charges every live value **its own width**, plus the scratch bits its packing needs, and tests
+> `≤ 512` — **K.6 verbatim, in bits.** The table below is withdrawn: **7 × 64-bit + 8 × 8-bit is
+> 512 bits here as under K.6** (the bytes packed into a name; at exactly 512 the question is
+> whether the schedule leaves staging room, which is scratch accounting, not a 32-bit charge);
+> **9 × 48-bit is 432 bits and fits**; **12 × 16-bit + 5 × 64-bit is 512 and fits**. All three
+> "704 → rejected" cells are struck. What each of these shapes really costs is **instructions**:
+> ~2-3 per access to a packed value.
 
-K.6 charges a value its actual width — its own worked example prices "eight live 64-bit values
+**The struck argument, retained for the record.** K.6 charges a value its actual width — its own worked example prices "eight live 64-bit values
 plus one 8-bit value" at 520 bits, eight bits for the byte, not thirty-two
 (`register-map-context.md` §7). The concrete regression, verified:
 
 | function shape | under K.6 | under this design | verdict |
 |---|---|---|---|
-| 7 × 64-bit + 8 × 8-bit | 448 + 64 = **512** → admitted at exactly 512 of 512 | 448 + 8×32 = **704** → **rejected** | a function K.6 admits cannot run |
-| 9 × 48-bit (432 bits of data) | 432 → admitted, placed exactly | needs nine 64-bit tiles; only eight exist → **rejected** | ditto |
-| 12 × 16-bit + 5 × 64-bit | 192 + 320 = **512** → admitted | 12×32 + 320 = **704** → **rejected** | ditto |
+| 7 × 64-bit + 8 × 8-bit | 448 + 64 = **512** → admitted at exactly 512 of 512 | ~~448 + 8×32 = 704 → rejected~~ **512 → admitted**, bytes packed, ~2-3 ops per access | **[STRUCK - user ruling 2026-09-03 (liveness)]** no divergence |
+| 9 × 48-bit (432 bits of data) | 432 → admitted, placed exactly | ~~nine 64-bit tiles; only eight exist → rejected~~ **432 → admitted**, packed | **[STRUCK]** |
+| 12 × 16-bit + 5 × 64-bit | 192 + 320 = **512** → admitted | ~~12×32 + 320 = 704 → rejected~~ **512 → admitted**, packed | **[STRUCK]** |
 
 Under cons-C15 that rejection is **fatal** — there is no spill, no truncation, no softening. The
 function is rewritten, split into a `CONT` chain, or refused.
 
-**Provenance: this one is THIS DESIGN'S choice**, not the ruling's. It follows from declining the
-16-bit tier (§2.1) and from reserving `x1`–`x7` (§8, Q2). A different fixed-aliasing map could buy
-some of it back; the per-function map bought all of it.
+**Provenance, corrected** `[SUPERSEDED - user ruling 2026-09-03 (liveness)]`**:** the design's choice is how many slices it names
+directly, and that decides **instruction count**. **There is no ceiling on live values** — the
+struck text said "sixteen, whatever their widths", which is exactly the count-of-values framing
+the ruling forbids. A boolean, a byte counter, a level number and a 3-bit tag cost **1, 8, 8 and 3
+bits** respectively, plus the scratch space they stage through, plus ~2-3 ops per access.
 
-**The ceiling on live values is sixteen, whatever their widths.** A boolean, a byte counter, a
-level number and a 3-bit tag each cost 32 bits.
+### 2.3 What the two limits cost, measured — **DIRECTNESS, NOT CAPACITY**
 
-### 2.3 What the two limits cost, measured
+> **[SUPERSEDED - user ruling 2026-09-03 (liveness)]** **Every count in this subsection measures
+> how many width-multisets a scheme places *without paying for shift-and-mask* — instruction
+> count, not admissible shapes.** All schemes listed hold 512 bits and express every width, so
+> **the ratios do not divide capability by capability and the comparison collapses**: A and the
+> per-function map have **identical capacity**, and differ by ~2-3 ops per packed access against
+> one map lookup. Read 81, 657, 969, 2,685 and 13,091 as directness figures only.
 
-The comparable measure is **how many distinct width-multisets each scheme can place**. Counting
+The measure below is **how many distinct width-multisets each scheme can place directly**. Counting
 every multiset over widths {64, 32, 16, 8} that sums to ≤ 512 bits, subject to each scheme's own
 name budget:
 
-| scheme | rule | admissible width-multisets |
+| scheme | direct-naming rule | **directly nameable** width-multisets (NOT an admission bound) |
 |---|---|---|
-| **Design A** | *a* ≤ 8 sixty-fours, *b* ≤ 16 thirty-twos, 64*a* + 32*b* ≤ 512 | **81** `[NOT COMMENSURABLE — like-for-like is 2,685; see the banner]` |
+| **Design A** | *a* ≤ 8 sixty-fours, *b* ≤ 16 thirty-twos, 64*a* + 32*b* ≤ 512 | **81** directly nameable — **and every other multiset up to 512 bits is expressible by packing** `[user ruling 2026-09-03 (liveness)]` |
 | Design A + the Q2 narrow subtree (§8) | + 2 × 16-bit and 4 × 8-bit names carved out of `w15` | 657 `[like-for-like: 4,233]` |
 | three complete tiers (QB option (b)) | 8 / 16 / 32 names at 64 / 32 / 16 | 969 `[like-for-like: 9,132]` |
-| **the rejected per-function map** | 31 names, each freely any of the four widths, ≤ 512 bits | **13,091** |
+| **the rejected per-function map** | 31 names, each freely any of the four widths, ≤ 512 bits | **13,091** directly nameable — **same 512-bit capacity as design A** |
 
 **Design A's 81 is exact and has a closed form**: the multisets are the integer pairs (*a*, *b*)
 with 0 ≤ *a* ≤ 8, 0 ≤ *b* ≤ 16 and 2*a* + *b* ≤ 16, which is
@@ -232,10 +276,11 @@ with 0 ≤ *a* ≤ 8, 0 ≤ *b* ≤ 16 and 2*a* + *b* ≤ 16, which is
 is why it is trusted here. **The "~2,137" that `register-map.md` §7.3 and §9.3 attribute to a
 "fixed two-width map" does not describe this design** — it is `alias-tiled`'s number, for a map
 carrying seven 16-bit and seven byte names. ~~Corrected: **the ratio is 13,091 → 81, a factor of
-162, not a factor of 6.**~~ **[WITHDRAWN — see the banner at the head of this file.** The 81 and the
-13,091 count objects over different alphabets and cannot be divided. **Like for like the ratio is
-13,091 → 2,685, a factor of 4.9**, because §2.2's charge-32 rule means a narrow value is charged 32
-and *still runs*. `register-map-final.md` §5.2.**]**
+162.**~~ ~~**Like for like the ratio is 13,091 → 2,685, a factor of 4.9**, because §2.2's
+charge-32 rule…~~ **[BOTH WITHDRAWN - user ruling 2026-09-03 (liveness).** There is no charge-32
+rule and **no expressiveness ratio to state**: both schemes hold 512 bits and express every width.
+The only honest comparison is **instruction count on a sub-name access — ~2-3 ops under A against
+one map lookup under the free map** — and how often that access happens is unmeasured.**]**
 
 **Against it, the two measured functions still fit** (cons-C21, DESIGN §22):
 
@@ -248,11 +293,13 @@ Both decompositions need re-measuring once `annotate` has a working width input 
 target (§8, Q8). Neither uses a sub-32-bit value, which is why nothing in the record yet
 measures the cost of Limit 2 on real code.
 
-**This is what must be acknowledged:** I2's "ANY combination" becomes **"any combination of
-64- and 32-bit values, with everything narrower charged 32."** ~~81 of 13,091.~~ **2,685 of 13,091
-[corrected — see the banner].** Say yes; or reinstate the map (Design B) and pay the third
-referenced object; or take **design A2** (`register-map-final.md` §3A), which reaches the byte tier
-with no third object at the price of reopening R84.
+**There is nothing here to acknowledge** `[SUPERSEDED - user ruling 2026-09-03 (liveness)]`**:** I2's *"16 4-byte regs, 64 1-byte regs,
+or ANY combination"* **stands unnarrowed under design A.** ~~I2's "ANY combination" becomes "any
+combination of 64- and 32-bit values, with everything narrower charged 32". 81 of 13,091. 2,685 of
+13,091.~~ **All struck.** The real choice is about **speed**: keep design A and pay ~2-3 ops per
+sub-name access; reinstate the map (Design B) and pay a third referenced object for a lookup
+instead; or take **design A2** (`register-map-final.md` §3A), which buys the same access in one
+instruction at the price of reopening R84. **Capacity is 512 bits in all three.**
 
 ---
 
@@ -584,10 +631,16 @@ as immediates in `slli`/`srli`, exactly as a struct field offset does.
 
 ## §7 ADMISSION — THREE TESTS, ONE OF WHICH IS A HEURISTIC
 
-> **A function is admissible iff (1) every opcode in it is in `RV64IMAFD` and its body satisfies
-> §4's seven legality rules; (2) its peak simultaneous liveness satisfies `64a + 32b ≤ 512` with
-> *a* ≤ 8 and *b* ≤ 16, where *b* counts values of 32 bits **or fewer, each charged 32**; and
-> (3) a verified non-overlapping placement exists over its live ranges.**
+> **[CORRECTED - user ruling 2026-09-03 (liveness)]** **A function is admissible iff (1) every
+> opcode in it is in `RV64IMAFD` and its body satisfies §4's seven legality rules — no reserved
+> name, no stack; (2) its peak simultaneous liveness, **each value at its own width**, **plus the
+> scratch bits its packing needs**, is **≤ 512 bits**, with at least one spare name free for
+> staging; and (3) a verified non-overlapping placement exists over its live ranges, where a value
+> with no name of its width is placed **packed** inside a wider name.**
+>
+> ~~`64a + 32b ≤ 512` with *a* ≤ 8 and *b* ≤ 16, where *b* counts values of 32 bits or fewer,
+> **each charged 32**~~ — **STRUCK.** That is a **direct-nameability** rule; it bounds instruction
+> count, never admission.
 
 ### 7.1 The subset and legality test
 
@@ -603,7 +656,9 @@ at 64 and 32 bits the name count *is* the bit count, because both tilings are co
 survives: a value never read is never live and costs nothing. cons-C15 survives: rejection is
 fatal.
 
-**Changed:** the charge-32 rule (§2.2). **Necessary but not sufficient** — see §7.3.
+**Changed: nothing** `[SUPERSEDED - user ruling 2026-09-03 (liveness)]` — ~~the charge-32 rule (§2.2)~~ is struck, so the bits test is
+K.6 verbatim, with one addition: it must also charge the **scratch bits** a packing stages
+through. **Necessary but not sufficient** — see §7.3.
 
 **The tool has no working width input on a RISC-V target, and this is a live blocker.**
 `annotate.cc:461-470`'s `width_of` parses **x86-64** register names (`rax`/`eax`/`al`, `r8d`,
@@ -680,20 +735,28 @@ here as recommendations:
 
 ## §9 THE THREE THAT REMAIN
 
-### QA — Acknowledge the two stated limits
+### QA — ~~Acknowledge the two stated limits~~ **WITHDRAWN**
 
-**The question.** §2 states them: **the byte tier is unreachable** (arithmetic, and a consequence
-of the 2026-09-03 ruling rather than of this design), and **every sub-32-bit value is charged 32
-bits** (this design's choice, a genuine regression against K.6 with a fatal failure mode). Together
-they narrow canon I2's *"64 1-byte regs, or ANY combination"* to **"any combination of 64- and
-32-bit values."** Measured: **81 admissible width-multisets against the per-function map's
-13,091** (§2.3).
+> **[SUPERSEDED - user ruling 2026-09-03 (liveness)]** *(dated 2026-09-03)* **Withdrawn: nothing
+> is narrowed and there is nothing to acknowledge.** The byte tier is **reachable** under design A
+> by packing; **no value is charged 32**; canon I2's *"64 1-byte regs, or ANY combination"* stands
+> as written. The 81-against-13,091 figure counts **direct nameability**, and both schemes hold
+> the same 512 bits. If a question survives here it is a **speed** question — how often offloaded
+> functions touch sub-name values, and therefore what A2's extent instructions or a narrow tier
+> would buy — and it needs measurement, not a ruling. **Recommendation (a) stands, on the ground
+> that it costs no capability and adds no third object.**
 
-**Why it needs you.** It is a tier-1 `[SHARPENED]` block being narrowed. The alternatives are real:
-**(a)** this design, keeping the decode path at two referenced objects; **(b)** reinstate the
-per-function map — Design B — regaining all 13,091 and paying the third referenced object you
-called foolish; **(c)** something else. **Recommendation: (a)**, recorded as a decision with a
-ledger entry of the same weight as the ruling that caused it, not as an omission.
+**The struck question, retained for the record.** §2 stated them: **the byte tier is unreachable**
+(arithmetic, and a consequence of the 2026-09-03 ruling rather than of this design), and **every
+sub-32-bit value is charged 32 bits** (this design's choice, a genuine regression against K.6 with
+a fatal failure mode). Together they narrow canon I2's *"64 1-byte regs, or ANY combination"* to
+**"any combination of 64- and 32-bit values."** Measured: **81 admissible width-multisets against
+the per-function map's 13,091** (§2.3). **[Every clause of that paragraph is struck.]**
+
+**Why it was thought to need you.** It looked like a tier-1 `[SHARPENED]` block being narrowed.
+The alternatives are real but they are about speed: **(a)** this design, two referenced objects,
+~2-3 ops per sub-name access; **(b)** the per-function map — Design B — one lookup per access and
+a third referenced object you called foolish; **(c)** design A2. **Recommendation: (a).**
 
 ### QB — The namespace fork: does `f`_n_ ≡ `x`_n_?
 
@@ -705,15 +768,17 @@ has 31 names for 512 bits. **That choice has not been made and it is the real fo
 |---|---|---|
 | names | 31 | 63 |
 | tiers, all complete | 64 and 32 (24 names) | 64, 32 **and 16** (56 names) |
-| width-multisets (§2.3) | **81** | **969** |
+| **directly nameable** width-multisets (§2.3) — *not* an admission bound `[user ruling 2026-09-03 (liveness)]` | **81** | **969** |
+| capacity | **512 bits, every width** | **512 bits, every width** |
 | allocation | one pool; K.6's "third wrong answer" unrepresentable | two pools; the allocator must not double-count, which is the failure K.6 names |
 | 16-bit arithmetic | n/a | **does not exist in `RV64IMAFD`** — the tier is load/store/move only unless O4 is amended for `Zfh` or a 16-bit integer tier |
 | `fmv.*` | free aliases, no-ops on identical names | real 32/64-bit moves between disjoint tiles — genuinely useful |
 | admission | one clause | one bit budget plus a clause for the narrow tier |
 
 **Recommendation: (a)** — the tier (b) buys has no arithmetic to run on it under ruling O4, and a
-single pool removes an error class the canon explicitly names. **But it costs 32 names and 888 of
-the 969 multisets, and it should be ruled rather than assumed.** (b) is a strictly larger change:
+single pool removes an error class the canon explicitly names. **It costs 32 names and 888 of the
+969 *directly nameable* multisets — i.e. instructions on those accesses, not the ability to hold
+the values** `[SUPERSEDED - user ruling 2026-09-03 (liveness)]` — **and it should still be ruled rather than assumed.** (b) is a strictly larger change:
 O4 must be amended for the tier to be worth having, and admission and the scoreboard both grow.
 
 ### QC — Two tier-1 supersessions this design requires
@@ -868,7 +933,7 @@ and CANON.md:9819 must be MARKED superseded, not quietly dropped** (cons-C31).
 | **post-migration fetch** | **NONE.** A context arriving on a tile it has never visited is immediately executable. No cold-touch fetch, no handle→address translation, no handle-reuse identity check, no map cache, no cross-page reload | **0 accesses, 0 cycles** |
 | **host packing per FORK, 8 × 32-bit arguments** | **20 instructions (4 `CXW` + 16 shift/or)** against 8 `CXW` for eight 64-bit arguments: **+12**, or **+8** with `Zbb`. Per bit moved: 12.8 bits/instruction packed against 64 unpacked | **+12 instructions, once per offload** |
 | **host result read-back** | 1 `CXR` for a 64-bit result; 2 for a 32-bit signed result; 3 for a 32-bit unsigned result (2 with `Zbb`); +1 to land it in an `f` register | **1–4 instructions** |
-| **admission loss from the two limits** | ~~**81 admissible width-multisets against the per-function map's 13,091 — a factor of 162**~~ **[WITHDRAWN — like for like it is 2,685 of 13,091, a factor of 4.9; see the banner]** (§2.3, both reproduced here). Concretely: 7 × 64-bit + 8 × 8-bit is 512 bits under K.6 and **rejected** here; nine 48-bit values are 432 bits and **rejected**; the ceiling is **sixteen live values, whatever their widths** | ~~**factor 162 on placeable shapes**~~ **factor 4.9 [corrected]** |
+| **admission loss from the two limits** | **NONE** `[SUPERSEDED - user ruling 2026-09-03 (liveness)]`. ~~81 against 13,091, a factor of 162~~ ~~like for like 2,685 of 13,091, a factor of 4.9~~ — both withdrawn; those count **direct nameability**. Concretely, and corrected: 7 × 64-bit + 8 × 8-bit is 512 bits under K.6 **and admitted here**; nine 48-bit values are 432 bits **and admitted**; **there is no ceiling on live values** — only 512 bits, plus staging room | **zero capability lost; ~2-3 ops per packed access** |
 | **admission loss from the placement requirement** | Only ever rejects functions the geometry genuinely cannot place, and relocation (1 instruction per move) repairs the gaps the counterexample opens. Empirically narrow — ~400,000 random instances, no failure — **not reproduced here** | **near zero, unproved** |
 | **floating-point divergence** | The tile rounds RNE where the host honours `frm`, and abolishes NaN-boxing where the host honours it. **No admission check can see either.** Priced, not free | **silent, gated at build time** |
 
@@ -908,8 +973,8 @@ per context.
    W2 (read from your own bits, sign-extend up, truncate down; FP raw), W3 (write your own bits and
    never a neighbour).
 4. **Seven legality rules** — §4.
-5. **Three admission tests** — subset+legality, `64a + 32b ≤ 512` with everything narrow charged 32,
-   and a verified placement.
+5. **Three admission tests** — subset+legality; **peak live bits + scratch bits ≤ 512, each value
+   at its own width** `[corrected - user ruling 2026-09-03 (liveness)]`; and a verified placement.
 
 ### 12.3 What a reader does NOT have to reason about
 
@@ -941,14 +1006,17 @@ design is less safe than the mechanism it replaces.
 `RV64IMAFD`, so ruling O4's opcode list stands unamended.** What changed is the liveness test and
 ten points of semantics.
 
-**13.1 "64 one-byte registers" is inexpressible, and that one is arithmetic.** §2.1. No scheme in
-which the register number alone names the slice can do it. **This is a consequence of the
-2026-09-03 ruling, not of this design.**
+**13.1 "64 one-byte registers" is EXPRESSIBLE; only a direct name for each byte is not.**
+`[SUPERSEDED - user ruling 2026-09-03 (liveness)]` §2.1, corrected. No scheme in which the register number alone names the slice can
+*name* 64 byte slices, but every such scheme **holds** them: eight bytes per 64-bit name, reached
+by shift-and-mask through a scratch name, ~2-3 ops per access. ~~This is a consequence of the
+2026-09-03 ruling~~ — struck; it is a property of name density, and it costs speed, not capability.
 
-**13.2 No name is narrower than 32 bits, and the charge-32 rule is a fatal regression against
-K.6.** §2.2. A boolean, a byte counter and a 3-bit tag each cost 32 bits; the ceiling is **sixteen
-live values**. 7 × 64-bit + 8 × 8-bit is 512 under K.6 and **704 here**. Measured across all
-shapes: **81 of 13,091.** *This one is this design's choice, and QA asks you to accept it.*
+**13.2 No name is narrower than 32 bits — an instruction-count cost, not a regression.**
+`[SUPERSEDED - user ruling 2026-09-03 (liveness)]` §2.2, corrected. ~~the charge-32 rule is a fatal regression against K.6~~ — **struck.**
+A boolean, a byte counter and a 3-bit tag cost **their own widths**; **there is no ceiling on live
+values**; 7 × 64-bit + 8 × 8-bit is **512 under K.6 and 512 here**; and "81 of 13,091" counts
+direct nameability. *Nothing here is for the user to accept, and QA is withdrawn.*
 
 **13.3 Overlap is undetectable by the machine — a DOWNGRADE of cons-C14.** §7.4. `d0` and
 `w0`/`w1` are the same bits; an allocator making both live produces a silent wrong answer.
@@ -1014,6 +1082,6 @@ restricted to a `d` destination.
 
 | | question | recommendation |
 |---|---|---|
-| **QA** | Accept that the context is *"any combination of 64- and 32-bit values, with everything narrower charged 32"* — **81 placeable shapes against the per-function map's 13,091** — or reinstate the map? | **Accept.** |
-| **QB** | Does `f`_n_ ≡ `x`_n_ (24 names, two complete tiers, one allocation pool, ~~81~~ **2,685** shapes), or do the namespaces name different bits (56 names, three complete tiers, two pools, ~~969~~ **9,132** shapes, and a 16-bit tier with no arithmetic to run on it unless O4 is amended)? | **`f`_n_ ≡ `x`_n_.** |
+| ~~**QA**~~ **WITHDRAWN** `[SUPERSEDED - user ruling 2026-09-03 (liveness)]` | ~~Accept that the context is "any combination of 64- and 32-bit values, with everything narrower charged 32" — 81 placeable shapes against the per-function map's 13,091 — or reinstate the map?~~ **The context is 512 bit-packed bits and every combination is expressible; the 81 and the 13,091 count direct names.** The live version is a speed question needing measurement, not a ruling. | **No ruling needed.** |
+| **QB** | Does `f`_n_ ≡ `x`_n_ (24 names, two complete tiers, one allocation pool, **81 directly nameable shapes**), or do the namespaces name different bits (56 names, three complete tiers, two pools, **969 directly nameable shapes**, and a 16-bit tier with no arithmetic to run on it unless O4 is amended)? `[corrected - user ruling 2026-09-03 (liveness)]` — the shape counts are **directness**, both options hold 512 bits, and ~~2,685~~/~~9,132~~ are struck along with the charge-32 enumeration that produced them. | **`f`_n_ ≡ `x`_n_.** |
 | **QC** | Ratify two tier-1 supersessions: (i) CANON.md:9819 *"the namespaces do not alias"*, and (ii) I.7 item 3's *"a function needing dynamic rounding modes … cannot be offloaded"*, softened here to a build-time gate. | **Supersede both**, with the divergence on the price list rather than in a footnote. |

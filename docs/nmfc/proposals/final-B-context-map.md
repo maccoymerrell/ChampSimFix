@@ -8,6 +8,21 @@ implementation complexity, performance impact, and overall simplicity."* Design 
 slice and nothing is fetched. **This is the other one: the map survives, as per-function
 state reached through the context, retrieved after migration rather than carried by it.**
 
+> **[SUPERSEDED - user ruling 2026-09-03 (liveness)]** *(dated 2026-09-03)*
+>
+> Everything below that argues from a **cap on live values** is struck, not softened: "the byte tier is unreachable", the **charge-32** rule, "at most 16 live values", "2,685 of 13,091", "a factor of 4.9", "a factor of 162", and any claim that Design A **narrows** invariant I2's *"ANY combination"*. The user's ruling, verbatim: *"We are operating on a 512-bit value. Literally every bit is independent because we are strictly in-order. Bit-packing is a thing, so we can have as many live values as we want as long as we have scratch space in the file to manipulate said value (for example, if we want to have 4 8-bit values in one vector, we can, but we must have another reg where we can stage the proper shifting and masking required)."*
+>
+> **The correct rule.**
+> 1. Design A fixes what a 5-bit register field can **NAME DIRECTLY** — eight 64-bit tiles (`x8`-`x15`) and sixteen 32-bit tiles (`x16`-`x31`). It does **not** bound how many values are **LIVE**.
+> 2. A value narrower than a name is **packed** with others inside one name and accessed by shift-and-mask through a **SCRATCH** name — standard RV64I (`srli`/`slli`/`andi`/`or`), no new instructions.
+> 3. Admission counts **BITS OF PEAK LIVENESS plus the scratch bits the packing needs** (at least one spare name for staging). Never a count of values. Never "charge 32".
+> 4. The byte tier and **any** width are **REACHABLE**. Canon I2's *"16 4-byte regs, 64 1-byte regs, or ANY combination"* (#232) stands **unnarrowed**.
+> 5. Nameability affects **INSTRUCTION COUNT ONLY**: a packed sub-name value costs about **2-3 extra ops per access**. **A2 (extent instructions) is a speed optimisation, never a capability fix.**
+> 6. **The expressiveness comparison collapses. A and B have IDENTICAL capacity — 512 bits — under every design.** They differ only in instruction count for sub-name values: **A ≈ 2-3 extra ops per packed access; B a map lookup per access.** The width-multiset counts below measure directness, not capability, and none of them is a capacity bound.
+> 7. The compiler's job is **packing plus scratch allocation**; the admission tool checks **bits plus scratch**, the `RV64IMAFD` subset, no reserved names, no stack.
+>
+> **Consequence for the recommendation: unchanged, and its reasoning is simpler.** Design A still wins — *same capacity as B*, no third object, no per-context state. Where this page said the loss "belongs to the 5-bit register field": it belongs to nothing. There is no loss of capability, only of directness.
+
 **Prerequisites.** `register-map-context.md` (mechanisms **M1**–**M15**, constraints
 **cons-C1**–**cons-C32**), `register-map-facts.md` (verdicts **fact-C1**–**fact-C24**),
 `register-map-fallback-user.md` (the user's words, verbatim), and `register-map.md` §§1–3
@@ -120,8 +135,10 @@ independently checkable:
 | `cons-C14` (undefined register is a hard error) | **RESTORED as a machine guarantee** (§2.5) — design A cannot do this | not restored (every name is always defined, as in A) |
 
 **They are not exclusive.** §7.3 shows that B2's classes are *fixed layouts*, so **design A is
-B2 with `K` = 1**, and B2 is the smallest change that buys back a byte tier and an all-64
-class without a memory reference. If the user rules design A in, B2 is the natural extension
+B2 with `K` = 1**, and B2 is the smallest change that buys **direct names** for a byte tier and
+an all-64 class without a memory reference. `[SUPERSEDED - user ruling 2026-09-03 (liveness)]` It buys **no capacity**: a byte under A
+is packed and reached by shift-and-mask through a scratch name, so what B2 buys back is ~2-3
+instructions per sub-name access, not the ability to hold the value. If the user rules design A in, B2 is the natural extension
 of it; if the user rules B1 in, B2 is its degenerate case.
 
 ---
@@ -259,10 +276,12 @@ give them **one name**, which is coalescing, which every register allocator alre
 - **A non-power-of-two width.** A 48-bit pointer is charged 64; a 12-bit index is charged 16.
   F0 places both exactly. *(F1 also fixes the offset but not the width, so it does not help.)*
 - **An unaligned placement.** Under F2 a 32-bit value starts at a multiple of 32.
-- **Sixty-four 1-byte names.** 64 slices need 64 names; `x0` is the hardwired zero, so **63**
-  are nameable. **#232's "64 1-byte regs" misses by exactly one name — under a free map, under
-  F2, under F0, and under any scheme in which the encoding names the value.** Design A reaches
-  **0** of 64 (`register-map.md` §1.3a, §9.1); design B reaches **63** of 64. §12.1.
+- **Sixty-four 1-byte NAMES.** 64 slices need 64 names; `x0` is the hardwired zero, so **63**
+  are nameable. **#232's "64 1-byte regs" misses by exactly one NAME — but not by one value.**
+  `[SUPERSEDED - user ruling 2026-09-03 (liveness)]` Sixty-four live bytes are expressible under every scheme here, A included: they
+  pack eight per 64-bit name and are reached by shift-and-mask through a scratch name at ~2-3
+  ops per access. Design A names **0** of the 64 directly and B names **63**, and that
+  difference is **instruction count**. §12.1, corrected.
 
 ---
 
@@ -809,7 +828,7 @@ expressiveness and in cost, and the user's real question is where on that line t
 | **0 — D+W** | `x8`–`x15` = 8 × 64 bits; `x16`–`x31` = 16 × 32 bits; `f`*n* ≡ `x`*n* | both tilings complete over 512 bits | **design A verbatim.** Pointers and `int`s — the default |
 | **1 — D** | `x8`–`x15` = 8 × 64; `x16`–`x31` illegal | complete | all-64 functions; the `-march=rv64ima` day-one path (`register-map.md` §3.10), where a stock GCC with `-ffixed` reaches exactly this |
 | **2 — D+H** | `x8`–`x11` = 4 × 64 (bits 0–255); `f0`–`f15` = 16 × 16 (bits 256–511) | complete | four pointers and sixteen halfwords: level numbers, small counters, indices |
-| **3 — D+B** | `x8`–`x11` = 4 × 64 (bits 0–255); `f0`–`f31` = 32 × 8 (bits 256–511) | complete | four pointers and **thirty-two byte names** — the tier design A proves is unreachable at ISA scope (`register-map.md` §1.3a) and which is reachable here because the byte names only have to cover *half* the file |
+| **3 — D+B** | `x8`–`x11` = 4 × 64 (bits 0–255); `f0`–`f31` = 32 × 8 (bits 256–511) | complete | four pointers and **thirty-two byte names** — a tier design A cannot name **directly** at ISA scope (`register-map.md` §1.3a) and can name here because the byte names only have to cover *half* the file. `[CORRECTED - user ruling 2026-09-03 (liveness)]` ~~unreachable~~ — **A reaches the same bytes by packing**, at ~2-3 ops per access; this class buys directness |
 
 Classes 2 and 3 use the `f` namespace for the narrow tier, which is exactly the fork
 `register-map.md` §10 Q6 leaves open — and B2 takes **both sides of it, per context**: class 0
@@ -860,9 +879,11 @@ partitioned**, so a workload whose functions are all one class uses `C/K` of the
 
 - **A function must fit one of `K` layouts.** No per-function packing at all: the width mix is
   chosen from a menu. `register-map.md` §7.1 reports the enumeration — the free map admits
-  **~13,091** distinct packings where a fixed two-width map admits **~2,137**. B2's count is
-  bounded above by the union of its `K` classes and is far below the free map's; **this
-  document does not compute it and will not invent it.**
+  **~13,091** **directly nameable** packings where a fixed two-width map names **~2,137**
+  directly. `[SUPERSEDED - user ruling 2026-09-03 (liveness)]` **Neither figure is an admission bound**: every scheme here holds 512
+  bits and expresses every width, so the counts measure how often an access is one instruction
+  rather than ~2-3. B2's count is bounded above by the union of its `K` classes and is far
+  below the free map's; **this document does not compute it and will not invent it.**
 - **No non-power-of-two width and no unaligned placement** — the same losses F2 has (§2.6), plus
   the loss of per-function choice.
 - **cons-C14 is not restored.** Every name in a class is always defined, so the run-time
@@ -993,9 +1014,12 @@ on a stderr line at `:927-928`**. K.6 already requires the rewrite. Under design
    `r8d`/`r8w`/`r8b`, `zmm`/`ymm`/`xmm`) and the target was ruled RISC-V (R11), where a register
    name carries no width (fact-C12). This is design A's §10 Q8 verbatim and it is **the same
    blocker for B**; it is not created by either design.
-2. Peak simultaneous liveness in bits — K.6 **verbatim**, at each value's actual width. Under B
-   there is no rounding-up, which is the regression design A has to declare (`register-map.md`
-   §3.8: seven 64-bit values plus eight bytes is 512 bits under K.6 and **704** under A). §12.4.
+2. Peak simultaneous liveness in bits — K.6 **verbatim**, at each value's actual width, **plus
+   the scratch bits any packing needs**. `[SUPERSEDED - user ruling 2026-09-03 (liveness)]` ~~Under B there is no rounding-up, which is
+   the regression design A has to declare (…512 bits under K.6 and 704 under A)~~ — **struck.
+   There is no rounding-up under A either**: seven 64-bit values plus eight bytes is 512 bits
+   under K.6, under A and under B. The difference is that A stages the bytes through a scratch
+   name (~2-3 ops per access) where B resolves them with a map lookup. §12.4.
 3. Produce a placement, and **emit it as the map**. Design A must produce a placement too and
    then throw it away, because the ISA fixes the geometry; under B the placement *is* the
    output. **cons-C20 — "admissibility is a property of the generated code" — becomes trivially
@@ -1087,15 +1111,26 @@ handle, pays **≈125,080** and roughly doubles the arrival cost on 63.5% of mig
 - **Code-space cost:** P1 adds 40–76 B per function, on the entry line. P2 as fallback adds
   1.0–1.9% of the code region, ×`N` physical copies (§3.3).
 
-### 10.4 Where design B is FASTER than design A, and it is not a small thing
+### 10.4 Where design B is FASTER than design A — and it is instructions, not admission
 
-Design A charges every value narrower than 32 bits **32 bits** (`register-map.md` §3.8, §9.2),
-so a function's admissibility is decided on a rounded-up budget. Its own worked counterexample:
-**seven live 64-bit values plus eight live 8-bit values = 448 + 64 = 512 bits, which K.6 admits
-at exactly 512 of 512; design A computes 448 + 8×32 = 704 and REJECTS it.** Under cons-C15 that
-rejection is fatal — there is no spill.
+> **[SUPERSEDED - user ruling 2026-09-03 (liveness)]** *(dated 2026-09-03)* **The premise of
+> this section is struck.** Design A does **not** charge narrow values 32 bits and does not
+> reject the worked case: seven live 64-bit values plus eight live 8-bit values is **512 bits
+> under K.6 and 512 under A**, with the bytes packed inside a name and reached by shift-and-mask
+> through a scratch name. **A and B have identical capacity — 512 bits.** What survives of this
+> section, and it is still worth having, is the **speed** claim: B resolves a sub-name access
+> with a map lookup where A pays about **2-3 extra ops**. That is the real difference, and it is
+> the one the recommendation must weigh against B's third object and per-context state.
 
-> **Design B admits that function.** Not faster — *possible*. The performance comparison between
+**The struck argument, retained for the record.** Design A charges every value narrower than 32
+bits **32 bits** (`register-map.md` §3.8, §9.2), so a function's admissibility is decided on a
+rounded-up budget. Its own worked counterexample: **seven live 64-bit values plus eight live
+8-bit values = 448 + 64 = 512 bits, which K.6 admits at exactly 512 of 512; design A computes
+448 + 8×32 = 704 and REJECTS it.** Under cons-C15 that rejection is fatal — there is no spill.
+**[EVERY FIGURE IN THIS PARAGRAPH IS STRUCK - user ruling 2026-09-03 (liveness): A computes 512 and
+admits it.]**
+
+> ~~**Design B admits that function.** Not faster — *possible*.~~ **[STRUCK: A admits it too.]** The performance comparison between
 > "runs on the tile" and "cannot be offloaded" is not a percentage, and it is the reason the map
 > was in the design in the first place.
 
@@ -1147,9 +1182,11 @@ be wrong at run time (fill, eviction, identity, invalidation), a structure that 
 coherent with read-only memory, and a `CONT` path that has to re-derive identity mid-invocation.
 **A has none of these because it has nothing to cache.**
 
-**B2 sits almost exactly where A does on this table** — which is the point of §7.3: it buys a
-byte tier, a halfword tier and an all-64 class for two bits per context and one extra mux level,
-and it buys them **without any of B1's caching machinery.**
+**B2 sits almost exactly where A does on this table** — which is the point of §7.3: it buys
+**direct names for** a byte tier, a halfword tier and an all-64 class for two bits per context
+and one extra mux level, and it buys them **without any of B1's caching machinery.** `[SUPERSEDED - user ruling 2026-09-03 (liveness)]`
+What it does **not** buy is capacity: A already holds those values, packed, at ~2-3 ops per
+access.
 
 ---
 
@@ -1157,14 +1194,20 @@ and it buys them **without any of B1's caching machinery.**
 
 Read as the price list, in the same discipline as `register-map.md` §9 (cons-C16).
 
-**12.1 #232's "64 1-byte regs" is still out of reach, by exactly one name.** 64 byte slices need
-64 names; `x0` is hardwired zero and denotes no bits, so **63** are nameable across both
-namespaces (fact-C17). A function wanting 63 live bytes is admissible under B and impossible
-under A (which reaches 0); a function wanting all 64 is impossible under both. **This is
-arithmetic, and it is the one part of the 2026-09-03 ruling's price that no design removes.**
+**12.1 #232's "64 1-byte regs" is fully expressible; only the 64th direct NAME is out of
+reach.** `[SUPERSEDED - user ruling 2026-09-03 (liveness)]` 64 byte slices would need 64 names; `x0` is hardwired zero and denotes no
+bits, so **63** are nameable across both namespaces (fact-C17). ~~A function wanting 63 live
+bytes is admissible under B and impossible under A (which reaches 0); a function wanting all 64
+is impossible under both.~~ **Struck.** Sixty-four live bytes are 512 bits and are **admissible
+under A and under B**: under A they pack eight per 64-bit name and are reached by shift-and-mask
+through a scratch name (~2-3 ops per access, and the scratch space must be accounted); under B a
+map lookup resolves each. The arithmetic is real but it counts **names**, so what it prices is
+**instruction count**. **Canon I2's "ANY combination" stands unnarrowed, and no design's price
+list may claim otherwise.**
 
-**12.2 Under F2, no non-power-of-two width and no unaligned placement.** A 48-bit pointer costs
-64; a 12-bit index costs 16. Nine 48-bit values do not fit. **F0 fixes this and costs 128 B, two
+**12.2 Under F2, no non-power-of-two width and no unaligned placement has a NAME.** A 48-bit
+pointer is named at 64; a 12-bit index at 16. **Nine 48-bit values are 432 bits and they fit** —
+packed, and reached through a scratch name `[corrected - user ruling 2026-09-03 (liveness)]`. **F0 fixes this and costs 128 B, two
 lines on every fill, and a live straddle path in `Context512` (§2.4).** §15 Q2.
 
 **12.3 A stale or unavailable map is a new fatal outcome.** §8.3 R2: a miss with no derivable
@@ -1249,8 +1292,9 @@ per-function packing worth a cached table, or is a menu of four layouts enough?*
 | per-context state added | 0 | 4 b + 6 B | 2 b |
 | per-tile state added | 310 b of ROM | 2.5 KiB | 2,520 b of ROM |
 | migration | 72 B | 72 B | 72 B |
-| widths expressible | 64 and 32, complete | **any power of two, any mix** (F2); anything at all (F0) | four fixed layouts, incl. a byte tier over half the file |
-| sub-32-bit values | **charged 32 — functions K.6 admits are rejected** | charged their own width | charged their class's width |
+| widths **directly nameable** `[corrected - liveness ruling]` | 64 and 32, complete | **any power of two, any mix** (F2); anything at all (F0) | four fixed layouts, incl. a byte tier over half the file |
+| widths **expressible** | **all** — 512 bits | **all** — 512 bits | **all** — 512 bits |
+| sub-32-bit values | **charged their own width**; no direct name, so ~2-3 ops per access `[corrected - user ruling 2026-09-03 (liveness)]` ~~charged 32 — functions K.6 admits are rejected~~ | charged their own width; one map lookup per access | charged their own width; direct name inside the class |
 | undefined register (cons-C14) | **undetectable** | **traps at decode** | undetectable |
 | over-liveness | **silent wrong answer** | **rejected at fill** | silent wrong answer |
 | new run-time failure modes | none | four (§8.3) | one |
@@ -1263,7 +1307,7 @@ per-function packing worth a cached table, or is a menu of four layouts enough?*
 |---|---|
 | **C1** no state outside the context and the encoding | **NOT met, and this is the design's premise.** A per-function map exists. §13 states it without softening |
 | **C2** no third referenced object at decode | **NOT met at fill; met in steady state**, and never *simultaneous* with the data access under §6.4 (iii) |
-| **C3** 512 bits, bit-packed, not eight registers | **met, more fully than by any other candidate.** Every power-of-two mix; 63 of 64 byte slices; #232's "16 4-byte regs" and "8 8-byte regs" exact |
+| **C3** 512 bits, bit-packed, not eight registers | **met — and met by every candidate, since all hold 512 bits** `[corrected - user ruling 2026-09-03 (liveness)]`. B names more of them **directly**: every power-of-two mix, 63 of 64 byte slices, and #232's "16 4-byte regs" and "8 8-byte regs" exact. Design A names 24 slices directly and packs the rest at ~2-3 ops per access, so what B is "more fully" is **direct**, not capable |
 | **C4** the file may not be widened | **met** — 512 exactly |
 | **C5** 512 in, 512 out, PC beside | **met** |
 | **C6** migration exactly 72 B | **met** under ID-1 (§5.1); **not met** under ID-2, which is why ID-2 is a ruling and not a default |

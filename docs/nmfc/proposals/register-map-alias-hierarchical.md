@@ -2,6 +2,21 @@
 
 **Status: PROPOSAL. NOT CANON. Nothing here may be cited as a decision until ruled.**
 
+> **[SUPERSEDED - user ruling 2026-09-03 (liveness)]** *(dated 2026-09-03)*
+>
+> Everything below that argues from a **cap on live values** is struck, not softened: "the byte tier is unreachable", the **charge-32** rule, "at most 16 live values", "2,685 of 13,091", "a factor of 4.9", "a factor of 162", and any claim that Design A **narrows** invariant I2's *"ANY combination"*. The user's ruling, verbatim: *"We are operating on a 512-bit value. Literally every bit is independent because we are strictly in-order. Bit-packing is a thing, so we can have as many live values as we want as long as we have scratch space in the file to manipulate said value (for example, if we want to have 4 8-bit values in one vector, we can, but we must have another reg where we can stage the proper shifting and masking required)."*
+>
+> **The correct rule.**
+> 1. Design A fixes what a 5-bit register field can **NAME DIRECTLY** — eight 64-bit tiles (`x8`-`x15`) and sixteen 32-bit tiles (`x16`-`x31`). It does **not** bound how many values are **LIVE**.
+> 2. A value narrower than a name is **packed** with others inside one name and accessed by shift-and-mask through a **SCRATCH** name — standard RV64I (`srli`/`slli`/`andi`/`or`), no new instructions.
+> 3. Admission counts **BITS OF PEAK LIVENESS plus the scratch bits the packing needs** (at least one spare name for staging). Never a count of values. Never "charge 32".
+> 4. The byte tier and **any** width are **REACHABLE**. Canon I2's *"16 4-byte regs, 64 1-byte regs, or ANY combination"* (#232) stands **unnarrowed**.
+> 5. Nameability affects **INSTRUCTION COUNT ONLY**: a packed sub-name value costs about **2-3 extra ops per access**. **A2 (extent instructions) is a speed optimisation, never a capability fix.**
+> 6. **The expressiveness comparison collapses. A and B have IDENTICAL capacity — 512 bits — under every design.** They differ only in instruction count for sub-name values: **A ≈ 2-3 extra ops per packed access; B a map lookup per access.** The width-multiset counts below measure directness, not capability, and none of them is a capacity bound.
+> 7. The compiler's job is **packing plus scratch allocation**; the admission tool checks **bits plus scratch**, the `RV64IMAFD` subset, no reserved names, no stack.
+>
+> **Consequence for the recommendation: unchanged, and its reasoning is simpler.** Design A still wins — *same capacity as B*, no third object, no per-context state. Where this page said the loss "belongs to the 5-bit register field": it belongs to nothing. There is no loss of capability, only of directness.
+
 **What it answers.** Given a context of **512 bits, bit-packed** (I2, I.0's 512-bit rule),
 what does the 5-bit register field of an ordinary `RV64IMAFD` instruction mean, when the
 answer must come from **the instruction alone** (hard constraint C1/C2, user ruling
@@ -90,6 +105,13 @@ decision (16 of 31 names) and the one most worth defending. The cheap alternativ
 C19): the upper half of every 64-bit region becomes unnameable at 32 bits, so **256 of the
 512 bits could never hold a 32-bit value**, and a function holding sixteen live 32-bit
 values (512 bits, which K.6 admits) would be inexpressible. It is also the level where the
+`[SUPERSEDED - user ruling 2026-09-03 (liveness)]` **"could never hold" is wrong.** No bit
+of the 512 is ever out of reach: a value narrower than a name is packed inside one and
+reached by shift-and-mask through a scratch name, so an incomplete 32-bit level would cost
+**instructions** (about 2-3 extra ops per access to a value living in an unnameable half),
+never capacity, and sixteen live 32-bit values remain expressible under either alternative.
+The argument for completeness survives intact on that corrected basis — it is an
+instruction-count argument, and a strong one. It is also where the
 record's only *measured* payoff appeared: DESIGN §22's headroom came from narrowing a
 `NodeID` from 64 to 32, and both admissible functions are pure 64/32 mixes. Buying
 completeness here costs eight names and buys the case the evidence points at.
@@ -510,17 +532,41 @@ of Knowlton's buddy allocator (1965; Knuth, *TAOCP* vol. 1, §2.5), and it is ex
 
 ### 7.3 The test
 
-Round every live value's width **up** to the nearest of {8, 16, 32, 64}. Let
+> **[SUPERSEDED - user ruling 2026-09-03 (liveness)]** *(dated 2026-09-03)*
+>
+> **The `S_narrow ≤ 32` clause, the round-up to a nameable width, and the whole-region
+> `x31` charge are struck.** They price a value at the width of the *name* that would hold
+> it, which is exactly the cap the ruling forbids. The context is 512 independent bits on a
+> strictly in-order core with no renaming; a value narrower than a name is **packed** with
+> others inside one name and reached by **shift-and-mask through a scratch name** (plain
+> RV64I: `srli`/`slli`/`andi`/`or`). **Eight live bytes are 64 bits and are admissible**, as
+> is any other width or mixture — the byte tier is **reachable**, and canon I2's *"64 1-byte
+> regs, or ANY combination"* stands unnarrowed.
+>
+> **The correct test:**
+> ```
+>   max over program points of ( bits of simultaneously-live values
+>                                + the scratch bits the packing needs )  <=  512
+>   and at least one spare name is available for staging
+>   and every opcode is in RV64IMAFD, no reserved name, no stack
+> ```
+> Peak liveness in **bits**, one pool, each value charged its **own** width — never rounded
+> up, never charged 32 — plus the staging space the shift-and-mask sequences require. What
+> the map's name shape decides is **instruction count only** (~2-3 extra ops per packed
+> access), and §7.2's buddy-placement theorem below is a statement about **direct
+> nameability**, not about capacity.
+
+The superseded text follows, retained for the record. Round every live value's width **up** to the nearest of {8, 16, 32, 64}. Let
 
 - `S_narrow` = the summed widths of values below 32 bits,
 - `S_wide` = the summed widths of values of 32 bits and above.
 
-**A function is admissible iff**
+**A function is admissible iff** `[SUPERSEDED - user ruling 2026-09-03 (liveness)]`
 
 ```
-    S_narrow <= 32
+    S_narrow <= 32                                    [STRUCK - no such cap exists]
   and
-    S_wide + (S_narrow > 0 ? 32 : 0) <= 512
+    S_wide + (S_narrow > 0 ? 32 : 0) <= 512           [STRUCK - nothing is charged 32]
 ```
 
 **and every opcode is in the ruled subset** (K.6's first test, unchanged).
@@ -545,7 +591,7 @@ This was checked exhaustively against exact placement in the map for every mixtu
 | L30: eight 64-bit + one 8-bit | 520 | **reject** | ✅ and for the right reason — 520 > 512, not "nine slots" |
 | sixteen live 32-bit values | 512 | **admit** | `x16`–`x31` |
 | seven 64-bit + four bytes | 480 | **admit** | `x8`–`x14`, `x4`–`x7` |
-| **eight live bytes** | 64 | **reject** | ❌ `S_narrow = 64 > 32` — see §12.2 |
+| **eight live bytes** | 64 | **admit** | `[CORRECTED - user ruling 2026-09-03 (liveness)]` 64 bits of liveness plus staging space; packed into one 64-bit name and reached by shift-and-mask through a scratch name, ~2-3 ops per access. The old row read "reject, `S_narrow = 64 > 32`" and is struck along with §12.2. |
 
 ### 7.5 Why this is not R30 in mirror image
 
@@ -571,7 +617,10 @@ feeds a stderr line at `:927` and gates nothing. The replacement is:
    gives it back after last read; a register never read takes nothing — C19).
 3. Round each live value's width up to {8, 16, 32, 64} — `reg_bits[reg]` already carries
    the width, from Pin's partial-width views (DESIGN §22).
-4. Compute `S_narrow` and `S_wide` at each program point, take the peaks, apply §7.3.
+4. `[CORRECTED - user ruling 2026-09-03 (liveness)]` Sum each live value at its **own**
+   width at each program point, take the peak, add the **scratch bits the packing needs**,
+   and test `peak + scratch ≤ 512` with at least one spare name for staging. (The struck
+   version computed `S_narrow`/`S_wide` and applied §7.3's caps.)
 5. Add K.6's **first** test, which neither implementation performs today: reject the first
    opcode outside the ruled subset.
 6. Rejection stays fatal, with no truncation (C15).
@@ -652,7 +701,7 @@ than quietly.
 | **M4** | `CXW`/`CXR`, 64-bit lane in `funct7[3:1]` | **Unchanged.** The lane stays an access granularity and stays 64 bits; the core's names are finer. `NMFC_CX_LANE_SHIFT`/`MASK` are untouched. What improves is the *host's* side: the lane and bit offset of every name are ISA constants (§6), so the host no longer needs the callee's layout to stage an argument. §11 open question 5: answered, no change. |
 | **M5** | the `x0` rule | Preserved exactly, and extended: name 0 reads zero and costs none of the 512 bits **in both namespaces**, so `f0` is `+0.0` (§4.3). `RegLayout::hasZero` disappears with the struct; the behaviour is unconditional. |
 | **M6** | the illegal-register trap (`NMFCTile::illegal`) | **Re-homed, not deleted.** Under a fixed map most names are always defined, so the old check ("reads a register the function's layout does not define") loses its subject. Four runtime checks take its place (§4.7): reserved `x1`, FP width mismatch, `rm = DYN`, and a non-64-bit address operand — and each is a real packing error caught at decode. The check that **cannot** be re-homed is the overlap rule (§8.1), which is invisible at runtime and becomes an admission and compiler-correctness obligation (§7, §12.5). `NMFCTile::illegal`'s message must change: it currently reports `layout_.bitsUsed()`, which will no longer exist. |
-| **M7** | the admission tool (`annotate.cc:524–559`, `:927`) | Rewritten per §7.6: peak liveness in bits, one pool, rounded to nameable widths, plus the `S_narrow ≤ 32` clause, plus K.6's subset test. Closes L30 in the direction K.6 already required, and fixes the two wrong answers L30 records. |
+| **M7** | the admission tool (`annotate.cc:524–559`, `:927`) | Rewritten per §7.6: peak liveness in bits, one pool, **each value at its own width**, plus the scratch bits the packing needs, plus K.6's subset test. `[CORRECTED - user ruling 2026-09-03 (liveness)]` — the round-up to nameable widths and the `S_narrow ≤ 32` clause are struck. Closes L30 in the direction K.6 already required, and fixes the two wrong answers L30 records. |
 | **M8** | the `RETC`/`ENDC` return bit (`BIT_R`) | **Unchanged in hardware, and this needs care.** I2 says "register positions carry no meaning across the boundary; the join knows how to interpret what came back." That remains literally true of the *hardware*: `END`+ret moves 512 opaque bits and interprets none of them. What changes is on the *software* side — the join site's knowledge of positions now comes from the ISA rather than from the callee's layout, so the calling convention for an offloaded function is fixed once instead of per function. **The hardware knows no more than it did; the compiler on both sides knows the same thing without being told.** |
 | **M9** | `JOIN` as a read-modify-write try (`cDST_new = ok ? payload : cDST_old`) | **Unaffected. Confirmed:** `JOIN` moves whole 512-bit values and never inspects a field. |
 | **M10** | `CONT` / `CONT.M` | **Genuine simplification.** Under M1, a successor running a different function needed that function's layout entry to be resident on the tile. Under a fixed map a successor inherits the map for free, because there is nothing to inherit. |
@@ -810,13 +859,17 @@ would go — but admitting `f16` is a subset change and needs a ruling. **The ta
 "f16/f32/f64 by name width" is therefore f32/f64 only, today.** Saying otherwise would be
 inventing an extension the record has not ruled.
 
-**12.2 At most 32 bits of sub-32-bit values, in one place.** `S_narrow ≤ 32` (§7.3). A
-function holding eight live bytes — 64 bits, which K.6's plain bit test admits — **cannot be
-expressed.** C16's remedy applies (rewrite, split into a `CONT` chain, or reject), but this
-is a case where **K.6's arithmetic and this map disagree**, and that must be recorded as a
-ledger entry rather than absorbed silently. The alternative shapes for the seven remaining
-names all trade this cap against completeness (§1.3c); none removes it, because 31 names
-cannot cover 512 bits at four widths (full coverage would need 8+16+32+64 = 120 names).
+**12.2 `[SUPERSEDED - user ruling 2026-09-03 (liveness)]` — there is no such cap, and this
+entry is withdrawn.** The struck text read: *"At most 32 bits of sub-32-bit values, in one
+place. `S_narrow ≤ 32` (§7.3). A function holding eight live bytes — 64 bits, which K.6's
+plain bit test admits — cannot be expressed."* **It can.** Eight live bytes pack into one
+64-bit name and are read and written by shift-and-mask through a scratch name; the cost is
+about 2-3 extra ops per access, not a rejection. **K.6's arithmetic and this map do not
+disagree** — both count bits — so there is no ledger entry to make and C16 is not invoked
+here. What remains true, and is the honest residue of the paragraph, is that 31 names
+cannot *directly name* every slice at four widths (that would need 8+16+32+64 = 120 names),
+so the seven remaining names trade **directness** against completeness (§1.3c). Directness
+is instruction count. Capacity is 512 bits under every arrangement.
 
 **12.3 No value narrower than 8 bits gets a name.** A live boolean costs 8 bits, not 1.
 "Bit-packing is the name of the game" (#232) is **bounded below at a byte** by this map.
@@ -892,8 +945,11 @@ regardless, and nothing here changes that.
    versus four 16s and two 8s over one 64-bit region (twice the territory, but incomplete
    and therefore breaking §7.2's theorem). The completeness argument decides it here; the
    record does not (§11 item 1 of the context file).
-4. **Whether `S_narrow ≤ 32` is an acceptable cap** (§12.2), given that it makes K.6's plain
-   bit test over-admit for byte-heavy functions and requires a ledger entry.
+4. ~~**Whether `S_narrow ≤ 32` is an acceptable cap** (§12.2).~~ **CLOSED, not open**
+   `[SUPERSEDED - user ruling 2026-09-03 (liveness)]`: no such cap exists, K.6's plain bit
+   test does not over-admit, and no ledger entry is required. The live question in its place
+   is how many extra ops per packed access byte-heavy functions actually pay — a question of
+   **instruction count**, answerable only by measurement.
 5. **Whether to add the truncation check** of §12.6.
 
 ## §14 CONSTRAINT CHECK
@@ -915,7 +971,7 @@ regardless, and nothing here changes that.
 | C13 | nothing speculative | ✅ untouched; and no rename is required (§10, x86 merge hazard) |
 | C14 | an undefined register is a hard error | ⚠️ **partly re-homed**: four decode checks (§4.7) replace it; the overlap rule moves to admission (§12.5), which is a stated regression |
 | C15 | rejection is fatal, never softened | ✅ §7.6 keeps `die()` on the bit test |
-| C16 | "cannot be expressed ⇒ cannot be offloaded" is allowed | ✅ invoked in §12.1, §12.2, §12.4, and each is *stated* |
+| C16 | "cannot be expressed ⇒ cannot be offloaded" is allowed | ✅ invoked in §12.1 and §12.4, and each is *stated*. `[CORRECTED - user ruling 2026-09-03 (liveness)]` **§12.2 is withdrawn as an invocation** — no width is inexpressible; a sub-name value is packed and reached through a scratch name at ~2-3 extra ops per access. |
 | C17 | admission counts peak liveness in bits, one pool | ✅ §7.3; one pool is structural, not asserted (§5.2) |
 | C18 | not a count of names | ✅ §7.5; no name appears in the test |
 | C19 | a register never read costs nothing | ✅ §7.6 step 2 |
