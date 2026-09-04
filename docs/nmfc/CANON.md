@@ -13,14 +13,18 @@ summarised away.
 **RULINGS NEEDED FROM THE USER** — **EVERY RULING THE USER GAVE IS APPLIED, and the count of
 rulings still to give fell from forty-nine to zero: 2026-09-02** (twenty-one numbered rulings
 plus three), **2026-09-03** (the last ten), and **again later on 2026-09-03** — the per-context
-translation cache, liveness, `W1b`, **`KILL`** and **the page model**. **WHAT IS NOT ZERO, and
-this line said it was: ONE READING AWAITING CONFIRMATION (`KILL`'s privilege level, which the
-user put as a hedged question) and SEVEN MISSING RULES the two newest rulings exposed — U1
-through U8, tabled below and stated at every point of use.** `[CORRECTED - identified
-2026-09-03. This paragraph asserted "NOTHING REMAINS OPEN" and "the count of readings AWAITING
-CONFIRMATION is ZERO too". Neither was true of the two newest rulings, and the assertion was the
-reason the gaps went unrecorded. The rulings themselves are unaffected and remain applied in
-full.]` **Also still offered, and of a THIRD kind that is neither: TWO PROPOSED NAMES, `HOST`
+translation cache, liveness, `W1b`, **`KILL`** and **the page model** — and **once more on
+2026-09-03, on the eight items U1–U8, ALL OF WHICH ARE NOW CLOSED.** **THE COUNT IS ZERO
+AGAIN, and this time on every kind at once: no ruling is unapplied, no reading awaits
+confirmation, and no question is open.** `[UPDATED - user ruling 2026-09-03 on U1-U8. This
+paragraph read "WHAT IS NOT ZERO … ONE READING AWAITING CONFIRMATION … and SEVEN MISSING RULES …
+U1 through U8, tabled below". The user answered all eight and the table is REMOVED: `KILL` is
+UNPRIVILEGED (U1 CONFIRMED — no longer a reading); a STRIPED page is a huge page, one contiguous
+`N·G` extent allocated and freed like any other (U2-U4); `KILL` is BROADCAST on the control path
+and the FTU entry is freed on the tile's KILL-ACK (U5, U6); a recycled handle names the NEW
+invocation and nothing else (U7); a striped page's shootdown is ANY REMAP (U8). The closures are
+stated at every point of use and recorded at ledger **L59** and **L60**.]` **The ONE thing still
+offered, and it is not a question of any kind: TWO PROPOSED NAMES, `HOST`
 and `STRIPED`, which change no statement in this document** (F.5b) — and
 **SELECTED CONFIGURATION FOR SIMULATION**, which holds every value this document used to
 state as a design constant and now states as a *configured* value with its file and line.
@@ -60,9 +64,10 @@ participates. **Migration stays 72 B.** Full statement: **H.10**; invariants sha
 **`[SCOPED - identified 2026-09-03. This line said "THE HONEST COUNT" with no qualifier, and a
 reader took it for the document's count. It is the count for THE Q-SET AND THE W1b ROW ABOVE, and
 for those it is still exactly right: Q1-Q4 are ruled, all three readings are confirmed, and W1b
-is confirmed and withdrawn. THE DOCUMENT'S COUNT IS NOT ZERO - the two newest rulings of
-2026-09-03 leave ONE reading awaiting confirmation (KILL's privilege level, U1) and SEVEN missing
-rules (U2-U8). See the OPEN QUESTIONS table below.]`**
+is confirmed and withdrawn. AND THE DOCUMENT'S COUNT IS NOW ZERO TOO - the U1-U8 items the two
+newest rulings exposed were put to the user and ALL EIGHT WERE ANSWERED on 2026-09-03, so the
+OPEN QUESTIONS table is REMOVED and the closures live at their points of use and at ledger L59
+and L60.]`**
 **[UPDATED - user ruling 2026-09-03, W1b: "**W1b: Not really sure what this is getting at? We can't do more than one op at once, so might as well make the ALU 64-bit always, it really makes no difference. FP/DP require floating point hardware we are already going to have to support alongside the integer ops.**" **The last item in this section is
 CONFIRMED and the drafting instruction is WITHDRAWN.** The count fell from "ZERO open, ONE
 awaiting confirmation" to **ZERO and ZERO**: no reading of a Q1-Q4 ruling is flagged, and the one
@@ -71,18 +76,19 @@ same act from the reader — has had that act. **Every `[USER TO CONFIRM]` tag i
 retired: H.10.3, the notation table's membership check, Appendix 1's preamble and L54, and
 Appendix 3 item 6.** A live instance of that tag, or of
 `[ASSISTANT'S READING … — user may overturn]`, is now a regression **on any subject**.]**
-**`[SUPERSEDED IN PART - identified 2026-09-03. The absence check above was written when the
-newest rulings in the document were W1b and the Q-set, and it is still correct for THOSE
-subjects: no [USER TO CONFIRM] is live anywhere, and no reading of a Q1-Q4, R-numbered or
-O-numbered ruling is live. IT IS NOT AN ABSENCE CHECK ANY MORE, because the KILL ruling was given
-as a hedged question - "As to whether this is privileged, probably not?" - and answering a
-question mark by derivation IS a reading, whatever the document would prefer to count. THE
-CORRECT CHECK IS NOW A CENSUS, NOT A ZERO: [ASSISTANT'S READING - user may overturn] is live on
-exactly ONE subject, KILL: SEVEN instances across FOUR sections - the front-matter KILL row
-(one), I.3a (THREE: the hook-to-handle reading, the privilege derivation, and the choice of
-ruling O7's path), I.4's fourth-closure row (one), and ledger L57 (TWO: the semantics and the
-privilege derivation) - and it is OPEN QUESTION U1. A live instance on any OTHER
-subject remains a regression; a live instance on this one is the correction.]`**
+**`[RESTORED AS AN ABSENCE CHECK - user ruling 2026-09-03 on U1-U8. For one revision this was a
+CENSUS rather than a zero: the KILL ruling had been given as a hedged question - "As to whether
+this is privileged, probably not?" - and answering a question mark by derivation IS a reading,
+so [ASSISTANT'S READING - user may overturn] was live in SEVEN instances across FOUR sections,
+all on KILL. THE USER ANSWERED, and the answer retires every one of them. Privilege: "1.
+unprivileged." - a plain word, no hedge, so the derivation is now the user's own. The handle
+reading: "The core only has a fixed number of handles … when an FTU entry is cleared, it is
+recycled" - the user's own words name handles and FTU entries, which is the reading. Ruling O7's
+closure path: the one part of it that was ever in question was WHEN the entry is freed, and that
+is ruled - "On kill-ACK." The count of fourteen follows from the two ruled facts and is not a
+separate reading. SO THE CHECK IS AN ABSENCE AGAIN, ON EVERY SUBJECT: no live instance of
+[ASSISTANT'S READING … — user may overturn] and none of [USER TO CONFIRM …] anywhere in this
+document. The closures are at I.3a, I.4, I.5, the KILL row below and ledger L57, L59 and L60.]`**
 `[HISTORICAL, kept so the audit trail survives — user confirmations of 2026-09-03: **Q2** ("*Unless there are
 any advantages to non-equivalency (for example, the min size of a float is 32 bits), then keep
 them the same.*"), **Q4** ("*I think that is okay.*") and now **Q3** ("*Q3: Accepted, function
@@ -261,44 +267,37 @@ as an `O`-row is.**]**
 | **the per-context translation cache** | "*I don't see how a shared TLB would be thrashed. There should be minimal address-space contention (a single program and all it's contexts share ONE address space) so it is highly beneficial for the TLB contents to be shared…*" | **REJECTED.** A tile has **ONE shared, ASID-tagged TLB**, as a regular core does. | **F.7**, **C.2**, **F.8**, **I3**; **P.1 R114**; ledger **L55**; Appendix 2 **S41** |
 | **liveness** | "*You go into great detail about how the regfile format A limits us to 16 live values. This is wrong, and assumes rename. We are operating on a 512-bit value. Literally every bit is independent because we are strictly in-order. Bit-packing is a thing, so we can have as many live values as we want as long as we have scratch space in the file to manipulate said value…*" | **CORRECTED IN PLACE.** Liveness is bounded by **512 bits plus the scratch the packing needs** — never by a count of names, and **the context is not eight registers.** Nameability affects **instruction count only**. | **I2**, **K.6**, **H.10.6**, **H.10.9**, **P.5 R113**, front-matter row **Q1**; ledger **L56** |
 | **`W1b`** | "*W1b: Not really sure what this is getting at? We can't do more than one op at once, so might as well make the ALU 64-bit always, it really makes no difference. FP/DP require floating point hardware we are already going to have to support alongside the integer ops.*" | **CONFIRMED, and the drafting instruction is WITHDRAWN.** The **integer ALU always executes at 64 bits**; a **32-bit-named integer source is sign-extended on read**; the **write port keeps only the named tile's bits**; **`*W` opcodes behave exactly as RV64 defines them**; **no "execute at the named width" mode exists.** The **FPU computes at the opcode's format**, and FP hardware is present under `IMAFD` regardless (**O4**). **This was the last item in this document awaiting the reader's act; the count is now ZERO.** | **H.10.3**, the `W1b` row above, the notation table's membership check, Appendix 1 preamble, Appendix 3 item 6; ledger **L54** |
-| **`KILL`** | "*Another correction: we probably need an instruction specifically to kill a failed program's contexts. KILL(hook) is probably the way to go. As to whether this is privileged, probably not?*" | **RULED IN — and everything past "it exists" is the ASSISTANT'S READING.** `[ASSISTANT'S READING - user may overturn; OPEN QUESTION U1. What the user RULED is that the instruction should exist. FOUR things in this cell are this document's, not the user's: (1) reading "KILL(hook)" as KILL rH, a handle in a general register; (2) UNPRIVILEGED, which answers a hedged question - "probably not?" - by derivation; (3) putting it on ruling O7's path; (4) the resulting count of fourteen. All four are tagged at I.3a and at ledger L57, and the privilege one is OPEN QUESTION U1 below. THE MECHANISM IS ALSO INCOMPLETE - the kill packet has no addressee, the in-flight case has no carrier, when the FTU entry is freed is stated two ways, and the no-op rule needs a handle-reuse rule: OPEN QUESTIONS U5, U6, U7.]` `KILL rH` ends **one of the caller's own** outstanding invocations on **ruling O7's** path — zeroed register file, error flag, `JOIN` returns the error immediately, nothing waits on the tile — and is a **NO-OP on a stale, retired or unowned handle.** It is unprivileged because **a handle is issued by the program's own FTU and names nothing outside it**: `pthread_cancel`, not `kill(2)`. **The count becomes 12 base + RESUME (privileged) + KILL = 14.** It **OVERTURNS #224** (newest wins, #307) and Part **P R77**; #224's objection survives as a programming caveat. **The `funct7` value is implementation choice (O3), recorded in SELECTED CONFIGURATION.** | **I.3a**, I.3, I.4, I.5, I.6, I.7, I.9, **C.4**, A.2, O.4; **P.5 R77** (OVERTURNED); Appendix 2 **S3**; ledger **L57** |
+| **`KILL`** | "*Another correction: we probably need an instruction specifically to kill a failed program's contexts. KILL(hook) is probably the way to go. As to whether this is privileged, probably not?*" | **RULED IN — and everything past "it exists" is the ASSISTANT'S READING.** `[CONFIRMED AND COMPLETED - user ruling 2026-09-03 on U1 and U5-U8. Every reading this cell used to carry is now the user's own word: KILL rH names an FTU handle ("the core only has a fixed number of handles"), it is UNPRIVILEGED ("unprivileged"), ruling O7's closure stands with its one open point ruled ("on kill-ACK"), and the count of fourteen follows from those. AND THE MECHANISM IS COMPLETE: the kill is BROADCAST on the control path, the tile holding the context acts and the others drop it (U5); the FTU entry is freed on that tile's KILL-ACK (U6); a recycled handle names the NEW invocation and nothing else (U7). U1-U8 closed; ledger L60.]` `KILL rH` ends **one of the caller's own** outstanding invocations on **ruling O7's** path — zeroed register file, error flag, `JOIN` returns the error immediately, nothing waits on the tile — and is a **NO-OP on a stale, retired or unowned handle.** **The kill is BROADCAST on the control path** — every tile sees it, the tile holding the context acts, the others drop it — **and the FTU entry is freed on that tile's KILL-ACK** (**U5**, **U6**, ledger **L60**). It is unprivileged because **a handle is issued by the program's own FTU and names nothing outside it**: `pthread_cancel`, not `kill(2)`. **The count becomes 12 base + RESUME (privileged) + KILL = 14.** It **OVERTURNS #224** (newest wins, #307) and Part **P R77**; #224's objection survives as a programming caveat. **The `funct7` value is implementation choice (O3), recorded in SELECTED CONFIGURATION.** | **I.3a**, I.3, I.4, I.5, I.6, I.7, I.9, **C.4**, A.2, O.4; **P.5 R77** (OVERTURNED); Appendix 2 **S3**; ledger **L57** |
 | **the page model** | "*This seems like a no-brainer? I would say yes, with the caveat that we would have 3 page sizes in total: 4 KiB, 1 grain, N grains. 4 KiB for standard pages, 1 grain for grain pages. N grains for standard (bad name, would prefer something meaningful) and duplicate pages. The only difference between standard and duplicate is that duplicates represent 1 grain of virtual space but N grains of physical space, while standard is 1 grain of virtual space per 1 grain of physical space.*" | **RULED — THREE SIZES, FOUR TYPES.** Sizes `4 KiB`, `G`, `N·G`. Types **HOST** (`4 KiB`/`4 KiB`, block-interleaved), **GRAIN** (`G`/`G`, one tile), **STRIPED** (`N·G`/`N·G`, one grain per tile), **DUPLICATE** (`G` virtual / `N·G` physical, one copy per tile). **One addressing mode, one page table, the size in the PTE (R13).** Consequences: **identity-mapped "regular" is RETIRED as a placement rule**; the **mode bit follows the size class**; **striped allocation granularity is `N·G`** (§12 fragmentation); an **unhinted object is GRAIN or STRIPED at the owner's choice** (**O1**). **`HOST` and `STRIPED` are names this document proposed** — tagged **[name proposed by the assistant - user to confirm]**, a vocabulary item and not a design question. | **F.5b**, **C.3**, **E.2**, **F.9**, **I12**, SELECTED CONFIGURATION; **P.1 R115**; Appendix 2 **S42**; ledger **L58** |
 
-**WHAT IS OPEN AFTER THESE FIVE — AND THE ANSWER IS NO LONGER "NOTHING".** `[CORRECTED -
-identified 2026-09-03. This paragraph read "NOTHING, AND THAT NOW INCLUDES THE CONFIRMATIONS",
-with both counts at ZERO. That was true of the Q1-Q4 and O1-O16 sets and it is still true of
-them: **no ruling the user gave is unapplied, and no reading of one of those rulings is
-outstanding.** It was NOT true of the two newest rulings, and the document was asserting a zero
-it had not earned. TWO THINGS ARE OPEN AND THEY ARE OF DIFFERENT KINDS. (i) ONE READING AWAITING
-CONFIRMATION: the KILL ruling's words were a hedged question - "As to whether this is privileged,
-probably not?" - and this document answered it by derivation. That is a reading, it is tagged as
-one at I.3a, I.4, ledger L57 and in the KILL row above, and it is U1 below. (ii) SEVEN MISSING
-RULES, none of which is a ruling the user failed to give - they are gaps this document found in
-its own mechanisms while applying the two newest rulings, each a decision with real alternatives,
-and each raised here rather than guessed. The correct honest count is therefore ONE reading
-awaiting confirmation and SEVEN open questions, not zero and zero.]`
+**WHAT IS OPEN AFTER THESE FIVE — AND THE ANSWER IS "NOTHING" AGAIN, EARNED THIS TIME.**
+`[UPDATED - user ruling 2026-09-03 on U1-U8. For one revision this paragraph read "AND THE ANSWER
+IS NO LONGER NOTHING", and it was right to: applying the two newest rulings had exposed ONE
+reading given as a hedged question and SEVEN missing rules, and the document had been asserting a
+zero it had not earned. THE USER ANSWERED ALL EIGHT ON 2026-09-03. The OPEN QUESTIONS table that
+stood here is REMOVED - not because the questions were withdrawn but because they are closed -
+and the closures are recorded below, at every point of use in the body, and at ledger L59 and
+L60. The ledger rows are the audit trail; the table below is the index.]`
 
-#### OPEN QUESTIONS — U1 THROUGH U8
+#### U1 THROUGH U8 — CLOSED, user ruling 2026-09-03
 
-**These are not rulings the user owes and forgot. U1 is a reading of a ruling that was given as a
-question; U2-U8 are places where applying the two newest rulings exposed a mechanism this document
-does not contain. Every one of them is stated at its point of use in the body with the same
-number.** **NOTHING BELOW IS GUESSED, AND NOTHING BELOW BLOCKS THE RULINGS THEMSELVES** — the
-page model and `KILL` are applied in full; these are the parts an implementer would have to invent
-and must not.
+**All eight are RULED and applied. Nothing here is a question any more.** Each row states the
+settled rule and quotes the user's words once; the body states the same rule at each point of use
+without re-quoting, and ledger **L59** (the giant-page semantics, U2–U4) and **L60** (`KILL`
+delivery and entry lifecycle, U1 and U5–U8) carry the full record.
 
-| # | the question | why it cannot be answered here | body |
+| # | the settled rule | the user's words, verbatim | body |
 |---|---|---|---|
-| **U1** | **Is `KILL` privileged?** | **A READING AWAITING CONFIRMATION, not a gap.** The user's words are "*As to whether this is privileged, probably not?*" — a hedge and a question mark. This document derives UNPRIVILEGED, and the derivation is sound: a handle is issued by the program's own FTU, the FTU acts only on entries it owns, so `KILL` cannot name another program's contexts — `pthread_cancel`, not `kill(2)`. **But a derivation from a question is not the user's word**, and this document previously recorded it as a closed ruling. **The reading stands until overturned; only its status changes.** | **I.3a**, **I.4**, **L57** |
-| **U2** | **Who allocates a STRIPED page's N frames, when, and how are the N per-tile free lists consulted together?** | Nothing names the agent, the moment, or the transaction. The pieces pull apart: **C.3** puts allocation "at translation time", i.e. on a fault taken by **ONE** tile; **F.6** keeps walks local; **F.8** gives each tile its **own** free-frame list. A fault on tile 0 must claim a grain on tiles 1..N-1 and **there is no cross-tile allocation transaction, no ordering rule, and no answer for two tiles racing for the same group index.** This is the first thing a page-table implementer writes. | **F.5b** consequence 3 |
-| **U3** | **How is any NMFC page FREED — and is a group STAMPED with its mode until fully free?** | Part F has **no deallocation path at all**; the only statement about release in the canon is **R13**'s "a freed unit's contents are garbage". **F.9** says all N copies of a duplicate are *made* together and never says they are *freed* together. **This is load-bearing:** a partially freed N-run leaves a group holding live grains of one mode and free grains a HOST allocation may take, breaking the group-homogeneity invariant **E.2** names as the ONLY reason the mode bit can be stripped at the DRAM port. The rule that would make E.2's invariant true — **stamp a group on first allocation, clear it only when fully free** — has the consequence that **the minimum HOST allocation claims a whole group**, which is a real cost and the user's call. | **F.5b** consequence 3, **E.2** |
-| **U4** | **What is the fallback when an `N·G` allocation partially succeeds?** | **Both fallbacks this document used to name are incoherent.** *Spill* (**F.8**, ruling **O6**) relocates a grain to a **different** tile, but a striped page needs a grain on **every** tile, so O6's target rule evaluates to nothing. *"Fall back to a GRAIN page"* silently changes the page's **virtual** size from `N·G` to `G` — and with **R18**'s "never a hard error", that is a **silently truncated mapping**. Real alternatives: compact to free a group index; refuse and OOM under R18; back `N·G` of virtual space with fewer than N tiles and accept unequal spread. | **F.5b** consequence 3, **O.4** risk 1 |
-| **U5** | **How is a kill packet ADDRESSED, and what happens to a context killed IN FLIGHT?** | An FTU entry is "512 bits of payload, two of state, one of retirement mode, and a hart id" (**I.5**) — **no tile field** — and no migration notifies the FTU of a context's new home, while **H.8** releases the source slot **at departure** so the source keeps no forwarding state. The in-flight branch previously invoked a **migration ACK that does not exist** anywhere else in this document. Alternatives: a current-tile field updated on every migration, or a broadcast-by-token. **Left unanswered, a killed in-flight context resumes on its destination with no FTU entry behind it.** | **I.3a** gaps 1-2, **C.4**, **L57** |
-| **U6** | **Is a killed FTU entry freed at the `KILL`, or marked returned-with-error and freed at the `JOIN`? And what frees a killed FIRE-AND-FORGET entry?** | **I.3a** asserts both: step 2 "closes at once" and "frees the FTU entry", step 5 has "a later `JOIN` return immediately with the error flag set". A freed entry cannot answer a `JOIN`, and **I.4** forbids a join-expected entry closing without returning its values. **The O7 analogy does not transfer** — under O7 the program is dead and will never `JOIN`; under `KILL` it is alive and expected to. And on a **fire-and-forget** handle a `JOIN` never succeeds, so the free-at-`JOIN` reading needs to know whether a killed context still emits its ACK — otherwise the entry is freed by **no instruction at all**, the shape **I.5** forbids by name. | **I.3a** gap 3, **I.4**, **I.5** |
-| **U7** | **Are FTU handles REUSED, and if so what distinguishes a retired handle from a reallocated one?** | The no-op rule for a stale handle depends on the answer. **I.5**'s entry has **no generation, epoch or sequence field**, and no section says whether handles recycle — though a fixed-size array implies they do. If they do, a `KILL` from a teardown path — **exactly the case the ruling names** — can kill an unrelated **younger** invocation that inherited the handle, and the "safe to issue blindly" property the rule rests on does not hold. Adding a generation field changes **I.5**'s entry sizing. | **I.3a**, **I.5** |
-| **U8** | **How many page-table copies must a shootdown reach, and which mechanism carries a PTE update?** | **THREE COUNTS FOR ONE SET.** **F.8** and **F.5a** said "`N+1` copies must agree", while the enumeration inside F.8's own quotation is "one per tile, one in the host's MMU, one in the fabric" = **N+2**; and **F.5b**/**C.2** put the table on **DUPLICATE** pages, which have exactly **N** copies — so the host MMU's and the fabric's copies are **not members of that replica set** and nothing says how they stay in step with it. **AND TWO MECHANISMS FOR ONE WRITE:** **C.3** has the MMU fan a write to a duplicate page out to every copy, **F.8** has a `RemapEvent` broadcast with per-copy recomputation forbidden — and if both fire, a PTE update is applied twice with no stated ordering. **A missed copy is exactly the failure F.8 says nothing downstream detects.** | **F.8**, **F.5a**, **C.3** |
+| **U1** | **`KILL` IS UNPRIVILEGED — CONFIRMED, and it is no longer a reading.** The derivation this document offered is now the user's own word: a handle is issued by the program's own FTU, the FTU acts only on entries it owns, so `KILL` cannot name another program's contexts. `pthread_cancel`, not `kill(2)`. | "*1. unprivileged.*" | **I.3a**, **I.4**, **L57**, **L60** |
+| **U2** | **A STRIPED PAGE IS A HUGE PAGE.** An `N·G` page is **ONE CONTIGUOUS `N·G` PHYSICAL EXTENT**, allocated like any huge page. **There is no cross-tile allocation transaction to design, because there is no cross-tile allocation** — one grain per tile is a **consequence of contiguity under the partition**, not a per-tile allocator claiming N free lists in step. The "N per-tile free lists consulted together" framing is STRUCK. | "*Like any other giant page? It has to be a consecutive space. … It makes no sense if you are just treating it as a large page.*" | **F.5b** consequence 3, **L59** |
+| **U3** | **DEALLOCATION IS ORDINARY.** A page is unmapped, its extent returned, its translations shot down — **exactly as any page of any size is freed** — and a striped page's extent is ONE extent, so there is no partially-freed N-run to invent a rule for. **Nothing NMFC-specific.** The group-stamp question falls with it: the extent is contiguous and homogeneous by construction. | "*Free/dealloc works like any other page. Strange question.*" | **F.5b** consequence 3, **E.2**, **L59** |
+| **U4** | **ON FAILURE, WHAT A REAL SYSTEM DOES FOR A HUGE PAGE — NO SPECIAL PATH.** If `N·G` consecutive frames are not available the allocation fails the way a huge-page allocation fails on a real machine; **this canon does not invent one.** "Partial success" is not a state a single contiguous extent has, so the two incoherent fallbacks are struck rather than replaced. **R18 still governs the reporting: warn, never a hard error.** | "*It is one giant page. If it can't be allocated, do whatever a real system would do when you try to allocate a giant page and there are not enough consecutive frames available.*" | **F.5b** consequence 3, **O.4** risk 1, **L59** |
+| **U5** | **THE KILL IS BROADCAST ON THE CONTROL PATH.** It goes to **every tile**; the tile holding the context **acts**, and the others **drop it**. No tile field in the FTU entry, no migration notification, no addressee to keep current — **and the in-flight case needs no carrier**, because a broadcast reaches the destination whether or not the context has arrived yet. A **directed** kill is an optimisation available only when the destination is known, and is **not required**. | "*Kill should be broadcast by nature? Unless you know the destination somehow?*" | **I.3a**, **C.4**, **L57**, **L60** |
+| **U6** | **THE FTU ENTRY IS FREED ON THE TILE'S KILL-ACK** — not at the `KILL`, not at the `JOIN`. Until the ACK arrives the entry is **returned-with-error and readable**, so a `JOIN` in that window gets the error flag; after it, the entry is free. **This frees the FIRE-AND-FORGET case too**: the ACK is an event the tile always produces, so no entry is left that no instruction can free (**I.5**). | "*On kill-ACK.*" | **I.3a**, **I.4**, **I.5**, **L60** |
+| **U7** | **A HANDLE NAMES AN FTU ENTRY; THE ENTRY IS CLEARED ON KILL-ACK AND RECYCLED; THE FTU HAS A FIXED NUMBER OF ENTRIES. "`KILL` of a recycled handle" IS NOT A DISTINCT CASE** — after recycling, the handle names the **NEW** invocation and there is nothing else it could name. **The generation-bit framing is STRUCK as architecture**: a generation bit, if an FTU has one, is an **implementation detail** against stale *software* handles and changes no statement here. **I.5**'s entry sizing is unchanged. | "*The core only has a fixed number of handles. … When a handle is killed, when an FTU entry is cleared, it is recycled. … That is like saying 'how do I read a register's old value after I write it?'. It doesn't make sense.*" | **I.3a**, **I.5**, **L60** |
+| **U8** | **A STRIPED PAGE'S SHOOTDOWN IS ANY REMAP.** Every tile holding a copy of the page table is updated, by the one mechanism a remap already uses; **nothing distinguishes the striped case** and no second write path exists for it. | "*Yes? Again, I don't see why this needs distinguished.*" | **F.8**, **F.5a**, **C.3**, **L59** |
 
-**AND THE THING THAT IS STILL NOT AN OPEN QUESTION, and must not be counted with them: TWO
+**AND THE THING THAT WAS NEVER AN OPEN QUESTION AND IS NOW THE ONLY THING LEFT TO CONFIRM: TWO
 NAMES**, `HOST` and `STRIPED`, tagged
 **[name proposed by the assistant - user to confirm]** at **F.5b** and **C.3**. **Renaming either
 changes no statement in this document**, because nothing in the machine reads a page type's name;
@@ -465,7 +464,7 @@ being qualified or merely annotated.**
 | **[RULED — user ruling 2026-09-02 R\<n\>]** | **the user has ruled and the statement is now settled at tier 1, newest.** The ruling's own words are quoted with the tag. **This is the strongest tag in the document**; a `[CONFLICT]`, `[UNRESOLVED]` or `[FOR THE USER TO RULE]` in the same passage is superseded by it. | no — it settles |
 | **[RULED — user ruling 2026-09-03 O\<n\>]** | **the same thing, for the ten residual questions the user closed on 2026-09-03.** Tier 1, newest, binding, and it supersedes every `[STILL OPEN]`, `[FOR THE USER TO RULE]` and `[USER TO CONFIRM]` in the same passage. **This and the R-tag are jointly the strongest tags in the document.** | no — it settles |
 | **[derived from ruling O\<n\>]** | a consequence the user did **not** spell out, drawn in this document from a ruling plus an existing tier-1 rule. **It is marked so it is never mistaken for the user's own words**, and the derivation is always shown beside it. | no — but it is the document's inference, not a quotation |
-| **[USER TO CONFIRM …]** | **RETIRED ONCE, THEN REINSTATED WITH A DIFFERENT SUBJECT — read both halves before using this tag or auditing it.** `[CORRECTED — an earlier revision of this row declared the tag retired and gave a grep check calling any live instance "a regression"; the SAME revision then added live instances. This row is rewritten rather than patched, because it is the document's authority mechanism and it stated the opposite of the body.]` **First subject (RETIRED, and it stays retired):** the tag marked exactly one clause — `RESUME`'s privilege level, which R20 left as a question — and **user ruling 2026-09-03 O16 ("*Yes, privileged.*") answered it.** Every instance of that form (the label followed by the word *privileged*) was removed and **none survives.** **Second subject (LIVE as of user ruling 2026-09-03, morning):** the tag now marks **the assistant's READING of a ruling given in words that did not answer the question as posed**, or **a drafting instruction this document struck on a proposal's authority.** The user DID rule and the ruling IS applied; what is offered for overturn is the reading. It is NOT `[FOR THE USER TO RULE]`. **THREE OF THOSE SUBJECTS WERE CONFIRMED BY THE USER ON 2026-09-03 — Q2/`f`*n* ≡ `x`*n* (`L51`, "*…then keep them the same*"), Q4's scope (`L52`, "*I think that is okay*") and Q3/I.7 item 3 (`L50`, "*Q3: Accepted, function should not be host-executable*") — and their tags are RETIRED; a live tag on any of those three is now itself the regression.** **AND THE FOURTH AND LAST SUBJECT IS NOW CONFIRMED TOO, SO THE CHECK BECOMES AN ABSENCE CHECK AGAIN — user ruling 2026-09-03 on W1b, verbatim: "**W1b: Not really sure what this is getting at? We can't do more than one op at once, so might as well make the ALU 64-bit always, it really makes no difference. FP/DP require floating point hardware we are already going to have to support alongside the integer ops.**" `L54` is CONFIRMED, its tag is retired at **H.10.3**, in Appendix 1's preamble, at the row itself and in Appendix 3 item 6, and BOTH spellings — `[USER TO CONFIRM …]` and `[ASSISTANT'S READING … — user may overturn]` — now have ZERO live instances. **The check WAS: no live instance of either spelling, on any subject.** `[CORRECTED - identified 2026-09-03. That check is now wrong for one subject and right for every other. THE USER-TO-CONFIRM SPELLING is still RETIRED with ZERO live instances - W1b was the last and it is confirmed. THE ASSISTANT'S-READING SPELLING is LIVE AGAIN, on a FIFTH subject: KILL. The ruling that introduced it - "we probably need an instruction specifically to kill a failed program's contexts. KILL(hook) is probably the way to go. As to whether this is privileged, probably not?" - is tier 1 and binding on the INSTRUCTION EXISTING, but it names no semantics and puts its privilege level as a question with a hedge. This document read "hook" as "handle", derived UNPRIVILEGED, chose ruling O7's path, and counted fourteen instructions; all four are readings and all four are now tagged. THE CHECK IS THEREFORE A CENSUS, NOT AN ABSENCE: the assistant's-reading tag is live in exactly SEVEN instances across FOUR sections, all on KILL - the front-matter KILL row (1), I.3a (3), I.4's fourth-closure row (1) and ledger L57 (2) - and recorded as OPEN QUESTION U1. Any live instance on any other subject is still a regression, and so is a KILL instance without a matching U1 entry.]` | **LIVE on ONE subject: `KILL` (U1). `[USER TO CONFIRM …]` remains retired with none.** |
+| **[USER TO CONFIRM …]** | **RETIRED ONCE, THEN REINSTATED WITH A DIFFERENT SUBJECT — read both halves before using this tag or auditing it.** `[CORRECTED — an earlier revision of this row declared the tag retired and gave a grep check calling any live instance "a regression"; the SAME revision then added live instances. This row is rewritten rather than patched, because it is the document's authority mechanism and it stated the opposite of the body.]` **First subject (RETIRED, and it stays retired):** the tag marked exactly one clause — `RESUME`'s privilege level, which R20 left as a question — and **user ruling 2026-09-03 O16 ("*Yes, privileged.*") answered it.** Every instance of that form (the label followed by the word *privileged*) was removed and **none survives.** **Second subject (LIVE as of user ruling 2026-09-03, morning):** the tag now marks **the assistant's READING of a ruling given in words that did not answer the question as posed**, or **a drafting instruction this document struck on a proposal's authority.** The user DID rule and the ruling IS applied; what is offered for overturn is the reading. It is NOT `[FOR THE USER TO RULE]`. **THREE OF THOSE SUBJECTS WERE CONFIRMED BY THE USER ON 2026-09-03 — Q2/`f`*n* ≡ `x`*n* (`L51`, "*…then keep them the same*"), Q4's scope (`L52`, "*I think that is okay*") and Q3/I.7 item 3 (`L50`, "*Q3: Accepted, function should not be host-executable*") — and their tags are RETIRED; a live tag on any of those three is now itself the regression.** **AND THE FOURTH AND LAST SUBJECT IS NOW CONFIRMED TOO, SO THE CHECK BECOMES AN ABSENCE CHECK AGAIN — user ruling 2026-09-03 on W1b, verbatim: "**W1b: Not really sure what this is getting at? We can't do more than one op at once, so might as well make the ALU 64-bit always, it really makes no difference. FP/DP require floating point hardware we are already going to have to support alongside the integer ops.**" `L54` is CONFIRMED, its tag is retired at **H.10.3**, in Appendix 1's preamble, at the row itself and in Appendix 3 item 6, and BOTH spellings — `[USER TO CONFIRM …]` and `[ASSISTANT'S READING … — user may overturn]` — now have ZERO live instances. **The check WAS: no live instance of either spelling, on any subject.** `[CORRECTED ONCE, THEN CLOSED - and both halves are kept so the audit trail survives. FOR ONE REVISION the check was a CENSUS rather than an absence: the assistant's-reading spelling went LIVE AGAIN on a FIFTH subject, KILL, in SEVEN instances across FOUR sections - the front-matter KILL row (1), I.3a (3), I.4's fourth-closure row (1) and ledger L57 (2) - because the ruling that introduced it put the privilege level as a hedged question and this document answered it by derivation, read "hook" as "handle", chose ruling O7's path and counted fourteen. USER RULING 2026-09-03 ON U1-U8 RETIRES EVERY ONE OF THEM. Privilege: "unprivileged" - no hedge, so the derivation is the user's own. The handle reading: "The core only has a fixed number of handles … when an FTU entry is cleared, it is recycled" - the user's own words name handles and FTU entries. O7's closure path: the one point of it that was ever in question, WHEN the entry is freed, is ruled - "On kill-ACK." The count of fourteen follows from ruled facts and was never a separate reading. THE CHECK IS AN ABSENCE AGAIN, ON EVERY SUBJECT: no live instance of either spelling anywhere. A live instance of either, on any subject, is a regression.]` | **RETIRED on every subject, with ZERO live instances of either spelling — `[USER TO CONFIRM …]` and `[ASSISTANT'S READING … — user may overturn]` alike.** |
 | **[name proposed by the assistant - user to confirm]** | **NEW AS OF user ruling 2026-09-03 (the page model), and it is a THIRD subject class that must not be counted with the two above.** It marks **a NAME this document chose for a thing the user ruled on but did not name** — not a reading of a ruling, not a struck drafting instruction, and **not an open question.** The ruling is applied in full; what is offered is the label. **The test that keeps it separate: renaming changes no statement in the document.** **EXACTLY TWO LIVE INSTANCES, both on page types: `HOST` (the 4 KiB page) and `STRIPED` (the `N·G` page), at F.5b and C.3** — the user's ruling used the word "*standard*" for both of them and called it "*a bad name*", so one word could not be kept for two types. `GRAIN` and `DUPLICATE` are the user's own words and carry no tag. **A live instance of this tag on anything that is not a name is a regression**, and so is a count other than two without a corresponding edit at F.5b, C.3, SELECTED CONFIGURATION, E.2, F.9, Part P and Appendix 2. | no — it settles the thing and offers only the label |
 
 **HOW A TAG IS DELIMITED — a rendering rule, and it has already broken tags in this
@@ -2500,10 +2499,13 @@ Read-only *by construction* is not the same as never written: a program **builds
 one and then stops writing it, and the "kernel writes are duplicated as well" clause
 is what makes that possible — the MMU fans a write to a duplicate page out to every
 copy, or the other N−1 tiles compute on garbage (DESIGN §29.3 D:3390-3395).
-**`[UNRESOLVED - identified 2026-09-03. THE PAGE TABLE IS ITSELF A DUPLICATE PAGE (F.5b, C.2),
-so this sentence and F.8's RemapEvent broadcast are two different mechanisms for the same write,
-and this document does not say which one carries a PTE update or a shootdown - nor what happens
-if both fire. Stated in full at F.8; raised as OPEN QUESTION U8.]`**
+**`[RESOLVED - user ruling 2026-09-03, U8. THE PAGE TABLE IS ITSELF A DUPLICATE PAGE (F.5b,
+C.2), and for one revision this document offered two mechanisms for one write. IT IS ONE
+MECHANISM: a mapping change is A REMAP, and a remap updates every tile holding a copy of the
+table - which is what F.8's RemapEvent broadcast already is. The sentence above governs ORDINARY
+KERNEL WRITES to a duplicate page; it is not a second path for a PTE update or a shootdown, and
+nothing about a STRIPED page distinguishes its remap from any other. Stated in full at F.8;
+ledger L59.]`**
 
 **Why duplication is sound at all:** N *writable* copies would need a coherence
 protocol; N copies of read-only code need nothing. That is exactly why function
@@ -2512,7 +2514,9 @@ bodies can be aliased this way **and the data they chase cannot**
 
 ### C.4 An invocation's lifecycle
 
-**[RE-VALIDATED 2026-09-03 - the KILL branch below was added under user ruling 2026-09-03 and
+**[RE-VALIDATED 2026-09-03 - the KILL branch below was added under user ruling 2026-09-03, and
+AMENDED by user ruling 2026-09-03 on U5-U7 (broadcast delivery, the KILL-ACK that frees the
+entry, and the recycled handle that is not a case) - and
 EVERY mermaid block in this document was re-run through the embedded checker printed later in
 this section: no `;`, balanced quotes, balanced brackets, balanced subgraph/end. All five blocks
 pass, and C.3's block was REPLACED wholesale in the same revision (the four-type page model,
@@ -2579,9 +2583,10 @@ sequenceDiagram
     Note over F: every outstanding FTU entry of that program<br/>closes AT ONCE — register file ZEROED, ERROR FLAG set.<br/>A JOIN on any of them returns immediately with the error.<br/>Nothing waits on the user program (ruling O7).
   else the program KILLS the invocation itself — KILL rH, UNPRIVILEGED
     H->>F: KILL rH — name one of MY OWN outstanding invocations
-    Note over F: the entry takes the SAME path ruling O7 defines,<br/>register file ZEROED and ERROR FLAG set, so a later<br/>JOIN returns the error at once and nothing waits on the tile.<br/>A stale, retired or unowned handle is a NO-OP.
-    F->>X: kill packet — the same control path an invocation,<br/>a completion and a RESUME packet already take
-    X->>B: end the context wherever it is — sleeping on a load<br/>or parked after a fault. Any atomic-table hold is released.<br/>THE IN-FLIGHT CASE AND THE PACKET'S ADDRESSEE ARE OPEN — see I.3a.
+    Note over F: the entry takes the SAME path ruling O7 defines,<br/>register file ZEROED and ERROR FLAG set, so a JOIN<br/>returns the error at once and nothing waits on the tile.<br/>A stale or unowned handle is a NO-OP, and a RECYCLED<br/>handle names the NEW invocation and nothing else.
+    F->>X: kill packet BROADCAST to every tile — the same control path<br/>an invocation, a completion and a RESUME packet already take
+    X->>B: the tile HOLDING the context ends it wherever it is — sleeping<br/>on a load or parked after a fault. Every other tile drops it.<br/>Any atomic-table hold is released. In flight needs no carrier.
+    B->>F: KILL-ACK — and the FTU entry is FREED on it, not before
   end
 ```
 
@@ -3496,9 +3501,12 @@ the ALLOCATOR makes: "F.9's allocator hands grains out in aligned N-runs and a g
 exactly one mode". THE UNSTATED RULE THAT WOULD MAKE IT TRUE is that a group is STAMPED with a
 mode (equivalently, a size class) on its first allocation and the stamp is cleared only when the
 group is FULLY FREE - which also means the minimum HOST allocation effectively claims a whole
-group. That is a real cost and a real decision, it interacts with the missing deallocation path
-F.5b consequence 3 names, and it is raised as OPEN QUESTION U3 in the front matter rather than
-adopted here.]`
+group. That is a real cost and a real decision, and USER RULING 2026-09-03 (U3) SETTLES IT BY
+REMOVING THE CASE THAT MOTIVATED IT: deallocation "works like any other page", and a STRIPED page
+is ONE CONTIGUOUS N·G EXTENT (F.5b consequence 3), so there is no partially-freed N-run to leave a
+group half-live. The invariant is preserved by CONTIGUITY plus F.9's aligned-N-run allocator, and
+no group STAMP is required as architecture; an allocator that wants one may keep one as policy,
+and the minimum-HOST-allocation cost is then its own, not this document's. Ledger L59.]`
 
 *User #10, 2026-08-27T06:41:05Z, who reduced it to this form himself:* "Regarding
 mapping mode, I think this is actually even simpler than you designed: **we are really
@@ -4525,10 +4533,11 @@ each:
 **One table per address space** (I3, R12), so the ASID selects the table and is part of
 every translation, every remap and every shootdown; the **TLB is shared and ASID-tagged**.
 Every copy of a given address space's table must agree and be built from one parameter
-dict **`[CORRECTED - identified 2026-09-03: this clause said "N+1 copies", which is ONE of the
-THREE counts this document gives for the same set. See F.8, where all three are laid out and the
-question is raised as OPEN QUESTION U8; the sizing is not settled, so this clause no longer
-asserts a number.]`** — a component given no `memSize` once derived a different remap budget from every
+dict **`[CORRECTED, THEN CLOSED - this clause said "N+1 copies", which was ONE of the THREE
+counts this document gave for the same set. USER RULING 2026-09-03, U8: a remap of any page,
+striped included, is ANY REMAP - EVERY HOLDER OF A COPY IS UPDATED, and the set is named by
+ENUMERATION rather than by arithmetic: one per tile, one in the host's MMU, one in the fabric.
+See F.8; ledger L59.]`** — a component given no `memSize` once derived a different remap budget from every
 component that had one, which is why `memSize` is fatal at construction now (F.8, DESIGN
 §30.3 D:3507-3516).
 
@@ -4609,67 +4618,62 @@ bit.
    is one bit and one reading of an existing field**, and it is the entire cost of holding four
    types in three sizes. **A reader who expects the size class to name the type will get
    DUPLICATE wrong**, which is the one place this model is not self-evident.
-3. **ALLOCATION GRANULARITY FOR A STRIPED OBJECT IS `N·G`.** That is the direct cost of making
-   spread a property of the page rather than of allocator policy. **A striped allocation needs a
-   free grain on EVERY tile at the SAME GROUP INDEX** (**F.9**: a striped page *is* an aligned
-   N-run of grains). Never a hard error (**R18**: warn, never fatal).
+3. **A STRIPED PAGE IS A HUGE PAGE, AND EVERYTHING ABOUT ITS ALLOCATION FOLLOWS FROM THAT.**
+   [RULED - user ruling 2026-09-03, U2-U4. See the front matter's U1-U8 table for the verbatim
+   words and ledger **L59** for the full record.] An `N·G` page is **ONE CONTIGUOUS `N·G`
+   PHYSICAL EXTENT**, and it is **allocated and freed exactly like any other huge page**:
 
-   **AND THREE THINGS THIS CONSEQUENCE USED TO SAY ARE WITHDRAWN, BECAUSE THEY WERE WRONG RATHER
-   THAN INCOMPLETE.** `[CORRECTED - user ruling 2026-09-03, the page model. Each of the three is
-   withdrawn IN PLACE rather than deleted, because each was cited from elsewhere in this document
-   and a reader chasing those citations must find out what happened.]`
+   - **ALLOCATION.** One contiguous extent of `N·G` consecutive frames, claimed the way a huge
+     page is claimed. **One grain per tile is a CONSEQUENCE OF CONTIGUITY UNDER THE PARTITION,
+     not a placement the allocator arranges** — `N` consecutive grains starting at an aligned
+     group index land one on each tile because that is what the partition arithmetic does with
+     consecutive grains (**F.9**). **There is no cross-tile allocation transaction, no ordering
+     rule and no race for a group index, because there is no cross-tile allocation**: it is one
+     extent from one allocator, exactly as a 2 MiB page is.
+   - **DEALLOCATION.** Unmap, return the extent, shoot down the translations — **as any page of
+     any size is freed.** **Nothing NMFC-specific.** The extent is one object, so there is no
+     partially-freed N-run and no group left holding live grains of one mode beside free grains
+     of another; **E.2**'s group-homogeneity invariant is preserved by contiguity itself.
+   - **FAILURE.** If `N·G` consecutive frames are not available, **the allocation fails the way a
+     huge-page allocation fails on a real system** — compaction, a fallback the OS already has,
+     or failure — and **this canon does not invent a special path for it.** "Partial success" is
+     not a state a single contiguous extent has. **R18 still governs the reporting: warn, never a
+     hard error**, and **O.4**'s striped-fragmentation instrument still earns its place, because
+     the condition it measures — how much `N·G`-aligned contiguity is left — is exactly the
+     condition a huge-page allocator fails on.
+
+   **WHAT THIS STRIKES, AND IT IS STRUCK IN PLACE BECAUSE IT WAS CITED FROM ELSEWHERE.**
+   `[CORRECTED - user ruling 2026-09-03, U2-U4. Three things this consequence used to say were
+   wrong rather than incomplete, and a fourth framing - "N per-tile free lists consulted
+   together", "all-or-nothing across tiles", "two tiles racing for the same group index" - is
+   struck outright, because it describes a distributed allocator this page type does not need.
+   A reader chasing a citation to any of them must find out what happened.]`
    - **(a) THE §12 EVIDENCE IS A DIFFERENT CONDITION AND DOES NOT SUPPORT THIS ONE.** This item
      quoted DESIGN §12 - "*an NMFC unit needs N free ROWS on ONE tile, so a scattered free list
      can fail an allocation while total free capacity is ample*" - as support for the striped
-     requirement. **They are opposite requirements**: §12 needs **N units of contiguity WITHIN
-     one tile**, striped needs **ONE unit on each of N tiles at a matching index**, and the
-     second does not follow from the first. Fragmentation is a real risk for striped pages; §12
-     is simply not the evidence for it. Stated at **O.4** risk 1, where the two conditions are
-     now separated.
+     requirement. **They are different requirements**: §12 needs **N units of contiguity WITHIN
+     one tile**, and a striped page needs **`N·G` of contiguity in the physical extent**.
+     Fragmentation is a real risk for striped pages - it is the ordinary huge-page risk - but
+     §12 is not the evidence for it. Stated at **O.4** risk 1, where the two are separated.
    - **(b) THE INSTRUMENTS NAMED HERE WERE BLIND TO THIS CONDITION.** The `(tile, row)` free
-     bitmap and the *largest allocatable run per tile* measure condition (a)'s first form only:
-     **a machine can report a large allocatable run on every tile and still have no group index
-     free on all N.** The instrument that actually diagnoses a striped-allocation failure is
-     **the number of group indices simultaneously free across all N tiles**, which was defined
-     nowhere in this document and is now required at **O.4**.
-   - **(c) BOTH NAMED FALLBACKS ARE INCOHERENT FOR A STRIPED PAGE, so neither is offered any
-     more.** **SPILL (F.8, ruling O6) is undefined here:** F.8 defines a spill as relocating a
-     grain to a DIFFERENT tile, and O6's target rule is "the tile holding the next-largest
-     cluster of the same vtile, else the least-loaded" - but a striped page needs a grain on
-     EVERY tile, so there is **no other tile to spill to** and O6's rule evaluates to nothing.
-     **"FALL BACK TO A GRAIN PAGE AND LOSE THE SPREAD" silently changes the page's VIRTUAL SIZE
-     from `N·G` to `G`.** A page's virtual extent is what the program was compiled against; this
-     document never said who is permitted to do that, whether the object is truncated, or how
-     the remaining `(N-1)·G` of virtual space is mapped - and combined with **R18**'s "never a
-     hard error" an implementer following the old text produces a **silently truncated mapping**,
-     which is corruption reported as a warning.
-   - **WHAT THE FALLBACK ACTUALLY IS, IS OPEN.** It is a design decision with real alternatives
-     (compact/relocate to free a group index; refuse the allocation and OOM under R18; allocate
-     `N·G` of virtual space backed by fewer than N tiles and accept unequal spread), and this
-     document does **not** choose one on its own authority. Raised as **OPEN QUESTION U4** in the
-     front matter.
+     bitmap and the *largest allocatable run per tile* measure per-tile contiguity only: **a
+     machine can report a large allocatable run on every tile and still have no `N·G`-aligned
+     extent free.** The instrument that diagnoses a striped-allocation failure is **the number of
+     aligned group indices free across the whole extent space**, which was defined nowhere in
+     this document and is required at **O.4**.
+   - **(c) BOTH NAMED FALLBACKS WERE INCOHERENT AND NEITHER IS OFFERED ANY MORE.** **SPILL
+     (F.8, ruling O6)** relocates a grain to a **different** tile, which a single contiguous
+     extent cannot do without ceasing to be one; **"FALL BACK TO A GRAIN PAGE"** silently changed
+     the page's **virtual** size from `N·G` to `G`, which under **R18**'s "never a hard error" is
+     a silently truncated mapping. **Neither is replaced by a new NMFC-specific rule** — the
+     failure path is the huge-page failure path, above.
+   - **(d) AND THE FRAMING ITSELF IS STRUCK.** This consequence used to say a striped allocation
+     "needs a free grain on EVERY tile at the SAME GROUP INDEX" and reasoned from **N per-tile
+     free lists** that must be consulted together. **That is the wrong picture.** It is one
+     extent; the per-tile spread is what the partition does to it. The per-tile free list
+     **F.8** describes is still how a **GRAIN** page is placed — it is the striped case it does
+     not govern.
 
-   **AND TWO RULES A PAGE-TABLE IMPLEMENTER NEEDS BEFORE ANY OF THIS, WHICH THIS DOCUMENT DOES
-   NOT CONTAIN.** `[MISSING RULE - identified 2026-09-03. Neither is a consequence of the ruling
-   that can be drawn here; both are choices, and both are raised in the front matter rather than
-   guessed.]`
-   - **HOW A STRIPED PAGE'S N FRAMES ARE ALLOCATED AT ALL.** Nothing in this document names
-     **which agent** runs the allocation, **when**, or **how the N per-tile free lists are
-     consulted together.** The pieces actively pull apart: **C.3** says allocation happens "at
-     translation time", i.e. on a fault taken by **ONE** tile; **F.6** requires walks stay local;
-     **F.8** gives each tile **its own** free-frame list. So a fault on tile 0 must somehow claim
-     a grain on tiles 1..N-1, and there is **no cross-tile allocation transaction, no ordering
-     rule, and no statement of what happens when two tiles fault on two different striped objects
-     and race for the same group index.** **OPEN QUESTION U2.**
-   - **HOW ANY OF IT IS FREED.** Part F has **no deallocation path**: "free" appears in it only
-     as "free-frame list", "free bitmap" and "free choice", and the only statement about release
-     anywhere in the canon is Part P **R13**'s "a freed unit's contents are garbage". **F.9**
-     rules that "all N copies of a duplicate are made together" and **never says they are freed
-     together**, and nothing says a striped page's N grains return to the N tiles' free lists
-     atomically. **This is load-bearing for a correctness invariant, not cosmetic:** a partially
-     freed N-run leaves a group holding live grains of one mode and free grains a HOST allocation
-     may take, which breaks the group-homogeneity invariant **E.2** names as the ONLY reason the
-     mode bit can be stripped at the DRAM port. **OPEN QUESTION U3.**
 4. **AN UNHINTED OBJECT MUST BE ONE OF GRAIN OR STRIPED, AND THE CHOICE IS THE OWNER'S.**
    [RULED - user ruling 2026-09-03 **O1**, verbatim: "*Unhinted grains are up to the OS/hardware
    to place. So, presumably the OS could map it wherever was most convenient.*"] There is no
@@ -5079,9 +5083,14 @@ recompute independently can disagree, and **both answers are legal physical addr
 so nothing downstream detects it (the scar recorded in Appendix 2 D7 as "two page tables
 that are copies built from different parameters").
 
-**HOW MANY COPIES THAT IS, IS STATED THREE DIFFERENT WAYS IN THIS DOCUMENT AND THE FAN-OUT IS
-THEREFORE UNSIZED.** `[UNRESOLVED - identified 2026-09-03. This is not a wording slip: a missed
-copy is exactly the failure the paragraph above says nothing downstream can detect.]` **(i)** The
+**HOW MANY COPIES THAT IS WAS STATED THREE DIFFERENT WAYS, AND THE RULING SETTLES IT BY
+ENUMERATION.** `[RULED - user ruling 2026-09-03, U8: a remap of a striped page is ANY REMAP -
+"I don't see why this needs distinguished" - so EVERY TILE HOLDING A COPY OF THE PAGE TABLE IS
+UPDATED, and the set is the ENUMERATION, not an arithmetic expression: one per tile, one in the
+host's MMU, one in the fabric. Nothing about a STRIPED page changes it. The three counts below
+are kept as the record of what was wrong, because each was cited from elsewhere and because a
+missed copy is exactly the failure the paragraph above says nothing downstream can detect. Ledger
+L59.]` **(i)** The
 DESIGN quotation says "**N+1** `PageTable` objects", and this section and **F.5a** both repeat
 "`N+1` copies must agree" - but the **enumeration inside the very same quotation** is "*one per
 tile, one in the host's MMU, one in the fabric that decides*", which is **N+2**. **(ii)**
@@ -5090,18 +5099,19 @@ N** copies by definition - one per tile - so **the host MMU's copy and the fabri
 members of that replica set**, and nothing in this document says how they are kept in step with
 it. An implementer sizing the `RemapEvent` fan-out gets **N, N+1 or N+2** depending on which
 sentence he reads. **The count and the relationship between the replica set and the two non-tile
-copies are raised as OPEN QUESTION U8** in the front matter. Until it is answered, **the safe
-reading is the ENUMERATION, not the arithmetic** - every tile, plus the host MMU, plus the fabric
-- because over-broadcasting costs a flush and under-broadcasting costs correctness.
+copies are SETTLED BY THE ENUMERATION** (user ruling 2026-09-03, U8): **every tile, plus the
+host MMU, plus the fabric** - what was the safe reading is now the rule, and the arithmetic
+expressions "N+1" and "N+2" are retired as ways to size the fan-out. Over-broadcasting costs a
+flush and under-broadcasting costs correctness, which is why the enumeration governs.
 
-**AND WHICH MECHANISM CARRIES A PTE UPDATE IS ALSO UNSETTLED, FOR THE SAME PAGE.** `[UNRESOLVED -
-identified 2026-09-03.]` **C.3** says the MMU fans a write to a duplicate page out to every copy
-("*kernel writes are duplicated as well*"), and the page table **is** a duplicate page. **This
-section** says a mapping change is a **`RemapEvent` broadcast**, with per-copy recomputation
-forbidden. An implementer cannot tell whether updating a PTE is **an ordinary store to a
-duplicate page, fanned out by hardware**, or **an explicit broadcast event** - nor which of the
-two carries the shootdown - and **if both fire, a PTE update is applied twice by two paths with
-no stated ordering between them.** Part of **OPEN QUESTION U8**.
+**AND WHICH MECHANISM CARRIES A PTE UPDATE IS SETTLED TOO, AND IT IS THIS ONE.** `[RULED - user
+ruling 2026-09-03, U8.]` **C.3** says the MMU fans a write to a duplicate page out to every copy
+("*kernel writes are duplicated as well*"), and the page table **is** a duplicate page — but that
+rule governs **ordinary kernel writes**, not mapping changes. **A MAPPING CHANGE IS A REMAP, AND
+A REMAP IS THIS SECTION'S `RemapEvent` BROADCAST**, with per-copy recomputation forbidden and the
+shootdown riding on it. **There is ONE path, so nothing is applied twice and no ordering between
+two paths has to be stated.** And **a STRIPED page's remap is not a special case of it**: every
+holder of a copy is updated, exactly as for any other page.
 
 **Spill — and it is a TILE, not a channel.** `[VOCABULARY RULED — user ruling 2026-09-02
 R18: "**channel is odd language here, should definitely be using 'tile'**." Every statement
@@ -7799,19 +7809,21 @@ assertions take priority over older assertions*") the newer statement governs wi
 **#224 is not deleted**: it is recorded at **I.7**, and its objection is answered below rather
 than ignored. Part P **R77** is marked OVERTURNED for the same reason.]
 
-**`KILL(hook)` is read as `KILL rH`, a handle in a general register.** [ASSISTANT'S READING -
-user may overturn. The user wrote "*KILL(hook)*"; "hook" is read as "handle" because the FTU handle is the **only** per-invocation name this ISA has: `JOIN`, `JOINQ`
+**`KILL(hook)` is `KILL rH`, a handle in a general register.** [RULED - user ruling 2026-09-03,
+U7, which names the referent in the user's own words: "*The core only has a fixed number of
+handles … when an FTU entry is cleared, it is recycled.*" For one revision this was tagged as the
+assistant's reading of the word "hook"; the reading is now the user's own vocabulary. It was
+always the only candidate, because the FTU handle is the **only** per-invocation name this ISA has: `JOIN`, `JOINQ`
 and `RESUME` all take one, `FORK` returns one, and nothing else in the machine names an
 invocation. There is no other referent the word could have.]
 
 **IT IS UNPRIVILEGED, and the reason is that there is nothing for privilege to protect.**
-**[ASSISTANT'S READING - user may overturn; OPEN QUESTION U1 in the front matter. The user's
-words were a HEDGED QUESTION, not a ruling: "As to whether this is privileged, probably not?"
-This document answers it by derivation, and the derivation is sound, but a derivation from a
-question mark is not the user's own words and this document previously presented it as a settled
-ruling with zero readings outstanding. What is RULED at tier 1 is that KILL EXISTS; its privilege
-level is the assistant's reading.]** The user's own words leave it open — "*As to whether
-this is privileged, probably not?*" — and the derivation is short: **a handle is issued by the
+**[RULED - user ruling 2026-09-03, U1: "*unprivileged*", a plain word with no hedge. For one
+revision this was tagged as the ASSISTANT'S READING, because the ruling that introduced KILL put
+the privilege level as a question - "As to whether this is privileged, probably not?" - and
+answering a question mark by derivation IS a reading. The user has now answered it in his own
+word, so the derivation below is no longer this document's: it is the reason for a ruled fact.]**
+The derivation is short: **a handle is issued by the
 program's OWN FTU** (**I.5**), and the FTU can only act on entries it owns, so **`KILL` cannot
 name another program's contexts at all.** A handle from a different address space is not a
 handle here; it is a number that names nothing. So the instruction is **`pthread_cancel`, not
@@ -7821,65 +7833,68 @@ and `JOIN`. **This is the exact opposite of `RESUME`'s case and for the exact op
 from it (**I.3**, ruling **O16**), whereas nothing about ending your own invocation touches the
 trap path.
 
-**WHAT IT DOES, AND IT IS ENTIRELY THE PATH RULING O7 ALREADY BUILT.** **[ASSISTANT'S READING -
-user may overturn. The user ruled that the instruction should EXIST and named nothing about its
-semantics; putting it on ruling O7's existing path - zeroed file, error flag, no wait - is this
-document's choice, made because O7 already defines a closure with exactly those properties and a
-second closure semantics would be new architectural state. It is a reading, and the count of
-fourteen instructions follows from it and from the ruling together.]** There is **no new closure
-semantics**, which is the whole reason this instruction is cheap:
+**WHAT IT DOES, AND IT IS ENTIRELY THE PATH RULING O7 ALREADY BUILT.** **[RULED - user ruling
+2026-09-03, U5-U7. For one revision this was tagged as the assistant's reading, because the
+ruling that introduced KILL named the instruction and nothing about its semantics. The user has
+since ruled every part of the path that was ever in question: the DELIVERY is a BROADCAST (U5),
+the entry is FREED ON THE KILL-ACK (U6), and a recycled handle names the new invocation and
+nothing else (U7). What is left of O7's path — a zeroed register file and one error flag — is not
+a choice between alternatives at all: it is the closure O7 already defines, and a second closure
+semantics would be new architectural state. The count of fourteen follows from ruled facts.]**
+There is **no new closure semantics**, which is the whole reason this instruction is cheap:
 
 | # | step | who |
 |---|---|---|
 | 1 | `KILL rH` retires on the host and the FTU looks the handle up **in its own entries** | the host, user-level |
-| 2 | the entry **closes at once: register file ZEROED, ERROR FLAG set** — the same one bit **I.4** and **I.6** already define | the FTU |
-| 3 | a kill packet goes out **as a control message — the same path an invocation packet, a completion and a `RESUME` packet already take** | the fabric |
-| 4 | the tile **ends the context wherever it is** — running, sleeping on its one outstanding load (**H.4**), or parked across a fault (**I.6**) — and **releases any atomic-table hold it is holding** (**H.7**). **THE IN-FLIGHT CASE IS NOT SETTLED: see the two gaps below.** | the function core |
-| 5 | a later `JOIN` on that handle **returns immediately with the error flag set**; `JOINQ` reports the entry as returned. **Nothing waits on the tile and nothing waits on the program.** | the host |
+| 2 | the entry **closes at once: register file ZEROED, ERROR FLAG set** — the same one bit **I.4** and **I.6** already define. **It is not FREED here: see step 6** | the FTU |
+| 3 | a kill packet is **BROADCAST to every tile** **as a control message — the same path an invocation packet, a completion and a `RESUME` packet already take** (user ruling 2026-09-03, **U5**) | the fabric |
+| 4 | **the tile holding the context acts; every other tile drops the packet.** That tile **ends the context wherever it is** — running, sleeping on its one outstanding load (**H.4**), or parked across a fault (**I.6**) — and **releases any atomic-table hold it is holding** (**H.7**). **The in-flight case needs no special carrier: a broadcast reaches the destination whether or not the context has arrived** | the function core |
+| 5 | a `JOIN` on that handle **returns immediately with the error flag set**; `JOINQ` reports the entry as returned. **Nothing waits on the tile and nothing waits on the program.** | the host |
+| 6 | the acting tile sends a **KILL-ACK**, and **the FTU entry is FREED on it** (user ruling 2026-09-03, **U6**) — which is also what frees a killed **fire-and-forget** entry, so no entry is left that no instruction can free (**I.5**) | the tile, then the FTU |
 
-**AND THE KILL PATH HAS THREE HOLES IN IT THAT THIS SECTION CANNOT CLOSE ON ITS OWN
-AUTHORITY.** `[UNRESOLVED - identified 2026-09-03. The ruling is applied; these are gaps in the
-MECHANISM the ruling implies, and each is a decision with real alternatives. They are named here,
-at the point of use, and raised in the front matter rather than guessed. An earlier revision of
-this section asserted an answer to the second one that the rest of the document does not
-contain.]`
+**AND THE THREE HOLES THE KILL PATH HAD ARE CLOSED — user ruling 2026-09-03, U5 and U6.**
+`[RULED. For one revision this read "THREE HOLES … THIS SECTION CANNOT CLOSE ON ITS OWN
+AUTHORITY", and it was right not to guess: an addressee, an in-flight carrier and a freeing point
+are decisions with real alternatives. The user answered all three. The gaps are kept below as the
+record of what was wrong — each was cited from elsewhere — with the settled rule at the head of
+each. The verbatim words are quoted once, in the front matter's U1-U8 table; ledger L60.]`
 
-1. **THE KILL PACKET HAS NO ADDRESSEE. OPEN QUESTION U5.** Step 3 says "a kill packet goes out"
-   and step 4 says "the tile ends the context wherever it is" — but **nothing in this document
-   says how the FTU knows which tile that is.** **I.5**'s enumeration of an FTU entry is "512
-   bits of payload, two of state, one of retirement mode, and a hart id" — **there is no tile
-   field** — and no section says a migration notifies the FTU of the context's new home. Since
-   **H.8** releases the source slot **AT DEPARTURE**, "*before the fabric is even asked*", the
-   source tile holds **no forwarding state** either. The alternatives are real ones — carry a
-   current-tile field in the entry and update it on every migration, or broadcast the kill by
-   token to all tiles and let the holder act — and they differ in cost and in what they do to
-   the migration protocol.
-2. **THE "MIGRATION ACK" THE IN-FLIGHT CASE USED TO RELY ON DOES NOT EXIST. OPEN QUESTION U5.**
-   `[CORRECTED - identified 2026-09-03. Step 4 read "or IN FLIGHT, in which case the MIGRATION
-   ACK carries the kill to the destination", and C.4's lifecycle branch repeated it. Those two
-   lines were the ONLY occurrences of a migration ACK in this entire document. C.4's migration
-   path is drawn as packet then arrive, with NO acknowledgement, and H.8 releases the slot at
-   departure precisely so that the source retains nothing. So the in-flight branch invented a
-   message the migration protocol does not have, sent by a source that has already forgotten the
-   context. The invented mechanism is STRUCK from step 4 and from C.4.]` **What is at stake is
-   not tidiness:** under the old text the FTU entry closes at step 2 while the context is in
-   flight, the kill is dropped for want of a carrier, **and the context resumes and runs on the
-   destination with no FTU entry behind it** — an orphaned context that no other path in this
-   canon reclaims.
-3. **WHEN THE ENTRY IS FREED IS STATED TWO INCOMPATIBLE WAYS. OPEN QUESTION U6.** Step 2 says the
-   entry "closes at once" and the "IT ALLOCATES NOTHING" paragraph below says outright that
-   "step 2 frees the FTU entry"; step 5 says "a later `JOIN` on that handle returns immediately
-   with the error flag set". **A freed entry cannot answer a later JOIN**, and **I.4** forbids a
-   join-expected entry closing without returning its values. **The O7 analogy this section leans
-   on does not transfer:** under O7 the program is dead and will never `JOIN`, so freeing at once
-   is safe; under `KILL` **the program is alive and is expected to `JOIN`.** The implementer needs
-   one of two mutually exclusive behaviours — free now, or mark returned-with-error and free at
-   `JOIN` — and this section asserted both. **And the second reading has its own hole:** on a
-   **FIRE-AND-FORGET** handle a `JOIN` can never succeed (**I.4**), and this section never says
-   whether a killed context still emits the ACK that **I.4** makes the only closure for such an
-   entry — so a killed `FORKF` entry could be freed by **no instruction at all**, which is
-   precisely the "resource held forever" shape **I.5** forbids by name and ruling **O7** exists to
-   eliminate. Both halves are **OPEN QUESTION U6**.
+1. **THE KILL IS BROADCAST — THAT IS THE ADDRESSEE, AND THERE ISN'T ONE. RULED, U5.** The kill
+   packet goes to **EVERY TILE** on the control path; **the tile holding the context acts and
+   every other tile drops it.** So **nothing has to know which tile that is**: **I.5**'s entry
+   still carries "512 bits of payload, two of state, one of retirement mode, and a hart id" with
+   **no tile field**, no migration has to notify the FTU of a context's new home, and **H.8** may
+   go on releasing the source slot **at departure** with the source holding no forwarding state.
+   **A DIRECTED kill is an optimisation, not a requirement** — available only where the
+   destination is already known, and never something the architecture depends on. *What this
+   closes:* the alternative that would have carried a current-tile field in the FTU entry and
+   updated it on every migration is **not built**; the entry sizing is unchanged.
+2. **AND THE IN-FLIGHT CASE NEEDS NO CARRIER, WHICH IS WHY THE MISSING "MIGRATION ACK" DOES NOT
+   MATTER. RULED, U5.** `[CORRECTED - identified 2026-09-03. Step 4 read "or IN FLIGHT, in which
+   case the MIGRATION ACK carries the kill to the destination", and C.4's lifecycle branch
+   repeated it. Those two lines were the ONLY occurrences of a migration ACK in this entire
+   document: C.4's migration path is drawn as packet then arrive, with NO acknowledgement, and
+   H.8 releases the slot at departure precisely so the source retains nothing. The invented
+   mechanism is STRUCK from step 4 and from C.4 and it is NOT reinstated - it is not needed.]`
+   **A broadcast reaches the destination tile whether or not the context has arrived there yet.**
+   If it arrives before the context, the destination drops it as an unheld handle and the context
+   lands on a tile with no entry behind it — which is why **the entry is not freed until the
+   KILL-ACK** (below): the acknowledging tile is by definition the tile that held the context,
+   and until one acknowledges, the kill is still outstanding. **There is no orphaned-context
+   case left.**
+3. **THE ENTRY IS FREED ON THE TILE'S KILL-ACK. RULED, U6, and it settles both halves.** Step 2's
+   "closes at once" and step 5's "a later `JOIN` returns immediately with the error flag set" are
+   **both true and were never in conflict about the FLAG — only about the FREE**, and the free is
+   now placed: **the entry CLOSES at step 2 (register file zeroed, error flag set) and is FREED
+   when the tile's KILL-ACK arrives.** In the window between, the entry is
+   **returned-with-error and readable**, so a `JOIN` in that window gets its error — **I.4**'s
+   rule that a join-expected entry never closes without returning its values is satisfied
+   literally. **AND THE FIRE-AND-FORGET BRANCH IS FREED BY THE SAME EVENT:** a `FORKF` entry
+   whose `JOIN` can never succeed is freed by the KILL-ACK, not by an ACK the killed context
+   might never send — so **no entry is left that no instruction can free**, which is the
+   "resource held forever" shape **I.5** forbids by name and ruling **O7** exists to eliminate.
+   `[The earlier text asserted BOTH "step 2 frees the FTU entry" and "a later JOIN returns the
+   error", which cannot both hold. The ruling keeps the second and moves the free to the ACK.]`
 
 **AND STEP 3 NAMES A GAP RATHER THAN A CLASS, DELIBERATELY.** **[derived from user ruling
 2026-09-03.]** The canon's **three** ruled message classes are **COHERENCE, MIGRATION and FILL**
@@ -7903,30 +7918,33 @@ already ended**, which is the situation the ruling names: a *failed* program doe
 it still has outstanding. A `KILL` that faulted on a handle the FTU had already reclaimed would
 put the teardown itself back in the position of needing to be correct about state it has lost.
 
-**BUT THE NO-OP RULE DEPENDS ON A RULE THIS DOCUMENT DOES NOT CONTAIN: HANDLE REUSE. OPEN
-QUESTION U7.** `[MISSING RULE - identified 2026-09-03.]` For a `KILL` on a "stale, retired or
-unowned" handle to be a no-op, **the FTU must be able to tell a RETIRED handle from a handle a
-later `FORK` has legitimately reallocated.** The entry **I.5** describes carries no generation,
-epoch or sequence field, and **no section of this document states whether handles are recycled at
-all** — though a fixed-size FTU array implies they are. If they are, then a `KILL` issued from a
-teardown path — **exactly the situation the ruling names**, where the program does not know what
-it still has outstanding — **can kill an unrelated YOUNGER invocation that inherited the
-handle.** The "safe to issue blindly" property this rule is justified by **does not hold without
-a generation field or an explicit no-reuse rule**, and adding one changes **I.5**'s entry
-sizing.
+**AND HANDLE REUSE IS RULED, WHICH IS WHY THE NO-OP RULE NEEDS NOTHING ADDED TO SUPPORT IT.**
+[RULED - user ruling 2026-09-03, **U7**.] **A handle NAMES AN FTU ENTRY. The FTU has a FIXED
+NUMBER of entries. An entry is CLEARED on the KILL-ACK and RECYCLED.** So a handle after
+recycling **names the NEW invocation, and there is nothing else it could name** — "*that is like
+saying 'how do I read a register's old value after I write it?'*" — and **"`KILL` of a recycled
+handle" is not a distinct case to write a rule for.** *Stale* and *unowned* keep their meaning
+and keep the no-op: a handle whose entry the FTU does not currently hold, or that names no entry
+of this program's, does nothing. **THE GENERATION-BIT FRAMING IS STRUCK AS ARCHITECTURE.**
+`[CORRECTED - user ruling 2026-09-03, U7. This paragraph read "THE NO-OP RULE DEPENDS ON A RULE
+THIS DOCUMENT DOES NOT CONTAIN: HANDLE REUSE", and proposed a generation, epoch or sequence field
+whose addition "changes I.5's entry sizing". IT DOES NOT AND MUST NOT. A generation bit, if an
+FTU has one, is an IMPLEMENTATION DETAIL against stale handles held in SOFTWARE - the same class
+of thing as a file-descriptor generation counter - and it is not part of this machine's
+architecture. I.5's entry sizing is UNCHANGED: 512 bits of payload, two of state, one of
+retirement mode, and a hart id.]`
 
 **IT ALLOCATES NOTHING AND CANNOT BE REFUSED.** Like `CONT` and `RESUME`, it names an entry that
-already exists, so it consumes no new resource. **Step 4 frees the tile slot, and it waits on
-nothing** — that is **I.1** satisfied literally. **WHAT STEP 2 DOES TO THE FTU ENTRY IS OPEN AND
-THIS PARAGRAPH NO LONGER ASSERTS IT.** `[CORRECTED - identified 2026-09-03. This paragraph read
-"step 2 frees the FTU entry and step 4 frees the tile slot", which contradicts step 5's "a later
-JOIN on that handle returns immediately with the error flag set" - a freed entry cannot answer a
-later JOIN - and contradicts I.4's rule that a join-expected entry never closes without returning
-its values. The two candidate behaviours are set out as gap 3 above and raised as OPEN QUESTION
-U6. I.5's prohibition - that no entry may be left which no instruction can free - is what
-CONSTRAINS the answer and is the reason the question cannot simply be left unasked: under the
-free-at-JOIN reading a killed FIRE-AND-FORGET entry has no freeing instruction at all unless a
-killed context still emits its ACK.]`
+already exists, so it consumes no new resource. **Step 4 frees the tile slot, step 6 frees the
+FTU entry, and it waits on nothing** — that is **I.1** satisfied literally. `[CORRECTED, THEN
+RULED. This paragraph once read "step 2 frees the FTU entry and step 4 frees the tile slot",
+which contradicted step 5's "a JOIN on that handle returns immediately with the error flag set" -
+a freed entry cannot answer a JOIN - and contradicted I.4's rule that a join-expected entry never
+closes without returning its values. It was then left open as OPEN QUESTION U6. USER RULING
+2026-09-03 places the free: "On kill-ACK." Step 2 CLOSES the entry, step 6 FREES it, and between
+them it is readable and returns its error. I.5's prohibition - that no entry may be left which no
+instruction can free - is satisfied for the FIRE-AND-FORGET case too, because the KILL-ACK is
+produced by the tile and not by the killed context.]`
 
 **THERE IS NO ALL-KILL INSTRUCTION, AND THE FATAL-FAULT CASE DOES NOT NEED ONE.** **[derived
 from user ruling 2026-09-03, on ruling O7]** "*Kill a failed program's contexts*" **in the
@@ -8011,7 +8029,7 @@ to go. As to whether this is privileged, probably not?**"]
 
 | | rule |
 |---|---|
-| **`KILL rH`, issued by the program itself** | the named entry **closes exactly as the row above closes it** — zeroed register file, error flag set — and the tile ends the context wherever it is. **It is UNPRIVILEGED** — `[ASSISTANT'S READING - user may overturn; the user's words were "As to whether this is privileged, probably not?", and the reason the answer is *not* is a derivation, not a quotation: see I.3a and OPEN QUESTION U1.]` — because a handle is issued by the program's own FTU and names nothing outside it. **A stale, retired or unowned handle is a NO-OP**, in the same class as `JOIN` on a fire-and-forget handle: a probe answer, **not a fault** — *but that rule needs a handle-reuse rule this document does not have,* **OPEN QUESTION U7**. **WHEN the entry is actually freed — at the `KILL` or at the later `JOIN` — is OPEN QUESTION U6**, and so is what happens to a killed **fire-and-forget** entry, whose closure this table makes an ACK that a killed context may never send. |
+| **`KILL rH`, issued by the program itself** | the named entry **closes exactly as the row above closes it** — zeroed register file, error flag set — and **the kill is BROADCAST**, so the tile holding the context ends it wherever it is and the others drop the packet. **It is UNPRIVILEGED** — [RULED - user ruling 2026-09-03, **U1**: "*unprivileged*". This was tagged as the assistant's reading of a hedged question for one revision; it is the user's own word now.] — because a handle is issued by the program's own FTU and names nothing outside it. **A stale or unowned handle is a NO-OP**, in the same class as `JOIN` on a fire-and-forget handle: a probe answer, **not a fault**; **a RECYCLED handle is not a case at all — it names the new invocation** (**U7**). **THE ENTRY IS FREED ON THE TILE'S KILL-ACK** (**U6**), so it is readable and returns its error until then — which is what keeps this table's join-expected rule literal — and **the same ACK frees a killed FIRE-AND-FORGET entry**, rather than an ACK the killed context might never send. Ledger **L60**. |
 
 **THE TWO ROWS ARE ONE PATH AND THAT IS DELIBERATE.** The fatal-fault teardown is the
 **kernel** applying this closure to every entry of a dying program; `KILL` is the **program**
@@ -8103,11 +8121,14 @@ the user program decides to join, which could be forever*". See I.4 and I.6.
 KERNEL.** [RULED - user ruling 2026-09-03: "*we probably need an instruction specifically to kill
 a failed program's contexts. KILL(hook) is probably the way to go.*"] `KILL rH` closes ONE entry
 — **the caller's own** — with the same zeroed file and error flag, and a stale handle is a no-op.
-**`[UNRESOLVED - identified 2026-09-03: whether that closure FREES the entry at the KILL, or
-marks it returned-with-error and frees it at the later JOIN, is stated both ways at I.3a and is
-OPEN QUESTION U6 - which matters most in this section, because on a FIRE-AND-FORGET handle a
-JOIN can never succeed, so the free-at-JOIN reading would leave an entry no instruction can
-reclaim: the resource-held-forever shape this section forbids by name.]`**
+**`[RULED - user ruling 2026-09-03, U6: "On kill-ACK." For one revision this was stated both
+ways at I.3a - freed at the KILL, or marked returned-with-error and freed at the later JOIN - and
+it mattered most in this section, because on a FIRE-AND-FORGET handle a JOIN can never succeed,
+so the free-at-JOIN reading would have left an entry no instruction could reclaim: the
+resource-held-forever shape this section forbids by name. THE FREE IS ON THE TILE'S KILL-ACK,
+which is neither: the entry CLOSES at the KILL and is READABLE until the ACK, and the ACK is
+produced by the TILE, so the fire-and-forget entry is reclaimed by an event that always
+happens.]`**
 **It is not an eviction either**, and for the same reason: the entry is not being reused while
 its owner still expects it, because its owner is the party asking. **It cannot be refused**, so
 it can never leave an entry only a refused instruction could free. See **I.3a** and **I.4**;
@@ -10835,7 +10856,7 @@ additive" rule).
 |---|---|
 | **function core** | invocations completed; **cycles by context state**; mean and P99 residency; contexts occupied; issue-slot utilisation; migrations in and out; atomic conflicts; I$/D$ hit rates; **achieved MLP per context and per core** |
 | **translation** | **the tile's ONE shared, ASID-tagged TLB** (**F.7**): hit rate **by page size** — the `4 KiB`, `G` and `N·G` arrays separately — and **split by code vs data**; walk count and latency distribution; **remote-walk rate**; **translation cold-start cycles after migration**; translation cycles as a share of context blocked time. `[CORRECTED - user ruling 2026-09-03. This cell began "per-context cache hit rate split by code vs data", which is a statistic for the PER-CONTEXT TRANSLATION CACHE the user rejected outright: F.7 states "THERE IS NO THIRD TIER ABOVE THE TLB, AND BUILDING ONE IS REJECTED", P.1 R114 rejects it, ledger L55 closes it, and the front-matter row records "A tile has ONE shared, ASID-tagged TLB". Part O is the register of what the machine MUST report, so this was the last LIVE REQUIREMENT anywhere in the canon for the rejected structure - an implementer following Part O would have BUILT a per-context cache in order to report on it. The per-context clause is STRUCK. The code-vs-data split it carried is a real and useful instrument and it MOVES onto the shared TLB, which is now the only translation cache in the machine.]` |
-| **mapping / allocation** | allocations by page **TYPE** — **HOST**, **GRAIN**, **STRIPED**, **DUPLICATE** (**F.5b**); **allocation failures split by type**; **the number of GROUP INDICES simultaneously free across all N tiles** — the striped-allocation instrument, and the only one of these that measures the striped condition; **largest allocatable NMFC run per TILE**; **spill rate**; per-tile free-frame imbalance; **a WARNING on every spill and on OOM — never a hard error** (user ruling 2026-09-02 R18) `[CORRECTED - user ruling 2026-09-03, the page model. This cell required "allocations by mode" and "NMFC-mode allocation failures and STANDARD fallbacks". Both are retired by the ruling and this was the ONE place in the document where the page model had not been applied. (a) MODE IS NO LONGER AN ALLOCATION CHOICE - it follows the size class (E.2, F.5b consequence 2), so the statistic that carries information is by page TYPE. (b) STANDARD is the retired name; the 4 KiB page is HOST (F.5b). (c) "fall back to STANDARD mode" names a page the allocator can no longer produce for an NMFC object at all: a 4 KiB page in grain-partitioned mode, and a G page block-interleaved, are NOT EXPRESSIBLE (E.2, F.5b consequence 1). The fallback question is genuinely open and is raised as OPEN QUESTION U4 in the front matter, not guessed here. (d) THE STRIPED INSTRUMENT IS NEW AND IT IS NOT A RESTATEMENT: largest-allocatable-run-per-tile measures N units of contiguity WITHIN ONE tile, which is the different, older condition; a machine can report a large allocatable run on every tile and still have NO group index free on all N. See risk 1 below.]` |
+| **mapping / allocation** | allocations by page **TYPE** — **HOST**, **GRAIN**, **STRIPED**, **DUPLICATE** (**F.5b**); **allocation failures split by type**; **the number of `N·G`-ALIGNED GROUP INDICES FREE across the extent space** — the striped-allocation instrument, and the only one of these that measures the striped condition; **largest allocatable NMFC run per TILE**; **spill rate**; per-tile free-frame imbalance; **a WARNING on every spill and on OOM — never a hard error** (user ruling 2026-09-02 R18) `[CORRECTED - user ruling 2026-09-03, the page model. This cell required "allocations by mode" and "NMFC-mode allocation failures and STANDARD fallbacks". Both are retired by the ruling and this was the ONE place in the document where the page model had not been applied. (a) MODE IS NO LONGER AN ALLOCATION CHOICE - it follows the size class (E.2, F.5b consequence 2), so the statistic that carries information is by page TYPE. (b) STANDARD is the retired name; the 4 KiB page is HOST (F.5b). (c) "fall back to STANDARD mode" names a page the allocator can no longer produce for an NMFC object at all: a 4 KiB page in grain-partitioned mode, and a G page block-interleaved, are NOT EXPRESSIBLE (E.2, F.5b consequence 1). The fallback question was raised as OPEN QUESTION U4 and is now RULED - user ruling 2026-09-03: a striped page is a giant page, so the fallback is the huge-page fallback and this canon invents nothing (F.5b consequence 3, ledger L59). (d) THE STRIPED INSTRUMENT IS NEW AND IT IS NOT A RESTATEMENT: largest-allocatable-run-per-tile measures N units of contiguity WITHIN ONE tile, which is the different, older condition; a machine can report a large allocatable run on every tile and still have NO `N·G`-aligned extent free. See risk 1 below.]` |
 | **placement** | invocations per tile under each policy; migration rate |
 | **fabric** | messages by class; queue occupancy; link utilisation; back-pressure stalls |
 | **FTU** | offloads issued; in-flight mean and max; cycles stalled on back-pressure; **fire-and-forget share**; **CLOSURES BY KIND — at a `JOIN`, at a fire-and-forget ACK, by FATAL-FAULT teardown (ruling O7), and by `KILL` — with the last two counted SEPARATELY** (**I.4**, **I.6**, **I.3a**); both mismatch counts (**I.4**) `[ADDED - user ruling 2026-09-03, KILL. This row carried NO closure statistic of any kind, while THREE other places asserted that it did: I.4 says "KILL closures are counted separately from fatal-fault closures ... [RULED - user ruling 2026-09-03; I.3a, O.4.]", the front-matter KILL row lists O.4 among the places the ruling is applied, and ledger L57 says the ruling is written at "A.2 and O.4 (the statistic)". The KILL ruling's O.4 edit was UNAPPLIED and those three citations dangled. They are made true here. The reason the two teardown closures are counted SEPARATELY is I.4's: they take the same path but say different things about the run - one is the machine killing a program, the other is a program ending its own work.]` |
@@ -10868,21 +10889,23 @@ nowhere.** `[OMISSION CORRECTED — §12 is a written risk register and was unci
    `(tile, row)` free bitmap; **failures and the largest allocatable run per tile are
    reported, so fragmentation is visible rather than silent.** F.8's "the spill rate is
    the statistic" is one of the three and not the diagnostic one.
-   **AND THERE ARE NOW TWO DIFFERENT FRAGMENTATION CONDITIONS UNDER THIS ONE HEADING, WHICH
+   **AND THERE ARE TWO DIFFERENT FRAGMENTATION CONDITIONS UNDER THIS ONE HEADING, WHICH
    THE §12 TEXT DOES NOT DISTINGUISH BECAUSE IT PREDATES THE PAGE MODEL.** `[CORRECTED - user
    ruling 2026-09-03, the page model. F.5b consequence 3 offers §12's sentence as support for
    a DIFFERENT claim, and it does not support it.]` **(i)** §12's own condition, quoted above:
    **N free rows on ONE tile** — N units of contiguity within a single tile. **(ii)** the
-   STRIPED condition, which the four-type model creates: **one free grain on EVERY tile at
-   the SAME group index** (F.5b, F.9). **These are opposite requirements and neither implies
-   the other**, and the instruments this row already names measure only (i): a machine can
-   report a large allocatable run on every tile and still have no group index free on all N.
-   **The instrument for (ii) is the new one in the table above — the number of group indices
-   simultaneously free across all N tiles — and before this correction it was defined
-   nowhere.** **The MITIGATION for (ii) is NOT settled**: both fallbacks F.5b consequence 3
-   used to name are incoherent for a striped page, so the question is raised as **OPEN
-   QUESTION U4** in the front matter rather than answered here. **R18 still governs the
-   failure behaviour either way: WARN, never a hard error.**
+   STRIPED condition: **an `N·G`-aligned CONTIGUOUS EXTENT free** — because a striped page is
+   one contiguous extent and one grain per tile is what the partition does to it (**F.5b**
+   consequence 3, **F.9**, user ruling 2026-09-03 **U2**). **Neither condition implies the
+   other**, and the instruments this row already names measure only (i): a machine can report a
+   large allocatable run on every tile and still have no `N·G`-aligned extent free.
+   **The instrument for (ii) is the new one in the table above — the number of aligned group
+   indices free across the extent space — and before this correction it was defined nowhere.**
+   **AND THE MITIGATION FOR (ii) IS RULED AND IS NOT NMFC-SPECIFIC** (user ruling 2026-09-03,
+   **U4**): **it is the huge-page failure path** — whatever a real system does when there are
+   not enough consecutive frames for a giant page. **The two fallbacks F.5b consequence 3 used
+   to name were incoherent and are struck, not replaced.** **R18 still governs the reporting:
+   WARN, never a hard error.**
 2. **THE FUNCTION CORE COULD LOOK ARTIFICIALLY GOOD, AND THIS IS A CAVEAT ON EVERY
    MEASURED FUNCTION-CORE NUMBER IN THIS DOCUMENT.** §12 D:1016, verbatim: "*The function
    core could look artificially good. **It replays resolved control flow, so it never
@@ -11079,7 +11102,10 @@ Every place the sources disagree, which authority won, and why. Authority order:
 user-vs-ChampSim conflicts, or genuinely open questions, that this document does not
 resolve on its own authority.
 
-**Count: 58 conflicts (L1–L58, no gaps).** **[UPDATED - L58 added 2026-09-03: the page model,
+**Count: 60 conflicts (L1–L60, no gaps).** **[UPDATED - L59 and L60 added 2026-09-03: the
+giant-page semantics of a STRIPED page (U2-U4) and `KILL` delivery and entry lifecycle (U1,
+U5-U8) - user ruling 2026-09-03, which closed all eight U-items and removed the front matter's
+OPEN QUESTIONS table.]** **[UPDATED - L58 added 2026-09-03: the page model,
 four types over three sizes, and identity-mapped placement retired - user ruling 2026-09-03.]**
 **[UPDATED - L57 added 2026-09-03: `KILL`, refused at #224 and RULED IN, unprivileged - user
 ruling 2026-09-03.]** **[UPDATED — L56 added 2026-09-03: liveness is
@@ -11097,14 +11123,16 @@ adding a row. Seven rows are new this revision — **L43**–**L49**, all from P
 mechanisms Part I depends on.]
 
 **Twenty-six rows carry a `RULED` bullet dated 2026-09-02, naming the ruling that closed
-them; two more — L2 (R12) and L13 — were closed in editing; and **EIGHT rows carry a
+them; two more — L2 (R12) and L13 — were closed in editing; and **TEN rows carry a
 `RULED` bullet dated 2026-09-03**: **L38** (`O1`, the unhinted-grain default), **L43**
 (`O3`, the encoding), **L46** (`O4`, the RISC-V subset), **L54** (W1b, the integer ALU is
-64-bit always — CONFIRMED, and it was the last unsettled item in this document), **L55** (the
+64-bit always — CONFIRMED), **L55** (the
 per-context translation cache, rejected), **L56** (liveness in bits plus scratch, not in names),
-**L57** (`KILL`, ruled in and unprivileged) and **L58** (the page model — four types over three
-sizes, identity-mapped placement retired). **[UPDATED - the tally read FIVE before user ruling
-2026-09-03 added L57 and L58 and confirmed L54.]**
+**L57** (`KILL`, ruled in and unprivileged), **L58** (the page model — four types over three
+sizes, identity-mapped placement retired), **L59** (a STRIPED page is a giant page — allocated,
+freed and shot down like any other) and **L60** (`KILL` is BROADCAST, and the FTU entry is freed
+on the tile's KILL-ACK — the row that closed the last of U1–U8). **[UPDATED - the tally read
+FIVE, then EIGHT; user ruling 2026-09-03 on U1-U8 added L59 and L60 and made it TEN.]**
 **No row has been deleted.**
 
 **[AND A NEW TAG EXISTS AS OF 2026-09-03 (morning): `[USER TO CONFIRM]`. It is NOT
@@ -11122,14 +11150,18 @@ tag at H.10.3 with no ledger row and no front-matter row to find it by.]` **[UPD
 L50 was confirmed on 2026-09-03 and the count fell from TWO to ONE.]** **[UPDATED A THIRD TIME -
 user ruling 2026-09-03 on W1b: the count fell from ONE to ZERO. Nothing in this document is
 awaiting the reader's act any more.]** **[UPDATED A FOURTH TIME - identified 2026-09-03, and it
-puts the count back above zero: A FIFTH SUBJECT took the assistant's-reading form after the
+put the count back above zero: A FIFTH SUBJECT took the assistant's-reading form after the
 sentence above was written - KILL, at ledger L57. The KILL ruling was given as a hedged question,
 "As to whether this is privileged, probably not?", and this document answered it by derivation,
-read "hook" as "handle", chose ruling O7's path and counted fourteen instructions. Those are
-readings, they are tagged as such at L57, I.3a, I.4 and the front-matter KILL row, and the
-question is OPEN QUESTION U1. The count of ledger rows carrying the tag is therefore ONE, not
-zero. THE FOUR ROWS NAMED ABOVE - L50, L51, L52, L54 - REMAIN CONFIRMED AND RETIRED; nothing
-about them is reopened.]** **The tag is
+read "hook" as "handle", chose ruling O7's path and counted fourteen instructions. Those were
+readings and they were tagged as such at L57, I.3a, I.4 and the front-matter KILL row, as OPEN
+QUESTION U1.]** **[AND UPDATED A FIFTH TIME, BACK TO ZERO - user ruling 2026-09-03 on U1-U8.
+"Unprivileged" is the user's own word, "the core only has a fixed number of handles" is his own
+vocabulary for the handle reading, and "on kill-ACK" rules the one point of O7's path that was
+ever in question. EVERY assistant's-reading tag on KILL is retired, at L57, L60, I.3a, I.4 and
+the front-matter KILL row, and THE COUNT OF LEDGER ROWS CARRYING THE TAG IS ZERO. THE FOUR ROWS
+NAMED ABOVE - L50, L51, L52, L54 - REMAIN CONFIRMED AND RETIRED; nothing about them is
+reopened.]** **The tag is
 not retired as a vocabulary** — the notation table's first retirement applies to its old
 `RESUME`-privilege subject, and the 2026-09-03 confirmations retire all four of its
 second-subject instances; that table is the authority.]**
@@ -12527,37 +12559,41 @@ as settled. A reader who finds R77 must be able to find out what replaced it.]**
   place), **I.9** (the encoding row and the count), **C.4** (the lifecycle branch), **A.2** and
   **O.4** (the statistic). Part **P R77** is marked **OVERTURNED**; Appendix 2 **S3** becomes half
   a build item.
-- **THE SEMANTICS, so they are not re-derived — and they are the ASSISTANT'S READING, not the
-  user's words.** `[ASSISTANT'S READING - user may overturn. The ruling named an instruction and
-  nothing else; O7's path is this document's choice of what it should do.]` The FTU entry closes
+- **THE SEMANTICS, so they are not re-derived — and every part of them that was ever a reading
+  is now RULED.** `[RULED - user ruling 2026-09-03 on U1 and U5-U8. The ruling that introduced
+  KILL named an instruction and nothing else, so for one revision O7's path was tagged as this
+  document's choice. The user has since ruled the delivery (BROADCAST), the freeing point (on
+  kill-ACK), handle recycling and the privilege level; see L60.]` The FTU entry closes
   on **ruling O7's** path — **zeroed register file, error flag set**, a later `JOIN` returns the
   error immediately, nothing waits on the tile; the tile ends the context **wherever it is** and
   **releases any atomic-table hold**; a **stale, retired or unowned handle is a NO-OP**, in the
   same class as `JOIN` on a fire-and-forget handle. **No new closure semantics and no new
   architectural state** — the error flag is the same one bit I.4 and I.6 already define.
-- **AND FOUR THINGS THE KILL PATH DOES NOT YET HAVE.** `[CORRECTED - identified 2026-09-03. This
-  row previously said the in-flight case was handled because "the migration ACK carries the
-  kill". THERE IS NO MIGRATION ACK: that phrase and C.4's copy of it were the only two
+- **AND THE FOUR THINGS THE KILL PATH DID NOT HAVE, ALL FOUR NOW RULED — see L60.** `[CORRECTED,
+  THEN CLOSED. This row previously said the in-flight case was handled because "the migration ACK
+  carries the kill". THERE IS NO MIGRATION ACK: that phrase and C.4's copy of it were the only two
   occurrences in the entire document, C.4's migration path is drawn as packet-then-arrive with no
   acknowledgement, and H.8 releases the source slot AT DEPARTURE so the source retains nothing to
-  send one with. The claim is STRUCK here, at I.3a step 4 and at C.4.]` **(i)** the kill packet
-  has **no addressee** — an FTU entry has no tile field (I.5) and no migration notifies the FTU
-  of a context's new home (**U5**); **(ii)** the **in-flight** case has no carrier, and under the
-  old text the entry closed while the context was in flight, leaving an **orphaned context** that
-  no path in this canon reclaims (**U5**); **(iii)** whether step 2 **frees** the entry or marks
-  it returned-with-error until the `JOIN` is stated **both ways**, and the fire-and-forget branch
-  may leave an entry no instruction can free (**U6**); **(iv)** the NO-OP rule needs a
-  **handle-reuse** rule this document does not contain, or a `KILL` from a teardown path can kill
-  a younger invocation that inherited the handle (**U7**). All four are in the front matter's
-  OPEN QUESTIONS table; all four are stated at **I.3a** at the point of use.
-- **WHY UNPRIVILEGED — and this is the ASSISTANT'S READING of a hedged question, not a ruling.**
-  **[ASSISTANT'S READING - user may overturn; OPEN QUESTION U1.]** A handle is issued by the
+  send one with. The claim is STRUCK here, at I.3a step 4 and at C.4, and it is NOT reinstated -
+  the broadcast makes it unnecessary.]` **(i)** the kill packet had **no addressee** — **RULED,
+  U5: it is BROADCAST, so it needs none**; the FTU entry keeps no tile field and no migration
+  notifies the FTU of a context's new home. **(ii)** the **in-flight** case had no carrier —
+  **RULED, U5: a broadcast reaches the destination whether or not the context has arrived**, and
+  with the entry freed on the ACK there is no orphaned context left. **(iii)** whether step 2
+  **frees** the entry was stated **both ways** — **RULED, U6: it CLOSES at the KILL and is FREED
+  on the tile's KILL-ACK**, which frees the fire-and-forget branch too. **(iv)** the NO-OP rule
+  needed a **handle-reuse** rule — **RULED, U7: an entry is cleared on the ACK and recycled, and
+  a recycled handle names the NEW invocation and nothing else**, so there is no case to write.
+  All four are stated at **I.3a** at the point of use and recorded at **L60**.
+- **WHY UNPRIVILEGED — and it is now the user's own word, not a derivation from a hedge.**
+  **[RULED - user ruling 2026-09-03, U1: "*unprivileged*".]** A handle is issued by the
   program's **own** FTU and the FTU can only act on entries it owns, so `KILL` **cannot name
-  another program's contexts at all**. It is `pthread_cancel`, not `kill(2)`. **The user's words
-  are "*As to whether this is privileged, probably not?*" — a question with a hedge, and this
-  document answered it and then recorded the answer as settled with "the count of readings
-  awaiting confirmation is ZERO". That overstated the record and is corrected: the count is not
-  zero.**
+  another program's contexts at all**. It is `pthread_cancel`, not `kill(2)`. **The record, kept
+  because the correction is part of it: the introducing ruling put this as "*As to whether this
+  is privileged, probably not?*" — a question with a hedge — and this document answered it by
+  derivation and then recorded the answer as settled. That overstated the record, was corrected
+  to an open reading (U1), and is now closed by the user's plain word. The derivation stands as
+  the REASON for a ruled fact.**
 - **WHAT #224 KEEPS:** its **observation** survives as a programming caveat — a `KILL` against a
   **healthy** invocation mid-update leaves the program's own structure half-updated — while the
   **cooperative protocol** it demanded is not built and is not needed, because the ruling scopes
@@ -12622,6 +12658,101 @@ and in DESIGN's own failure record, under four different descriptions.]**
   is FROZEN (R3)**, so that is recorded, not scheduled. SST's alignment item is **S42**.
 - **CLOSED as a ruling; OPEN as an alignment task** against SST, and as a naming confirmation
   against the two proposed names.
+
+**L59 — A STRIPED PAGE IS A GIANT PAGE: one contiguous `N·G` extent, allocated, freed and shot
+down like any other. [RULED - user ruling 2026-09-03, U2, U3, U4 and U8]** **[ADDED - this row
+exists because the three questions it closes (U2, U3, U4) were tabled in the front matter as
+OPEN QUESTIONS and are cited from F.5b, E.2, F.8 and O.4; a reader chasing any of those citations
+must be able to find what closed them. U8 is recorded here too, because "as any remap" is the
+same kind of answer about the same page type.]**
+- *What this document asked, and the asking is what was wrong:* who allocates a STRIPED page's N
+  frames, when, and **how the N per-tile free lists are consulted together** (U2); how any NMFC
+  page is **FREED**, and whether a group must be **STAMPED** with its mode until fully free (U3);
+  what the **fallback** is when an `N·G` allocation **partially succeeds** (U4); and how many
+  page-table copies a **shootdown** must reach (U8). Every one of them presumes a **distributed,
+  per-tile allocator** for a page type that does not have one.
+- *What the user ruled, verbatim, user ruling 2026-09-03:* "**2. Like any other giant page? It has
+  to be a consecutive space. I don't understand this question. It makes no sense if you are just
+  treating it as a large page. 3. Free/dealloc works like any other page. Strange question.
+  4. Again, I don't understand this. It is one giant page. If it can't be allocated, do whatever a
+  real system would do when you try to allocate a giant page and there are not enough consecutive
+  frames available.**" And on the shootdown: "**8. Yes? Again, I don't see why this needs
+  distinguished.**"
+- **RULING APPLIED — and the shape of the answer matters more than any of its parts.** An `N·G`
+  page is **ONE CONTIGUOUS `N·G` PHYSICAL EXTENT**. **(1) ALLOCATION** is a huge-page allocation:
+  one extent, one allocator, **no cross-tile transaction, no ordering rule and no race for a
+  group index, because there is no cross-tile allocation.** **One grain per tile is a CONSEQUENCE
+  OF CONTIGUITY UNDER THE PARTITION** — N consecutive grains from an aligned base land one per
+  tile because that is what the partition arithmetic does (**F.9**). **(2) DEALLOCATION** is
+  ordinary: unmap, return the extent, shoot down. **Nothing NMFC-specific**, and **no group STAMP
+  is required as architecture** — a single contiguous extent cannot be partially freed into a
+  half-live group, so **E.2**'s group-homogeneity invariant is preserved by contiguity plus
+  F.9's aligned-N-run allocator. **(3) FAILURE** is the huge-page failure path — whatever a real
+  system does when there are not enough consecutive frames — and **this canon invents none**;
+  "partial success" is not a state one extent has. **R18** still governs the reporting: warn,
+  never fatal. **(4) SHOOTDOWN** is **any remap**: every holder of a copy of the page table is
+  updated by the one mechanism a remap already uses, and **nothing distinguishes the striped
+  case**. Written at **F.5b** consequence 3 (the canonical statement), **E.2** (the group-stamp
+  question, withdrawn), **F.5** and **F.8** (the copy count, settled by enumeration, and the one
+  update mechanism), **C.3** (kernel writes to a duplicate page are not a second PTE path), and
+  **O.4** risk 1 (the instrument and the mitigation).
+- **WHAT IS STRUCK, and it is struck in place because it was cited:** the **"N per-tile free
+  lists consulted together"** framing; **"all-or-nothing across tiles"**; **"two tiles racing for
+  the same group index"**; the two incoherent fallbacks (**spill**, which a contiguous extent
+  cannot do, and **"fall back to a GRAIN page"**, which silently changed the page's virtual size);
+  and the arithmetic copy counts **N+1** and **N+2** as ways to size a remap fan-out. **The
+  per-tile free list F.8 describes still governs a GRAIN page** — it is the striped case it never
+  governed.
+- **WHAT THIS ROW DOES NOT CHANGE:** the fragmentation risk is real and stays measured — it is
+  simply **the ordinary huge-page risk**, and **DESIGN §12's "N free rows on ONE tile" remains a
+  DIFFERENT condition** that does not evidence it (**O.4** risk 1).
+- **CLOSED.**
+
+**L60 — `KILL` delivery and FTU-entry lifecycle: broadcast, and freed on the kill-ACK.
+[RULED - user ruling 2026-09-03, U1, U5, U6, U7]** **[ADDED - this row exists because it closes
+the last four OPEN QUESTIONS and, with them, the last live `[ASSISTANT'S READING]` tag in this
+document. L57 records the instruction; this records the mechanism, and the two must be read
+together.]**
+- *What was open:* the kill packet had **no addressee** and the FTU entry no tile field (U5); the
+  **in-flight** case had no carrier, after the "migration ACK" it had leaned on was found not to
+  exist (U5); **when the entry is freed** was stated two incompatible ways, and the
+  **fire-and-forget** branch risked an entry no instruction could free (U6); the no-op rule for a
+  stale handle needed a **handle-reuse** rule, and the alternative on offer — a **generation
+  field** — would have changed **I.5**'s entry sizing (U7); and **`KILL`'s privilege level** was
+  a reading derived from a hedged question (U1).
+- *What the user ruled, verbatim, user ruling 2026-09-03:* "**1. unprivileged. … 5. Kill should be
+  broadcast by nature? Unless you know the destination somehow? 6. On kill-ACK. 7. That is fine.
+  The core only has a fixed number of handles. I don't understand how this is a question? When a
+  handle is killed, when an FTU entry is cleared, it is recycled. Are you asking what to do when
+  you try to kill a handle but it has been recycled? How could that happen? That is like saying
+  'how do I read a register's old value after I write it?'. It doesn't make sense.**"
+- **RULING APPLIED. (1) DELIVERY IS A BROADCAST** on the control path: every tile sees the kill,
+  **the tile holding the context acts and the others drop it.** So the FTU entry needs **no tile
+  field**, migration needs **no notification path to the FTU**, and **H.8** may go on releasing
+  the source slot at departure. A **directed** kill is an optimisation where the destination is
+  already known, and is **not required**. **(2) THE IN-FLIGHT CASE NEEDS NO CARRIER** — a
+  broadcast reaches the destination whether or not the context has arrived — so the invented
+  "migration ACK" stays struck and is not replaced. **(3) THE ENTRY IS FREED ON THE TILE'S
+  KILL-ACK**: it CLOSES at the `KILL` (register file zeroed, error flag set) and is **readable
+  and returned-with-error until the ACK**, so a `JOIN` in that window gets its error and **I.4**'s
+  join-expected rule stays literal; **the same ACK frees a killed FIRE-AND-FORGET entry**, so
+  **I.5**'s prohibition — no entry that no instruction can free — holds without a special case.
+  **(4) HANDLE REUSE IS NOT A CASE:** a handle names an FTU entry, the FTU has a fixed number of
+  entries, an entry is cleared on the ACK and **recycled**, and after recycling **the handle names
+  the NEW invocation and nothing else.** **The generation-bit framing is STRUCK as architecture**
+  — a generation bit, if an FTU has one, is an implementation detail against stale *software*
+  handles — and **I.5**'s entry sizing is **unchanged**. **(5) `KILL` IS UNPRIVILEGED** on the
+  user's own word; the FTU-ownership derivation stands as the reason, not as the authority.
+  Written at **I.3a** (the six-step path and the three closed gaps), **I.4** (the fourth closure),
+  **I.5** (the second path that reclaims an entry without a `JOIN`), **C.4** (the lifecycle
+  branch), and the front-matter `KILL` row.
+- **AND THIS ROW RETIRES THE LAST `[ASSISTANT'S READING - user may overturn]` TAG IN THE
+  DOCUMENT.** Privilege is ruled; the hook-to-handle reading is the user's own vocabulary ("*the
+  core only has a fixed number of handles*"); the one point of ruling **O7**'s path that was ever
+  in question — when the entry is freed — is ruled; and the count of **fourteen** follows from
+  ruled facts. **The notation table's check is an ABSENCE check again, on every subject.**
+- **CLOSED.**
+
 
 ---
 
@@ -12924,12 +13055,20 @@ These are not divergences; they are the scars, and each is a test the canon shou
      FTU entries on ruling **O7**'s path — zeroed file, error flag, `JOIN` returns the error at
      once — and is a **no-op on a stale handle**. **The instruction count is now 12 base +
      RESUME (privileged) + KILL = 14.** #224's refusal and Part P **R77** are **OVERTURNED**;
-     #224 survives as a programming caveat. **I.3a**, ledger **L57**.
+     #224 survives as a programming caveat. **AND THE MECHANISM IS RULED TOO** (user ruling
+     2026-09-03, U1 and U5–U8): **UNPRIVILEGED is the user's own word**; the kill is
+     **BROADCAST** to every tile and the holder acts while the others drop it; **the FTU entry is
+     freed on that tile's KILL-ACK**, which frees a fire-and-forget entry as well; and a
+     **recycled handle names the NEW invocation**, so there is no stale-vs-reallocated case and
+     no generation field. **I.3a**, ledger **L57** and **L60**.
    - **THE PAGE MODEL — FOUR TYPES OVER THREE SIZES** (user ruling 2026-09-03: "*3 page sizes in
      total: 4 KiB, 1 grain, N grains*"). **HOST** 4 KiB, **GRAIN** `G` on one tile, **STRIPED**
      `N·G` one grain per tile, **DUPLICATE** `G` virtual over `N·G` physical. **Identity-mapped
      "regular" is RETIRED as a placement rule** (P.1 **R115**); the **mode bit follows the size
-     class**; striped allocation granularity is `N·G`. **F.5b**, **C.3**, ledger **L58**.
+     class**; **a STRIPED page is a GIANT PAGE — one contiguous `N·G` extent, allocated, freed
+     and shot down like any other, with one grain per tile a consequence of contiguity under the
+     partition** (user ruling 2026-09-03, U2–U4 and U8). **F.5b**, **C.3**, ledger **L58** and
+     **L59**.
    - **O5 — three message classes on the one fabric: COHERENCE, MIGRATION, FILL**,
      per-destination queues, **coherence strictly first, then migration and fill at EQUAL
      WEIGHT** — the precondition of invariant 11's parity.
