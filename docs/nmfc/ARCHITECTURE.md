@@ -955,6 +955,35 @@ has an unenforceable order**, since with strict priority it must always be able 
 current owner of a line a tile is working on. Back-invalidation is the mechanism that makes
 "never evicts to admit" true rather than hoped for.
 
+#### Ownership follows the reference
+
+**An NMFC read of a line a host holds dirty transfers the ownership to the tile.** The
+directory sends the holder a transfer snoop rather than a plain downgrade. The host **drops to
+shared and keeps its readable copy** — it read or wrote the line a moment ago, and taking the
+copy away would only make it fetch the line again — and the **requesting tile becomes the
+line's owner of record**, holding the dirty copy. **No forwarder is nominated.** Nominating the
+host would put it straight back in the path of the tile's next reference to that line; with no
+forwarder, that reference is answered by the slice under the tile's own stack, which is the
+whole point of the transfer.
+
+The tile's state is therefore **`O`** — dirty and shared — and not `E` or `M`, and the reason
+is a correctness one rather than a preference. A cache that holds a line exclusively may write
+it **silently**, with no message to the directory. Granting the tile exclusivity while the host
+still holds a copy would lose the host's copy on the tile's first write. `O` gives the tile the
+ownership and the dirty data while keeping the host's shared copy valid, and it makes the tile's
+first write an **upgrade** — which invalidates the host properly, through the directory. **When
+the transferred line reaches the tile's slice is not yet specified.**
+
+This is the third row of the admission-order table made mechanical, and it is the sense in which
+a reference to a block a function core is touching is *treated as ownership*. A directory that
+leaves the host as owner of record makes every later function-core read of the same line another
+snoop of the host, so the avoided direction is paid once per **read**, and the cost grows with
+the traffic. Moving the ownership makes it paid once per **line**, at the moment the tile takes
+it, and never again — so what remains of the avoided direction is bounded by the number of lines
+the function cores take, not by how often they read them. **The reverse direction is unchanged:
+a host reference to a line a function core holds dirty is the permitted direction, and the host
+pays for it.**
+
 #### Three message classes on one fabric
 
 There is **one fabric**, carrying three message classes in queues that are **per destination
@@ -1599,9 +1628,14 @@ fault — it would compute a different answer, silently, which is the worst fail
 design has. The refusal is a requirement on the machine and not a documentation rule, and it
 happens at **fetch**, before any body instruction executes, because fetch is the last point
 before the first wrong result and because a build-time check cannot see a jump taken at run
-time. What the host fetches and refuses on — a marker word a function carries at its entry, an
-attribute on the translation, or something else — is not yet specified, and neither is how far
-into a function body such a refusal reaches.
+time. What the host fetches and refuses on is not fixed by the architecture. **The selected
+implementation uses a marker word that every function carries as its first instruction word**
+(§6): a function core executes it as a no-op, both host models refuse it as an illegal
+instruction, and a fork whose target does not carry it is **refused rather than faulted**, so a
+mislinked call answers instead of computing. An attribute on the translation is the other
+available construction; it catches an entry into the middle of a function body, which a marker
+at the entry does not, at the cost of moving the check into the page table and the operating
+system. **How far into a function body such a refusal reaches is not yet specified.**
 
 **The fork type and the end type are chosen independently, so every combination returns
 something.** A fire-and-forget entry closes on its acknowledgement and its return can never be
@@ -2331,6 +2365,8 @@ live, and they live nowhere else.
 | **page-table levels and base page size** | a multi-level radix table with the size class carried in the entry, as any multi-size table carries it, terminating at `4 KiB`, `G` and `N·G`. The level count is standard; the geometry that produces the two device-derived terminators is a design item and is not yet fixed (§2.4) | 5 levels, 4 KiB base page |
 | **the three page sizes** | exactly three size classes — `4 KiB`, `G`, `N·G` — of which only `4 KiB` is a constant; the other two follow the device | 4 KiB / 1 MiB / 4 MiB |
 | **mode-bit position** | `mode_bit ≥ log2 G + log2 N`, strictly above the tile field in both layouts — bit 22 at the geometry above. The convention is one position above the top of DRAM, which at 64 GiB of DRAM is bit 36 and makes the carried address exactly one bit wider than DRAM. The inequality binds; the convention does not | bit 38 — two positions above the top of DRAM, so it satisfies the constraint and departs from the convention |
+| **the function-entry marker word** | the architecture fixes that a host core refuses function text **at fetch** (§3.4); it does not fix what fetch refuses on. Where an implementation uses an entry marker, the marker is one word, it sits at the function's first instruction, a function core executes it as a no-op, both host models refuse it, and a fork checks it before it dispatches. The value is an implementation's and carries no meaning | `0xe000000b` — one variant of a reserved encoding group |
+| **`KILL`'s field value, and `JOIN`'s answer encoding** | field encodings are implementation-defined (§3.1): the architecture fixes the instruction count, the group membership, and that `KILL` takes a slot in the reserved space beside `RESUME`. `JOIN`'s closure must be a **well-formed answer a program can test**, which makes the answer a field rather than a flag — a killed invocation must be distinguishable from a clean one | `KILL`: `funct7` = `0x60`, `funct3` = the single-source form, `rd` = `x0`, `rs1` = the handle. `JOIN`: `OK` = `0x1`, `ERROR` = `0x2`, so a killed entry answers `OK\|ERROR` = `0x3` with a zeroed register file |
 | **clocks** | nothing in the design assumes the function core runs at the host's rate. If it does not, every cycle comparison says so | 4 GHz (250 ps) for host cores, function cores, fabric and caches |
 
 **What is not configuration, and therefore has no row above.** Each of the following is a

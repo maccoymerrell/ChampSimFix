@@ -384,7 +384,8 @@ are pointed at from **K.6** and Appendix 2 **S40**.
 | **NUCA backoff** | not parameterised — the epoch count is the only knob | — | **R21.** The rule is "*a grain that has just moved sits still, for longer the more often it has moved*" (G.4 rule 6); the function, its parameters and its reset are configuration. |
 | **directory entries / sharers** | ChampSim has **no MOESIF directory** | `std::set<uint32_t> sharers` per line, **unbounded** — `src/NMFCCoherenceFabric.h:156`; `directoryLatency` 4 — `:67` | **R19: size it to modern systems and make sure it is not a bottleneck.** The design part is the **state set (M O E S I F)**, its **location** (the L2↔LLC boundary, in the fabric), **strict NMFC priority as an order, not a tie-break** (I14, C.5), and — **RULED, user ruling 2026-09-03 O9** — an **exact bit vector over host cores and tiles, inclusive of the caches above the fabric, back-invalidating on eviction** (C.5). **The scaling target is now a number: "*up to 32 memory tiles*" on "*a substantially beefy multi-core system*", expecting "*a LOT of traffic*"** — so one sharer bit per host core plus 32 tile bits is what an entry must carry, and the entry count follows R19. |
 | **fabric message classes and arbitration** | one `FUNCTION_FABRIC` plus a separate host `INTERLEAVE_FABRIC`, `max_deliver` 4 per class per cycle — `nmfc_4tile.json:718`; **frozen under R3** | `bytesPerCycle` 32, `controlDeliver` 4/cycle — `NMFCCoherenceFabric.h:66, :70` | **RULED — user ruling 2026-09-03 O5.** **Three classes on ONE fabric: COHERENCE, MIGRATION, FILL, per-destination queues; COHERENCE strictly first, then MIGRATION and FILL at EQUAL WEIGHT.** The classes and the order are **design** (C.5, H.8, J.2); the per-cycle delivery rates and queue depths are configuration. |
-| **`funct7` / `funct3` field values** | **none** — ChampSim has no decoder, no opcode table, no assembler (I.10) | `/mnt/md0/NMFC-Rev/src/nmfc/include/nmfc_isa.h:21-104` — groups `0x0`–`0x5`, variants, and every funct7 constant; `nmfc.h`'s assembler macros emit from it | **RULED — user ruling 2026-09-03 O3: "*I think this is just a simulator thing and not a meaningful design choice, so I say we describe it as implementation choice.*"** **The canon assigns NO field values.** It fixes the **count** (**12 base + RESUME (privileged) + KILL = 14**), the **group membership**, and that `RESUME` and `KILL` each take a slot. The SST values in this row are **one implementation's choice**, recorded so the binaries already assembled against them stay valid — **never quoted as canon** (I.9, ledger L43). **`KILL`'s field value is likewise implementation choice** [RULED - user ruling 2026-09-03, and O3 governs it]: `nmfc_isa.h` assigns it none today, so an implementation takes a variant slot inside the reserved `0x6`/`0x7` groups and **records the number here**, exactly as it does for `RESUME` and the entry marker. |
+| **`funct7` / `funct3` field values** | **none** — ChampSim has no decoder, no opcode table, no assembler (I.10) | `/mnt/md0/NMFC-Rev/src/nmfc/include/nmfc_isa.h:21-104` — groups `0x0`–`0x5`, variants, and every funct7 constant; `nmfc.h`'s assembler macros emit from it | **RULED — user ruling 2026-09-03 O3: "*I think this is just a simulator thing and not a meaningful design choice, so I say we describe it as implementation choice.*"** **The canon assigns NO field values.** It fixes the **count** (**12 base + RESUME (privileged) + KILL = 14**), the **group membership**, and that `RESUME` and `KILL` each take a slot. The SST values in this row are **one implementation's choice**, recorded so the binaries already assembled against them stay valid — **never quoted as canon** (I.9, ledger L43). **`KILL`'s field value is likewise implementation choice** [RULED - user ruling 2026-09-03, and O3 governs it]: `nmfc_isa.h` assigns it none today, so an implementation takes a variant slot inside the reserved `0x6`/`0x7` groups and **records the number here** — **which it now has: the next row.** |
+| **entry-marker word, `KILL`'s field value, and `JOIN`'s answer encoding** `[ADDED 2026-09-03 (evening) — the alignment pass assigned all three, and O3 governs all three]` | **none** — ChampSim has no decoder, no opcode table and no assembler (I.10) | `/mnt/md0/NMFC-Rev/src/nmfc/include/nmfc_isa.h`, frozen library `4cd0e05`. **Entry marker: the word `0xe000000b`** = group `0x7` variant `0x0` (`NMFC_G_MARK`, `NMFC_F7_ENTRY`), commit `3b9bb41`; group `0x7` variants 1–15 stay reserved for the mailboxes. **`KILL`: `funct7` = `0x60`** = group `0x6` variant `0x0` (`NMFC_G_KILL`, `NMFC_F7_KILL`), with `funct3 = NMFC_XS1`, `rd = x0`, `rs1 = handle`, `rs2 = x0` — the shape I.9's encoding table gives; commit `309b312`. **`JOIN`'s answer is a FIELD, not a flag: `NMFC_JOIN_OK` = `0x1`, `NMFC_JOIN_ERROR` = `0x2`**, so a `JOIN` on a killed entry answers `OK\|ERROR` = `0x3` with the zeroed register file | **RULED — user ruling 2026-09-03 O3 governs all three: "*I think this is just a simulator thing and not a meaningful design choice, so I say we describe it as implementation choice.*"** **What the design fixes, and it is all this table's middle column may be read for:** (i) **there IS a first-instruction marker word, it is checked at FETCH, it is a no-op on a tile and an ILLEGAL INSTRUCTION on both host models, and a `FORK` whose target does not carry it is REFUSED rather than faulted** (**I.7a**); (ii) **`KILL` takes one variant slot inside the reserved `0x6`/`0x7` groups** and the count stays **14** (**I.3a**, ledger L43, L57); (iii) **a closure must be a WELL-FORMED ANSWER the program can TEST** (**I.4**) — which is why `JOIN`'s answer became a field: `OK` alone and `OK\|ERROR` are distinguishable, where a 0/1 flag was not. **The three numbers are one implementation's choice**, recorded so binaries already assembled against them stay valid, and **never quoted as canon.** |
 | **clocks** | **250 ps = 4 GHz** on host core, function cores, fabric, caches — `nmfc_4tile.json:519, 569, 583, …` | 1 GHz default — `test/coherent_memory.py:_cache(clock=…)`; tile clock from the tile component | no tier-1..3 source states a function-core clock. **Nothing in the design assumes the function core runs at the host's rate**; if it does not, every cycle comparison must say so. |
 | **page-table levels / page size** | **5 levels**, 4 KiB base page — `nmfc_4tile.json:505-508`. **No shipped config declares an `N·G` page**, because no tool can ask for one (C.3, L41) | `NMFCPageTable.h` — and its `PageType` enum is `REGULAR`/`GRAIN`/`DUPLICATE`/`STANDARD` with `REGULAR` **identity-mapped** (`:42-46`, `:309`, `:402`), which is the RETIRED model: divergence **S42** | **R13: five levels, a PTE derived from that, multiple page sizes as modern hardware already does, and the mode bit stored in the PTE and carried as an extra bit on every physical address** (F.5a). The level count is standard, not novel. |
 | **page SIZES — there are exactly THREE** | 4 KiB declared; `G` derived (see the `G` row above); **`N·G` not expressible in any shipped config** | 4 KiB and `G`; `N·G` not built | **RULED - user ruling 2026-09-03, verbatim: "*we would have 3 page sizes in total: 4 KiB, 1 grain, N grains*".** The three sizes are **`4 KiB`, `G`, `N·G`** and **only `4 KiB` is a constant** — `G` and `N·G` are both functions of the device geometry (E.3), so the page sizes move when the memory configuration moves. **Design fixes the three size CLASSES; the byte values are configuration.** F.5b |
@@ -466,6 +467,8 @@ being qualified or merely annotated.**
 | **[derived from ruling O\<n\>]** | a consequence the user did **not** spell out, drawn in this document from a ruling plus an existing tier-1 rule. **It is marked so it is never mistaken for the user's own words**, and the derivation is always shown beside it. | no — but it is the document's inference, not a quotation |
 | **[USER TO CONFIRM …]** | **RETIRED ONCE, THEN REINSTATED WITH A DIFFERENT SUBJECT — read both halves before using this tag or auditing it.** `[CORRECTED — an earlier revision of this row declared the tag retired and gave a grep check calling any live instance "a regression"; the SAME revision then added live instances. This row is rewritten rather than patched, because it is the document's authority mechanism and it stated the opposite of the body.]` **First subject (RETIRED, and it stays retired):** the tag marked exactly one clause — `RESUME`'s privilege level, which R20 left as a question — and **user ruling 2026-09-03 O16 ("*Yes, privileged.*") answered it.** Every instance of that form (the label followed by the word *privileged*) was removed and **none survives.** **Second subject (LIVE as of user ruling 2026-09-03, morning):** the tag now marks **the assistant's READING of a ruling given in words that did not answer the question as posed**, or **a drafting instruction this document struck on a proposal's authority.** The user DID rule and the ruling IS applied; what is offered for overturn is the reading. It is NOT `[FOR THE USER TO RULE]`. **THREE OF THOSE SUBJECTS WERE CONFIRMED BY THE USER ON 2026-09-03 — Q2/`f`*n* ≡ `x`*n* (`L51`, "*…then keep them the same*"), Q4's scope (`L52`, "*I think that is okay*") and Q3/I.7 item 3 (`L50`, "*Q3: Accepted, function should not be host-executable*") — and their tags are RETIRED; a live tag on any of those three is now itself the regression.** **AND THE FOURTH AND LAST SUBJECT IS NOW CONFIRMED TOO, SO THE CHECK BECOMES AN ABSENCE CHECK AGAIN — user ruling 2026-09-03 on W1b, verbatim: "**W1b: Not really sure what this is getting at? We can't do more than one op at once, so might as well make the ALU 64-bit always, it really makes no difference. FP/DP require floating point hardware we are already going to have to support alongside the integer ops.**" `L54` is CONFIRMED, its tag is retired at **H.10.3**, in Appendix 1's preamble, at the row itself and in Appendix 3 item 6, and BOTH spellings — `[USER TO CONFIRM …]` and `[ASSISTANT'S READING … — user may overturn]` — now have ZERO live instances. **The check WAS: no live instance of either spelling, on any subject.** `[CORRECTED ONCE, THEN CLOSED - and both halves are kept so the audit trail survives. FOR ONE REVISION the check was a CENSUS rather than an absence: the assistant's-reading spelling went LIVE AGAIN on a FIFTH subject, KILL, in SEVEN instances across FOUR sections - the front-matter KILL row (1), I.3a (3), I.4's fourth-closure row (1) and ledger L57 (2) - because the ruling that introduced it put the privilege level as a hedged question and this document answered it by derivation, read "hook" as "handle", chose ruling O7's path and counted fourteen. USER RULING 2026-09-03 ON U1-U8 RETIRES EVERY ONE OF THEM. Privilege: "unprivileged" - no hedge, so the derivation is the user's own. The handle reading: "The core only has a fixed number of handles … when an FTU entry is cleared, it is recycled" - the user's own words name handles and FTU entries. O7's closure path: the one point of it that was ever in question, WHEN the entry is freed, is ruled - "On kill-ACK." The count of fourteen follows from ruled facts and was never a separate reading. THE CHECK IS AN ABSENCE AGAIN, ON EVERY SUBJECT: no live instance of either spelling anywhere. A live instance of either, on any subject, is a regression.]` | **RETIRED on every subject, with ZERO live instances of either spelling — `[USER TO CONFIRM …]` and `[ASSISTANT'S READING … — user may overturn]` alike.** |
 | **[name proposed by the assistant - user to confirm]** | **NEW AS OF user ruling 2026-09-03 (the page model), and it is a THIRD subject class that must not be counted with the two above.** It marks **a NAME this document chose for a thing the user ruled on but did not name** — not a reading of a ruling, not a struck drafting instruction, and **not an open question.** The ruling is applied in full; what is offered is the label. **The test that keeps it separate: renaming changes no statement in the document.** **EXACTLY TWO LIVE INSTANCES, both on page types: `HOST` (the 4 KiB page) and `STRIPED` (the `N·G` page), at F.5b and C.3** — the user's ruling used the word "*standard*" for both of them and called it "*a bad name*", so one word could not be kept for two types. `GRAIN` and `DUPLICATE` are the user's own words and carry no tag. **A live instance of this tag on anything that is not a name is a regression**, and so is a count other than two without a corresponding edit at F.5b, C.3, SELECTED CONFIGURATION, E.2, F.9, Part P and Appendix 2. | no — it settles the thing and offers only the label |
+| **[IMPLEMENTATION EVIDENCE - tier 4, SST]** | **NEW AS OF 2026-09-03 (the SST alignment pass). A finding from a RUN of the SST/Rev tree, recorded with the commit it was taken on and the counters it produced.** It is **tier 4** under the authority table above and **it decides nothing**; it is recorded because a ruling was BUILT and the build produced numbers, or because building it uncovered something the design record did not know. **A number under this tag never becomes design by having been measured**, and it never overrides a ruling. Where a build differs from a ruling's letter, the difference carries the NEXT tag, not this one. | no — it decides nothing |
+| **[IMPLEMENTATION CHOICE — user to ratify or overturn]** | **NEW AS OF 2026-09-03, and it is a FOURTH subject class that must not be counted with the three above.** It marks a place where **the implementation departed from a ruling's letter, or filled a gap the ruling left**, and the implementer **flagged it rather than absorbing it**. The ruling stands as written until the user acts; what is offered is the departure, with its reason and its measured cost. **It is NOT `[USER TO CONFIRM]`** — nothing under it is a reading of the user's words — and **it is NOT `[FOR THE USER TO RULE]`**, because the question put is whether to overturn a thing already built, not what to build. **EXACTLY TWO LIVE INSTANCES, both at ledger L14**: the transferred line is not written to the tile's slice at the moment of transfer, and the grant is `O` rather than `E`/`M`. | no — the ruling is unweakened; the tag flags a deviation from it |
 
 **HOW A TAG IS DELIMITED — a rendering rule, and it has already broken tags in this
 document.** `[ADDED. A Markdown code span (single backticks) ENDS AT THE NEXT BACKTICK and
@@ -2867,6 +2870,26 @@ and 64 % are repeat snoops of a line already snooped once. **That second term is
 decision for this section, and it is open**; classic MOESI does keep the owner on a read,
 so moving ownership to the reader is architecture and was not changed under R5. Ledger
 **L14**/**L15** carry the full before/after.
+
+**[RESOLVED 2026-09-03 — THE SECOND TERM IS CLOSED, AND IT WAS CLOSED BY BUILDING I14's OWN
+TIER-1 CLAUSE.]** `[IMPLEMENTATION EVIDENCE - tier 4, SST]` The protocol decision this
+section left open — the directory setting `d.global = O` and **never clearing `d.owner`** —
+is now built the other way, in SST commit
+**`489d2532ddb5b0903363ef7c5d00d0a1049c5d84`** (frozen library `4cd0e05`). **An NMFC read
+of a line a HOST holds dirty transfers the ownership to the requesting tile**: a new
+`FetchXfer` snoop, the host drops `M`/`O` to **`S`** and keeps its readable copy,
+`d.owner` becomes the tile, **no forwarder is nominated**, and the grant is **`O`**. That
+is I14's tier-1 sentence — "*references to blocks that the nmfc is touching can be treated
+as ownership*" — implemented literally, and it is stated as architecture in the reference
+document's §2.5. On `tile_bfs`/4: `nmfcPaysSnoop` **8 471 → 3 888**, `fwdFromO`
+**7 989 → 38**, slice hit rate 63.08% → 63.92%, **simulated time unchanged**. **3 888 is
+the count of DISTINCT LINES the function cores take from the host, not a count of reads**,
+so what remains is structural and **bounded** rather than growing with traffic.
+**The FIRST term — the workload shape — is untouched, and the caution above stands: do not
+quote the snoop-direction table as evidence for or against I14.** Two points of the build
+were flagged by the implementer for the user rather than settled here; ledger **L14**
+carries them under `[IMPLEMENTATION CHOICE — user to ratify or overturn]`, with the full
+before/after.
 
 ---
 
@@ -10079,6 +10102,16 @@ it is where the other three Parts point. **The one exception in all four Parts i
 stress workload** (L32, G.6), which was reshaped, re-run and verified against the host and
 whose build and binary ARE recorded.
 
+**AND THERE IS NOW A SECOND EXCEPTION, IN THIS PART ONLY: N.9.** `[ADDED 2026-09-03
+(evening).]` **The banner above covers N.2 through N.8 and does NOT cover N.9.** N.9 holds
+three workload sweeps taken on the SST/Rev tree against a **frozen library whose hash is
+recorded**, on a **checked-in configuration file that is named**, with the workloads' own
+answers diffed against their baselines — so the one thing N.0 says cannot be said of any
+other measurement in Parts G, K, L and N, **that its provenance is recorded**, is true of
+those. **That does not promote them.** SST is **tier 4** and decides nothing (the authority
+table), Appendix 2 **S38** still forbids comparing any SST number to a ChampSim number, and
+every headline number in N.9 carries a claim shape without which it may not be quoted.
+
 ### N.0 PROVENANCE WARNING — NO MEASUREMENT IN THIS DOCUMENT NAMES THE CONFIGURATION FILE THAT PRODUCED IT, AND THE CHECKED-IN CONFIGURATIONS CANNOT RUN AGAINST THE CHECKED-IN WORKLOAD
 
 **[ADDED — BLOCKING FOR REPRODUCTION, AND IT IS ASSEMBLED ENTIRELY FROM FINDINGS THIS
@@ -10332,6 +10365,14 @@ does.**
 
 **Carry the parity caveat with the number, always (M.3).**
 
+`[AND IT IS NOT THE ONLY SPEEDUP IN THIS DOCUMENT ANY MORE — added 2026-09-03 (evening).]`
+**N.9** records three SST/Rev sweeps whose speedups converge in the high 20s on two of three
+workloads and fall **below 1×** on the third. **They neither supersede nor confirm 5.67×, and
+they may not be compared with it**: different core model, different host, different workloads,
+and **Appendix 2 S38 still forbids comparing an SST number to a ChampSim number until the
+baseline reproduction step is done.** Read the two as separate records, each with its own core
+model attached, which is exactly what invariant **I8** requires of both.
+
 ### N.3 THE §29 INVERSION — replication cut migrations 4.96× and was 38.2% SLOWER
 
 Full table and mechanism in Part L. The one-line statement, which is the most useful
@@ -10559,6 +10600,17 @@ hitting them in §30.3. **Quote the right one.**
 
 *(Carry the provenance: these figures come from the spawn decomposition — see N.6.)*
 
+`[AND WHERE THE LIMIT SITS IS NOT SETTLED BY THIS SECTION ALONE — added 2026-09-03 (evening).]`
+The 13.7% / 76.9% ratio is a **DRAM-utilisation** result, and it is the premise validation.
+**In the SST sweeps at N.9 the DRAM is idle** — ≤ 1.23% on BFS except at 32G, ≤ 9.8% of peak on
+shuffled-sum, 2.2% at the busiest hash-table point — **and what fills is the fabric**, at
+40–61% of 64 GB/s with a control/data byte ratio near 1:1. **That is a different machine, a
+different workload and a different host, so it contradicts nothing here**; what it forbids is
+carrying "*the memory tiles extract 76.9% of the channel*" into a sentence about those runs.
+**And this section's own standing warning applies to the fabric claim too:** a structure
+reporting itself the constraint is a hypothesis (**O.1**), no fabric ablation was run, and the
+FTU/window ablations that WERE run came back "not the bottleneck" for the fourth time.
+
 ### N.8 WHAT LIMITS BANDWIDTH: ARRIVAL RATE, NOT THE MEMORY SYSTEM
 
 **DESIGN §19 (D:1522-1578) was absent from this document, which carried its METHOD — the
@@ -10650,6 +10702,315 @@ not a diagnosis (E.3, DESIGN §17 D:1404-1408).
   banking as a *bandwidth knob on a starved channel*, where nothing downstream could
   matter. D.2's case is structural — where the binding happens, and whether a monolithic
   512-entry queue is buildable. **Build it; do not expect bandwidth from it here.**
+
+### N.9 SST SWEEPS 2026-09-03 — THREE WORKLOADS ON THE FROZEN BUILD `4cd0e05`, AND THIS IS THE SECOND EXCEPTION TO PART N'S BANNER
+
+`[IMPLEMENTATION EVIDENCE - tier 4, SST]` **[ADDED 2026-09-03 (evening). Read the banner at
+the head of this Part and then read this sentence: THESE MEASUREMENTS ARE NOT COVERED BY IT.
+Every number in N.2 through N.8 is a historical observation of an earlier ChampSim tree whose
+configuration is unrecoverable (N.0). Every number BELOW names its build, its configuration
+file and its workload, and was taken against a library that was frozen before the first sweep
+started and not rebuilt during any of them. That does not promote them: SST is TIER 4 and
+decides nothing. It means the one thing N.0 says cannot be said of any other measurement in
+Parts G, K, L and N — **their provenance is recorded** — is true of these.]**
+
+**PROVENANCE, in full, and it is the whole reason this subsection exists.**
+
+- **Frozen build `4cd0e0599b4a147f8d56399e71606c8a5e977abd`** (NMFC-Rev, `main`, pushed).
+  Every number below was taken against that library and it was not rebuilt during any sweep.
+- **Configuration throughout: 4 tiles × 128 contexts, `test/rev-test-coherent.py`** — Rev
+  in-order host at 3.0 GHz with L1/L2, MOESIF directory on the fabric, **4 MiB LLC slice and
+  one DDR5-4800 channel per tile**, and `G = coherent_memory.grain(4) = 1,048,576 B` **read
+  from the configuration and never hard-coded**.
+- `src/rev` untouched; **nothing under `/mnt/md0/ChampSim` touched** (R3, the freeze, holds).
+- **The alignment changes these were taken after** are the five steps at ledger L14, L55,
+  L57–L60 and Appendix 2 S3/S41/S42/S43; the ownership-transfer before/after is at **L14**
+  and is not repeated here.
+- **49 gated sections** across three suites (21 / 23 / 5), **≈126 simulations** (25 / 76 / 25),
+  wall time **5m01s**: `NMFC SUITE: PASS`, `NMFC COHERENT SUITE: PASS`,
+  `NMFC VANADIS SUITE: PASS`.
+
+> **THE CLAIM SHAPE — IT TRAVELS WITH EVERY HEADLINE NUMBER BELOW, AND A NUMBER QUOTED
+> WITHOUT IT IS QUOTED WRONGLY.** This is invariant **I8**'s requirement that the core model
+> travel with the number, and **M.3**'s parity caveat, applied to this sweep:
+>
+> 1. **The host is Rev, and Rev is IN-ORDER.** It has no reorder buffer and sleeps on one
+>    outstanding load, so the baseline cannot overlap dependent chains or run ahead into the
+>    next one the way an out-of-order core partly would — **which is precisely the parallelism
+>    the function cores exploit.** **Every speedup below is therefore an UPPER BOUND with
+>    respect to host microarchitecture.** Vanadis (out-of-order) exists in the configuration
+>    set and **none of the three workloads has been run on it.**
+> 2. **M.3's second half applies too, and it is the half that gets dropped.** The function
+>    core replays resolved control flow and **never mispredicts**; the sensitivity run the
+>    design asks for is not in this record either.
+> 3. **BFS's numbers are additionally a LOWER bound.** Every BFS point is a **64-fabric-credit**
+>    measurement while the machine has 512 contexts; raising credits to 512 and changing
+>    nothing else makes the offloaded step **1.90× faster at 4G with byte-identical migrations
+>    and a byte-identical answer.** The sweep is reported at the checked-in default on purpose.
+>
+> **So: BFS is bounded on both sides, and the other two sweeps are bounded above.** I8 is
+> otherwise satisfied — each baseline is the reference algorithm compiled from the same source
+> over the same data with the same placement, and the comparison is on identical work.
+
+---
+
+#### SWEEP 1 — BFS (direction-optimising; the bottom-up step is what was offloaded)
+
+Times are the **offloaded step** (the bottom-up levels only, the part that moved); the
+top-down levels are the same host code in both builds. Answers are compared by diffing
+FNV-1a checksums over every vertex's depth and parent, externally, between the two builds.
+
+| point | working set | answers identical | host ms | NMFC ms | speedup | host insns (traverse, baseline) | fc insns | mig/load | contexts in use, mean (peak) of 512 | slice hit (NMFC) | DRAM util, upper bound |
+|---|---|---|---:|---:|---:|---:|---:|---:|---|---:|---:|
+| G/4 | 0.25 MiB, V=4,096 | **PASS** | 0.393 | 0.259 | **1.51x** | 321,534 | 346,877 | 0.000 | 14.9 (16) | 0.876 | <= 0.65% |
+| G | 1.00 MiB, V=16,384 | **PASS** | 1.644 | 0.534 | **3.08x** | 1,280,420 | 1,379,311 | 0.000 | 60.5 (64) | 0.882 | <= 1.17% |
+| 4G | 4.00 MiB, V=65,536 | **PASS** | 20.717 | 1.108 | **18.70x** | 3,179,348 | 2,885,154 | 0.395 | 47.6 (256) | 0.929 | <= 0.95% |
+| 16G | 16.00 MiB, V=262,144 | **PASS** | 211.836 | 8.756 | **24.19x** | 21,470,089 | 26,148,764 | 0.519 | 42.7 (256) | 0.953 | <= 1.23% |
+| 32G | 32.00 MiB, V=524,288 | **PASS** | 384.837 | 14.693 | **26.19x** | 24,384,291 | 20,347,478 | 0.352 | 53.2 (256) | 0.533 | <= 5.13% |
+
+Occupancy is time-weighted against `fabricBusyCycles` (**O.2**). DRAM utilisation is an upper
+bound: whole-run DRAM bytes charged entirely to the traversal, against 4 × 38.4 = 153.6 GB/s.
+
+**What the numbers say, and the second sentence is the one to quote.** The speedup rises and
+flattens — 18.70×, 24.19×, 26.19× — **and the counters say it is a ratio of two curves that
+both bend.** The offloaded machine's throughput is flat at 1.9–2.2 ns per function-core load
+from `G` through `16G` and doubles to 4.13 ns at `32G`, where 32 MiB of graph stops fitting
+16 MiB of slice; the baseline's cost per vertex climbs 100 → 316 → 808 ns over the same range,
+**one level earlier**. **A good deal of the headline is the single in-order core falling off a
+cache, not the function cores getting faster** — which is the claim shape's first bullet
+appearing directly in the data. The first two points are **below N.1's scale gate**
+(`grain × tiles` = 4 MiB): one grain, one tile, `migrations = 0`, and the context peaks of 16
+and 64 are the level's own width (`V/256` invocations), not the machine's. From `4G` up all
+four tiles work at **1.03:1 max/min with no placement policy doing anything about it**
+(`first_touch` against `round_robin` is worth 0.3% — compare G.5). A migration weighs exactly
+**72.0 bytes** against the 64-byte line a conventional machine would have moved (**J.1**,
+**J.2**). **Total work is NOT smaller**: host-real plus function-core instructions is ~1.1× the
+baseline's; the host's own traversal work falls to 5.1% of the baseline's, and the part that is
+actually about offloading is 1.3%. **DRAM is idle throughout** (≤ 1.23% except at 32G); what
+fills is the **fabric** — control-class traffic reaches 40.5% of 64 GB/s at 4G and 60.7% at 16G
+during the offloaded levels, at a control/data byte ratio of 0.94:1. And **the DRAM row-hit rate
+is the one place the offloaded machine is measurably harder on the memory system**: 0.872 → 0.754
+at 16G, because many contexts interleaving probes on one channel have worse row locality than one
+core streaming.
+
+---
+
+#### SWEEP 2 — Shuffled-sum (N=4 dependent-load layers, one invocation per chain)
+
+Both page formulations run at every point: **str** = STRIPED (`.bss`, one contiguous `N·G`
+extent), **grn** = GRAIN (one vtile per layer). Times are the compute phase only, stamped by
+the program with `rdtime`. Every offloaded run checks its checksum and sixteen sampled chains
+against its own in-program host reference, and the baseline at the same point prints the same
+checksum.
+
+| point | working set | PASS | host ms | NMFC ms | speedup | fc instructions | mig/load | contexts, mean per tile (of 128) | slice hit | DRAM BW, offload (host) |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 str | 256 KiB (0.25 G) | **PASS** | 0.560 | 0.495 | **1.13x** | 284,792 | 0.191 | 23.6 | 51.7% | 7.7% (0.0%) |
+| 1 grn | 256 KiB (0.25 G) | **PASS** | 0.560 | 0.151 | **3.71x** | 368,872 | 0.938 | 5.3 | 65.7% | 0.0% (0.0%) |
+| 2 str | 1 MiB (1 G) | **PASS** | 2.312 | 1.157 | **2.00x** | 1,138,866 | 0.189 | 13.7 | 75.5% | 3.5% (0.0%) |
+| 2 grn | 1 MiB (1 G) | **PASS** | 2.312 | 0.595 | **3.88x** | 1,478,364 | 0.938 | 5.6 | 65.8% | 0.0% (0.0%) |
+| 3 str | 4 MiB (4 G) | **PASS** | 28.810 | 2.371 | **12.15x** | 4,947,978 | 0.938 | 5.6 | 90.3% | 0.0% (0.0%) |
+| 3 grn | 4 MiB (4 G) | **PASS** | 28.810 | 2.371 | **12.15x** | 5,917,896 | 0.938 | 5.6 | 90.3% | 0.0% (0.0%) |
+| 4 str | 16 MiB (16 G) | **PASS** | 180.415 | 9.478 | **19.03x** | 19,534,314 | 0.750 | 5.6 | 93.8% | 0.0% (0.0%) |
+| 4 grn | 16 MiB (16 G) | **PASS** | 180.417 | 9.478 | **19.04x** | 22,278,392 | 0.938 | 5.7 | 93.8% | 0.0% (0.0%) |
+| 6 str | 32 MiB (32 G) | **PASS** | 659.110 | 29.050 | **22.69x** | 39,063,942 | 0.750 | 8.3 | 44.2% | 7.0% (0.3%) |
+| 6 grn | 32 MiB (32 G) | **PASS** | 669.171 | 26.197 | **25.54x** | 43,417,861 | 0.938 | 8.6 | 40.8% | 8.2% (0.3%) |
+| 5 str | 64 MiB (64 G) | **PASS** | 1564.553 | 60.964 | **25.66x** | 79,250,063 | 0.750 | 9.7 | 22.4% | 9.3% (0.4%) |
+| 5 grn | 64 MiB (64 G) | **PASS** | 1547.021 | 57.417 | **26.94x** | 86,160,184 | 0.938 | 9.7 | 23.2% | 9.8% (0.4%) |
+
+DRAM bandwidth is bytes moved over the compute phase divided by (compute time × 76.8 GB/s
+peak), with a setup-only run's traffic subtracted from each. Occupancy is the mean of the four
+tiles' means; the program's own in-flight window is 60 and the FTU 64, so **the peak of 60 seen
+everywhere is the program's bound, not the machine's** — which is **H.9**'s rule and **N.4**'s,
+restated by a different workload.
+
+**What the numbers say.** The curve rises toward about 27×, **and the mechanism is one column**:
+the offloaded cost per chain is **flat at 54 host-equivalent cycles over the 64× range from
+256 KiB to 16 MiB** and rises only to 82 at 64 MiB, while the baseline goes
+205 → 212 → 659 → 1,032 → 1,886 → 2,238. **The architecture is not getting faster with size;
+the in-order host is getting slower and the function cores are not.** Below one grain **the
+page type is the whole result** — 1.13× striped against 3.71× grain on the same program and the
+same data, because a sub-grain striped working set is entirely grain 0 on one tile (one tile
+served 21,044 of 32,768 loads, another none at all): **this is F.5b's page model measured, and
+it is the sharpest available demonstration of it.** **More migrations, faster:** GRAIN migrates
+3.75 times per chain against STRIPED's 0.76 at 256 KiB and runs **3.3× faster** — *migration is
+not the cost, being in the wrong place is*, which is **N.3**'s rule reproduced on a second
+workload. At exactly 4 G the two declarations produce the same physical layout and agree to
+four significant figures — **a useful control**. Both machines move the same ~440 MB at 64 MiB
+and the offloaded one moves it 26× faster (7,490 against 286 MB/s) at a 0.9% DRAM row-hit rate
+on both: **the workload is latency, and what the architecture supplies is the concurrency to
+turn it into bandwidth.** The honest ceiling is that **9.8% of peak is not a bandwidth-saturating
+machine**, and from 4 G upward the **control traffic of moving the computation is 1.9–2.2× the
+data traffic of the computation itself** (169 + 144 × migrations bytes per invocation, which
+reproduces every row). **The FTU sits at 59.7 of 60 everywhere and is NOT the bottleneck**:
+quadrupling the window (FTU 256, window 248) at 16 MiB made it **2.6% slower** with every other
+counter unchanged — the fourth independent instance of **H.9a**'s finding.
+
+---
+
+#### SWEEP 3 — Chained hash table (fixed `B` = 2^16 buckets, tail-swap append)
+
+Two phase structures at every point: **sep** = all `I` inserts then `I/2` lookups; **int** =
+inserts and lookups mixed 2:1, so chains are appended to while they are walked. Times are the
+insert/lookup phase (`workcyc`), stamped by the program. Each build verifies itself against the
+analytic expectation, and the two builds' digests are diffed externally.
+
+| point | working set / load factor | PASS, digests identical | host ms | NMFC ms | speedup | tile instructions | mig/mem op (mig/invocation) | contexts mean per tile (of 128), FTU mean of 64 | slice hit NMFC (host) | DRAM BW NMFC (host) |
+|---|---|---|---:|---:|---:|---:|---:|---|---:|---:|
+| P0 sep | 0.69 G / 0.125 | **PASS**, yes | 0.533 | 0.879 | **0.61x** | 209,709 | 0.1357 (0.7408) | 2.06, 18.8 | 94.67% (0.00%) | 0.446% (0.840%) |
+| P0 int | 0.69 G / 0.125 | **PASS**, yes | 0.659 | 0.735 | **0.90x** | 228,385 | 0.1300 (0.7497) | 2.39, 36.0 | 94.52% (0.00%) | 0.478% (0.718%) |
+| P1 sep | 1.00 G / 0.333 | **PASS**, yes | 1.379 | 2.335 | **0.59x** | 606,936 | 0.1317 (0.7469) | 2.18, 19.4 | 97.25% (0.00%) | 0.321% (0.656%) |
+| P1 int | 1.00 G / 0.333 | **PASS**, yes | 1.819 | 1.943 | **0.94x** | 647,361 | 0.1265 (0.7505) | 2.53, 36.9 | 97.12% (0.00%) | 0.354% (0.524%) |
+| P2 sep | 4.00 G / 2.333 | **PASS**, yes | 25.830 | 16.320 | **1.58x** | 7,270,676 | 0.0964 (0.7500) | 2.97, 21.9 | 98.72% (83.84%) | 0.232% (0.170%) |
+| P2 int | 4.00 G / 2.333 | **PASS**, yes | 24.468 | 13.731 | **1.78x** | 6,942,876 | 0.0994 (0.7506) | 3.33, 41.2 | 98.58% (81.61%) | 0.261% (0.177%) |
+| P3 sep | 16.00 G / 10.333 | **PASS**, yes | 604.283 | 78.245 | **7.72x** | 73,076,443 | 0.0461 (0.7504) | 4.18, 24.5 | 99.12% (96.79%) | 0.177% (0.034%) |
+| P3 int | 16.00 G / 10.333 | **PASS**, yes | 493.782 | 62.113 | **7.95x** | 62,520,027 | 0.0534 (0.7503) | 4.70, 45.4 | 98.97% (96.17%) | 0.201% (0.041%) |
+| P4 sep | 32.00 G / 21.000 | **PASS**, yes | 3708.926 | 232.448 | **15.96x** | 256,341,907 | 0.0271 (0.7500) | 5.89, 33.3 | 85.71% (64.63%) | 2.239% (0.262%) |
+| P4 int | 32.00 G / 21.000 | **PASS**, yes | 2707.781 | 148.644 | **18.22x** | 210,219,534 | 0.0329 (0.7503) | 7.24, 53.0 | 89.21% (72.37%) | 1.815% (0.233%) |
+
+**What the numbers say, and the first sentence is the most useful one in this subsection.**
+**The architecture LOSES below about three dependent loads per offloaded operation** — 0.61×
+and **0.59× at P0/P1 separated, the worst point in the sweep** — and wins by an order of
+magnitude above ten. **What moves is not the size but the LOAD FACTOR:** over the sweep the
+chase inside one operation grows 2.12 → 24.38 tile loads per invocation, the host's cost per
+operation grows **41×** (130 → 5,390 cycles) and the offloaded cost grows **1.6×** (215 → 338).
+Two counters explain the flatness: **contexts are asleep on a load 77% of tile cycles at P3
+while the tile keeps issuing** (**H.4**, **H.9**), and **the walk is local** — after one
+migration at dispatch, every load hits the slice the context is sitting on (99.12% at P3),
+which is **K.5**'s shape doing exactly what K.5 says it does. Placement does what it declared:
+**0.75 migrations per invocation at every point**, which is the 3/4 a round-robin fork over four
+tiles predicts, falling to 0.027 per memory operation as chains lengthen, at 72.0 bytes each.
+The append is one `amoswap.w` and is **uncontended** (30 atomic parks in 1,376,256 atomics —
+**H.7**); `heldWordsSnooped` is large but reconciles exactly against the fcD caches'
+`snoopPatches`, so it is a **16 KiB-D$ capacity effect, not contention** (**D.3**, **D.4**).
+**`nmfcOwnershipTransfers` is 8,192 at P2, P3 and P4** — exactly the line count of the
+2^16-bucket table — **and `hostPaysSnoop` is 0 for the whole run**: the L14 ownership transfer
+handing the table over once and never fighting over it again, which is the clearest evidence in
+the record for **I14**'s direction. Nothing here is bandwidth-bound: the busiest run uses
+**2.2%** of DRAM bandwidth while running 16× faster, and both builds move the same bytes to
+0.08% (755.20 against 755.82 MiB at P4). **The concurrency ceiling is the FABRIC, not the
+tracking unit:** re-running P3 with FTU 256 / credits 256 / ring 128 changed the answer by
+−2.0% and +4.9% and left `tileOutstanding` identical to four significant figures.
+
+---
+
+#### THE CAVEATS, VERBATIM
+
+**[Reproduced word for word from the sweep's own summary, because a caveat paraphrased is a
+caveat weakened. The first two are the claim shape above; they are repeated here in the form
+they were written.]**
+
+> - **The host is Rev, in-order, and canon I8 requires the core model to travel with the
+>   number.** Rev has no reorder buffer and sleeps on one outstanding load, so the baseline
+>   cannot overlap chains or run ahead into the next one the way an out-of-order core would
+>   partly do — which is precisely the parallelism the function cores exploit. **Every speedup
+>   here is therefore an upper bound with respect to host microarchitecture.** I8's other
+>   requirements are met: the baseline is the reference algorithm compiled from the same
+>   source over the same data with the same placement, and the comparison is on identical
+>   work. Vanadis (out-of-order) exists in the configuration set and **none of the three
+>   workloads has been run on it**.
+> - **The core-model caveat (M.3), and its second half.** M.3 says a function-core speedup
+>   carries two caveats, not one. The second is branch honesty: the function core replays
+>   resolved control flow and **never mispredicts**; the sensitivity run the design asks for
+>   is not in the record here either. Both caveats apply to every speedup above.
+> - **BFS: every number is a 64-fabric-credit measurement, and a lower bound.** The checked-in
+>   coherent configuration caps invocations in flight at 64 while the machine has 512
+>   contexts (`tileOutstanding` mean 62.2 of 64 at 16G; 3,745 fork refusals against 4,096
+>   forks). Raising credits to 512 and changing nothing else makes the offloaded step **1.90x
+>   faster at 4G with byte-identical migrations and a byte-identical answer**. The sweep is
+>   reported at the checked-in default on purpose. The same check at 16G was launched and had
+>   not finished.
+> - **BFS F1, tagged for the user and unresolved: a host-dirty line can lose bytes a function
+>   core did not write.** Reproducible at 1, 2 and 4 tiles on the frozen library. A 64-byte
+>   line the host holds dirty when a tile first reads it can return to the host with the
+>   tile's 8-byte store applied and the host's earlier writes to the other 56 bytes lost. The
+>   traversal answer is bit-identical to the baseline in every such run, so the tiles read
+>   correct records — it is the host's later read-back that is wrong. Suspects are the R-F
+>   transfer path and the write-back/merge under it. The sweep's measurements are unaffected
+>   (the workload's graph-checksum read pass evicts the host's dirty lines), and the workload
+>   now carries a permanent check for it.
+> - **BFS: the 32G point put a level back on the host.** GAPBS's alpha rule fired one
+>   expansion later there, so a top-down expansion costing 122.25 M cycles ran on the host in
+>   both builds — 66% of the offloaded build's entire traversal. Both builds take the same
+>   decision on the same graph, so the comparison stays honest, but at 32G two thirds of the
+>   traversal was never offloaded; the offloaded-step column is the one comparable across the
+>   sweep.
+> - **The R-F implementation deviates from the ruling's letter in one clause, and needs a
+>   ruling.** The line is not written to the slice at the moment of transfer; the writeback
+>   duty moves with the ownership and the line reaches the tile's slice when the tile evicts
+>   it. Writing it back at transfer would cost ~3,900 extra DRAM writes on that run to buy
+>   nothing. Related: `(E/M)` cannot be granted while the host keeps its copy, because `E`
+>   permits a silent write; `O` is what preserves the host's `S`.
+> - **Sizing overruns, all reported rather than quietly moved.** BFS tops out at 32G, not 64G
+>   — the 64G binaries are built and were launched but had not finished at 43 minutes.
+>   Shuffled-sum's 64G point took 54-59 minutes a run against the ~30-minute guidance and is
+>   reported beside 32G, the rule's fallback. The hash table's 64G point extrapolates to ~12 h
+>   and was **dropped to 32G**; its 32G point still overran, at 92 and 127 minutes for the
+>   baselines. Hash-table `G/4` is not expressible at a fixed B = 2^16 (the table alone is
+>   G/2), so its smallest point is 0.69 G.
+> - **Convergence is claimed from five or six points, not proven.** The last shuffled-sum step
+>   is 5%, and the offloaded per-chain cost is still rising (75 → 82): the curve is flattening,
+>   not flat. Nothing here establishes where it settles.
+> - **Unexplained residual.** Shuffled-sum point 1 striped reports 49,249 slice misses on
+>   32,768 tile loads over a 4,096-line working set. NUCA relocation accounts for most of it;
+>   the remainder has not been chased down and is not claimed to be understood.
+> - **A host-model defect found by the suite and not fixed here.** SST's Vanadis does not
+>   narrow `addw` (`addiw`, `subw`, `mulw`, `sllw` are all correct, and all are correct on
+>   Rev). `host_rv64.c` gates this on the in-order host and only *reports* it on Vanadis: it
+>   is a defect in a host model this project does not own.
+> - **Wall-clock times were taken with three agents' sweeps and the suites sharing a 144-core
+>   machine**, so they are upper bounds. Simulated results are unaffected — the simulations are
+>   deterministic and the configurations were byte-identical across runs.
+
+**Two of those caveats have their own rows in this document and must be followed there rather
+than argued from here.** **F1** is ledger **L61**, **OPEN** — nothing in this document may
+state or imply that it is fixed. **The R-F deviation** is the pair of
+`[IMPLEMENTATION CHOICE — user to ratify or overturn]` items at ledger **L14**.
+
+#### WHAT THESE SWEEPS DO AND DO NOT SETTLE — the convergence statements, stated as they may be quoted
+
+`[This paragraph exists because "converges to 27×" is the sentence most likely to be lifted
+out of the tables above and quoted without any of the three preceding subsections. Rule 4:
+when quoting a number, quote its provenance.]`
+
+1. **A convergence is OBSERVED, not established.** Two of the three sweeps flatten in the
+   high 20s — BFS 18.70 → 24.19 → 26.19×, shuffled-sum 19.0 → 25.5 → 26.9× — **and the sweep's
+   own caveat is that this is claimed from five or six points and the offloaded per-chain cost
+   is still rising.** The honest statement is *"the curve is flattening, not flat, and nothing
+   here establishes where it settles"*, and it is the sweep's own wording.
+2. **The mechanism of the convergence is known and it is half about the host.** In both
+   sweeps the offloaded cost per unit of work is **flat across a 64× range of working set**
+   while the baseline's climbs — so the ratio is *two curves, one of which bends because a
+   single in-order core falls off a cache*. **A speedup produced that way is an upper bound
+   with respect to host microarchitecture** (the claim shape, bullet 1). Quoting the ratio
+   without the mechanism claims something the measurement does not support.
+3. **The third sweep is the one that bounds the claim from below, and it must be quoted with
+   the other two.** The hash table **loses** — 0.59× — below about three dependent loads per
+   offloaded operation. **The architecture has a floor, this sweep measured it, and a summary
+   that omits it is not a summary of this sweep.** It is also **K.2**'s rule appearing as a
+   number: the unit of work must be large enough to be worth moving to.
+4. **These numbers do NOT supersede N.2's 5.67×, and they may not be compared with it.**
+   N.2 is the ChampSim core model on a different workload, a different host and an
+   unrecoverable configuration (N.0); these are SST/Rev on a recorded one. **Appendix 2 S38
+   is explicit and still binds: no SST number may be compared to a ChampSim number until the
+   baseline reproduction step is done.** The two live side by side and neither replaces the
+   other.
+5. **They do NOT re-take N.7's premise validation either, and they point the other way about
+   WHERE the limit is.** N.7's 13.7% / 76.9% is a DRAM-utilisation ratio from the spawn
+   decomposition on ChampSim. In these sweeps **DRAM is idle** — ≤ 1.23% on BFS except at 32G,
+   ≤ 9.8% of peak on shuffled-sum, 2.2% at the busiest hash-table point — and **what fills is
+   the fabric**, at 40–61% of 64 GB/s on BFS and a control/data byte ratio near 1:1. **On this
+   configuration the constraint is the fabric, not the channel.** That is not a contradiction
+   of N.7 — it is a different machine, a different workload and a different host — but **a
+   reader must not carry N.7's "the memory tiles extract 76.9% of the channel" into a sentence
+   about these runs.**
+6. **And the standing warning of N.7 applies to item 5.** Three structures have each reported
+   themselves the constraint in this project's history and been wrong (**O.1**). The fabric
+   saturation above is a **measurement of one configuration**, not a finding about the
+   architecture — and the counter-evidence is in the same tables: quadrupling the FTU and the
+   window changed the answer by −2.6% and −2.0%/+4.9%, which is what "not the bottleneck"
+   looks like, and no equivalent ablation of the fabric was run.
+
 
 ---
 
@@ -11102,7 +11463,11 @@ Every place the sources disagree, which authority won, and why. Authority order:
 user-vs-ChampSim conflicts, or genuinely open questions, that this document does not
 resolve on its own authority.
 
-**Count: 60 conflicts (L1–L60, no gaps).** **[UPDATED - L59 and L60 added 2026-09-03: the
+**Count: 61 conflicts (L1–L61, no gaps).** **[UPDATED - L61 added 2026-09-03 (evening): the
+BFS **F1 lost-bytes** defect found by the SST sweeps, and it is the ONLY row in this appendix
+that is OPEN. It opens no ruling — it is a defect in the implementation, in the class R5
+established for L14/L15 — so the front matter's "zero questions open" is unaffected.]**
+**[UPDATED - L59 and L60 added 2026-09-03: the
 giant-page semantics of a STRIPED page (U2-U4) and `KILL` delivery and entry lifecycle (U1,
 U5-U8) - user ruling 2026-09-03, which closed all eight U-items and removed the front matter's
 OPEN QUESTIONS table.]** **[UPDATED - L58 added 2026-09-03: the page model,
@@ -11431,6 +11796,29 @@ wrong way.** **[RULED 2026-09-02 — see the RULED bullet at the end of this row
 - **The ratio survived the fix: 50.5× → 48.2× on `tile_bfs`/4.** The follow-up `5e5fa66` then closed the counter defect that charged a clean `E` holder as a dirty one (the increment now happens after the state is known): `tile_bfs`/4 becomes `hostPaysSnoop` **62**, `nmfcPaysSnoop` **12 910**, with the clean cases split off into `hostPaysCleanSnoop` **211** / `nmfcPaysCleanSnoop` **237** (the old totals are the sums). **That makes the direction worse, not better — 208:1.**
 - **What the measurement now says the ratio is.** (i) **Workload shape** — `tile_bfs`'s host builds the graph in `.bss` and the function cores consume it; 13 620 of 13 627 events land on `.bss`, 12 066 on `col` alone. (ii) **An ownership-policy defect**: the directory sets `d.global = O` and never clears `d.owner` (`NMFCCoherenceFabric.cc:603-609`), so the host L2 stays owner of record — 0 evictions and 0 writebacks on `tile_bfs`/4 — and 8 500 of 13 627 events find the directory already in `O`, 64 % of them repeat snoops of a line already snooped once. **That is a protocol decision, a C.5 matter, and it was deliberately left open** (R5: do not change architecture). (iii) The loader, now gone, was the **smallest** term. Ablation with no architecture changed — host L2 at 64 KiB, fc D-cache at 512 KiB — inverts the direction to **5 007 `hostPaysSnoop` against 1 405 `nmfcPaysSnoop`, 3.6:1 the permitted way**, which says the number is environment and policy, not the invariant.
 - **STATUS: the bug half of this row is CLOSED. I14 stands, untouched. The instruction not to quote the snoop-direction table as evidence for or against I14 STANDS** — the loader path is fixed and the direction did not flip. Still open: the ownership policy above (C.5), and a workload in which the function core owns its working set.
+- **[RESOLVED 2026-09-03 — THE OWNERSHIP POLICY IS BUILT. This closes the half of this row that survived the loader fix.]** `[IMPLEMENTATION EVIDENCE - tier 4, SST]` SST commit **`489d2532ddb5b0903363ef7c5d00d0a1049c5d84`**, in the frozen library **`4cd0e0599b4a147f8d56399e71606c8a5e977abd`**; knob `ownershipTransfer` (env `NMFC_OWNERSHIP_TRANSFER`), default **1**; `tile_bfs`, 4 tiles / 128 contexts, `test/rev-test-coherent.py`, Rev in-order host, `config/tile_ddr5.yaml`. **What was built:** one new snoop, `CohCmd::FetchXfer`, fired **only** when the requester is a function core, the holder is a host agent and the directory is in `M` or `O` (`NMFCCoherenceFabric.cc:554`). The host drops to **`S`** rather than out (it read the line a moment ago; taking it away only makes it fetch again), `d.owner` becomes the requesting tile, `d.forwarder` becomes **NONE** (nominating the host would put it straight back in the path of the tile's next miss, which is the whole point of the change), the old host owner joins `d.sharers`, and the grant is **`O`**. The permitted direction — a host reading a line a function core modified — is unchanged: still `FetchDown`, still `hostPaysSnoop`. **A bug found while writing it was fixed in the same commit and measured neutral**: `complete()`'s slice-supplied fall-through granted `E` even with `d.sharers` non-empty, and `E` permits a silent write, so those sharers kept stale copies; the reader is now made the forwarder (`F`) when sharers exist. **No writeback at the transfer: the writeback DUTY moves with the ownership**, and the line reaches the tile's slice when the tile evicts it.
+- **Before / after on `tile_bfs`/4** (knob 0 → knob 1):
+
+  | statistic | before | after |
+  |---|---:|---:|
+  | **nmfcPaysSnoop** | 8,471 | **3,888** (−54.1%) |
+  | **nmfcOwnershipTransfers** | 0 | **3,888** — equal to `nmfcPaysSnoop`: **one snoop per LINE, not per read** |
+  | **fwdFromO** | 7,989 | **38** (−99.5%) |
+  | dirty-snoop ratio nmfc : host | 206.6 : 1 | **92.6 : 1** |
+  | hostPaysSnoop | 41 | 42 |
+  | nmfcPaysCleanSnoop | 236 | 755 |
+  | fwdFromF | 243 | 2,232 |
+  | downgrades | 8,232 | 6,158 |
+  | memReads / memWrites | 33,116 / 23,038 | 35,205 / **23,026** |
+  | slice hit rate | 63.08% | **63.92%** |
+  | hopCycles | 856,908 | 815,424 (−4.8%) |
+  | **simulated time** | 2.08294 ms | **2.08294 ms — no regression** |
+
+  On `tile_coh`/2: `fwdFromO` **11 → 2**, transfers **0 → 9**, every other MOESIF counter and the simulated time unmoved. **`nmfcPaysCleanSnoop` rising is not a regression in I14's terms** — it counts snoops of a holder that modified nothing, and it is the host's now-clean `S` copy being taken back when a function core writes the line; I14 is about paying for the other side's *modifications*. **The residual is now structural and bounded:** 3,888 is the number of distinct lines the function cores take from the host, so it can no longer grow with traffic, and what survives in `fwdFromO` is the **permitted** direction.
+- **Gates added** (`run_coherent.sh`): `nmfcOwnershipTransfers` required in the MOESIF block, and a new `tile_bfs`/4 section gated on `nmfcOwnershipTransfers > 0` **and** `fwdFromO < nmfcOwnershipTransfers` — the structural check, since after a transfer no host owns anything a function core reads. **The implementer flags that this gate's margin on `tile_coh`/2 is 2** (the test's own two host reads of `result`) **and is therefore thin.**
+- **`[IMPLEMENTATION CHOICE — user to ratify or overturn]` (i) — THE LINE IS NOT WRITTEN TO THE SLICE AT THE MOMENT OF TRANSFER.** The ruling's letter is "*the host writes back to the tile's slice and drops to S*"; two of its three clauses are implemented exactly and this one is not. **As built, the writeback duty moves with the ownership** and the line reaches the tile's slice when the tile evicts it. **The reason:** writing it back at the transfer is a DRAM write that `O` exists to avoid, and it would be paid **twice** for any line the tile never modifies — once at the transfer and again at the tile's eviction — so `memWrites` would rise by roughly one per transferred line (**about 3,900 on this run**) to buy nothing. As built `memWrites` is flat, and the effect the ruling asks for still holds: after the tile evicts, its writeback puts the line in the slice under its own stack and its next read is a local slice access — which is what the +6.3% `memReads` and the +0.84 pt slice hit rate are. **The ruling stands as written until the user rules on this.**
+- **`[IMPLEMENTATION CHOICE — user to ratify or overturn]` (ii) — THE GRANT IS `O`, NOT `E`/`M`.** The ruling's letter is "*the directory records the tile as owner (E/M)*". **`(E/M)` cannot be granted while the host keeps its copy:** `E` in this protocol permits a **silent** local upgrade to `M` (`writable(E)` is a local hit in `NMFCCache`, with no message to the directory), so granting `E` while the host holds `S` would lose the host's copy on the tile's first write. **`O` is the state that gives the tile the ownership AND the dirty copy while keeping the host's `S` copy correct** — the tile's first write becomes an **upgrade**, which invalidates the host properly. `E` would be reachable only by dropping the host to `I`, which contradicts the ruling's own "*drops to S*". **The two clauses of the ruling are in tension and the build resolved it in favour of "drops to S"; the user may rule the other way.**
+- **AND ONE MEASUREMENT THIS ROW DOES NOT CLAIM.** The change is neutral on run time (2.08294 ms either way) — **it is a coherence-traffic result, not a speed result**, and it must not be quoted as one. The first term of the ratio, the workload shape, is unchanged, so **the instruction above — do not quote the snoop-direction table as evidence for or against I14 — still stands.** Written at **C.5**, and stated as architecture (no numbers, no history) at `docs/nmfc/ARCHITECTURE.md` §2.5.
 
 **L15 — "A program's static data arrives Modified", which makes `F` unreachable early.**
 - *Tier 3, measured:* the loader writes the whole image — text, rodata and bss — through
@@ -12753,6 +13141,34 @@ together.]**
   ruled facts. **The notation table's check is an ABSENCE check again, on every subject.**
 - **CLOSED.**
 
+**L61 — F1: a host-dirty line can LOSE BYTES a function core did not write.**
+**[OPEN — A DEFECT, NOT A DESIGN QUESTION. Added 2026-09-03 (evening) by the SST sweeps;
+in the class user ruling 2026-09-02 **R5** established for L14/L15 — "*that sounds like a
+bug*" — so it asks the user for nothing and this row is not `[FOR THE USER TO RULE]`.]**
+`[IMPLEMENTATION EVIDENCE - tier 4, SST]`
+- *What it is, in the words of the run that found it (RESULTS.md caveats, verbatim):*
+  "**BFS F1, tagged for the user and unresolved: a host-dirty line can lose bytes a function
+  core did not write.** Reproducible at 1, 2 and 4 tiles on the frozen library. A 64-byte
+  line the host holds dirty when a tile first reads it can return to the host with the tile's
+  8-byte store applied and the host's earlier writes to the other 56 bytes lost. The
+  traversal answer is bit-identical to the baseline in every such run, so the tiles read
+  correct records — it is the host's later read-back that is wrong. Suspects are the R-F
+  transfer path and the write-back/merge under it. The sweep's measurements are unaffected
+  (the workload's graph-checksum read pass evicts the host's dirty lines), and the workload
+  now carries a permanent check for it."
+- **Where it sits:** on the **ownership-transfer path of L14 / R-F**, which is the code the
+  same alignment pass added (`FetchXfer`, and the write-back/merge under it). **Read this row
+  and L14 together**: L14 records what the transfer bought, this row records the correctness
+  question standing over the same path.
+- **What it does NOT invalidate.** The three sweeps at **N.9** are unaffected for the reason
+  the caveat gives — the workload's checksum read pass evicts the host's dirty lines before
+  the read-back — and every BFS answer in that sweep is bit-identical to its baseline.
+  **It is a correctness defect, not a measurement defect.**
+- **STATUS: OPEN.** Frozen library `4cd0e0599b4a147f8d56399e71606c8a5e977abd`. **A fix was
+  being written when this row was recorded and IS NOT recorded here; nothing in this document
+  may state or imply that F1 is fixed.** The row closes when the fix lands, with its own
+  before/after and the permanent check still passing.
+
 
 ---
 
@@ -12762,7 +13178,11 @@ together.]**
 2026-09-02T18:32. **Authority tier 4 — lowest. Nothing here decides anything.** This is
 a checklist for the next work session, not a description of the machine.
 
-**Count: 42 divergences** (**S42 added 2026-09-03 — SST's PageType enum and its identity
+**Count: 43 divergences** (**S43 added 2026-09-03 (evening) — the tile's shared TLB is NOT
+ASID-tagged, because this tree has no ASID anywhere; found by the alignment pass that removed
+the per-context entries, and it belongs with the page-table work, not with a design change**;
+**and S41, S42 and half of S3 were BUILT in that pass — each row now carries a `[BUILT]` note
+with its commit, and a reader must not go and re-do them**; **S42 added 2026-09-03 — SST's PageType enum and its identity
 mapping, both superseded by the four-type / three-size page model**; **S41 added 2026-09-03 — SST's per-context translation
 entries, rejected and to be removed**; **S40 added 2026-09-03 (morning) — register naming**; S39 added;
 **S13 re-tagged from `[WRONG]` to `[NOTE]`** — it is a documented, scoped, announced trade-off,
@@ -12867,7 +13287,7 @@ SST or it is not measured, and this document says which.
 |---|---|---|
 | **S1** `[GAP]` | **`FORK.M` / `FORKF.M` are fatal at the tile** (`NMFCTile.cc:548-555`). Encodable, decoded by both hosts, carried across the fabric — and then it aborts. | I.2 — the memory fork form exists precisely so the context need not already be loaded |
 | **S2** `[GAP]` | **`CONT.M` is fatal at the tile** (`NMFCTile.cc:1738-1746`). | I.3 — `CONT.M` replaces the context wholesale |
-| **S3** `[GAP — and half of it is now a BUILD ITEM, updated 2026-09-03]` | ISA groups 0x6, 0x7 (reserved for KILL and mailboxes) are fatal. **`KILL` IS NO LONGER UNBUILT** [RULED - user ruling 2026-09-03, **I.3a**]: one variant slot in these groups now decodes to `KILL rH` — unprivileged, the O7 closure, a no-op on a stale handle — so SST must **implement** that slot rather than refuse it. The rest of the reserved space (mailboxes, `RESUME`, I.7a's entry marker) keeps the original note. | **I.3a** — `KILL` is built and unprivileged; I.7 — the remainder is reserved and unbuilt: a clean refusal, not a crash |
+| **S3** `[GAP — and half of it is now a BUILD ITEM, updated 2026-09-03]` | ISA groups 0x6, 0x7 (reserved for KILL and mailboxes) are fatal. **`KILL` IS NO LONGER UNBUILT** [RULED - user ruling 2026-09-03, **I.3a**]: one variant slot in these groups now decodes to `KILL rH` — unprivileged, the O7 closure, a no-op on a stale handle — so SST must **implement** that slot rather than refuse it. The rest of the reserved space (mailboxes, `RESUME`, I.7a's entry marker) keeps the original note. **[BUILT 2026-09-03 — `[IMPLEMENTATION EVIDENCE - tier 4, SST]`. Both halves that were work items are now code. `KILL`: commit `309b31228b525cfdd7a1b5248697f6176acc6720` — broadcast on the control path (kills drained first, in their own queue, never gated on tile capacity), the holder ended wherever it is, non-holders keeping a standing order fired at `admit()`/`handleMigration()` so the in-flight case is closed, and the FTU entry freed on the kill-ACK; `JOIN` in the window answers with the error and the zeroed file. The ENTRY MARKER of I.7a: commit `3b9bb412403df497a5b8a20ad1a86f40b14040a7` — group `0x7` variant `0x0`, a no-op on a tile, a fatal on BOTH host models, checked by `FORK` before it allocates (`forkRefusedNotFunction`), and enforced at build time by `admit.py`. Field values are at SELECTED CONFIGURATION. What is still refused, correctly, is the rest of the reserved space — the mailboxes and `RESUME`. **One bounded gap the KILL build states about itself:** a standing kill order that no tile ever matches (the already-ended case) stays resident — 6 of 8 at four tiles — bounded by `maxPendingKills` (default 64) and reported by `killsDropped`; closing it properly needs a kill-resolved broadcast, which is architecture this document does not have and the implementer did not invent.]** | **I.3a** — `KILL` is built and unprivileged; I.7 — the remainder is reserved and unbuilt: a clean refusal, not a crash |
 | **S4** `[GAP]` | **SST IMPLEMENTATION LAYOUT, TIER 4 — NOT THE DESIGN.** SST's harness hard-codes exactly one register layout, `x1..x8 × 64-bit` (the same convenience its `NMFC_CTX_WORDS = 8` / `in[0..7]` context array expresses), and no compiler produces another. **Read it as a tier-4 implementation convenience and never as a statement about the context.** The design is **512 bits, BIT-PACKED** — not eight registers, not eight lanes, not `x1`–`x8` (user #232, #238; the 512-bit rule at I2 and H.3). | I2/I.8, H.3, K.6 — 512 bits divided per function; **bit-packing is compile-side work and is not done** |
 | **S5** `[GAP]` | The **bit-level admission test is never exercised**: nothing produces a layout other than the default, so the bits-used figure is always 512. | K.6 — admission is a test on bits |
 | **S6** `[WRONG — as of user ruling 2026-09-03 O4]` | The tile's core is **RV64IM+A only** — no FP, CSR, FENCE, RVC, MULH*, ecall — while `main` on the host is full RV64G. **The ruled subset is `RV64IMAFD`** (user ruling 2026-09-03 **O4**, "*I think we want float, so C*"), so this tile would **trap on the floating-point instructions the canon admits**. It changed from a declared asymmetry to a divergence when O4 was ruled. **And the fix is not a second register file:** `F`/`D` values are packed into the **same 512-bit context** under two register namespaces (I.0, I.7); a separate FP file breaks invariant 2 and grows a migration past 72 B. | **I.0** (the subset and the namespaces), **K.6** (admission), H.1 |
@@ -12891,8 +13311,8 @@ SST or it is not measured, and this document says which.
 | **S18** `[ARTEFACT — re-tagged; the warning fires on a HARDCODED CONSTANT, not on the geometry]` | SST warns that `G = 256 KiB × ntiles` is "not a whole number of bank sweeps at 1 or 3 tiles" and proceeds. **That warning presupposes `sweep := 512 KiB fixed`.** On the checked-in reference device a sweep is `row_bytes × banks_per_channel` = `4096 × 64` = **256 KiB**, so `G / sweep = total_channels = N` **exactly, at every tile count** — G(3) = 768 KiB = 3 sweeps. **The condition the warning tests is never true for this device; it is testing SST's own constant.** Fix the constant (derive the sweep from the device) or delete the warning. | **E.5**, which now defines `sweep` and records that the odd-tile-count caveat was an artefact of the same fixed 512 KiB — it does not exist for either device in the tree |
 | **S19** `[WRONG]` | The per-tile entry-point rewrite (`pc + t·G`) documented at `NMFCFabricComponent.h:60` is **implemented nowhere** — correctly, because code is on duplicate pages, but the doc still asserts it. | J.1 — the PC does not change on migration |
 | **S40** `[GAP — the implementation step, added 2026-09-03 (morning)]` | **REGISTER NAMING: SST models 8 × 64-bit lanes; DESIGN A IS TO BE IMPLEMENTED.** SST resolves a register name through a **per-function `RegLayout`** — 32 × (`uint16` offset + `uint8` width) = **768 bits per resident function** (`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCRegLayout.h:40-42`), read at **every** register access (`NMFCTile.cc:461-475`, `return c.regs.read( layout_.field[r] );`), and nothing in the tree produces a layout other than the hard-coded `x1..x8 × 64-bit` default (see **S4**, **S5**). **The canon is now Design A** (H.10): the register number **is** the bit range, resolved by ≈7 gates or a 310-bit ROM per tile, with **nothing fetched**. **This is the largest single divergence in this appendix and it is a BUILD ITEM, not a defect to argue about.** The build order — steps, files and line counts — is `docs/nmfc/proposals/register-map-final.md` **§9**, and its unresolved engineering items are **§9.1 U1–U7**. In outline: delete `struct RegLayout` and `defaultLayout()`, keep `RegField` and `Context512`, **delete `Context512`'s straddle branches** (provably dead — no slice crosses a 64-bit word), add the ~8-line `constexpr` decoder, delete `RegLayout layout_` from `NMFCTile.h:448-450`, add the three width/extension-class bits to the `dbufReg`/`dbufValue` pair (`NMFCTile.h:85-86`), and add the decoder's legality rules. **Net ≈ −60/+15 lines in the layout header alone.** **`RegLayout::illegal()`'s run-time trap (`NMFCTile.cc:464`, `:472`) does not survive** — a total map leaves it nothing to fire on — and **its replacement is the admission-time placement verifier**, which does not exist yet and whose owner is undecided (**U3**). **ChampSim is FROZEN (R3): none of this is a ChampSim work item.** | **H.10** (the whole section), **I2**, **I7**, **K.6**; and **S4**/**S5**, which this supersedes as the *reason* the 8×64 layout must not be read as the design |
-| **S42** `[WRONG — added 2026-09-03. THE ALIGNMENT-PASS ITEM FOR THE PAGE MODEL.]` | **SST'S PAGE TYPES AND ITS IDENTITY MAPPING ARE THE RETIRED MODEL, IN BOTH HALVES.** `enum class PageType { REGULAR, GRAIN, DUPLICATE, STANDARD }` (`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCPageTable.h:42-46`), defaulting to `REGULAR` (`:68`, `:87`, `:207`, `:365`), parsed from the region string's fourth field (`:207-214`, which accepts `grain`, `duplicate`, `standard` and `regular` and rejects everything else); **`REGULAR` is IDENTITY-MAPPED** — `t.frame = addr` with the comment "*identity: nothing relocates yet*" (`:309`), "*REGULAR is mapped identically: striping across tiles is what the …*" (`:280`), "*identity-mapped: its own grain index is a unique key*" (`:402`), and the NUCA relocation path explicitly excludes it (`:431-437`: "*Nothing identity-mapped may reach this*"). **REPLACE BOTH.** [RULED - user ruling 2026-09-03, verbatim: "*we would have 3 page sizes in total: 4 KiB, 1 grain, N grains. 4 KiB for standard pages, 1 grain for grain pages. N grains for standard (bad name, would prefer something meaningful) and duplicate pages. The only difference between standard and duplicate is that duplicates represent 1 grain of virtual space but N grains of physical space, while standard is 1 grain of virtual space per 1 grain of physical space.*"] **What the alignment pass must do, in three parts: (1)** the four types become **HOST** (`4 KiB`/`4 KiB`, block-interleaved), **GRAIN** (`G`/`G`, one tile), **STRIPED** (`N·G`/`N·G`, one grain per tile) and **DUPLICATE** (`G` virtual / `N·G` physical) — i.e. `REGULAR` **becomes STRIPED and changes size from `G` to `N·G`**, and `STANDARD` **becomes HOST**; **(2)** the **size goes in the PTE**, as R13 already requires of a multi-size table, and the **mode is read off the size class** rather than carried as an independent flag, with **one replicate bit** separating DUPLICATE from GRAIN inside the `G` class; **(3)** **the identity mapping goes** — every type is relocatable, which is what unblocks **S10** and removes the frame-arena overlap class DESIGN §30.3 records. **This is a BUILD ITEM, not a defect to argue about**, and it is the largest page-side divergence in this appendix. **ChampSim is FROZEN (R3)**, so none of it is a ChampSim work item. | **F.5b** (the model), **C.3** (the diagram), **E.2** (the mode bit follows the size class), **F.9** (the aligned N-run), Part **P R115** (identity mapping retired), ledger **L58**; and **S10**, which this supersedes as the *reason* the relocation path has a REGULAR-only branch |
-| **S41** `[WRONG — added 2026-09-03]` | **SST BUILDS PER-CONTEXT TRANSLATION ENTRIES, WHICH THE CANON NOW REJECTS.** `struct CtxXlat` and `CtxXlat xlat[4]` (`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCTile.h:122`, `:135`), parameter `ctxXlat` default **2** ("*Translation entries carried in each context (§7)*"), with the statistics `xlatCtxHits`, `xlatTlbHits`, `xlatWalks` and `xlatColdAfterMigration`, plus the `coldXlat` flag. **TO BE REMOVED in the alignment pass** — the tile keeps ONE shared, ASID-tagged TLB and its local walk, and a context consults that directly. **`xlatColdAfterMigration` SURVIVES** and is re-pointed at the destination tile's shared TLB. ChampSim's `ctx_xlat_cache` (`inc/nmfc/nmfc_types.h:112`, held at `:150`) is **frozen history**: ChampSim is frozen (R3), so it is not a work item there. | **F.7**, **P.1 R114**, ledger **L55**, **I3** |
+| **S42** `[WRONG — added 2026-09-03. THE ALIGNMENT-PASS ITEM FOR THE PAGE MODEL.]` | **SST'S PAGE TYPES AND ITS IDENTITY MAPPING ARE THE RETIRED MODEL, IN BOTH HALVES.** `enum class PageType { REGULAR, GRAIN, DUPLICATE, STANDARD }` (`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCPageTable.h:42-46`), defaulting to `REGULAR` (`:68`, `:87`, `:207`, `:365`), parsed from the region string's fourth field (`:207-214`, which accepts `grain`, `duplicate`, `standard` and `regular` and rejects everything else); **`REGULAR` is IDENTITY-MAPPED** — `t.frame = addr` with the comment "*identity: nothing relocates yet*" (`:309`), "*REGULAR is mapped identically: striping across tiles is what the …*" (`:280`), "*identity-mapped: its own grain index is a unique key*" (`:402`), and the NUCA relocation path explicitly excludes it (`:431-437`: "*Nothing identity-mapped may reach this*"). **REPLACE BOTH.** [RULED - user ruling 2026-09-03, verbatim: "*we would have 3 page sizes in total: 4 KiB, 1 grain, N grains. 4 KiB for standard pages, 1 grain for grain pages. N grains for standard (bad name, would prefer something meaningful) and duplicate pages. The only difference between standard and duplicate is that duplicates represent 1 grain of virtual space but N grains of physical space, while standard is 1 grain of virtual space per 1 grain of physical space.*"] **What the alignment pass must do, in three parts: (1)** the four types become **HOST** (`4 KiB`/`4 KiB`, block-interleaved), **GRAIN** (`G`/`G`, one tile), **STRIPED** (`N·G`/`N·G`, one grain per tile) and **DUPLICATE** (`G` virtual / `N·G` physical) — i.e. `REGULAR` **becomes STRIPED and changes size from `G` to `N·G`**, and `STANDARD` **becomes HOST**; **(2)** the **size goes in the PTE**, as R13 already requires of a multi-size table, and the **mode is read off the size class** rather than carried as an independent flag, with **one replicate bit** separating DUPLICATE from GRAIN inside the `G` class; **(3)** **the identity mapping goes** — every type is relocatable, which is what unblocks **S10** and removes the frame-arena overlap class DESIGN §30.3 records. **This is a BUILD ITEM, not a defect to argue about**, and it is the largest page-side divergence in this appendix. **ChampSim is FROZEN (R3)**, so none of it is a ChampSim work item. **[BUILT 2026-09-03 — `[IMPLEMENTATION EVIDENCE - tier 4, SST]`. Commit `ab30d15480ba1ae3916ad8439531eeda8f3c7b78`: `PageType::{HOST, GRAIN, STRIPED, DUPLICATE}` over three sizes carried in the PTE, **the partition class DERIVED from the size class** through one predicate (`grainPartitioned`), `modeBit` derived from the declarations and demoted to a fatal-if-inconsistent check shared by all three components, `STRIPED` as one contiguous `N·G` extent whose grains land one per tile as a consequence of contiguity, and `parseRegion` **refusing `regular` and `standard` by name** and saying which word replaces which. Per-type migrations on one kernel of 64 loads at 1 / 2 / 4 tiles: HOST 0 / 63 / 63, GRAIN 0 / 0 / 0, STRIPED 0 / 31 / 15, DUPLICATE 0 / 0 / 0 — one per 64 B block, none, one per grain boundary, never. **This fixed S10 as that row predicts** — and it exposed a further defect, fixed in the same commit: **the NUCA grain move was incoherent** (it read the old frames out of DRAM while the grain was dirty in a host L2 or a tile D$, then repointed every access at the stale copy) and **had never once run end to end**, because under the retired model the memory a policy moved was undeclared and `lookup()`'s undeclared window never consulted the remap. A move is now FLUSH → COPY → REMAP, and only a STRIPED page moves. **THREE THINGS THE BUILD COULD NOT DO, each with its reason, and they are the residue of this row:** (1) **memory in no declared region is still resolved at its own address** — the host's stack, and Vanadis's PHDR window; it cannot be demand-allocated because the fabric, the host MMU and every tile build the table independently and must agree without communicating; (2) **a function core touching an unmapped page is not modelled** — only the host MMU answers an absent mapping, and giving the tile's load path an absent-page state is a fault architecture this document has not specified; (3) **`checkBelowPhysBase` cannot see the undeclared window**, since it iterates regions and the window is not one — now the only unguarded overlap left.]** | **F.5b** (the model), **C.3** (the diagram), **E.2** (the mode bit follows the size class), **F.9** (the aligned N-run), Part **P R115** (identity mapping retired), ledger **L58**; and **S10**, which this supersedes as the *reason* the relocation path has a REGULAR-only branch |
+| **S41** `[WRONG — added 2026-09-03]` | **SST BUILDS PER-CONTEXT TRANSLATION ENTRIES, WHICH THE CANON NOW REJECTS.** `struct CtxXlat` and `CtxXlat xlat[4]` (`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCTile.h:122`, `:135`), parameter `ctxXlat` default **2** ("*Translation entries carried in each context (§7)*"), with the statistics `xlatCtxHits`, `xlatTlbHits`, `xlatWalks` and `xlatColdAfterMigration`, plus the `coldXlat` flag. **TO BE REMOVED in the alignment pass** — the tile keeps ONE shared, ASID-tagged TLB and its local walk, and a context consults that directly. **`xlatColdAfterMigration` SURVIVES** and is re-pointed at the destination tile's shared TLB. ChampSim's `ctx_xlat_cache` (`inc/nmfc/nmfc_types.h:112`, held at `:150`) is **frozen history**: ChampSim is frozen (R3), so it is not a work item there. **[BUILT 2026-09-03 — `[IMPLEMENTATION EVIDENCE - tier 4, SST]`. Commit `13ee3278149c407c660767f70af66092c0e47610`: `CtxXlat`, `xlat[4]`, `xlatNext`, the `ctxXlat` parameter and `statXlatCtxHits` are gone from `NMFCTile.{h,cc}` and from both test configurations, and `xlatColdAfterMigration` now counts only the destination TLB's cold walk. **The removal is confirmed by a wide margin, not merely tolerated:** on `tile_bfs`/4 the shared TLB ALONE answers 447,470 against 8 walks, where the two levels together answered 447,398 + 78 against **14,248** walks, and **3,068 of 3,069 migrating contexts found their first page already translated at the destination** (cold arrivals 3,059 → 1). Simulated time 1.60965 → 1.61005 ms. Gates added in `run_nmfc.sh` (`xlatCtxHits` required ABSENT, not zero) and `run_coherent.sh` (a ten-to-one hits-over-walks ratio — the ratio that would have caught the index defect in D7). **Two latent defects the removal exposed are in D7**, and the ASID clause of the ruling is NOT built: see **S43**.]** | **F.7**, **P.1 R114**, ledger **L55**, **I3** |
 
 ### D3 — Accounting and modelling artefacts that distort numbers
 
@@ -12927,6 +13347,7 @@ SST or it is not measured, and this document says which.
 |---|---|
 | **S37** `[GAP]` | The tile-memory configuration's own header states it does not build the machine: **the host has no L2, so there is no L2-to-LLC coherence boundary; ONE shared bus serves every tile, so a tile's core reaching its OWN slice contends with every other tile — an artefact, since the machine puts that path inside the tile; coherence runs over that bus rather than the fabric, so the fabric models a small minority of the traffic it should carry; there is no distance between tiles and no bytes-to-time on the fabric; and I14 is not modelled at all.** Its own instruction: "**Do not read the topology built below as a statement about the architecture.**" |
 | **S38** `[GAP]` | **No SST number may be compared to a ChampSim number** until the baseline reproduction step is done (stock GAPBS BFS, no NMFC, against ChampSim's 197,753,293-cycle baseline). The SST docs say so themselves: "no cycle count taken against [the loopback stub] means anything at all"; "no timing measured here means anything yet." |
+| **S43** `[GAP — added 2026-09-03 (evening) by the alignment pass, and it is a GAP, NOT A DESIGN CHANGE]` | **THE TILE'S SHARED TLB IS NOT ASID-TAGGED, BECAUSE THIS TREE HAS NO ASID ANYWHERE.** The ruling the alignment pass implemented reads "*a shared, ASID-tagged TLB per tile*"; the shared TLB is built and the per-context entries are gone (**S41**), but **the tag is not built** — and the reason is not an omission in the TLB. **There is no ASID in the context, in the page-table entry, in the placement key, or in the remap message**, so a tag added today would have exactly one value in every run. `NMFCTile.h` records the gap in place. **The implementer stated it as a gap rather than adding a dead field, and that is the right call:** an ASID is not a TLB feature, it is an address-space identity that the PTE, the placement key and the remap protocol must all carry, and **those are exactly the three things the page-table work re-derives**. **THIS ROW BELONGS WITH THE PAGE-TABLE WORK (F.5a, F.8, I3, and ledger L49 — "address spaces and ASIDs are absent from this document while three invariants depend on them"), AND IT IS NOT AN ARGUMENT FOR CHANGING THE RULING.** The canon's statement of the TLB stands as written: one shared, ASID-tagged TLB per tile, and its local walk. |
 
 ### D6 — What SST does build, and where it LEADS ChampSim
 
@@ -12985,6 +13406,32 @@ These are not divergences; they are the scars, and each is a test the canon shou
   "because the failure it prevents is invisible at run time".
 - **Identity-mapped frames colliding with allocated ones** — the header had said "above
   anything the program image occupies" from the beginning and nothing checked it.
+- **A TRANSLATE-RETRY LIVELOCK THAT ONLY A SHARED STRUCTURE COULD EXPOSE** `[2026-09-03,
+  found and fixed by the alignment pass that removed the per-context entries — S41]`.
+  `translate()` parks the instruction and re-translates when the walk lands. **That retry was
+  guaranteed to hit only because the walk had filled a PER-CONTEXT entry** — the code's own
+  comments said so, "*finding the translation in the context's own entries*". Against a
+  direct-mapped **shared** TLB another context can evict it first, so the retry walks again,
+  forever. **Measured: `tile_bfs`/4 completed in 8 s before, and had not completed in 900 s
+  after.** Fixed with a **walker output latch** (`walkPage` / `walkDelta` / `walkAnswered`):
+  one page, written only by a walk, consumed once, cleared, unreachable across migration, and
+  counted as `xlatWalkAnswers` rather than as a TLB hit. **The lesson is the general one:
+  removing a private cache can turn a correctness crutch into a livelock, and the failure is
+  a HANG, not a slowdown — so a suite that only checks answers will not see it.**
+- **THE SPARSE-KEY TLB INDEX, ROUND TWO — and it is the same bug as the round already recorded
+  three bullets above** `[2026-09-03, found and fixed in the same commit]`. `tlbSlot()` folded
+  a sparse key onto its own low bits: `pageOf()` keys a region page as
+  `((region+1) << 40) | grain_index`, and the fold shifted by exactly 20 and 40 — **the tag's
+  own position** — so `mixed % 2^k == (region+1) ^ grain_index` for every `k ≥ 3`. **Eight
+  usable slots at any power-of-two size**, with region keys landing on the dense address/grain
+  keys. Signature: **213,837 walks against 233,644 hits, byte-identical at 64, 128, 512 and
+  4,096 entries, and 8 walks at size 97.** Fixed with multiplicative mixing indexed from the
+  high half. **Two things make this the most instructive scar in the list.** (i) **It survived
+  because the private per-context entries answered everything** — the shared TLB was consulted
+  **78 times in a whole run** — so the structure that hid it is the structure the ruling
+  removed. (ii) **The comment above `tlbSlot()` records the EARLIER round of the same bug, and
+  the XOR fold written to fix that one moved the collapse from one slot to eight.** A fix that
+  is not measured against the signature that found the bug is not a fix.
 
 ---
 
