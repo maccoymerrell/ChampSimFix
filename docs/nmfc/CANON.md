@@ -1491,6 +1491,20 @@ speedup, an occupancy figure or a "not the bottleneck" ablation taken there is a
 about a host-fed machine and not only about an under-driven baseline (user 2026-09-04; H.9,
 N.4, ledger **L63**).
 
+`[AND THE CAVEAT IS NOW SATISFIED FOR THREE WORKLOADS, WHICH IS WHAT I8 ASKS FOR — 2026-09-04,
+**N.9a**, ledger **L62**.]` **The default host is the out-of-order Vanadis core**, and BFS,
+shuffled-sum and the chained hash table have all been run on it against the frozen build
+`8365318`; **the core model that now travels with those numbers is a 352-entry, 6-wide,
+out-of-order one**. What the re-measurement found is that the two-sided caveat above is true in
+BOTH directions and **the NMFC side is the larger term**: the out-of-order host feeds the
+function cores at **0.49–0.65×** the in-order host's NMFC-instruction rate, because a
+coprocessor instruction cannot be speculative and must reach the head of the reorder buffer
+before it issues. **So an in-order host does not under-drive NMFC relative to an out-of-order
+one; it over-drives it.** The *baseline* half of the caveat is real and measured, and over the
+range that could be reached it is smaller than expected (hash table: 1.58× → 1.22× penalty from
+P1 to P2). **I8's remaining requirement — the branch-honesty sensitivity run (M.3, O.4 item 2)
+— is still not in the record on either host.**
+
 `[CARRIED, SECOND CAVEAT — the branch-honesty caveat, DESIGN §12 D:1016]` The function
 core **replays resolved control flow, so it never mispredicts**; `FLAG_TAKEN_TARGET` plus
 a configurable fetch bubble is the honesty knob, ChampSim ships it (`fetch_bubble: 1` in
@@ -10150,8 +10164,11 @@ stress workload** (L32, G.6), which was reshaped, re-run and verified against th
 whose build and binary ARE recorded.
 
 **AND THERE IS NOW A SECOND EXCEPTION, IN THIS PART ONLY: N.9.** `[ADDED 2026-09-03
-(evening).]` **The banner above covers N.2 through N.8 and does NOT cover N.9.** N.9 holds
-three workload sweeps taken on the SST/Rev tree against a **frozen library whose hash is
+(evening). EXTENDED 2026-09-04: N.9 now holds TWO generations — **N.9a**, the out-of-order
+re-measurement on frozen `8365318`, which is the HEADLINE; and **N.9b**, the in-order sweeps
+on frozen `4cd0e05`, retained as a labelled secondary column. The exception covers both.]`
+**The banner above covers N.2 through N.8 and does NOT cover N.9.** N.9 holds
+workload sweeps taken on the SST tree against a **frozen library whose hash is
 recorded**, on a **checked-in configuration file that is named**, with the workloads' own
 answers diffed against their baselines — so the one thing N.0 says cannot be said of any
 other measurement in Parts G, K, L and N, **that its provenance is recorded**, is true of
@@ -10773,7 +10790,290 @@ not a diagnosis (E.3, DESIGN §17 D:1404-1408).
   matter. D.2's case is structural — where the binding happens, and whether a monolithic
   512-entry queue is buildable. **Build it; do not expect bandwidth from it here.**
 
-### N.9 SST SWEEPS 2026-09-03 — THREE WORKLOADS ON THE FROZEN BUILD `4cd0e05`, AND THIS IS THE SECOND EXCEPTION TO PART N'S BANNER
+### N.9 SST SWEEPS — THE HEADLINE IS THE OUT-OF-ORDER HOST (2026-09-04, frozen `8365318`); THE IN-ORDER SWEEPS OF 2026-09-03 (`4cd0e05`) ARE RETAINED BELOW AS A SECONDARY COLUMN. THIS IS THE SECOND EXCEPTION TO PART N'S BANNER
+
+`[RULED — user 2026-09-04, and it is ledger **L62**: "**THE DEFAULT HOST IS THE OUT-OF-ORDER
+VANADIS CORE**", and "*if you are saying you ran these results without an OOO core, they are
+unpresentable*". The in-order tables are NOT withdrawn and NOT deleted — they are demoted to a
+labelled secondary column, and every one of them now carries the tag **"in-order — superseded
+as headline, user ruling 2026-09-04"**. A reader who quotes an in-order speedup as this
+project's headline is quoting against a ruling.]`
+
+#### N.9a THE OUT-OF-ORDER RE-MEASUREMENT — THE HEADLINE TABLES
+
+`[IMPLEMENTATION EVIDENCE - tier 4, SST]` **Frozen build
+`83653181711ac04fc0b26cddb965be4391cb19bd`** (NMFC-Rev, `main`), written to
+`results/ooo/FROZEN` before the first simulation and not rebuilt during any sweep. Host:
+`test/vanadis-nmfc.py` — **Vanadis at 3.0 GHz, 352 reorder-buffer slots**, 288 physical
+integer / 168 physical FP registers, 6-wide fetch/decode/issue/retire, a 192-entry load/store
+queue holding up to 114 stores, **split 48 KiB L1D / 32 KiB L1I**, 2 MiB L2, `VanadisNodeOS`
+as another agent on the fabric. **The memory system below it is the one the in-order sweeps
+used**: MOESIF directory on the fabric, 4 MiB LLC slice and one DDR5-4800 channel per tile, 4
+tiles × 128 contexts, `G = coherent_memory.grain(4) = 1,048,576 B` read from the
+configuration. **`NMFC_FTU_ENTRIES` = 256** (`e0842d5`, ledger **L62**); the control queue
+takes the same number from the same line. **`NMFC_ALLOW_INORDER` was never set and
+`inorder-nmfc.py` was never run.** `src/rev` untouched; nothing under `/mnt/md0/ChampSim`
+touched. Full record: `results/ooo/RESULTS-OOO.md` and the three per-workload reports beside it.
+
+**Two provenance facts that qualify every two-column comparison below.** (i) The in-order
+columns were taken against **`4cd0e05`** — fourteen to twenty-two commits earlier, before the
+F1 fix (`69e5739`, **L61**) and before the FTU default moved 64 → 256 — **so coherence
+counters do not carry across the gap, and the in-order programs' rings are 60 and 32 where
+these are 252 and 128.** Everything the host comparison turns on — FORK/JOIN/CXW counts,
+invocations, migrations and migration bytes — is byte-identical across it, and that is the
+check that the same program ran. (ii) The coherence A/B (L14) was committed as `6f4bffc` on
+top of `ba4ffe3`; `tile_bfs`/4 under the defaults, rebuilt from the merged tree, is
+**bit-identical in every statistic** to the same point on the frozen library.
+
+> **THE CLAIM SHAPE, RESTATED FOR THE OUT-OF-ORDER TABLES.** Invariant **I8** requires the
+> core model to travel with the number. It now does, and it is an out-of-order one: **352
+> reorder-buffer slots, 6-wide, split L1I/L1D, and every host IPC and ROB-occupancy figure
+> below is Vanadis's own `instructions_retired`, `cycles` and `rob_slots_in_use`.** **The
+> in-order upper-bound caveat therefore does NOT apply to the tables in N.9a** — it applies to
+> the in-order tables in N.9b, which is where it is now written. **M.3's second half still
+> applies to every speedup on either host**: the function core replays resolved control flow
+> and **never mispredicts**, and the branch-honesty sensitivity run is still not in the record
+> (**O.4** item 2). And one caveat is NEW and points the other way: **Vanadis's branch
+> predictor is a 512-entry `VanadisBasicBranchUnit`** which mispredicts 20–23% on these chain
+> walks, each miss discarding a nearly full window — **a stronger predictor would make the
+> baselines faster and these speedups SMALLER still**, so the numbers below are generous to
+> the architecture and the direction of that error is stated rather than assumed away.
+
+**BFS — there is no out-of-order sweep curve, and the reason is a host-model defect.**
+`bfssw_{host,nmfc}_*.exe` **deadlocks under Vanadis in the BASELINE build as much as the
+offloaded one**, a few microseconds in and before the graph is built: `10404: ld a5,0(a5)` —
+the first load after the `node[]` initialisation loop — sits at the head of the reorder buffer
+with `exe: no` for the rest of the run. Ten points ran 22 minutes and printed only their
+banner. It is not the offload (`cpu:rocc` = 0 in the stuck baseline runs), not the tracking
+unit or the fabric queue (neither is touched before `build_graph()`), not the predecode cache
+(4 → 16 moves the plateau by zero instructions), not the tile count and not NUCA. **It is a
+defect in a host model this project does not own and cannot be worked around from
+`src/nmfc`.**
+
+| point | working set | V | **OoO host ms** | **OoO NMFC ms** | **OoO speedup** | in-order — *superseded as headline, user ruling 2026-09-04* |
+|---|---|---:|---:|---:|---:|---:|
+| G/4 | 0.25 MiB | 4,096 | *deadlock* | *deadlock* | **—** | 1.51x |
+| G | 1.00 MiB | 16,384 | *deadlock* | *deadlock* | **—** | 3.08x |
+| 4G | 4.00 MiB | 65,536 | *deadlock* | *deadlock* | **—** | 18.70x |
+| 16G | 16.00 MiB | 262,144 | *deadlock* | *deadlock* | **—** | 24.19x |
+| 32G | 32.00 MiB | 524,288 | *deadlock* | *deadlock* | **—** | 26.19x |
+
+**The out-of-order column is left EMPTY rather than filled from the in-order host.** What did
+run is `tile_bfs.c` — same algorithm, same offload, same counters — at 4,096 V (both builds
+PASS) and 131,072 V (baseline PASS; the offloaded build reached `reached 131034`, the same
+count to the vertex, and was dropped at the 40-minute cap **during its own in-program
+verification**). `tile_bfs.c` marks no phase, so its whole-run ratio is **2.043x
+offloaded/baseline and is explicitly NOT a speedup** — the offloaded build's total contains a
+reference traversal the baseline's does not. **Every size at which the in-order BFS curve says
+the offload wins by an order of magnitude is a size that cannot be reached on this host.**
+
+**SWEEP 2 — Shuffled-sum, compute phase, out-of-order headline.** Checksums equal the
+in-order sweep's at every point, both formulations, both hosts, both builds.
+
+| pt | working set | PASS | host ns (OoO) | NMFC ns (OoO) | **speedup (OoO)** | in-order — *superseded as headline* | host IPC | ROB of 352 | fc instr | mig/load |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 str | 256 KiB | **NEITHER RUN COMPLETED — deadlock** | — | — | **—** | 1.13x | — | — | — | — |
+| 1 grn | 256 KiB | PASS | 589,298 | 236,539 | **2.49x** | 3.71x | 0.382 | 286.8 | 367,300 | 0.938 |
+| 2 str | 1 MiB | **NEITHER RUN COMPLETED — deadlock** | — | — | **—** | 2.00x | — | — | — | — |
+| 2 grn | 1 MiB | PASS | 2,432,293 | 941,537 | **2.58x** | 3.88x | 0.377 | 289.0 | 1,468,596 | 0.938 |
+| 3 str | 4 MiB | PASS | 29,270,477 | 3,761,318 | **7.78x** | 12.15x | 0.166 | 323.9 | 4,947,978 | 0.938 |
+| 3 grn | 4 MiB | PASS | 29,270,352 | 3,761,361 | **7.78x** | 12.15x | 0.166 | 323.9 | 5,872,902 | 0.938 |
+| 4 str | 16 MiB | offload PASS, **baseline did not complete** | — | 15,040,102 | **not measured** | 19.03x | 0.492 | 349.8 | 19,533,844 | 0.750 |
+| 4 grn | 16 MiB | offload PASS, **baseline did not complete** | — | 15,040,993 | **not measured** | 19.04x | 0.492 | 349.8 | 22,274,102 | 0.938 |
+
+**The two striped sub-grain rows are a LIVENESS DEFECT, not slow points**, and it is on the
+NMFC side. 2,686 of 8,192 chains complete and then **every counter on every tile and on the
+fabric is byte-identical at 1 ms and at 5 ms of simulated time** — sixteen times apart, zero
+movement; 252 invocations outstanding (exactly the ring) and none will return; tile 0 holds
+**128 of 128 contexts** while tiles 2 and 3 do no work at all. Reproduces in 52 s. Halving the
+tracking unit to 128 reaches the **same 2,655 completed chains and the same 10,768 loads**, so
+window depth is not the trigger; the circular wait is **not established** and a counter dump
+cannot establish it. **This is a defect to fix in the source, ahead of any performance work.**
+
+**SWEEP 3 — Chained hash table, insert/lookup phase, out-of-order headline.** At every point
+the offloaded build and the baseline agree on all nine recorded quantities, and so does the
+in-order record for the same point.
+
+| point | phase | working set / load factor | max chain | answers identical | host ms | NMFC ms | **speedup (OoO)** | in-order — *superseded as headline* |
+|---|---|---|---:|:--:|---:|---:|---:|---:|
+| P0 | sep | 0.69 MiB / 0.125 | 3 | yes | 0.794 | 1.463 | **0.54x** | 0.61x |
+| P0 | int | 0.69 MiB / 0.125 | 3 | yes | 1.237 | 1.491 | **0.83x** | 0.90x |
+| P1 | sep | 1.00 MiB / 0.333 | 5 | yes | 2.182 | 3.892 | **0.56x** | 0.59x |
+| P1 | int | 1.00 MiB / 0.333 | 5 | yes | 3.408 | 3.984 | **0.86x** | 0.94x |
+| P2 | sep | 4.00 MiB / 2.333 | 11 | yes | 31.456 | 27.212 | **1.16x** | 1.58x |
+| P2 | int | 4.00 MiB / 2.333 | 11 | yes | 35.824 | 28.226 | **1.27x** | 1.78x |
+| P3, P4 | both | 16.00 G / 10.333, 31.99 G / 21.0 | — | — | **dropped — all eight over the 45-minute budget** | | **—** | 7.72x–18.22x |
+
+Migrations per invocation on the out-of-order host are **0.7408 / 0.7497 / 0.7469 / 0.7505 /
+0.7500 / 0.7506** — **identical to the in-order record at all six points to four decimal
+places**, which is the check that the machine below the host is the same machine.
+
+##### THE HOST-FEED FINDING — the measurement L63 was waiting for, and it answers the opposite way
+
+`[This is the resolution of ledger **L63**'s open item. L63 asked whether admission on an
+out-of-order host is bounded by the FTU, by the fabric, or by neither, and forbade any
+statement in either direction until the host-feed table landed. It has landed.]`
+
+| workload | metric | **in-order (Rev)** | **out-of-order (Vanadis, 352 ROB)** | ratio |
+|---|---|---:|---:|---:|
+| `tile_bfs`, 4 tiles | all NMFC instructions / host cycle | **0.012317** | **0.008012** | **0.65x** |
+| shuffled-sum, pt 3 | FORK+JOIN / host cycle *(the count exact on both)* | **0.03685** | **0.02323** | **0.63x** |
+| hash table, P0 sep | all NMFC instructions / host cycle | **0.0343** | **0.0206** | **0.60x** |
+| hash table, P0 int | all NMFC instructions / host cycle | **0.0411** | **0.0202** | **0.49x** |
+
+**THE ANSWER IS THE OPPOSITE OF THE HYPOTHESIS, AND IT IS THE SAME ON THREE WORKLOADS. The
+in-order host was NOT throttling the NMFC side. It was driving it FASTER.**
+
+1. **Nothing was ever refused, on either host.** `forkRefused` is **0** at every completed
+   point of all three workloads on both hosts. The tracking unit peaks at **24 of 256** on
+   `tile_bfs` and **128–143 of 256** on the hash table; the tiles never exceed **1.4%** of
+   their 512 contexts. **The FTU does not bind on the out-of-order host either** — which is
+   the sentence L63 forbade until it was measured, and it is now measured. What binds is on
+   the host side of the interface.
+2. **The mechanism is architectural, not a modelling accident, and it is one branch in the
+   host.** A coprocessor instruction is architecturally visible the moment it issues — an
+   NMFC `FORK` puts an invocation on the fabric and nobody can take that back — so on a
+   machine that speculates it may issue only when it is the **oldest instruction in the
+   reorder buffer**. Vanadis enforces exactly that (`vanadis.cc`:
+   `if (is_rocc && j != 0) { allocate_fu = 1; }`). The core may fetch, decode and rename past
+   it, which is why the buffer fills at 87–98%; it cannot retire past it. **Each NMFC
+   instruction is therefore a serialisation point, measured at 14.4 host cycles apiece against
+   ≤ 9.05 on the in-order host.** An in-order core pays none of this: it has nothing to
+   squash, so a coprocessor instruction is just an instruction.
+3. **The cost per unit of work is a host-side constant on both hosts, and the two constants
+   differ.** Shuffled-sum: `all NMFC instr / host cycle` reads **0.06927, 0.06961, 0.06969,
+   0.06972 over a 64× range of working set** — six instructions per chain over that rate is
+   **86.6, 86.2, 86.1, 86.1 host cycles per chain**, against **54.3** in-order, so **the
+   out-of-order host drives the function cores 1.58× slower at every size**. Hash table: the
+   offloaded build costs the host **355.9, 356.3, 357.2 cycles per operation** at P2, P1, P0
+   separated — flat to 0.4% over a 6× working set and a 2.1× chain length — against **213.5**
+   in-order, the same **1.67×**.
+4. **FTU occupancy is not concurrency, and this is the counter that proves the point L63
+   re-labelled.** At shuffled-sum point 1 the unit holds **247.0 of 252 entries live while
+   only 13.6 contexts are resident across the four tiles** — the other ~233 are finished
+   results an in-order retirement ring has not collected. The in-order host, with a **quarter**
+   of the entries, kept **more** work at the tiles (21.2 against 13.6). Quadrupling the
+   tracking unit bought a longer queue of uncollected results and no concurrency at all. On
+   the hash table the same relation closes as **Little's law** —
+   `contexts per tile = residency ÷ host issue interval ÷ tiles` — to **two decimal places at
+   all twelve points**.
+5. **What the in-order host actually burned was the POLL, not the fork.** On `tile_bfs`, FORK
+   (4,096), JOIN (4,096) and CXW (32,768) are **identical on both hosts** and migrations are
+   **byte-identical** (3,073, 221,256 B); what falls is `JOINQ` — **36,085 in-order against
+   18,184 out-of-order, 8.8 polls per join against 4.4** — which is a 352-entry window covering
+   the same wait with half as many queries. Strip the poll out and the *architectural* feed
+   rate moves only **15.3%**, and it moves DOWN.
+6. **And the out-of-order host still loses `tile_bfs` by 18%** — 2.4581 ms against 2.0829 ms,
+   at IPC 0.232 with the reorder buffer 87% full and touching 351 of 352 slots. **A buffer that
+   full on a dependent poll is a buffer waiting, not a buffer helping.**
+
+**THE OTHER SIDE OF THE IN-ORDER EFFECT — the half I8's original caveat was about — IS REAL,
+IS SMALLER THAN EXPECTED OVER THE RANGE REACHED, AND IS MEASURED.** The out-of-order
+**baseline** is *not* faster on these workloads at the sizes that ran: it is **5.2% slower**
+on shuffled-sum at 0.25 G and 1 G and 1.6% slower at 4 G (2.00 branch mispredictions per
+chain, each discarding an average of 347.4 reorder-buffer entries), and it costs **1.49× and
+1.58× the cycles** of the in-order baseline at hash-table P0 and P1 — where the L2 miss counts
+say the phase was never waiting on memory at all (**11,394 misses against 11,264 lines**;
+**16,513 against 16,384** — compulsory misses, no capacity misses). **At P2 it begins to
+reverse**: the working set is twice the L2, L2 misses go 16,513 → 296,913, and the
+out-of-order baseline's penalty falls from **1.58× to 1.22×** separated and 1.87× to 1.46×
+interleaved. **The load-overlap effect is real and worth about 0.36 of the 1.58 by P2 — it
+closes a gap over this range rather than opening one.** And `host_bfs_big` shows the regime
+directly: a pointer chase over a 13.0 MiB graph runs at **IPC 0.151 with 312.5 of 352 slots
+occupied**, against 0.332 and 266.7 at 416 KiB. **How much of the offload's advantage an
+out-of-order baseline gives back at the sizes where the in-order curve turns is NOT KNOWN and
+is not estimated here**, because those are exactly the sizes the swept binary cannot reach on
+this host.
+
+**The arithmetic of the fall, on the one workload that supports it.** Shuffled-sum:
+`speedup_OoO / speedup_in-order` = **0.671, 0.665, 0.640**, which factors exactly into a
+**baseline term of 1.052, 1.052, 1.016** and an **offload term of 0.639, 0.632, 0.630**.
+**None of the lost speedup is the baseline overlapping loads better; all of it is the offload
+side**, and item 2 is what that ×0.63 is.
+
+##### THE FTU 128-vs-256 ROW (one comparison row, ruled; no ablation sweep)
+
+`[RULED — user 2026-09-04, ledger L62: FTU default is 256; run the middle size point of each
+workload once at NMFC_FTU=128 as ONE extra row. `vanadis-nmfc.py` already honours the
+override, so the build stayed frozen.]`
+
+| workload | what the row says |
+|---|---|
+| **BFS (`tile_bfs`)** | **Byte-identical.** The program fixes its in-flight window at **24** in source, below both 128 and 256, so the program's ring binds either way: 5,881,354 host cycles, 1.9585 ms, `ftuPeak` 24, `forkRefused` 0, 294,911 tile instructions in both. Halving a structure nobody queued for changes nothing. |
+| **Shuffled-sum (pt 3)** | **7.78x → 7.23x (+7.6% on the phase)**, `forkRefusedFTU` **130,944** against M = 131,072 — essentially every chain's first FORK refused, taken as the answer it is, so the NMFC stream goes **6 → 7 instructions per chain**. Cost per NMFC instruction moves 14.35 → 13.23 cycles — *down*, because a refused FORK never reaches the fabric. `JOINQ` per `JOIN` stays 1.00 and tile occupancy falls only 3.6 → 3.3 of 128. **The cost tracks the instruction count, not the tiles.** |
+| **Hash table** | **It does not finish, and that is the row.** Run at P2 interleaved, then dropped to P1 and P0; **all three killed at 2,700 s** against 1,045.5 / 166.6 / 73.1 s at FTU 256 — at least **2.6x, 16.2x, 36.9x**. `tile_htab.c` sizes its lookup ring at `NMFC_FTU_ENTRIES / 2` **at compile time**, so the ring is 128 in both runs; at 128 the ring alone fills the unit, every insert is refused, and the insert path retries `FORKF` up to 4,000,000 times **without ever calling `collect_one()`**. **At 256 the tracking unit is not the constraint; at 128 it is a cliff** — and what falls off it is the program's fire-and-forget path. A ring sized at half the tracking unit is safe only while the unit really is twice the ring. |
+
+##### WHAT LIMITS THE MACHINE NOW — ranked, on the default host, each with the counter that says so
+
+1. **The host's NMFC-instruction issue rate on a speculating host.** ~14 host cycles per NMFC
+   instruction; 86 host cycles per chain flat across a 64× range; 355.9 cycles per hash-table
+   operation flat across a 6×. `roccQueueFull` = 0 and the NMFC unit answers in the tick it
+   accepts a command, so **the coprocessor is idle waiting and the cost is entirely the host's
+   issue rule.** **This is the binding constraint at every size that completed.**
+2. **In-order retirement of each program's own ring**, which turns the tracking unit into a
+   queue of finished results (247 live against 13.6 resident) and, on `tile_bfs`, into a
+   24-deep window that binds below both FTU sizes.
+3. **Placement, and below one grain it is worth more than the host model is.** `first_touch`
+   against `round_robin` on the identical `tile_bfs` binary and host: 2.4581 → 1.9585 ms
+   (**1.25x**), migrations 3,073 → 0, slice hit 0.637 → 0.871. Below one grain on shuffled-sum
+   the same failure is now a **deadlock** rather than a slowdown.
+4. **NOT the tracking unit at 256, NOT the fabric, NOT the tiles, NOT DRAM, NOT the slices.**
+   `forkRefused` 0 everywhere; `invocationQueueFull` 0 throughout; tiles under 1.4% of 512
+   contexts; DRAM 0.14–0.56% of peak at 87–98% row-hit; slices 84–99%.
+5. **And two liveness defects cap what can be measured at all** — the swept-BFS host-model
+   deadlock and the shuffled-sum striped sub-grain freeze. Item 5 is not a footnote; on BFS it
+   is the result.
+
+**The interface change this points at, stated once and not built:** let `FORK` issue
+speculatively and hold its packet until the instruction retires. That is a change to the
+**interface**, not to the tiles, and it is what would let an out-of-order host be worth having
+here. Until then the honest statement is that **NMFC's host interface is designed for an
+in-order host and pays a speculating one a pipeline drain per instruction.**
+
+##### THE OUT-OF-ORDER CAVEATS
+
+- **M.3's second half — branch honesty — is still unrun** and applies to every speedup on
+  either host. The core-model half of I8/M.3 is now **discharged for these three workloads**:
+  the host model is named, is out-of-order, and travels with the number.
+- **Convergence is observed, not proven, and it is weaker here than in the in-order sweep** —
+  shuffled-sum has four points on this host where the in-order sweep had six, and BFS has none.
+- **Dropped and overrun points, all reported.** Hash table P3 and P4: all eight killed at
+  2,700 s (measured OoO/in-order wall ratio 7.8–13.9× puts P3 at 1.5–5.0 h and P4 at 18–29 h).
+  Hash-table FTU-128: killed at all three sizes tried. Shuffled-sum 16 G: offload measured,
+  **baseline not measured** (~70 min/run, started, lost to an unrelated process-group kill at
+  ~75%, not restarted); 32 G and 64 G not attempted. `tile_bfs_big` offloaded: traversal
+  finished and agreed, dropped at the cap during its own verification. `bfssw_4g` under the
+  coherence A/B: 1,500 s, banner only.
+- **No speedup is extrapolated across hosts.** The two hosts differ by a near-constant factor
+  on the offloaded side and by ~2% on the baseline; **no number is offered for any point that
+  did not run here.**
+- **The in-order columns are a different build and a different ring** (`4cd0e05`, FTU 64,
+  rings 60/32) and their polling counters were not archived. FORK and JOIN are exact on both
+  hosts because the programs' structure fixes them; `JOINQ`/`CXW`/`CXR` are marked *not
+  archived* for shuffled-sum rather than reconstructed. **Rev reports no retired-instruction
+  count**, so its IPC is an issue-cycle proxy and the comparison of instruction *counts* uses
+  Rev's `CyclesWithIssue` against Vanadis's `instructions_retired` — they agree to 0.002–0.004%
+  on the same binary, which is evidence that the same program ran and not a proof that the two
+  counters mean the same thing.
+- **Two statements about a host model this project does not own.** The branch predictor
+  (above), and Vanadis still does not narrow `addw`; the two hosts compute bit-identical
+  answers on all three workloads, which rules that defect out of these numbers.
+- **Wall-clock times were taken with several agents sharing a 144-core machine** and are upper
+  bounds. Simulated results are unaffected.
+- **SST remains tier 4 and decides nothing**; Appendix 2 **S38** still forbids comparing any
+  SST number to a ChampSim number.
+
+---
+
+#### N.9b THE IN-ORDER SWEEPS OF 2026-09-03, FROZEN `4cd0e05` — SUPERSEDED AS HEADLINE, USER RULING 2026-09-04
+
+**[RETAINED, NOT WITHDRAWN. Everything below was measured, and its provenance is recorded —
+which is the whole reason this subsection is an exception to Part N's banner. What changed on
+2026-09-04 is its STANDING: it is a secondary column, and it may not be quoted as this
+project's headline. Where an out-of-order measurement of the same point exists, N.9a is the
+one to quote; where none exists — every BFS size, shuffled-sum 32 G and 64 G, hash-table P3
+and P4 — the honest statement is that the point has not been measured on the default host.]**
+
 
 `[IMPLEMENTATION EVIDENCE - tier 4, SST]` **[ADDED 2026-09-03 (evening). Read the banner at
 the head of this Part and then read this sentence: THESE MEASUREMENTS ARE NOT COVERED BY IT.
@@ -10800,9 +11100,12 @@ Parts G, K, L and N — **their provenance is recorded** — is true of these.]*
   wall time **5m01s**: `NMFC SUITE: PASS`, `NMFC COHERENT SUITE: PASS`,
   `NMFC VANADIS SUITE: PASS`.
 
-> **THE CLAIM SHAPE — IT TRAVELS WITH EVERY HEADLINE NUMBER BELOW, AND A NUMBER QUOTED
-> WITHOUT IT IS QUOTED WRONGLY.** This is invariant **I8**'s requirement that the core model
-> travel with the number, and **M.3**'s parity caveat, applied to this sweep:
+> **THE CLAIM SHAPE FOR THE IN-ORDER TABLES — IT TRAVELS WITH EVERY NUMBER BELOW, AND A
+> NUMBER QUOTED WITHOUT IT IS QUOTED WRONGLY. `[AMENDED 2026-09-04: these are no longer
+> HEADLINE numbers. The headline is N.9a. Bullet 1 below is the reason the ruling was made,
+> and it is now discharged there — for the workloads and sizes that ran on the default host.]`**
+> This is invariant **I8**'s requirement that the core model travel with the number, and
+> **M.3**'s parity caveat, applied to this sweep:
 >
 > 1. **The host is Rev, and Rev is IN-ORDER.** It has no reorder buffer and sleeps on one
 >    outstanding load, so the baseline cannot overlap dependent chains or run ahead into the
@@ -10821,6 +11124,19 @@ Parts G, K, L and N — **their provenance is recorded** — is true of these.]*
 > **So: BFS is bounded on both sides, and the other two sweeps are bounded above.** I8 is
 > otherwise satisfied — each baseline is the reference algorithm compiled from the same source
 > over the same data with the same placement, and the comparison is on identical work.
+>
+> `[UPDATED 2026-09-04 — BULLET 1's LAST SENTENCE IS NO LONGER TRUE AND ITS BOUND IS NOW
+> MEASURED, NOT ASSUMED.]` Vanadis is no longer unrun: **all three workloads have been run on
+> it, and it is now the DEFAULT host (L62).** N.9a holds the results. The upper bound bullet 1
+> asserts turned out to be **much smaller than expected over the range that could be reached,
+> and on the offloaded side it points the other way**: the out-of-order **baseline** is 1.6–5.2%
+> *slower* on shuffled-sum and costs 1.49–1.58× the in-order baseline's cycles at hash-table
+> P0/P1, closing only to 1.22× at P2 where the working set finally exceeds the L2 — while the
+> out-of-order host drives the **offload** 1.58–1.67× slower, so **every out-of-order speedup
+> in N.9a is LOWER than its in-order counterpart, at every point that ran.** Bullet 2 (branch
+> honesty) is untouched and still applies to both hosts. Bullet 3 (BFS at 64 fabric credits)
+> is untouched and applies only to the in-order BFS table, since there is no out-of-order BFS
+> curve.
 
 `[RE-READ — user 2026-09-04. CLAIM-SHAPE ITEM 1 IS INCOMPLETE AS WRITTEN, AND THE MISSING
 HALF CHANGES WHICH STRUCTURE THESE SWEEPS INDICT.]` Item 1 above applies the in-order caveat
@@ -10836,14 +11152,24 @@ bottleneck" or "the concurrency ceiling is the FABRIC, not the tracking unit" is
 a statement about an IN-ORDER-FED machine** — a structure cannot report itself binding
 while it is being fed below its capacity, and the FTU/window ablations that "changed
 nothing" were ablations of a resource nobody was queueing for. **Those results are NOT
-withdrawn and they are NOT evidence about the out-of-order host.** The measurement that
-decides it is the **host-feed table in the Vanadis sweeps**, which is being taken; until it
-lands, **whether admission on an out-of-order host is bounded by the FTU, by the fabric, or
-by neither is NOT KNOWN.** H.9, H.9a, N.4, ledger **L63**.
+withdrawn and they are NOT evidence about the out-of-order host.**
+
+`[RESOLVED 2026-09-04 — THE HOST-FEED TABLE LANDED, AND IT ANSWERS THE OPPOSITE WAY. See
+**N.9a**, "THE HOST-FEED FINDING", and ledger **L63**, now CLOSED.]` The measurement is taken,
+on three workloads. **The in-order host was not throttling the NMFC side: it was driving it
+FASTER** — NMFC instructions per host cycle fall to **0.65×** (BFS), **0.63×** (shuffled-sum)
+and **0.60× / 0.49×** (hash table sep/int) of the in-order rate on the out-of-order host. And
+**`forkRefused` is 0 at every completed point on both hosts**, with the tracking unit peaking
+at 24 of 256 on `tile_bfs` and 128–143 of 256 on the hash table, so **the FTU does not bind on
+the out-of-order host either.** The mechanism is that a coprocessor instruction cannot be
+speculative: on Vanadis a RoCC op issues only when it is the oldest instruction in the reorder
+buffer, at ~14.4 host cycles apiece. **What is still true, and is the durable half of the
+re-read: the admission rate is a HOST statistic on BOTH host models** — it is just that the
+out-of-order host's is *lower*. H.9, H.9a, N.4, ledger **L63**.
 
 ---
 
-#### SWEEP 1 — BFS (direction-optimising; the bottom-up step is what was offloaded)
+#### SWEEP 1 — BFS (direction-optimising; the bottom-up step is what was offloaded) — *in-order, superseded as headline, user ruling 2026-09-04*
 
 Times are the **offloaded step** (the bottom-up levels only, the part that moved); the
 top-down levels are the same host code in both builds. Answers are compared by diffing
@@ -10884,7 +11210,7 @@ core streaming.
 
 ---
 
-#### SWEEP 2 — Shuffled-sum (N=4 dependent-load layers, one invocation per chain)
+#### SWEEP 2 — Shuffled-sum (N=4 dependent-load layers, one invocation per chain) — *in-order, superseded as headline, user ruling 2026-09-04*
 
 Both page formulations run at every point: **str** = STRIPED (`.bss`, one contiguous `N·G`
 extent), **grn** = GRAIN (one vtile per layer). Times are the compute phase only, stamped by
@@ -10936,11 +11262,15 @@ quadrupling the window (FTU 256, window 248) at 16 MiB made it **2.6% slower** w
 counter unchanged — the fourth independent instance of **H.9a**'s finding. `[RE-READ — user
 2026-09-04: on the IN-ORDER host, which bounds admission on the NMFC side as well as the
 baseline side, so all four instances say "not the bottleneck WHEN FED IN ORDER". See the
-re-read box under this subsection's claim shape; L63.]`
+re-read box under this subsection's claim shape; L63.]` `[AND NOW ANSWERED — 2026-09-04, N.9a:
+the FTU does not bind on the OUT-OF-ORDER host either. `forkRefused` = 0 at every completed
+point on both hosts and the unit peaks at 128–143 of 256; what binds is the host's NMFC
+issue rate, which is LOWER on the out-of-order host. The finding survives on both hosts, for a
+reason neither host's ablation could have shown.]`
 
 ---
 
-#### SWEEP 3 — Chained hash table (fixed `B` = 2^16 buckets, tail-swap append)
+#### SWEEP 3 — Chained hash table (fixed `B` = 2^16 buckets, tail-swap append) — *in-order, superseded as headline, user ruling 2026-09-04*
 
 Two phase structures at every point: **sep** = all `I` inserts then `I/2` lookups; **int** =
 inserts and lookups mixed 2:1, so chains are appended to while they are walked. Times are the
@@ -10986,6 +11316,12 @@ tracking unit:** re-running P3 with FTU 256 / credits 256 / ring 128 changed the
 `[RE-READ — user 2026-09-04: measured with an IN-ORDER host feeding it, so "the fabric, not
 the tracking unit" is ranked under a bounded feed. On the out-of-order host the ranking is
 being measured and is not known; see this subsection's claim-shape re-read box and L63.]`
+`[NOW MEASURED — 2026-09-04, N.9a: on the out-of-order host the ranking is neither. The
+binding constraint is the HOST's NMFC-instruction issue rate (~14.4 cycles per instruction,
+`roccQueueFull` = 0, the coprocessor idle waiting); the fabric queue never fills
+(`invocationQueueFull` = 0) and the tracking unit never refuses (`forkRefused` = 0). The
+ranking in this sentence is superseded for the out-of-order host and retained for the
+in-order one.]`
 
 ---
 
@@ -11069,6 +11405,16 @@ they were written.]**
 >   machine**, so they are upper bounds. Simulated results are unaffected — the simulations are
 >   deterministic and the configurations were byte-identical across runs.
 
+`[TWO OF THE CAVEATS ABOVE ARE SUPERSEDED IN PART, 2026-09-04, AND THE QUOTE IS LEFT VERBATIM
+BECAUSE A CAVEAT PARAPHRASED IS A CAVEAT WEAKENED. (i) "*Vanadis (out-of-order) exists in the
+configuration set and none of the three workloads has been run on it*" is **no longer true**:
+all three have been run on it, it is now the default host (**L62**), and the results are
+**N.9a**. (ii) The first caveat's "*every speedup here is therefore an upper bound with respect
+to host microarchitecture*" is now **measured rather than assumed** — the bound is much smaller
+than expected over the range that could be reached, and the out-of-order speedups are lower at
+every point that ran, for a reason on the OFFLOAD side rather than the baseline side. Nothing
+in the block above is withdrawn; it is what this sweep reported, on the host it reported it on.]`
+
 **Two of those caveats have their own rows in this document and must be followed there rather
 than argued from here.** **F1** is ledger **L61**, and it is now **CLOSED — FIXED** in
 `69e5739`, verified by a test that fails on the parent commit and passes at 1, 2 and 4 tiles
@@ -11084,6 +11430,14 @@ above, because it is not.]` **The R-F deviation** is the pair of
 `[This paragraph exists because "converges to 27×" is the sentence most likely to be lifted
 out of the tables above and quoted without any of the three preceding subsections. Rule 4:
 when quoting a number, quote its provenance.]`
+
+`[AND FROM 2026-09-04 THE PROVENANCE INCLUDES THE HOST RULING. Every convergence statement
+below is about the IN-ORDER tables and may not be quoted as this project's headline. **On the
+default out-of-order host no convergence was observed at all, because no curve reached far
+enough**: BFS has no curve (the swept binary deadlocks), shuffled-sum has four points ending
+at 7.78× where its in-order counterpart read 12.15×, and the hash table tops out at 1.27×
+where its in-order counterpart read 1.78×. **Item 5 and item 6 below are also superseded in
+their ranking** — see N.9a, "WHAT LIMITS THE MACHINE NOW".]`
 
 1. **A convergence is OBSERVED, not established.** Two of the three sweeps flatten in the
    high 20s — BFS 18.70 → 24.19 → 26.19×, shuffled-sum 19.0 → 25.5 → 26.9× — **and the sweep's
@@ -11126,6 +11480,13 @@ when quoting a number, quote its provenance.]`
    by the IN-ORDER host, whose FORK/JOIN retire in order at ≤ 1/cycle and bound admission on
    the NMFC side too, so "quadrupling the FTU changed nothing" is what enlarging an unqueued
    resource looks like. The fabric ranking above is ranked under that bounded feed. L63.]`
+   `[AND THE FOURTH STRUCTURE IS THE ONE THAT REPORTED ITSELF BINDING — 2026-09-04, N.9a. On
+   the out-of-order host the host's own NMFC-issue rule is the constraint at every size that
+   completed, and it is the first structure in this project's history to report itself binding
+   with the counters that would have shown it idle if it were not: `roccQueueFull` = 0,
+   `invocationQueueFull` = 0, `forkRefused` = 0, tiles under 1.4% of their contexts, DRAM under
+   0.6% of peak. **O.1's warning still applies to the ranking and is now aimed at THIS claim**:
+   it is a measurement of two host models, not a finding about hosts in general.]`
 
 
 ---
@@ -11974,6 +12335,102 @@ wrong way.** **[RULED 2026-09-02 — see the RULED bullet at the end of this row
 - **`[IMPLEMENTATION CHOICE — user to ratify or overturn]` (i) — THE LINE IS NOT WRITTEN TO THE SLICE AT THE MOMENT OF TRANSFER.** The ruling's letter is "*the host writes back to the tile's slice and drops to S*"; two of its three clauses are implemented exactly and this one is not. **As built, the writeback duty moves with the ownership** and the line reaches the tile's slice when the tile evicts it. **The reason:** writing it back at the transfer is a DRAM write that `O` exists to avoid, and it would be paid **twice** for any line the tile never modifies — once at the transfer and again at the tile's eviction — so `memWrites` would rise by roughly one per transferred line (**about 3,900 on this run**) to buy nothing. As built `memWrites` is flat, and the effect the ruling asks for still holds: after the tile evicts, its writeback puts the line in the slice under its own stack and its next read is a local slice access — which is what the +6.3% `memReads` and the +0.84 pt slice hit rate are. **The ruling stands as written until the user rules on this.**
 - **`[IMPLEMENTATION CHOICE — user to ratify or overturn]` (ii) — THE GRANT IS `O`, NOT `E`/`M`.** The ruling's letter is "*the directory records the tile as owner (E/M)*". **`(E/M)` cannot be granted while the host keeps its copy:** `E` in this protocol permits a **silent** local upgrade to `M` (`writable(E)` is a local hit in `NMFCCache`, with no message to the directory), so granting `E` while the host holds `S` would lose the host's copy on the tile's first write. **`O` is the state that gives the tile the ownership AND the dirty copy while keeping the host's `S` copy correct** — the tile's first write becomes an **upgrade**, which invalidates the host properly. `E` would be reachable only by dropping the host to `I`, which contradicts the ruling's own "*drops to S*". **The two clauses of the ruling are in tension and the build resolved it in favour of "drops to S"; the user may rule the other way.**
 - **AND ONE MEASUREMENT THIS ROW DOES NOT CLAIM.** The change is neutral on run time (2.08294 ms either way) — **it is a coherence-traffic result, not a speed result**, and it must not be quoted as one. The first term of the ratio, the workload shape, is unchanged, so **the instruction above — do not quote the snoop-direction table as evidence for or against I14 — still stands.** Written at **C.5**, and stated as architecture (no numbers, no history) at `docs/nmfc/ARCHITECTURE.md` §2.5.
+
+
+- **[MEASURED — POLICY CHOSEN BY MEASUREMENT. 2026-09-04, the coherence A/B on the DEFAULT
+  out-of-order host at frozen `8365318`.]** `[IMPLEMENTATION EVIDENCE - tier 4, SST 6f4bffc, on
+  `origin/main` on top of `ba4ffe3`.]` `[user ruling 2026-09-04, verbatim: "COHERENCE POLICY
+  A/B on the default host at the frozen build — the user has no opinion and wants it
+  measured."]` **The two `[IMPLEMENTATION CHOICE]` items below are no longer arguments; they are
+  A/B rows.** Four protocols, one machine, three workloads at 4 tiles, offloaded build only (the
+  host baseline has no function core on the fabric, so all four settings produce the same run):
+  **transfer off** (`ownershipTransfer=0`, the plain `FetchDown` downgrade, the host stays Owner
+  and forwards on every repeat read); **on (current)** (`FetchXfer`, grant `O`, no writeback);
+  **on + writeback** (`xferWriteback=1`, a slice write at the moment of transfer); **on +
+  M/invalidate** (`xferGrant=M`, `FetchInv`, an exclusive dirty grant). Knobs `xferWriteback`
+  and `xferGrant` on `nmfc.NMFCCoherenceFabric`, reached as `NMFC_XFER_WRITEBACK` /
+  `NMFC_XFER_GRANT`; **naming either while `ownershipTransfer=0` is FATAL, not ignored** — a run
+  that reported a policy it did not take would be wrong in a way nothing in its output could
+  show. Workloads: `tile_bfs`/4 and `htab_p2_int`/4 (both named by the user) and `shuf_str_3`/4
+  standing in for `bfssw 4G`, which was re-run under the current setting and confirmed
+  unmeasurable on this host (1,500 s, banner only, dropped — the host-model deadlock at N.9a).
+- **THE M VARIANT HAD TO BE MADE CORRECT BEFORE IT COULD BE MEASURED, and "invalidate the host
+  copy" was not the whole requirement.** An `Owned` line is dirty **and shared**, so a host that
+  owns one can have clean sharers beside it, and **a writable grant beside any survivor is bug
+  F1 (L61) with the sides swapped** — the tile writing the line silently while someone else
+  reads its own stale bytes. The snoop is therefore `FetchInv` to the owner **and `Inv` to every
+  other sharer**, with the directory clearing the sharer set and the forwarder nomination with
+  it. That makes the M variant a **read-for-ownership taken on a read**, which is the textbook
+  migratory-data optimisation. `xferInvSharers` counts the copies past the owner's and reads
+  **zero on all three workloads** — the case did not arise in them, which is not the same as it
+  not existing, and is why it is counted rather than assumed.
+- **The A/B table.** Simulated time is the workload's own phase timer where it keeps one
+  (`HT-TIME workcyc`; `SHUFFLE cycles: compute`); `tile_bfs.c` marks no phase, so its number is
+  the whole run and is labelled as a bound. **`DRAM wr` is zero in all twelve runs** — these
+  working sets fit the four 4 MiB slices, so every writeback lands in a slice, which is why
+  `slice wr` sits beside it. **Every workload's answer is byte-identical under all four
+  protocols**, checked on the digests (`valhash`/`valsum`/`ansdig`, the shuffled sum's checksum,
+  the BFS reached set) rather than on the PASS lines.
+
+  | workload | setting | sim time (ns) | hostPays | nmfcPays | fwdFromO | fwdFromF | ownXfers | xferWB | xferInv | slice wr | DRAM wr | slice hit |
+  |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | tile_bfs | transfer off | 1,958,471 | 277 | 12,307 | 12,063 | 9 | 0 | 0 | 0 | 18,016 | 0 | 84.8% |
+  | tile_bfs | **on (current)** | 1,958,490 | 277 | 4,616 | 275 | 3,674 | 4,616 | 0 | 0 | 22,094 | 0 | 87.1% |
+  | tile_bfs | on + writeback | 1,958,490 | 277 | 4,616 | 275 | 3,674 | 4,616 | 4,616 | 0 | 26,710 | 0 | 88.2% |
+  | tile_bfs | on + M/invalidate | **2,253,578 (+15.1%)** | 278 | 4,616 | 276 | 20 | 4,616 | 0 | 4,616 | 21,979 | 0 | 88.7% |
+  | htab_p2_int | transfer off | 28,225,655 | 921 | 16,820 | 9,593 | 120 | 0 | 0 | 0 | 312,257 | 0 | 99.0% |
+  | htab_p2_int | **on (current)** | 28,225,655 | 921 | 8,192 | 965 | 120 | 8,192 | 0 | 0 | 312,695 | 0 | 99.0% |
+  | htab_p2_int | on + writeback | 28,225,655 | 921 | 8,192 | 965 | 120 | 8,192 | 8,192 | 0 | 320,887 | 0 | 99.0% |
+  | htab_p2_int | on + M/invalidate | 28,225,655 | 921 | 8,192 | 965 | 120 | 8,192 | 0 | 8,192 | 312,676 | 0 | 99.0% |
+  | shuf_str_3 | transfer off | 3,761,318 | 0 | 256,564 | 256,606 | 4,280 | 0 | 0 | 0 | 65,614 | 0 | 89.8% |
+  | shuf_str_3 | **on (current)** | 3,761,318 | 1 | 31,929 | 43 | 198,589 | 31,929 | 0 | 0 | 65,614 | 0 | 90.3% |
+  | shuf_str_3 | on + writeback | 3,761,318 | 1 | 31,929 | 43 | 198,589 | 31,929 | 31,929 | 0 | 97,543 | 0 | 90.7% |
+  | shuf_str_3 | on + M/invalidate | 3,761,318 | 1 | 31,930 | 43 | 4,963 | 31,930 | 0 | 31,930 | 65,614 | 0 | 92.5% |
+
+- **Correctness under each setting** (`run_coherent.sh` in full, 80 simulations per setting, run
+  one setting at a time): **PASS** for *on*, *on+writeback* and *on+M/invalidate* — 78 of 78
+  programs, `tile_dirty_xfer` PASS at 1, 2 and 4 tiles. Under *transfer off* it is **FAIL (3)**,
+  and **those three are the setting, not a defect**: they are the gates added by this very row
+  whose purpose is to check that a transfer happened (`nmfcOwnershipTransfers` non-zero on two
+  workloads, and `fwdFromO < nmfcOwnershipTransfers` on `tile_bfs`/4). **The F1 gate
+  (`snoopDirtyInvalidated` = 0 on every cache) reads zero under all four settings, the M variant
+  included.**
+- **RECOMMENDATION, AND IT IS WHAT THE COUNTERS SAY RATHER THAN A PREFERENCE: keep the shipped
+  defaults — `ownershipTransfer=1`, `xferWriteback=0`, `xferGrant=O` — and keep all three as
+  KNOBS rather than as decisions.**
+  1. **The transfer earns its default on traffic, not on time.** `nmfcPaysSnoop` falls 51–88%
+     and `fwdFromO` falls 90–99.98% on all three workloads — precisely the asymmetry **I14**
+     names — and it costs nothing: simulated time agrees to **0.001%** on `tile_bfs` and **to
+     the nanosecond** on both workloads that keep a phase timer. Turning it off buys nothing and
+     gives back the one thing R-F was introduced to fix.
+  2. **Writeback-at-transfer is a straightforward loss, and choice (i) below is therefore
+     RATIFIED BY MEASUREMENT.** It adds **exactly one slice write per transfer** — 4,616, 8,192
+     and 31,929, one per transfer by construction — and moves **no other counter in any of the
+     three runs, time included**. The tile still holds the line dirty and still writes it back
+     when it evicts, so this is a write **added** to the run rather than moved within it. On this
+     machine the slices absorb them and DRAM never sees them; on a machine whose working set
+     spilled they would be DRAM writes and the case would be **worse, not better**.
+  3. **The M variant is correct but WORKLOAD-DEPENDENT, so it must not be the default — and
+     choice (ii) below is therefore RATIFIED BY MEASUREMENT for the default, with `M` retained
+     as the knob.** `upgrades` against `invalidations` is the counter that decides the sign.
+     Under `O` the tile's first write is an **upgrade**, a second round trip taking back the copy
+     the host kept; under `M` that copy never existed. On `htab_p2_int` that merges the transfer
+     and the upgrade into one snoop: **8,192 upgrades disappear (8,235 → 43) and the
+     invalidation count does not move at all (8,235 → 8,235)** — which is why it is neutral **to
+     the nanosecond** rather than merely close. On `shuf_str_3` the tiles only **read**, so there
+     is no upgrade to save and `M` buys **31,930 invalidations for nothing** (39 → 39 upgrades,
+     40 → 31,970 invalidations). On `tile_bfs`, where the host reads the data back, it saves 519
+     upgrades, pays 4,097 invalidations and costs **+15.1%** — because `O` leaves the host a
+     clean copy that `F` forwards on its own next read, and `M` takes that copy away
+     (`fwdFromF` 3,674 → 20; fabric→slice reads +27%). **A policy whose sign depends on whether
+     the caller writes what it fetched belongs behind a knob, and it is now behind one with the
+     counter that predicts which way it will go.**
+- **ONE CAVEAT THIS A/B CANNOT SEE PAST, AND IT IS THE SAME FINDING AS N.9a's.** All three
+  workloads are **host-feed-bound**: the transfer changes a quarter of a million forwarded
+  snoops on the shuffled sum and does not move its compute phase by a nanosecond. **On a machine
+  whose host could feed the tiles faster, coherence would be a larger share of the time and
+  these differences would be larger too. The traffic counts are the durable result here; the
+  times are the times of this machine.**
 
 **L15 — "A program's static data arrives Modified", which makes `F` unreachable early.**
 - *Tier 3, measured:* the loader writes the whole image — text, rodata and bss — through
@@ -13410,8 +13867,41 @@ with it closed the appendix has NO open rows.]**
   not rewritten; the correction of record is in `src/nmfc/README.md` under
   **Corrections of record**, and here.
 
+**L62 — THE DEFAULT HOST IS THE OUT-OF-ORDER VANADIS CORE, AND THE TRACKING UNIT DEFAULTS TO
+256. Two rulings, one row. [RULED — user 2026-09-04. The number was reserved for them.]**
+- *Tier 1 — user, 2026-09-04, verbatim:* "**Running OOO is imperative, if you are saying you ran
+  these results without an OOO core, they are unpresentable.**"
+- **RULING (a) — THE DEFAULT HOST.** The default host is the **out-of-order Vanadis core**,
+  configured at `src/nmfc/test/vanadis-nmfc.py` and committed as the default in `61fd180`. The
+  in-order configuration `src/nmfc/test/inorder-nmfc.py` **refuses to run** without
+  `NMFC_ALLOW_INORDER=1` (`8365318`), and that variable is not to be set. **Every headline number
+  this project quotes must be taken on the out-of-order host**; in-order numbers are retained as
+  a labelled secondary column and are **unpresentable alone**. Applied at **N.9** (which now
+  splits into **N.9a**, the out-of-order headline, and **N.9b**, the in-order tables labelled
+  *superseded as headline*), at **Part B I8**'s core-model caveat, and at **L63**.
+- **RULING (b) — FTU DEFAULT 256.** `NMFC_FTU_ENTRIES` is **256** (`e0842d5`), and each
+  workload's in-flight ring follows it through the macro. The control queue takes the same number
+  from the same line. **One comparison row at `NMFC_FTU=128` per workload was ruled, and NO
+  ablation sweep of implementation parameters** — window sizes, ring sizes, credit counts or FTU
+  sizes beyond that one row. `vanadis-nmfc.py` already honours the `NMFC_FTU` override
+  (`ftu = int(os.getenv("NMFC_FTU", str(nmfc_sizes.FTU_ENTRIES)))`), so the row was taken **with
+  the build frozen**. The three rows are at **N.9a**, "THE FTU 128-vs-256 ROW", and they say:
+  byte-identical on BFS (the program's own 24-deep ring binds below both sizes), **+7.6%** on
+  shuffled-sum with `forkRefusedFTU` **130,944** of M = 131,072, and **it does not finish at all**
+  on the hash table, whose lookup ring is compiled at `NMFC_FTU_ENTRIES / 2` = 128 and therefore
+  fills a 128-entry unit by itself. **At 256 the tracking unit is not the constraint; at 128 it
+  is a cliff.**
+- **WHY THE ABLATION BAN IS PART OF THE SAME RULING (and it is **O.1**/**O.4**'s rule with a
+  budget attached).** *User, 2026-09-04:* measure with the instrumentation that exists —
+  occupancy, per-tile and per-class counters — rather than spending simulation time discovering
+  a knob's effect. The recorded failure this prevents is 30 minutes lost to a `SHUF_WINDOW`
+  ablation on the in-order host, on a machine whose feed was the constraint the whole time.
+- **STATUS: RULED and APPLIED.** N.9a is the headline; N.9b is labelled; L63 is closed by the
+  host-feed table N.9a carries.
+
 **L63 — THE FTU OCCUPANCY FINDING IS AN IN-ORDER-HOST ARTEFACT. Re-labelled, not deleted.
-[RE-READ — user 2026-09-04]**
+[RE-READ — user 2026-09-04. CLOSED 2026-09-04 by the out-of-order host-feed table — see the
+last two bullets.]**
 - *What this document said (tier 3, DESIGN §31.3, carried at H.9, H.9a, N.4, O.4 and L33):*
   the FTU at **63.61 of 64, full 98.5% of the time**, while tile contexts sat at **4–10% of
   128** and the fabric control queue was empty with zero refusals; an eightfold context sweep
@@ -13437,19 +13927,55 @@ with it closed the appendix has NO open rows.]**
   rate is the machine's admission rate.* Nothing measured is withdrawn: the workload is settled
   (L32), the fabric-queue negative result is untouched, the context sweep is still flat and is
   now **explained** — contexts were never the resource being waited on.
-- **WHAT IS NOT KNOWN, AND MUST NOT BE ASSERTED IN EITHER DIRECTION: whether the FTU binds on
-  the OUT-OF-ORDER host.** That is being measured — the **host-feed table in the Vanadis
-  sweeps** — and until it lands, neither "the FTU binds" nor "the FTU is not the bottleneck"
-  may be carried into a sentence about Vanadis. The same prohibition covers N.9's "**the
-  concurrency ceiling is the FABRIC, not the tracking unit**", which was ranked under the same
-  bounded feed.
+- **WHAT WAS NOT KNOWN, AND IS NOW MEASURED: whether the FTU binds on the OUT-OF-ORDER host.
+  IT DOES NOT — AND THE PREMISE OF THE RE-READ IS FALSE IN THE DIRECTION IT ASSUMED.**
+  `[RESOLVED 2026-09-04 — the host-feed table landed on three workloads, at **N.9a**, frozen
+  build `8365318`, default host `vanadis-nmfc.py`. This bullet's prohibition is DISCHARGED and
+  replaced by the finding.]`
+  - **The out-of-order host feeds the NMFC side MORE SLOWLY, not faster.** NMFC instructions
+    retired per host cycle, in-order → out-of-order: `tile_bfs` **0.012317 → 0.008012 (0.65×)**;
+    shuffled-sum point 3, FORK+JOIN (the count exact on both hosts), **0.03685 → 0.02323
+    (0.63×)**; hash table P0 **0.0343 → 0.0206 (0.60×)** separated and **0.0411 → 0.0202
+    (0.49×)** interleaved. **The in-order host was not throttling the NMFC side; it was driving
+    it 1.5–2× faster.**
+  - **Nothing was refused on either host.** `forkRefused` = **0** at every completed point of
+    all three workloads on both hosts; the unit peaks at **24 of 256** on `tile_bfs` and
+    **128–143 of 256** on the hash table; the tiles never exceed **1.4%** of their 512 contexts;
+    `invocationQueueFull` = 0 and `roccQueueFull` = 0 throughout. **So neither the FTU nor the
+    fabric queue binds on the out-of-order host** — and the "concurrency ceiling is the FABRIC"
+    sentence at N.9b's SWEEP 3 is superseded for that host and retained for the in-order one.
+  - **THE MECHANISM, and it is architectural rather than a property of one host model.** A
+    coprocessor instruction is architecturally visible the moment it issues — a `FORK` puts an
+    invocation on the fabric and nobody can take it back — so **on any machine that speculates it
+    may issue only when it is the oldest instruction in the reorder buffer.** Vanadis enforces
+    exactly that (`vanadis.cc`: `if (is_rocc && j != 0) { allocate_fu = 1; }`, with the comment
+    naming NMFC FORK as the case). The core fetches, decodes and renames past it — which is why
+    the buffer sits 87–98% full — and cannot retire past it. **Measured cost: 14.4 host cycles
+    per NMFC instruction against ≤ 9.05 in-order**, six per chain on shuffled-sum (86.1 host
+    cycles per chain, flat over a 64× working-set range) and 7.33 per operation on the hash table
+    (355.9 cycles per operation, flat over a 6× range) against **213.5** in-order.
+  - **AND THE RE-READ'S DURABLE HALF SURVIVES, WHICH IS THE POINT WORTH KEEPING:** the admission
+    rate is a **HOST** statistic on **both** host models, and "FTU full, tiles idle" is the
+    signature of a starved feed on both. **What was wrong was the assumption about which host
+    starves it more.** At shuffled-sum point 1 the out-of-order host holds **247.0 of 252 entries
+    live while 13.6 contexts are resident** across four tiles, and the in-order host — with a
+    **quarter** of the entries — kept **more** work at the tiles (**21.2**). On the hash table the
+    same relation closes as **Little's law** (`contexts per tile = residency ÷ host issue
+    interval ÷ tiles`) **to two decimal places at all twelve points**.
+  - **The change this points at is at the INTERFACE, not in the tiles:** let `FORK` issue
+    speculatively and hold its packet until the instruction retires. **As specified, NMFC's host
+    interface is designed for an in-order host and costs a speculating one a pipeline drain per
+    instruction.** Not built; recorded here as the finding's consequence.
 - **A STATISTIC FOLLOWS FROM THIS AND IT IS NEW (O.4):** the machine must report its **admission
   rate as a HOST statistic** — NMFC-instruction retirements per cycle, split by opcode — beside
   FTU in-flight mean and max. Without it, a starved feed and a bound unit are the same number.
 - **WHERE IT IS APPLIED:** front-matter SELECTED CONFIGURATION (FTU entries row), the RULINGS
   row for L32, **Part B I8** (the core-model caveat, both-sided), **H.9**, **H.9a**, **N.4**,
   **N.9** (claim shape, SWEEP 2, SWEEP 3), **O.4**, and ledger rows **L32** and **L33**.
-- **STATUS: the re-label is APPLIED; the out-of-order measurement is OPEN.**
+- **STATUS: the re-label is APPLIED, and the out-of-order measurement is CLOSED (2026-09-04,
+  N.9a).** What remains open is not a measurement but a design question: whether `FORK` should
+  become speculatively issuable. Ledger **L62** carries the host ruling that produced this
+  measurement.
 
 
 ---
