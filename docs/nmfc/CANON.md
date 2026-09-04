@@ -199,6 +199,15 @@ no `[FOR THE USER TO RULE]` tag left live anywhere in this document — the two 
 from the reader in order to be implemented.** What it still needs is *measurement*, which
 is Part N's and Part O's business and is not a ruling.
 
+**[AND ONE FURTHER RULING ARRIVED LATER ON 2026-09-03, AFTER THE TABLE ABOVE WAS WRITTEN.
+It is recorded here and NOT as an eleventh row, because the table's own membership check —
+`grep -nE '^\| \*\*O[0-9]+\*\* \|'` yielding exactly ten rows — is an invariant of this
+document.]** **THE PER-CONTEXT TRANSLATION CACHE IS REJECTED.** A tile has **ONE shared,
+ASID-tagged TLB**, as a regular core does; a context consults it and walks the tile's local
+copy of the page table on a miss. The user's words: "*I don't see how a shared TLB would be thrashed. There should be minimal address-space contention (a single program and all it's contexts share ONE address space) so it is highly beneficial for the TLB contents to be shared, otherwise you are forcing retranslation on the same function code, the same data pages that other functions have already walked. I really don't understand how that design can be considered an improvement over just a regular TLB for each NMFC core.*" Applied at **F.7**,
+**C.2**, **F.8**, **I3**; rejected at **P.1 R114**; ledger **L55**; SST's copy is Appendix 2
+**S41**. **It closes nothing that was open — it removes a mechanism that was never justified.**
+
 ### CLOSED IN EDITING — the six that were never rulings to ask for
 
 **None of these was closed by a new user ruling.** Each was closed because asking it of the
@@ -1964,13 +1973,15 @@ Placement is decided at translation. Routing reads the **physical** address. The
 copy resolves even a *foreign* address without leaving the tile (I3, user ruling
 2026-09-02 R12). **The TLB is shared and ASID-tagged** — sharing a translation *cache*
 across address spaces is what an ASID is for, and is a different thing from sharing a
-*table*.
+*table*. **And it is the tile's ONLY translation cache** — a context consults it
+directly and walks on a miss, exactly as a regular core does. The per-context entries an
+earlier revision of this diagram drew above it are **REJECTED** (user ruling 2026-09-03;
+**F.7**, **P.1 R114**, ledger **L55**).
 
 ```mermaid
 flowchart TB
   VA["VIRTUAL ADDRESS<br/>the only thing a function or a host holds"]
-  CTX["per-context translation slots<br/>1 code + a few data<br/>dropped on migration"]
-  TLB["SHARED, ASID-TAGGED TLB — two arrays probed in parallel<br/>small = 4 KiB pages, huge = G-sized pages<br/>shared across address spaces, tagged by ASID"]
+  TLB["THE TILE'S ONE SHARED, ASID-TAGGED TLB — two arrays probed in parallel<br/>small = 4 KiB pages, huge = G-sized pages<br/>shared across address spaces AND across every context on the tile, tagged by ASID"]
   PT["LOCAL COPY OF THIS ADDRESS SPACE'S PAGE TABLE<br/>ONE table PER ADDRESS SPACE,<br/>on DUPLICATE pages, so every tile holds a copy<br/>5 levels, multiple page sizes, mode bit in the PTE<br/>WALKS NEVER LEAVE THE TILE"]
   PA["PHYSICAL ADDRESS"]
   MODE{"mode bit<br/>one bit, one position above the top of DRAM<br/>stamped at ALLOCATION, never changes"}
@@ -1981,13 +1992,11 @@ flowchart TB
 
   ASID["ASID — names WHICH page table<br/>part of every translation, remap and shootdown"]
 
-  VA --> CTX
+  VA --> TLB
   ASID --> TLB
   ASID --> PT
-  CTX -->|miss| TLB
   TLB -->|miss| PT
   PT --> PA
-  CTX -->|hit| PA
   TLB -->|hit| PA
   PA --> MODE
   MODE -->|bit set| NMFCM
@@ -4382,59 +4391,77 @@ rejected design, shipped and defaulted-into.** Ledger **L26**.
 
 ### F.7 Translation caching, and what migrates
 
-Three tiers, and only the first two are per-context:
+**Two tiers, and NEITHER is per-context. A tile has ONE shared, ASID-tagged TLB — the
+same arrangement a regular core has** (I3; user ruling 2026-09-02 R12, "*TLBs are
+shared*"):
 
 | tier | what | on migration |
 |---|---|---|
-| per-context translation slots | a few entries held inside the context itself — **"1 code + a few data" (C.2). The entry count and width are CONFIGURATION (user ruling 2026-09-02 R6–R10); the slots are NOT part of the 512-bit architectural context and NOT part of the migration payload** | **dropped** |
-| tile TLB | two arrays probed in parallel: small (4 KiB) and huge (G) | stays with the tile |
+| the tile's shared TLB | ONE per tile, ASID-tagged, shared by every context on it: two arrays probed in parallel, small (4 KiB) and huge (G) | stays with the tile |
 | the walk | into the local copy of the one page table | stays with the tile |
 
-`[UNRESOLVED — flagged, not decided. THREE STATEMENTS IN THIS DOCUMENT SIZE A CONTEXT AND
-THEY DO NOT AGREE ABOUT THIS ROW.]` H.3's heading is "**Context state — no stack, 512
-bits, and that is all**", and its body defines a context as "*a PC into its body plus at
-most one cache block of registers*". J.1 fixes the migration payload at **exactly 72
-bytes** — 64 of register file plus an 8-byte PC — and says translations "do not travel".
-H.2's per-context state budget is **~87 B = 64 regfile + ~13 instruction buffer + ~10 data
-buffer** (DESIGN §25.7 D:2569-2573) and **has no line for translation slots at all**.
-**An implementer sizing per-context SRAM therefore has three incompatible answers and no
-entry count.** The three are consistent under exactly one reading — that the slots are
-per-context *microarchitectural* state which is neither part of the 512-bit
-**architectural** context nor part of the migration payload, which is why H.3 and J.1 can
-both be exactly right while H.2's 87 B is simply incomplete — **but no tier-1, tier-2 or
-tier-3 source states that**, so it is recorded here as the likely reading and NOT written
-as canon.
+**THERE IS NO THIRD TIER ABOVE THE TLB, AND BUILDING ONE IS REJECTED — user ruling
+2026-09-03; P.1 R114, ledger L55.** An earlier revision of this document put a few
+`va → pa` entries inside each context — DESIGN §7's `ctx_xlat` (`inc/nmfc/nmfc_types.h:112`
+in ChampSim, `CtxXlat` at `NMFCTile.h:122` in SST) — and, asked what they were, justified
+them with a claim **no source at any tier makes**: that a barrel core's many contexts would
+thrash a shared TLB. **That rationale was this document's own invention and is withdrawn.**
+The user's words, verbatim:
 
-`[CLOSED IN THIS REVISION, and it needed no new ruling. Two things dispose of it.]`
-**(1)** The **entry count and width are configuration**, not design — user ruling
-2026-09-02 R6–R10, "*values … should not be fixed parts of the design*"; see SELECTED
-CONFIGURATION. **(2)** The three statements are then not in conflict at all, because
-tier 1 already says which budget the slots sit in: **F.7 says they are DROPPED on
-migration** and **J.1 fixes the payload at exactly 72 bytes**, so they cannot be inside
-either the 512-bit architectural context or the migration payload. **The reading above is
-therefore the canon**: per-context translation slots are microarchitectural state outside
-both. **H.2's ~87 B budget is incomplete** and must not be quoted as the whole per-context
-cost, and a slot count must not be inferred from the 512-bit figure.
+> "*I don't see how a shared TLB would be thrashed. There should be minimal address-space
+> contention (a single program and all it's contexts share ONE address space) so it is
+> highly beneficial for the TLB contents to be shared, otherwise you are forcing
+> retranslation on the same function code, the same data pages that other functions have
+> already walked. I really don't understand how that design can be considered an
+> improvement over just a regular TLB for each NMFC core.*"
 
-**Translations are dropped on migration, and the reason is structural, not
-staleness.** A cached `va → pa` entry is only *usable* on the tile that owns `va`, and
-after migrating every address the context is about to touch belongs to the new tile by
-construction. So every carried entry is provably invalid. **There is no
-`carry_translations` knob: building a switch for a provably-useless option is
-clutter.**
+**So: a context consults the tile's shared TLB, and on a miss walks the tile's local copy of
+the page table. That is the whole of it.** The contexts on a tile run the same function code
+over **one** address space, which is precisely the case in which a shared TLB pays: sharing
+is what makes the second context's translation free. A per-context cache in front of it
+re-privatises exactly the entries that were worth sharing, and throws them away on every
+migration. **The measurement says the same thing and is recorded at P.1 R114.**
+
+`[THE PER-CONTEXT SIZING CONFLICT THAT STOOD HERE IS DISSOLVED, NOT RESOLVED — the ruling
+removed the thing it was about, so it is recorded in one paragraph rather than three.]`
+Three statements in this document sized a context and disagreed about exactly one row:
+H.3's "**Context state — no stack, 512 bits, and that is all**"; J.1's migration payload of
+**exactly 72 bytes**, 64 of register file plus an 8-byte PC, with translations that "do not
+travel"; and H.2's per-context budget of **~87 B = 64 regfile + ~13 instruction buffer +
+~10 data buffer** (DESIGN §25.7 D:2569-2573), which carries **no line for per-context
+translation state at all**. **H.2 was right.** With the per-context cache rejected there is
+no third structure to place, no entry count to infer from the 512-bit figure, and nothing to
+reconcile: **translation state on a tile is the shared TLB, and it is per-TILE, not
+per-context.**
+
+**Nothing translational travels with a context, and the reason is structural, not
+staleness.** A cached `va → pa` entry is only *usable* on the tile that owns `va`, and after
+migrating every address the context is about to touch belongs to the new tile by
+construction — so an entry carried across would be provably invalid. **DESIGN §7.1's
+reasoning therefore still holds; it now applies to nothing carried**, because with the
+shared TLB as the only cache there is no per-context translation state to carry in the first
+place. What an arriving context meets is the destination tile's shared TLB: **cold for it
+until its first walk fills it, and already warm for every page some other context on that
+tile has walked** — which is the point of sharing. **There is no `carry_translations` knob**
+(R14): building a switch for a provably-useless option is clutter, and there is now no state
+for it to switch.
 
 *User #9, 2026-08-27T06:33:44Z:* "For designs where we store
 translation data with a given context, **it does not need migrated. The translation
 data is useless if migrated, so it shouldn't be migrated.**"
 
-`[SUPERSESSION, stated because F.10 quotes the other side of it.]` **#9 reverses #8**
+`[SUPERSESSION, stated because F.10 quotes the other side of it — and BOTH sides are now
+moot on the mechanism, though not on the interface.]` **#9 reverses #8**
 (2026-08-27T06:19:21Z), fourteen minutes earlier, whose AskUserQuestion answer put the
-per-context translation cache "**In the context, migrates with it**". **Newer wins
-(#307): translations are dropped.** F.10 carries #8 for its *swappable
-`translation_engine`* requirement only, and now says so. R14 rejects the
-`carry_translations` knob on the same authority.
+per-context translation cache "**In the context, migrates with it**". #9 said do not migrate
+it; **the 2026-09-03 ruling goes further and says do not build it** (P.1 R114). F.10 carries
+#8 for its *swappable `translation_engine`* requirement only, and now says so; R14 rejects
+the `carry_translations` knob on the same authority.
 
-`[AND §7.1 GAVE A SECOND REASON, WHICH THIS DOCUMENT DROPPED RATHER THAN RETIRED.]`
+**[AND §7.1 GAVE A SECOND REASON, WHICH THIS DOCUMENT DROPPED RATHER THAN RETIRED. It is
+kept as ARCHAEOLOGY: the mechanism both reasons were about is rejected (P.1 R114), and the
+paragraph survives only so that a reader who finds §7.1's argument in DESIGN knows which
+half of it was already dead before the rejection.]**
 DESIGN §7.1 D:931 continues: "*The **code** entry is worse than unusable — the context's
 instruction VA literally **changes** on migration, because it now runs copy `t'` at
 `entry_pc_base + t' · G`.*" **That reason is DEAD, and dropping it silently weakened the
@@ -4445,9 +4472,16 @@ old tile — not for a special one. **The FIRST reason (every carried entry is p
 invalid, because every address the context is about to touch belongs to the new tile)
 carries the whole argument on its own, and it is unaffected.** See H.8 and R110.
 
-What replaces the knob is a **statistic**: translation cold-start cycles after
-migration, counted separately from the fabric hop. Measured at **2.2–2.3 cycles** mean
-cold start with a 100% instruction-cache hit rate (DESIGN §21.2 D:1850-1856).
+**What prices migration's translation cost is a statistic, and it SURVIVES the rejection
+with its meaning re-pointed.** `xlatColdAfterMigration` — SST's
+`"Walks caused by a context arriving with no translations (§7.1)"` — now counts walks
+caused by a context arriving **cold in the destination tile's shared TLB**, which is the
+only cold start left once nothing is carried. It is counted separately from the fabric hop
+and measured at **2.2–2.3 cycles** mean cold start with a 100% instruction-cache hit rate
+(DESIGN §21.2 D:1850-1856). **[CAUTION — that figure was measured on a tree that HAD the
+per-context cache. It is the cost of a cold arrival, so it is the right shape, but it is
+not a measurement of the shared-TLB-only machine and must be re-taken. See Appendix 2
+S41.]**
 
 **Mixed page sizes are required.** *User #10, 2026-08-27T06:41:05Z:* "**I think mixed
 sizes are the way to go. It won't be possible to assess the translation system
@@ -4516,8 +4550,9 @@ NUCA policy actually does (Part G).
 **A REMAP IS A NORMAL TLB SHOOTDOWN. THAT IS THE WHOLE MECHANISM.**
 `[CONFIRMED — user ruling 2026-09-02 R17, "Okay, sounds correct."]` When the OS changes a
 mapping it must invalidate the cached translations of that mapping, **exactly as any
-machine does on any remap**: the shared ASID-tagged TLB, the per-context translation slots,
-and every tile's copy of that address space's table. There is nothing NMFC-specific about
+machine does on any remap**: the tile's one shared, ASID-tagged TLB and every tile's copy
+of that address space's table — **and that is the whole list, since there is no
+per-context translation state to invalidate** (P.1 R114). There is nothing NMFC-specific about
 it, and nothing here to design.
 
 **The generation counter and the per-grain log are the SIMULATOR'S CHEAP MODEL of that
@@ -4702,6 +4737,15 @@ is provably invalid) and R14 rejects a `carry_translations` knob on the same aut
 **The swappability requirement survives; "the per-context cache migrates with the
 context" does not.** Anything reading #8 as licensing carried translations is reading
 a fourteen-minute-old draft of the user's own position.
+
+**AND ONE OF #8'S THREE MECHANISMS NO LONGER EXISTS TO BE SWAPPED IN.** `[ADDED — user
+ruling 2026-09-03.]` The **per-context translation cache** is **rejected outright** (P.1
+R114, ledger L55): "*I don't see how a shared TLB would be thrashed. There should be minimal address-space contention (a single program and all it's contexts share ONE address space) so it is highly beneficial for the TLB contents to be shared, otherwise you are forcing retranslation on the same function code, the same data pages that other functions have already walked. I really don't understand how that design can be considered an improvement over just a regular TLB for each NMFC core.*" **The swappable
+`translation_engine` requirement is untouched and still governs** — it now has two arms to
+carry, the shared TLB + local PTW baseline and the flat/region table, which is exactly the
+IMPICA-style comparison F.1 names. **A rejected branch stays buildable as a labelled control
+(F.10's own rule) only where the user rejected the POLICY; here the user rejected the
+MECHANISM, so there is nothing to keep a control for.**
 
 *User #98, 2026-08-28T21:12:32Z, defending it against scope creep:* "Okay, go for it.
 **please don't let the swappable translation system go out of scope.** I noticed no
@@ -5284,8 +5328,11 @@ context, in-order per context, non-speculative. No ROB, no rename, no branch pre
 no load/store queue" — **read with the qualification above: no predictor in the execution
 path** — plus fetch through an instruction-cache channel with a fetch
 latency and a taken-branch bubble, **issue width as *contexts issuing per cycle***,
-per-context translation, migration, op-class latencies, and a block-granular lock table
-with ownership hand-off. **Those carry over.** What is genuinely new is narrower than it
+translation, migration, op-class latencies, and a block-granular lock table
+with ownership hand-off. **Those carry over** — with one subtraction: ChampSim's
+translation was **per-context**, and that cache is **REJECTED** (**P.1 R114**, user ruling
+2026-09-03), so what carries over is translation through the tile's ONE shared TLB. What is
+genuinely new is narrower than it
 looks: **real instructions in place of `body_instr` records, pipeline DEPTH as an explicit
 quantity, the per-context instruction buffer, the register file's actual division, and one
 change of policy — H.4's one-outstanding-load rule, which is not a port at all.**
@@ -8930,8 +8977,10 @@ Two further rules that follow:
 *User #238, 2026-09-01T06:19:05Z, point 4:* "**Stop with your blatant lies about what was
 modeled in ChampSim. Lets be clear: migration WAS MODELLED. fetch WAS MODELLED.**"
 
-ChampSim models: the multi-context function core with per-context translation and
-migration; the three-class fabric with per-destination queues and an age guarantee;
+ChampSim models: the multi-context function core with translation — including a
+**per-context** translation cache, which is **rejected as a design** (P.1 R114, user ruling
+2026-09-03) but was **genuinely modelled**, and this section is about what was modelled —
+and migration; the three-class fabric with per-destination queues and an age guarantee;
 instruction fetch through a real I-cache channel; the dual-page-size MMU with a real
 walker; the placement-aware allocator with grain groups, replica sets and remap; the
 LLC-slice-per-tile hierarchy; ramulator2 per tile with derived geometry; the host core
@@ -9838,6 +9887,7 @@ Marked `[REBUILT]` where the record shows it was rejected and then built again a
 | R22 | **A grain carrying two page TYPES** | Half of it cannot be duplicated on every tile while the other half is silo'd to one | I12 |
 | R23a | **Giving `.rodata` a vtile and co-locating it with the code** | **"This misreads what a vtile does. A vtile gathers a coherent set onto *one* tile; code is wanted on *all* of them. Duplication is not a stronger form of co-location, it is a different type"**, and the read-only restriction is what makes duplication sound. This is the sharpest statement in the record of the vtile-vs-duplicate distinction, and getting it wrong puts every constant on one tile — see the scar "`.rodata` left striped → every context on every other tile migrated on its first constant" (Appendix 2 D7) | DESIGN §26.1 D:2738-2742; C.3; F.2 |
 | R23 | **Forking `PageTableWalker` and `CACHE`** to get huge pages and dual sizes | One `channel` model does it: a stock walker cannot terminate early so it cannot express a huge page, and a TLB is a cache with fixed offset bits so one array cannot hold both sizes | DESIGN §6 D:885, D:891 |
+| R114 | **A PER-CONTEXT TRANSLATION CACHE** — a few `va → pa` entries held inside each context and consulted before the tile's TLB: DESIGN §7's `ctx_xlat`, ChampSim's `ctx_xlat_cache` (`inc/nmfc/nmfc_types.h:112`, held at `:150`), SST's `CtxXlat` (`NMFCTile.h:122`, `:135`, parameter `ctxXlat` default 2) `[ADDED — user ruling 2026-09-03.]` | "**I don't see how a shared TLB would be thrashed. There should be minimal address-space contention (a single program and all it's contexts share ONE address space) so it is highly beneficial for the TLB contents to be shared, otherwise you are forcing retranslation on the same function code, the same data pages that other functions have already walked. I really don't understand how that design can be considered an improvement over just a regular TLB for each NMFC core.**" **A tile has ONE shared, ASID-tagged TLB, as a regular core does** (I3). **AND THE MEASUREMENT SAYS THE SAME.** On the stress workload: `xlatCtxHits` **3.2M**, `xlatTlbHits` **1.15M**, `xlatWalks` **239k**. The per-context cache sits *in front of* the TLB, not instead of it, so **every one of those 3.2M hits is an entry the shared TLB holds or is about to hold** — it saves nothing a TLB does not, and it drops its contents on every migration. **PROVENANCE OF THE REJECTED RATIONALE, recorded so it is not re-derived: DESIGN §7 listed the mechanism with NO justification at all, and the “many contexts would thrash a shared TLB” argument was this document's own invention on 2026-09-03. It is withdrawn, not weakened.** | user ruling 2026-09-03; **F.7**, **C.2**, **I3**; ledger **L55**; Appendix 2 **S41**; DESIGN §7 D:768, §7.1 D:794 |
 
 ### P.2 Decomposition and the unit of work
 
@@ -9966,7 +10016,8 @@ Every place the sources disagree, which authority won, and why. Authority order:
 user-vs-ChampSim conflicts, or genuinely open questions, that this document does not
 resolve on its own authority.
 
-**Count: 54 conflicts (L1–L54, no gaps).** **[UPDATED — L50–L53 added 2026-09-03 (morning): the
+**Count: 55 conflicts (L1–L55, no gaps).** **[UPDATED — L55 added 2026-09-03: the
+per-context translation cache, REJECTED.]** **[UPDATED — L50–L53 added 2026-09-03 (morning): the
 four register-naming questions and their rulings. L54 added in the same revision's correction
 pass: W1b, the struck drafting instruction, which had a live `[USER TO CONFIRM]` tag at H.10.3
 and no row here to find it by. Four subjects took that tag; **L50, L51 and L52 were all confirmed by the
@@ -9978,9 +10029,10 @@ adding a row. Seven rows are new this revision — **L43**–**L49**, all from P
 mechanisms Part I depends on.]
 
 **Twenty-six rows carry a `RULED` bullet dated 2026-09-02, naming the ruling that closed
-them; two more — L2 (R12) and L13 — were closed in editing; and **three rows carry a
+them; two more — L2 (R12) and L13 — were closed in editing; and **four rows carry a
 `RULED` bullet dated 2026-09-03**: **L38** (`O1`, the unhinted-grain default), **L43**
-(`O3`, the encoding), and **L46** (`O4`, the RISC-V subset). **No row has been deleted.**
+(`O3`, the encoding), **L46** (`O4`, the RISC-V subset), and **L55** (the per-context
+translation cache, rejected). **No row has been deleted.**
 
 `[AND A NEW TAG EXISTS AS OF 2026-09-03 (morning): `[USER TO CONFIRM]`. It is NOT
 `[FOR THE USER TO RULE]` — the user DID rule, and the ruling is applied; what is recorded for
@@ -10635,8 +10687,9 @@ had lost the requirement entirely.**
 - *`[AUTHORITY NOTE on #8, because half of it is superseded]`:* #8's *swappable interface*
   requirement stands. **#8's other clause — the per-context translation cache "In the
   context, migrates with it" — is REVERSED by #9 fourteen minutes later** ("*The
-  translation data is useless if migrated, so it shouldn't be migrated*") and by F.7/R14.
-  Cite #8 for swappability only.
+  translation data is useless if migrated, so it shouldn't be migrated*") and by F.7/R14,
+  **and the MECHANISM ITSELF is now rejected outright — user ruling 2026-09-03, P.1 R114,
+  ledger L55 — so #8's three swappable arms are two.** Cite #8 for swappability only.
 - *Status:* **no statement of this requirement appeared anywhere in this document** —
   `grep -i swappable` returned nothing — and **ledger L4 proposed DELETING the alternative
   router**, which would remove exactly the comparison the user asked for.
@@ -11235,6 +11288,37 @@ flagged, it is buried.]**
   §10.5's execution-unit work comes back with it.** `[USER TO CONFIRM.]` **OPEN as a
   confirmation; the amended rule is what is written and implemented meanwhile.**
 
+**L55 — the per-context translation cache (`ctx_xlat`) versus one shared TLB per tile.
+[RULED — user ruling 2026-09-03: REJECTED]** **[ADDED — this row exists because the
+mechanism it kills had been carried in this document for its whole life under a name —
+"per-context translation slots" — that named nothing in either implementation and was
+nowhere defined.]**
+- *The conflict:* DESIGN §7 lists the entries in the context record ("*a few translation
+  entries, LOCAL TO THIS TILE*") and §7.1 explains only why they are **dropped** on
+  migration. **No source at any tier ever justified HAVING them.** Both simulators build
+  them anyway — ChampSim `ctx_xlat_cache` (`inc/nmfc/nmfc_types.h:112`, held at `:150`),
+  SST `CtxXlat` (`NMFCTile.h:122`, `:135`, parameter `ctxXlat` default 2).
+- *What this document did, and it is the fault being recorded:* asked by the user on
+  2026-09-03 what "per-context translation slots" were, it supplied **a rationale of its own
+  invention** — that a barrel core's many contexts would thrash a shared TLB. **That claim
+  appears in no tier-1, tier-2 or tier-3 source. It is withdrawn.**
+- *What the user said, verbatim:* "**I don't see how a shared TLB would be thrashed. There should be minimal address-space contention (a single program and all it's contexts share ONE address space) so it is highly beneficial for the TLB contents to be shared, otherwise you are forcing retranslation on the same function code, the same data pages that other functions have already walked. I really don't understand how that design can be considered an improvement over just a regular TLB for each NMFC core.**"
+- **RULING APPLIED: REJECTED. ONE shared, ASID-tagged TLB per tile, exactly as a regular
+  core has**, consulted directly by every context and backed by the tile's local walk (I3,
+  and R12's "*TLBs are shared*"). Written at **F.7**, **C.2**, **F.8**, **F.10**, **H**'s
+  preamble and **M.4**; rejected at **P.1 R114**; SST's copy is divergence **S41**, to be
+  removed in the alignment pass. **ChampSim's is frozen history** (R3).
+- **AND THE MEASUREMENT AGREES, which is why this is a correction and not merely a ruling to
+  obey.** On the stress workload: **`xlatCtxHits` 3.2M, `xlatTlbHits` 1.15M, `xlatWalks`
+  239k.** The per-context cache sits **in front of** the shared TLB, so every one of those
+  3.2M hits is an entry the shared TLB holds or is about to hold. **It saves nothing a TLB
+  does not, and it drops everything on migration.**
+- *What SURVIVES the rejection:* **`xlatColdAfterMigration`** — the statistic still counts
+  the cost, re-pointed at the destination tile's shared TLB, where an arriving context is
+  cold until its first walk (**F.7**, **J**). And DESIGN §7.1's reasoning — that under
+  congruence a carried entry is provably useless — **still holds, and now applies to nothing
+  carried.** **CLOSED.**
+
 ---
 
 ## APPENDIX 2 — DIVERGENCES: SST IMPLEMENTATION vs CANON
@@ -11243,7 +11327,8 @@ flagged, it is buried.]**
 2026-09-02T18:32. **Authority tier 4 — lowest. Nothing here decides anything.** This is
 a checklist for the next work session, not a description of the machine.
 
-**Count: 40 divergences** (**S40 added 2026-09-03 (morning) — register naming**; S39 added;
+**Count: 41 divergences** (**S41 added 2026-09-03 — SST's per-context translation
+entries, rejected and to be removed**; **S40 added 2026-09-03 (morning) — register naming**; S39 added;
 **S13 re-tagged from `[WRONG]` to `[NOTE]`** — it is a documented, scoped, announced trade-off,
 not a defect; **S18 re-tagged from `[WRONG]` to `[ARTEFACT]`** — its warning tests a hardcoded
 constant, not the geometry).
@@ -11370,6 +11455,7 @@ SST or it is not measured, and this document says which.
 | **S18** `[ARTEFACT — re-tagged; the warning fires on a HARDCODED CONSTANT, not on the geometry]` | SST warns that `G = 256 KiB × ntiles` is "not a whole number of bank sweeps at 1 or 3 tiles" and proceeds. **That warning presupposes `sweep := 512 KiB fixed`.** On the checked-in reference device a sweep is `row_bytes × banks_per_channel` = `4096 × 64` = **256 KiB**, so `G / sweep = total_channels = N` **exactly, at every tile count** — G(3) = 768 KiB = 3 sweeps. **The condition the warning tests is never true for this device; it is testing SST's own constant.** Fix the constant (derive the sweep from the device) or delete the warning. | **E.5**, which now defines `sweep` and records that the odd-tile-count caveat was an artefact of the same fixed 512 KiB — it does not exist for either device in the tree |
 | **S19** `[WRONG]` | The per-tile entry-point rewrite (`pc + t·G`) documented at `NMFCFabricComponent.h:60` is **implemented nowhere** — correctly, because code is on duplicate pages, but the doc still asserts it. | J.1 — the PC does not change on migration |
 | **S40** `[GAP — the implementation step, added 2026-09-03 (morning)]` | **REGISTER NAMING: SST models 8 × 64-bit lanes; DESIGN A IS TO BE IMPLEMENTED.** SST resolves a register name through a **per-function `RegLayout`** — 32 × (`uint16` offset + `uint8` width) = **768 bits per resident function** (`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCRegLayout.h:40-42`), read at **every** register access (`NMFCTile.cc:461-475`, `return c.regs.read( layout_.field[r] );`), and nothing in the tree produces a layout other than the hard-coded `x1..x8 × 64-bit` default (see **S4**, **S5**). **The canon is now Design A** (H.10): the register number **is** the bit range, resolved by ≈7 gates or a 310-bit ROM per tile, with **nothing fetched**. **This is the largest single divergence in this appendix and it is a BUILD ITEM, not a defect to argue about.** The build order — steps, files and line counts — is `docs/nmfc/proposals/register-map-final.md` **§9**, and its unresolved engineering items are **§9.1 U1–U7**. In outline: delete `struct RegLayout` and `defaultLayout()`, keep `RegField` and `Context512`, **delete `Context512`'s straddle branches** (provably dead — no slice crosses a 64-bit word), add the ~8-line `constexpr` decoder, delete `RegLayout layout_` from `NMFCTile.h:448-450`, add the three width/extension-class bits to the `dbufReg`/`dbufValue` pair (`NMFCTile.h:85-86`), and add the decoder's legality rules. **Net ≈ −60/+15 lines in the layout header alone.** **`RegLayout::illegal()`'s run-time trap (`NMFCTile.cc:464`, `:472`) does not survive** — a total map leaves it nothing to fire on — and **its replacement is the admission-time placement verifier**, which does not exist yet and whose owner is undecided (**U3**). **ChampSim is FROZEN (R3): none of this is a ChampSim work item.** | **H.10** (the whole section), **I2**, **I7**, **K.6**; and **S4**/**S5**, which this supersedes as the *reason* the 8×64 layout must not be read as the design |
+| **S41** `[WRONG — added 2026-09-03]` | **SST BUILDS PER-CONTEXT TRANSLATION ENTRIES, WHICH THE CANON NOW REJECTS.** `struct CtxXlat` and `CtxXlat xlat[4]` (`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCTile.h:122`, `:135`), parameter `ctxXlat` default **2** ("*Translation entries carried in each context (§7)*"), with the statistics `xlatCtxHits`, `xlatTlbHits`, `xlatWalks` and `xlatColdAfterMigration`, plus the `coldXlat` flag. **TO BE REMOVED in the alignment pass** — the tile keeps ONE shared, ASID-tagged TLB and its local walk, and a context consults that directly. **`xlatColdAfterMigration` SURVIVES** and is re-pointed at the destination tile's shared TLB. ChampSim's `ctx_xlat_cache` (`inc/nmfc/nmfc_types.h:112`, held at `:150`) is **frozen history**: ChampSim is frozen (R3), so it is not a work item there. | **F.7**, **P.1 R114**, ledger **L55**, **I3** |
 
 ### D3 — Accounting and modelling artefacts that distort numbers
 
@@ -11391,7 +11477,7 @@ SST or it is not measured, and this document says which.
 |---|---|
 | **S29** `[STALE]` | `NMFCTile.h:11-15` claims **no data memory, no LLC slice, no migration, no atomics**. **All four exist.** |
 | **S30** `[STALE]` | `NMFCTile.h:280-286` claims routing is on the **virtual** address "and knowingly so". **The code routes on the frame** — which is correct per I12, so the comment teaches the rejected design. |
-| **S31** `[STALE]` | `NMFCTile.cc:1360-1367` says "Nothing here has translations to drop yet" and "the instruction address itself changes". **The tile has both per-context translation slots and a TLB, and the migration explicitly keeps the PC unchanged.** Both halves are wrong, and the second contradicts J.1. |
+| **S31** `[STALE]` | `NMFCTile.cc:1360-1367` says "Nothing here has translations to drop yet" and "the instruction address itself changes". **The first half is now accidentally right and the second is still wrong.** With the per-context cache rejected (**P.1 R114**) a migrating context genuinely has nothing to drop — the shared TLB stays with the tile — but the comment says so because SST never built the drop, not because the design has none, and the code beside it still carries `CtxXlat` (**S41**). The second half contradicts J.1: the migration explicitly keeps the PC unchanged. **Rewrite the comment; do not read it as agreeing with the canon.** |
 | **S32** `[STALE]` | `src/nmfc/README.md:126` describes "§5's local translation **with a page-table root per channel**" — the third surviving instance of the rejected framing (see ledger L2). |
 | **S33** `[STALE]` | `NMFC-Rev/README.md:97-100` says the context-register question is open, "provisionally the eight argument registers a0-a7". **It is decided: eight 512-bit context registers per software thread, with `CXW`/`CXR`. The `a0`-`a7` aperture is rejected** (R82). |
 | **S34** `[STALE]` | `NMFC-Rev/README.md:47` says "DESIGN.md §0 invariants — **all eleven**". **There are fourteen** (ledger L11). |
