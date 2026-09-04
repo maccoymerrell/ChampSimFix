@@ -11,9 +11,13 @@ summarised away.
 
 **Two sections come first because they are what the document needs FROM the reader:**
 **RULINGS NEEDED FROM THE USER** — **NOTHING REMAINS OPEN; the count is ZERO, down from
-forty-nine** — because the user ruled twice, on **2026-09-02** (twenty-one numbered
-rulings plus three) and on **2026-09-03** (the last ten), and both sets are applied
-throughout this revision — and
+forty-nine, and as of the later rulings of 2026-09-03 the count of readings AWAITING
+CONFIRMATION is ZERO too** — because the user ruled on **2026-09-02** (twenty-one numbered
+rulings plus three), then on **2026-09-03** (the last ten), and then **again later on
+2026-09-03** — the per-context translation cache, liveness, `W1b`, **`KILL`** and **the page
+model** — and every set is applied throughout this revision. **The only thing still offered to
+the reader is TWO PROPOSED NAMES, `HOST` and `STRIPED`, which change no statement in this
+document** (F.5b) — and
 **SELECTED CONFIGURATION FOR SIMULATION**, which holds every value this document used to
 state as a design constant and now states as a *configured* value with its file and line.
 Everything after them is the document proper.
@@ -22,9 +26,12 @@ Everything after them is the document proper.
 
 ## RULINGS NEEDED FROM THE USER
 
-**THE USER RULED ON 2026-09-02 AND AGAIN ON 2026-09-03. BOTH SETS ARE APPLIED IN THIS
-REVISION, AND NOTHING IS LEFT OPEN.** They are tier 1, they are the newest words in the
-record, and they are binding.
+**THE USER RULED ON 2026-09-02 AND AGAIN ON 2026-09-03 — AND THEN SEVERAL MORE TIMES LATER ON
+2026-09-03. EVERY SET IS APPLIED IN THIS REVISION, AND NOTHING IS LEFT OPEN.** They are tier 1,
+they are the newest words in the record, and they are binding. **The later rulings of 2026-09-03
+have their own table below** — the per-context translation cache, liveness, `W1b`, **`KILL`** and
+**the page model** — recorded there rather than as new `O`-rows, because the ten-row table's
+membership is an audit invariant of this document.
 
 `[A THIRD SET WAS RULED ON 2026-09-03 (MORNING) — THE REGISTER-NAMING QUESTIONS — AND IT IS THE
 ONE PLACE THIS SECTION'S "NOTHING IS LEFT OPEN" NEEDS A QUALIFIER. Read this before quoting the
@@ -43,12 +50,18 @@ participates. **Migration stays 72 B.** Full statement: **H.10**; invariants sha
 | **Q2** | does `f`*n* ≡ `x`*n*? | "*I don't know what that means.*" | **RULED as: YES — one pool, type from the opcode** (**H.10.5**). Carries the base-ISA spelling amendment: `RV64IMA` + Zfinx/Zdinx semantics on the tile; **O4's substance untouched, float is in**. **`[CONFIRMED — user, 2026-09-03, verbatim: "Unless there are any advantages to non-equivalency (for example, the min size of a float is 32 bits), then keep them the same." There are none — under A the smallest name is already 32 bits, so every `f` name has a 32- or 64-bit slice; the reasoning is at H.10.5. Tag RETIRED, reading STANDS.]`** Ledger **L51** |
 | **Q3** | supersede I.7 item 3? | "*I don't know what CANON I.7 is.*" | **RULED as: SUPERSEDE, and price the divergence** — a function-core binary is **not host-executable** (**I.7 item 3**, **H.10.8**). **`[CONFIRMED — user, 2026-09-03, verbatim: "Q3: Accepted, function should not be host-executable. Functions may need to have preambles to prevent incorrectness (so fetch refuses to execute a function on host)." Tag RETIRED at every point of use; the reading STANDS. AND THE CONFIRMATION CARRIED A NEW REQUIREMENT WITH IT — the machine must REFUSE to execute a function on a host core, and it must refuse AT FETCH — stated at **I.7a**, where the one mechanism recorded (an ENTRY MARKER) is marked PROPOSAL — NOT RULED.]`** Ledger **L50** |
 | **Q4** | is the run-time undefined-register trap a requirement or a preference? | "**Requirement.**" | **RULED: REQUIREMENT.** The illegal-name trap is **built and free** (**I7**, **H.10.4**). **What A cannot trap is MISUSE of a legal name — that is admission's job (K.6 test 3).** **`[SCOPE CONFIRMED — user, 2026-09-03, verbatim: "I think that is okay." The requirement is the trap on an ILLEGAL NAME; misuse of a legal name is ADMISSION'S job (K.6 test 3). Tag RETIRED at every point of use; the choice of A stands.]`** Ledger **L52** |
-| **W1b** | should the integer-ALU width rule be *"from the widest register operand; `*W` forms 32"*, as this revision's drafting instruction worded it? | *(no user words — this is a departure from a DRAFTING INSTRUCTION, not from a ruling)* | **STRUCK, following `register-map-final.md` §3.3**; H.10.3 carries the amended rule (execute at 64, W3 truncates into the destination name). `[USER TO CONFIRM]` — **if W1b was meant literally this reverts, and SW2 plus §10.5's execution-unit work come back with it** (**H.10.3**). Ledger **L54** |
+| **W1b** | should the integer-ALU width rule be *"from the widest register operand; `*W` forms 32"*, as this revision's drafting instruction worded it? | "**W1b: Not really sure what this is getting at? We can't do more than one op at once, so might as well make the ALU 64-bit always, it really makes no difference. FP/DP require floating point hardware we are already going to have to support alongside the integer ops.**" — user ruling 2026-09-03 | **CONFIRMED, AND W1b IS WITHDRAWN.** The amended rule is not merely what this document wrote on a proposal's authority — **it is now the BUILT rule at tier 1**: the **ALU always executes at 64 bits**, a **32-bit-named integer source is sign-extended on read** (RV64's own convention), the **write port keeps only the named tile's bits**, **`*W` opcodes behave exactly as RV64 defines them**, and **no "execute at the named width" mode exists.** Floating point is unaffected and was never the question: the **FPU computes at the opcode's format** — `f32` in a `w` tile, `f64` in a `d` tile — and **FP hardware is present under `IMAFD` regardless** (O4). **The `[USER TO CONFIRM]` tag is RETIRED at every point of use**; SW2 and §10.5's execution-unit work stay deleted (**H.10.3**). Ledger **L54**, CONFIRMED |
 
-**SO THE HONEST COUNT IS: ZERO QUESTIONS OPEN, ONE THING AWAITING CONFIRMATION** — **NO
-reading of a Q1–Q4 ruling is still flagged**, and what remains is one struck drafting instruction
-(**W1b**, **L54**), which is not a ruling at all but needs the same act from the reader and so
-carries the same tag. `[UPDATED — user confirmations of 2026-09-03: **Q2** ("*Unless there are
+**SO THE HONEST COUNT IS NOW: ZERO QUESTIONS OPEN, AND ZERO AWAITING CONFIRMATION.**
+**[UPDATED - user ruling 2026-09-03, W1b: "**W1b: Not really sure what this is getting at? We can't do more than one op at once, so might as well make the ALU 64-bit always, it really makes no difference. FP/DP require floating point hardware we are already going to have to support alongside the integer ops.**" **The last item in this section is
+CONFIRMED and the drafting instruction is WITHDRAWN.** The count fell from "ZERO open, ONE
+awaiting confirmation" to **ZERO and ZERO**: no reading of a Q1-Q4 ruling is flagged, and the one
+struck drafting instruction (**W1b**, **L54**) — which was never a ruling at all, but needed the
+same act from the reader — has had that act. **Every `[USER TO CONFIRM]` tag in this document is
+retired: H.10.3, the notation table's membership check, Appendix 1's preamble and L54, and
+Appendix 3 item 6.** A live instance of that tag, or of
+`[ASSISTANT'S READING … — user may overturn]`, is now a regression **on any subject**.]**
+`[HISTORICAL, kept so the audit trail survives — user confirmations of 2026-09-03: **Q2** ("*Unless there are
 any advantages to non-equivalency (for example, the min size of a float is 32 bits), then keep
 them the same.*"), **Q4** ("*I think that is okay.*") and now **Q3** ("*Q3: Accepted, function
 should not be host-executable. Functions may need to have preambles to prevent incorrectness (so
@@ -69,9 +82,9 @@ is the whole of the difference the note existed to preserve.]`
 W1b, which had a live tag at H.10.3, no row in this table and no ledger row; a reader auditing by
 this count or by the ledger would not have found it.]` Every one
 of the four questions was ruled, every ruling is applied, and **all four readings are now
-confirmed.** What is still flagged is not a question the user declined to answer, and it is no
-longer a reading either — it is **a DRAFTING INSTRUCTION this document struck on a proposal's
-authority**, recorded so it can be overturned rather than inherited silently.
+confirmed.** **AND SO IS THE FIFTH ITEM, WHICH WAS NEVER A READING:** the drafting instruction
+this document struck on a proposal's authority — **W1b** — was put to the user on 2026-09-03 and
+answered, "**W1b: Not really sure what this is getting at? We can't do more than one op at once, so might as well make the ALU 64-bit always, it really makes no difference. FP/DP require floating point hardware we are already going to have to support alongside the integer ops.**" **Nothing in this section is flagged any more.**
 **AND THE ONE THAT COULD HAVE CHANGED THE DESIGN IS NOW CLOSED:** Q4's scope was confirmed as the
 illegal-name half — "*I think that is okay*" — so the reading that misuse of a legal name is
 **admission's** job (K.6 test 3) stands, **Design A is not in tension with the requirement**, and
@@ -143,7 +156,7 @@ them. **The ids are NOT renumbered and NOT retired**: every existing body citati
 | **R19** | "*size it according to modern systems. Make sure it is not a bottleneck. Look at other modern systems.*" — directory **sizing is configuration**. | the sizing half of old q42 | **C.5**, SELECTED CONFIGURATION |
 | **R20** | "*faults should go to the kernel handler, execute, then resume the work just like a normal system. On fault, it is probably necessary to pass the fault to the core via the FUT and have it handle it, then send a 'resume' instruction with the context handle to resume it.*" and "*RESUME needs an extra instruction (privileged???? this is real question, not sure if it needs to be or not).*" | the recoverable-fault half of old q39 | **I.6**, I.3, I.9, C.4 |
 | **R21** | "*Undecided, once again something that must be experimentally derived. We start at common and implement tuning/algorithm adjustments as needed.*" | old q40 | **G.4**, SELECTED CONFIGURATION |
-| **INSTRUCTION COUNT** | "*RETC and ENDC are the same instruction, with a return bit.*" → **twelve** base instructions; **RESUME** (R20) makes thirteen, one of them privileged. | old q18, **L44** | **I.3**, I.9, A.2, C.4 |
+| **INSTRUCTION COUNT** | "*RETC and ENDC are the same instruction, with a return bit.*" → **twelve** base instructions; **RESUME** (R20) makes thirteen, one of them privileged; and **`KILL`** — user ruling 2026-09-03, "*we probably need an instruction specifically to kill a failed program's contexts*" — makes **fourteen**, unprivileged. **The count is now stated as 12 base + RESUME (privileged) + KILL = 14.** | old q18, **L44**, **L57** | **I.3**, **I.3a**, I.6, I.9, A.2, C.4 |
 | **GEOMETRY** | "*Ranks are included. 32 banks per channel assumes DDR5 and one rank. … the entire system must adapt to an arbitrary bank count, tile-memory-sizing, grain-sizing. Please do not lock in any bank/rank/column/row/channel counts as if they were the only ones supported. **WE MUST SUPPORT ALL POSSIBLE VALUES FOR EACH, WITHIN A FULL 48-bit PHYSICAL ADDRESS SPACE.***" | old q28, **L8** | **I12**, E.3, E.4, D.2 |
 | **L32** | the reshaped stress workload **works**: sum verified against the host, loads / migrations / instructions **25.0% on every tile**, zero stores, **196,904 migrations for 262,143 loads**. The rejected chase shape's 2.5:1 spread was predicted exactly from its addresses (12.5 / 37.5 / 37.5 / 12.5) — congruent routing, not a broken machine. | old q1, **L32** | **G.6**, H.9, N.4, L32 |
 
@@ -183,7 +196,7 @@ else is a regression, not a new question.
 | # | the user's ruling, 2026-09-03, verbatim | what it settles | applied at |
 |---|---|---|---|
 | **O1** | "*Unhinted grains are up to the OS/hardware to place. So, presumably the OS could map it wherever was most convenient.*" | **RULED.** An unhinted grain's placement is the **address-space owner's free choice** — allocator convenience, nothing more. **No partition semantics attach to its virtual address.** `(va >> grain_bits) % num_tiles` is therefore permitted as *one* convenient default a placer may use and is **not** a rule, not a guarantee, and not something any other mechanism may rely on; F.3's delete-on-sight list stops naming it as an architectural partition and keeps naming it as a router. **#269's rejection of virtual-address partitioning stands untouched** — that is about the architecture reading the VA, not about an allocator picking a convenient frame. | **F.3**, **F.8**, A.4a, ledger **L38** |
-| **O3** | "*I think this is just a simulator thing and not a meaningful design choice, so I say we describe it as implementation choice.*" | **RULED — option (a).** `funct7`/`funct3` values are **implementation choice**; **the canon does not fix them.** The canon fixes only the **count** (twelve base plus a privileged `RESUME`), the **membership** of the groups, and that `RESUME` gets a slot. SST's `nmfc_isa.h` is **one implementation's** choice, recorded in **SELECTED CONFIGURATION** and never quoted as canon. | **I.9**, SELECTED CONFIGURATION, ledger **L43** |
+| **O3** | "*I think this is just a simulator thing and not a meaningful design choice, so I say we describe it as implementation choice.*" | **RULED — option (a).** `funct7`/`funct3` values are **implementation choice**; **the canon does not fix them.** The canon fixes only the **count** (**12 base + RESUME (privileged) + KILL = 14**, the last added by user ruling 2026-09-03), the **membership** of the groups, and that `RESUME` and `KILL` each get a slot. SST's `nmfc_isa.h` is **one implementation's** choice, recorded in **SELECTED CONFIGURATION** and never quoted as canon. | **I.9**, SELECTED CONFIGURATION, ledger **L43** |
 | **O4** | "*I think we want float, so C.*" | **RULED — option (c): RV64IMAFD.** Floating point is in the subset. **AND THE CONSEQUENCE, STATED CORRECTLY: it does NOT widen the context.** The context is **512 bits, BIT-PACKED** (#232, #238) — *not* eight 64-bit registers, so there is no per-register set to widen. A float occupies bits of the same 512 like any other value (`f64` = 64 bits, `f32` = 32); **the compiler packs them.** Invariants 2 and 11 and the 72-byte migration are **untouched**. A RISC-V encoding names `f0`–`f31` separately from `x0`–`x31`, so the packed file is presented under **two register namespaces over the same 512 bits** — a naming convention, never a second file. ~~**And the namespaces do NOT alias, because a register name is not a fixed bit offset here:**~~ **[SUPERSEDED IN PART — user ruling 2026-09-03 (morning), Design A; H.10.5, ledger L51. THE STRUCK CLAUSE IS KEPT IN PLACE, NOT DELETED, so a reader who was quoting it can see what replaced it. Under Design A a register name IS a fixed bit offset — that is the whole design — and `f`*n* IS `x`*n*, identical bits, type from the opcode. The half that survives and is STRENGTHENED is the next clause: 512 bits of live storage, not 64 architectural slots. Disjointness of simultaneously-live VALUES is still required, but it is verified at admission (K.6 test 3), not asserted by the compiler's naming.]** the core implements **512 bits of live storage, not 64 architectural slots**, and ~~the compiler binds each simultaneously-live name — `f` or `x` — to a **disjoint bit range** within them~~ *(struck with the clause above; the binding is fixed at tape-out — H.10.2)*. What is bounded is **liveness in bits across both namespaces together** (invariant 2), never the size of the name space. **Consequence: the machine is an RV64IMAFD target under a register-pressure constraint, not a general-purpose RV64IMAFD core** — a stock unconstrained binary is rejected by the admission test, exactly as one with a stack or a spill already was (I7). **The admission test checks the IMAFD subset and counts liveness in BITS.** | **I.0**, I.7, **K.6**, ledger **L46** |
 | **O5** | "*a.*" | **RULED — option (a).** **Three message classes on the ONE fabric — COHERENCE, MIGRATION, FILL — with per-destination queues (H.8).** Arbitration: **COHERENCE strictly first** (I14 makes NMFC priority an ORDER, not a tie-break, and a coherence response the order depends on may not sit behind a fill), **then MIGRATION and FILL at EQUAL WEIGHT** — and that equal weight is exactly what makes invariant 11's 72 B / 64 B byte parity hold. | **C.5**, **H.8**, **J.2** |
 | **O6** | "*Presumably the vtile's home would be where we first tried to place it and discovered we couldn't. It should therefore be placed where the next-largest cluster of similar vtiles are, and if none exist, the least-loaded.*" | **RULED.** The spill target is **the tile holding the next-largest cluster of the same vtile**; **if no such cluster exists, the least-loaded tile.** Vocabulary is **tile** (R18). The simulator **warns and never hard-errors** (R18). | **F.8** |
@@ -199,14 +212,44 @@ no `[FOR THE USER TO RULE]` tag left live anywhere in this document — the two 
 from the reader in order to be implemented.** What it still needs is *measurement*, which
 is Part N's and Part O's business and is not a ruling.
 
-**[AND ONE FURTHER RULING ARRIVED LATER ON 2026-09-03, AFTER THE TABLE ABOVE WAS WRITTEN.
-It is recorded here and NOT as an eleventh row, because the table's own membership check —
+**[AND FURTHER RULINGS ARRIVED LATER ON 2026-09-03, AFTER THE TABLE ABOVE WAS WRITTEN.
+They are recorded here and in the table that follows this one, and NOT as eleventh and further
+rows, because the table's own membership check —
 `grep -nE '^\| \*\*O[0-9]+\*\* \|'` yielding exactly ten rows — is an invariant of this
-document.]** **THE PER-CONTEXT TRANSLATION CACHE IS REJECTED.** A tile has **ONE shared,
+document. The first of them is stated in full immediately below; the rest — liveness, `W1b`,
+**`KILL`** and **the page model** — are in **THE LATER RULINGS OF 2026-09-03**, after this
+paragraph.]** **THE PER-CONTEXT TRANSLATION CACHE IS REJECTED.** A tile has **ONE shared,
 ASID-tagged TLB**, as a regular core does; a context consults it and walks the tile's local
 copy of the page table on a miss. The user's words: "*I don't see how a shared TLB would be thrashed. There should be minimal address-space contention (a single program and all it's contexts share ONE address space) so it is highly beneficial for the TLB contents to be shared, otherwise you are forcing retranslation on the same function code, the same data pages that other functions have already walked. I really don't understand how that design can be considered an improvement over just a regular TLB for each NMFC core.*" Applied at **F.7**,
 **C.2**, **F.8**, **I3**; rejected at **P.1 R114**; ledger **L55**; SST's copy is Appendix 2
 **S41**. **It closes nothing that was open — it removes a mechanism that was never justified.**
+
+
+### THE LATER RULINGS OF 2026-09-03 — recorded OUTSIDE the ten-row table, which is a membership invariant
+
+**[ADDED - user ruling 2026-09-03. These are rulings the user gave AFTER the ten-row table above
+was written, and they are recorded here rather than as new `O`-rows for one reason: that table's
+own membership check — `grep -nE '^\| \*\*O[0-9]+\*\* \|'` yielding exactly TEN rows — is an
+invariant of this document, and adding an eleventh row would break the audit path every body
+citation of an `O`-number depends on. **Every row below is tier 1, newest, and binding, exactly
+as an `O`-row is.**]**
+
+| ruling | the user's words, verbatim | what it settles | applied at |
+|---|---|---|---|
+| **the per-context translation cache** | "*I don't see how a shared TLB would be thrashed. There should be minimal address-space contention (a single program and all it's contexts share ONE address space) so it is highly beneficial for the TLB contents to be shared…*" | **REJECTED.** A tile has **ONE shared, ASID-tagged TLB**, as a regular core does. | **F.7**, **C.2**, **F.8**, **I3**; **P.1 R114**; ledger **L55**; Appendix 2 **S41** |
+| **liveness** | "*You go into great detail about how the regfile format A limits us to 16 live values. This is wrong, and assumes rename. We are operating on a 512-bit value. Literally every bit is independent because we are strictly in-order. Bit-packing is a thing, so we can have as many live values as we want as long as we have scratch space in the file to manipulate said value…*" | **CORRECTED IN PLACE.** Liveness is bounded by **512 bits plus the scratch the packing needs** — never by a count of names, and **the context is not eight registers.** Nameability affects **instruction count only**. | **I2**, **K.6**, **H.10.6**, **H.10.9**, **P.5 R113**, front-matter row **Q1**; ledger **L56** |
+| **`W1b`** | "*W1b: Not really sure what this is getting at? We can't do more than one op at once, so might as well make the ALU 64-bit always, it really makes no difference. FP/DP require floating point hardware we are already going to have to support alongside the integer ops.*" | **CONFIRMED, and the drafting instruction is WITHDRAWN.** The **integer ALU always executes at 64 bits**; a **32-bit-named integer source is sign-extended on read**; the **write port keeps only the named tile's bits**; **`*W` opcodes behave exactly as RV64 defines them**; **no "execute at the named width" mode exists.** The **FPU computes at the opcode's format**, and FP hardware is present under `IMAFD` regardless (**O4**). **This was the last item in this document awaiting the reader's act; the count is now ZERO.** | **H.10.3**, the `W1b` row above, the notation table's membership check, Appendix 1 preamble, Appendix 3 item 6; ledger **L54** |
+| **`KILL`** | "*Another correction: we probably need an instruction specifically to kill a failed program's contexts. KILL(hook) is probably the way to go. As to whether this is privileged, probably not?*" | **RULED IN, and UNPRIVILEGED.** `KILL rH` ends **one of the caller's own** outstanding invocations on **ruling O7's** path — zeroed register file, error flag, `JOIN` returns the error immediately, nothing waits on the tile — and is a **NO-OP on a stale, retired or unowned handle.** It is unprivileged because **a handle is issued by the program's own FTU and names nothing outside it**: `pthread_cancel`, not `kill(2)`. **The count becomes 12 base + RESUME (privileged) + KILL = 14.** It **OVERTURNS #224** (newest wins, #307) and Part **P R77**; #224's objection survives as a programming caveat. **The `funct7` value is implementation choice (O3), recorded in SELECTED CONFIGURATION.** | **I.3a**, I.3, I.4, I.5, I.6, I.7, I.9, **C.4**, A.2, O.4; **P.5 R77** (OVERTURNED); Appendix 2 **S3**; ledger **L57** |
+| **the page model** | "*This seems like a no-brainer? I would say yes, with the caveat that we would have 3 page sizes in total: 4 KiB, 1 grain, N grains. 4 KiB for standard pages, 1 grain for grain pages. N grains for standard (bad name, would prefer something meaningful) and duplicate pages. The only difference between standard and duplicate is that duplicates represent 1 grain of virtual space but N grains of physical space, while standard is 1 grain of virtual space per 1 grain of physical space.*" | **RULED — THREE SIZES, FOUR TYPES.** Sizes `4 KiB`, `G`, `N·G`. Types **HOST** (`4 KiB`/`4 KiB`, block-interleaved), **GRAIN** (`G`/`G`, one tile), **STRIPED** (`N·G`/`N·G`, one grain per tile), **DUPLICATE** (`G` virtual / `N·G` physical, one copy per tile). **One addressing mode, one page table, the size in the PTE (R13).** Consequences: **identity-mapped "regular" is RETIRED as a placement rule**; the **mode bit follows the size class**; **striped allocation granularity is `N·G`** (§12 fragmentation); an **unhinted object is GRAIN or STRIPED at the owner's choice** (**O1**). **`HOST` and `STRIPED` are names this document proposed** — tagged **[name proposed by the assistant - user to confirm]**, a vocabulary item and not a design question. | **F.5b**, **C.3**, **E.2**, **F.9**, **I12**, SELECTED CONFIGURATION; **P.1 R115**; Appendix 2 **S42**; ledger **L58** |
+
+**WHAT IS OPEN AFTER THESE FIVE: NOTHING, AND THAT NOW INCLUDES THE CONFIRMATIONS.** The count of
+questions open is **ZERO** and the count of readings awaiting confirmation is **ZERO** — `W1b`
+was the last of the latter and it is confirmed above. **The one thing still offered to the user is
+of a different kind and must not be counted with them: TWO NAMES**, `HOST` and `STRIPED`, tagged
+**[name proposed by the assistant - user to confirm]** at **F.5b** and **C.3**. **Renaming either
+changes no statement in this document**, because nothing in the machine reads a page type's name;
+the model, the sizes and the consequences are identical under any labels. **A naming choice is not
+an open question, and the front matter's count does not move for it.**
 
 ### CLOSED IN EDITING — the six that were never rulings to ask for
 
@@ -288,9 +331,11 @@ are pointed at from **K.6** and Appendix 2 **S40**.
 | **NUCA backoff** | not parameterised — the epoch count is the only knob | — | **R21.** The rule is "*a grain that has just moved sits still, for longer the more often it has moved*" (G.4 rule 6); the function, its parameters and its reset are configuration. |
 | **directory entries / sharers** | ChampSim has **no MOESIF directory** | `std::set<uint32_t> sharers` per line, **unbounded** — `src/NMFCCoherenceFabric.h:156`; `directoryLatency` 4 — `:67` | **R19: size it to modern systems and make sure it is not a bottleneck.** The design part is the **state set (M O E S I F)**, its **location** (the L2↔LLC boundary, in the fabric), **strict NMFC priority as an order, not a tie-break** (I14, C.5), and — **RULED, user ruling 2026-09-03 O9** — an **exact bit vector over host cores and tiles, inclusive of the caches above the fabric, back-invalidating on eviction** (C.5). **The scaling target is now a number: "*up to 32 memory tiles*" on "*a substantially beefy multi-core system*", expecting "*a LOT of traffic*"** — so one sharer bit per host core plus 32 tile bits is what an entry must carry, and the entry count follows R19. |
 | **fabric message classes and arbitration** | one `FUNCTION_FABRIC` plus a separate host `INTERLEAVE_FABRIC`, `max_deliver` 4 per class per cycle — `nmfc_4tile.json:718`; **frozen under R3** | `bytesPerCycle` 32, `controlDeliver` 4/cycle — `NMFCCoherenceFabric.h:66, :70` | **RULED — user ruling 2026-09-03 O5.** **Three classes on ONE fabric: COHERENCE, MIGRATION, FILL, per-destination queues; COHERENCE strictly first, then MIGRATION and FILL at EQUAL WEIGHT.** The classes and the order are **design** (C.5, H.8, J.2); the per-cycle delivery rates and queue depths are configuration. |
-| **`funct7` / `funct3` field values** | **none** — ChampSim has no decoder, no opcode table, no assembler (I.10) | `/mnt/md0/NMFC-Rev/src/nmfc/include/nmfc_isa.h:21-104` — groups `0x0`–`0x5`, variants, and every funct7 constant; `nmfc.h`'s assembler macros emit from it | **RULED — user ruling 2026-09-03 O3: "*I think this is just a simulator thing and not a meaningful design choice, so I say we describe it as implementation choice.*"** **The canon assigns NO field values.** It fixes the **count** (twelve base plus a privileged `RESUME`), the **group membership**, and that `RESUME` takes a slot. The SST values in this row are **one implementation's choice**, recorded so the binaries already assembled against them stay valid — **never quoted as canon** (I.9, ledger L43). |
+| **`funct7` / `funct3` field values** | **none** — ChampSim has no decoder, no opcode table, no assembler (I.10) | `/mnt/md0/NMFC-Rev/src/nmfc/include/nmfc_isa.h:21-104` — groups `0x0`–`0x5`, variants, and every funct7 constant; `nmfc.h`'s assembler macros emit from it | **RULED — user ruling 2026-09-03 O3: "*I think this is just a simulator thing and not a meaningful design choice, so I say we describe it as implementation choice.*"** **The canon assigns NO field values.** It fixes the **count** (**12 base + RESUME (privileged) + KILL = 14**), the **group membership**, and that `RESUME` and `KILL` each take a slot. The SST values in this row are **one implementation's choice**, recorded so the binaries already assembled against them stay valid — **never quoted as canon** (I.9, ledger L43). **`KILL`'s field value is likewise implementation choice** [RULED - user ruling 2026-09-03, and O3 governs it]: `nmfc_isa.h` assigns it none today, so an implementation takes a variant slot inside the reserved `0x6`/`0x7` groups and **records the number here**, exactly as it does for `RESUME` and the entry marker. |
 | **clocks** | **250 ps = 4 GHz** on host core, function cores, fabric, caches — `nmfc_4tile.json:519, 569, 583, …` | 1 GHz default — `test/coherent_memory.py:_cache(clock=…)`; tile clock from the tile component | no tier-1..3 source states a function-core clock. **Nothing in the design assumes the function core runs at the host's rate**; if it does not, every cycle comparison must say so. |
-| **page-table levels / page size** | **5 levels**, 4 KiB base page — `nmfc_4tile.json:505-508` | `NMFCPageTable.h` | **R13: five levels, a PTE derived from that, multiple page sizes as modern hardware already does, and the mode bit stored in the PTE and carried as an extra bit on every physical address** (F.5a). The level count is standard, not novel. |
+| **page-table levels / page size** | **5 levels**, 4 KiB base page — `nmfc_4tile.json:505-508`. **No shipped config declares an `N·G` page**, because no tool can ask for one (C.3, L41) | `NMFCPageTable.h` — and its `PageType` enum is `REGULAR`/`GRAIN`/`DUPLICATE`/`STANDARD` with `REGULAR` **identity-mapped** (`:42-46`, `:309`, `:402`), which is the RETIRED model: divergence **S42** | **R13: five levels, a PTE derived from that, multiple page sizes as modern hardware already does, and the mode bit stored in the PTE and carried as an extra bit on every physical address** (F.5a). The level count is standard, not novel. |
+| **page SIZES — there are exactly THREE** | 4 KiB declared; `G` derived (see the `G` row above); **`N·G` not expressible in any shipped config** | 4 KiB and `G`; `N·G` not built | **RULED - user ruling 2026-09-03, verbatim: "*we would have 3 page sizes in total: 4 KiB, 1 grain, N grains*".** The three sizes are **`4 KiB`, `G`, `N·G`** and **only `4 KiB` is a constant** — `G` and `N·G` are both functions of the device geometry (E.3), so the page sizes move when the memory configuration moves. **Design fixes the three size CLASSES; the byte values are configuration.** F.5b |
+| **page TYPES — there are exactly FOUR** | the trace `region` enum has **three** values, `STANDARD`/`NMFC`/`CODE` (`inc/nmfc/nmfc_trace.h:127-145`), and no manifest token can declare a GRAIN or a STRIPED page (C.3, ledger **L41**) | `PageType` has four names but the WRONG four — see **S42** | **RULED - user ruling 2026-09-03.** **HOST** (4 KiB / 4 KiB, block-interleaved), **GRAIN** (`G` / `G`, one tile), **STRIPED** (`N·G` / `N·G`, one grain per tile), **DUPLICATE** (`G` virtual / `N·G` physical, one copy per tile). **The mode bit follows the size class**; one **replicate bit** separates DUPLICATE from GRAIN, which share the `G` size. **HOST and STRIPED are names this document proposed and the user has not yet confirmed** — the model does not depend on them. F.5b, C.3 |
 | **DRAM minor-fault penalty** | **50000 ps** — `nmfc_4tile.json:511` | — | a simulator knob; no design content |
 
 **Two things this table is NOT.** It is not a recommended configuration — nothing here has
@@ -366,7 +411,8 @@ being qualified or merely annotated.**
 | **[RULED — user ruling 2026-09-02 R\<n\>]** | **the user has ruled and the statement is now settled at tier 1, newest.** The ruling's own words are quoted with the tag. **This is the strongest tag in the document**; a `[CONFLICT]`, `[UNRESOLVED]` or `[FOR THE USER TO RULE]` in the same passage is superseded by it. | no — it settles |
 | **[RULED — user ruling 2026-09-03 O\<n\>]** | **the same thing, for the ten residual questions the user closed on 2026-09-03.** Tier 1, newest, binding, and it supersedes every `[STILL OPEN]`, `[FOR THE USER TO RULE]` and `[USER TO CONFIRM]` in the same passage. **This and the R-tag are jointly the strongest tags in the document.** | no — it settles |
 | **[derived from ruling O\<n\>]** | a consequence the user did **not** spell out, drawn in this document from a ruling plus an existing tier-1 rule. **It is marked so it is never mistaken for the user's own words**, and the derivation is always shown beside it. | no — but it is the document's inference, not a quotation |
-| **[USER TO CONFIRM …]** | **RETIRED ONCE, THEN REINSTATED WITH A DIFFERENT SUBJECT — read both halves before using this tag or auditing it.** `[CORRECTED — an earlier revision of this row declared the tag retired and gave a grep check calling any live instance "a regression"; the SAME revision then added live instances. This row is rewritten rather than patched, because it is the document's authority mechanism and it stated the opposite of the body.]` **First subject (RETIRED, and it stays retired):** the tag marked exactly one clause — `RESUME`'s privilege level, which R20 left as a question — and **user ruling 2026-09-03 O16 ("*Yes, privileged.*") answered it.** Every instance of that form (the label followed by the word *privileged*) was removed and **none survives.** **Second subject (LIVE as of user ruling 2026-09-03, morning):** the tag now marks **the assistant's READING of a ruling given in words that did not answer the question as posed**, or **a drafting instruction this document struck on a proposal's authority.** The user DID rule and the ruling IS applied; what is offered for overturn is the reading. It is NOT `[FOR THE USER TO RULE]`. **THREE OF THOSE SUBJECTS WERE CONFIRMED BY THE USER ON 2026-09-03 — Q2/`f`*n* ≡ `x`*n* (`L51`, "*…then keep them the same*"), Q4's scope (`L52`, "*I think that is okay*") and Q3/I.7 item 3 (`L50`, "*Q3: Accepted, function should not be host-executable*") — and their tags are RETIRED; a live tag on any of those three is now itself the regression.** **The check is a MEMBERSHIP check, not an absence check: every live tag must sit on the ONE remaining subject — W1b (`L54`) — which must have a row in the RULINGS table, a row in Appendix 1, and a flag at its point of use, spelled `[USER TO CONFIRM …]`. The second spelling, `[ASSISTANT'S READING … — user may overturn]`, has NO live instance left: its last one was at I.7 item 3 and the user's Q3 confirmation of 2026-09-03 retired it. The spelling is kept in this table as VOCABULARY, because a future reading may need it — but a live instance of it today is a regression, exactly as a live tag on a second subject is, or the one subject missing any of the three.** | n/a — live, ONE subject |
+| **[USER TO CONFIRM …]** | **RETIRED ONCE, THEN REINSTATED WITH A DIFFERENT SUBJECT — read both halves before using this tag or auditing it.** `[CORRECTED — an earlier revision of this row declared the tag retired and gave a grep check calling any live instance "a regression"; the SAME revision then added live instances. This row is rewritten rather than patched, because it is the document's authority mechanism and it stated the opposite of the body.]` **First subject (RETIRED, and it stays retired):** the tag marked exactly one clause — `RESUME`'s privilege level, which R20 left as a question — and **user ruling 2026-09-03 O16 ("*Yes, privileged.*") answered it.** Every instance of that form (the label followed by the word *privileged*) was removed and **none survives.** **Second subject (LIVE as of user ruling 2026-09-03, morning):** the tag now marks **the assistant's READING of a ruling given in words that did not answer the question as posed**, or **a drafting instruction this document struck on a proposal's authority.** The user DID rule and the ruling IS applied; what is offered for overturn is the reading. It is NOT `[FOR THE USER TO RULE]`. **THREE OF THOSE SUBJECTS WERE CONFIRMED BY THE USER ON 2026-09-03 — Q2/`f`*n* ≡ `x`*n* (`L51`, "*…then keep them the same*"), Q4's scope (`L52`, "*I think that is okay*") and Q3/I.7 item 3 (`L50`, "*Q3: Accepted, function should not be host-executable*") — and their tags are RETIRED; a live tag on any of those three is now itself the regression.** **AND THE FOURTH AND LAST SUBJECT IS NOW CONFIRMED TOO, SO THE CHECK BECOMES AN ABSENCE CHECK AGAIN — user ruling 2026-09-03 on W1b, verbatim: "**W1b: Not really sure what this is getting at? We can't do more than one op at once, so might as well make the ALU 64-bit always, it really makes no difference. FP/DP require floating point hardware we are already going to have to support alongside the integer ops.**" `L54` is CONFIRMED, its tag is retired at **H.10.3**, in Appendix 1's preamble, at the row itself and in Appendix 3 item 6, and BOTH spellings — `[USER TO CONFIRM …]` and `[ASSISTANT'S READING … — user may overturn]` — now have ZERO live instances. **The check is: no live instance of either spelling, on any subject.** Both are kept in this table as VOCABULARY, because a future reading may need them; a live instance today is a regression.** | n/a — **RETIRED, no live instance** |
+| **[name proposed by the assistant - user to confirm]** | **NEW AS OF user ruling 2026-09-03 (the page model), and it is a THIRD subject class that must not be counted with the two above.** It marks **a NAME this document chose for a thing the user ruled on but did not name** — not a reading of a ruling, not a struck drafting instruction, and **not an open question.** The ruling is applied in full; what is offered is the label. **The test that keeps it separate: renaming changes no statement in the document.** **EXACTLY TWO LIVE INSTANCES, both on page types: `HOST` (the 4 KiB page) and `STRIPED` (the `N·G` page), at F.5b and C.3** — the user's ruling used the word "*standard*" for both of them and called it "*a bad name*", so one word could not be kept for two types. `GRAIN` and `DUPLICATE` are the user's own words and carry no tag. **A live instance of this tag on anything that is not a name is a regression**, and so is a count other than two without a corresponding edit at F.5b, C.3, SELECTED CONFIGURATION, E.2, F.9, Part P and Appendix 2. | no — it settles the thing and offers only the label |
 
 **HOW A TAG IS DELIMITED — a rendering rule, and it has already broken tags in this
 document.** `[ADDED. A Markdown code span (single backticks) ENDS AT THE NEXT BACKTICK and
@@ -444,6 +490,12 @@ sentence does not already fix which Part it belongs to.
 | `I9` / `I.9` | congruence, checked every run | encoding |
 | `I10` / `I.10` | extend, never fan out | what ChampSim builds instead |
 
+[UPDATED AGAIN — user ruling 2026-09-03 adds **`I.3a`** (the `KILL` instruction) to Part I and
+**`F.5b`** (the four page types over three sizes) to Part F. **Neither collides with anything**:
+the lettered-suffix form is this document's existing convention for a section inserted after a
+numbered one — `F.5a`, `I.7a` and `E.2a` predate them — and Part B has no invariant named `I3a`.
+**Cite `I.3a` with its period, exactly as every other Part I section.**]
+
 [UPDATED — Part I now has an `I.0` and an `I.11`. **Neither collides**: Part B has no
 `I0`, and its `I11` is the migration-parity invariant while `I.11` is the
 memory-committing loop, which are far enough apart that a dropped period is obvious. The
@@ -457,10 +509,16 @@ inside this document; the id space itself is the defect.
 now a **record of rulings, not a request for them: NOTHING IS OPEN.** It holds the
 **ten** items `O1`, `O3`–`O7`, `O9`, `O12`, `O15` and `O16` — the numbering deliberately
 gapped so the body's existing citations stay valid — **every one of them RULED by the user
-on 2026-09-03**, with his words quoted verbatim; plus a **CLOSED IN EDITING** table
+on 2026-09-03**, with his words quoted verbatim; **then a second table, THE LATER RULINGS OF
+2026-09-03**, holding the five the user gave after the ten-row table was written — the
+per-context translation cache, liveness, `W1b`, **`KILL`** and **the page model** — which are
+recorded there rather than as new `O`-rows because the ten-row table's membership is an audit
+invariant; plus a **CLOSED IN EDITING** table
 recording the six (`O2`, `O8`, `O10`, `O11`, `O13`, `O14`) that were never rulings to ask
 for. **If you are reading this document to find out what it still needs from you: it needs
-nothing.**
+nothing — no ruling, and no confirmation of a reading. The one thing it OFFERS you is two
+proposed page-type NAMES, `HOST` and `STRIPED`, which change nothing whichever way you answer
+(F.5b).**
 **SELECTED CONFIGURATION FOR SIMULATION** follows it and holds every value this document
 used to state as a design constant — under R6–R10 those are configuration, not design, and
 an implementer reads that table to know what has actually been run. Part A is the machine
@@ -472,7 +530,8 @@ the SST divergence checklist, **and its D0 records that ChampSim is frozen.** Ap
 the standing method rules, including the never-quote-bare list.
 
 **Three sections are new and are where a re-derivation is most likely to start:**
-**I.0** (what a function core executes underneath the twelve base instructions — **the
+**I.0** (what a function core executes underneath the twelve base instructions, the privileged
+`RESUME` and the unprivileged `KILL` — **the
 machine is RISC-V under user ruling 2026-09-02 R11**, and x86-64 in this document is the
 trace toolchain's host and nothing else), **I.11** (the
 memory-committing invocation loop, which is built as trace markers and has no opcode), and
@@ -516,7 +575,8 @@ sentence is NMFC.
 **NMFC changes exactly one thing *in the memory system*: the address partition moves
 to the fabric.** The qualifier is load-bearing and must always be carried: NMFC *also*
 adds a new kind of core (A.3), a host-side tracking unit (A.4) and **twelve base
-instructions plus a privileged `RESUME`** (Part I). What it does **not** change is the memory hierarchy's shape. A
+instructions plus a privileged `RESUME` and an unprivileged `KILL` — fourteen in all**
+(Part I; `KILL` is user ruling 2026-09-03). What it does **not** change is the memory hierarchy's shape. A
 conventional machine routes an L2 miss into a shared LLC and only slices afterwards,
 on the way to the controllers. NMFC slices **vertically**: the fabric picks the
 tile, and that tile's LLC slice, memory controller and DRAM channel are one stack
@@ -1396,7 +1456,10 @@ accesses routed to a tile their address never named and 27% of run time**
 "75.3% of all accesses routed to the wrong tile").
 
 [NOT A PAST DEFECT. IN THE CURRENT TREE THE ASSERTION IS STILL GATED — TWICE — AND IS
-SKIPPED BY 29 OF THE 33 CONFIGURATIONS AND BY EVERY STANDARD PAGE. This was recorded
+SKIPPED BY 29 OF THE 33 CONFIGURATIONS AND BY EVERY STANDARD PAGE — **STANDARD being the
+tier-2 tree's name for what this document now calls a HOST page** (user ruling 2026-09-03,
+**F.5b**), whose tile is a block field and which the congruence check therefore has nothing to
+say about. This was recorded
 nowhere; an earlier revision of this document discussed only SST's `checkCongruent()`
 (E.2a) and left the reader believing ChampSim's had been ungated.]
 
@@ -1576,6 +1639,17 @@ obliging the allocator to spend a whole grain — and the one thing a grain genu
 cannot do is carry two *types*, because half of it cannot be duplicated on every tile
 while the other half is silo'd to one.
 *(DESIGN §0.12 D:99-111, §5.0 D:494-512, §5.0.3 D:556-570.)*
+
+**[RULED - user ruling 2026-09-03: AND THE PAGE TYPES THIS INVARIANT REFERS TO ARE NOW FOUR, OVER
+THREE SIZES.]** **HOST** (`4 KiB`), **GRAIN** (`G` on one tile), **STRIPED** (`N·G`, one grain per
+tile) and **DUPLICATE** (`G` virtual, `N·G` physical, one copy per tile) — full statement at
+**F.5b**, drawn at **C.3**. **Nothing in this invariant changes**, and two things in it get
+sharper. **First, "physical partition, never virtual" is now true by construction at every page
+type**, because the type that used to get its spread from an **identity mapping** — the old
+`REGULAR` page — is retired (Part **P R115**), and spread is a property of the `N·G` page rather
+than of where the allocator was forbidden to put things. **Second, "a grain cannot carry two
+types" is unchanged and is now also unrepresentable**: a page's type is its size class plus one
+replicate bit, and a grain is inside exactly one page.
 
 *Tier-1 origin, user #269, 2026-09-01T20:11:19Z, the single most complete statement:*
 "Tiles are partitioned via virtual addresses. This means that the destination tile is
@@ -2000,7 +2074,7 @@ earlier revision of this diagram drew above it are **REJECTED** (user ruling 202
 ```mermaid
 flowchart TB
   VA["VIRTUAL ADDRESS<br/>the only thing a function or a host holds"]
-  TLB["THE TILE'S ONE SHARED, ASID-TAGGED TLB — two arrays probed in parallel<br/>small = 4 KiB pages, huge = G-sized pages<br/>shared across address spaces AND across every context on the tile, tagged by ASID"]
+  TLB["THE TILE'S ONE SHARED, ASID-TAGGED TLB — three arrays probed in parallel<br/>one per page size: 4 KiB, G, and N x G<br/>shared across address spaces AND across every context on the tile, tagged by ASID"]
   PT["LOCAL COPY OF THIS ADDRESS SPACE'S PAGE TABLE<br/>ONE table PER ADDRESS SPACE,<br/>on DUPLICATE pages, so every tile holds a copy<br/>5 levels, multiple page sizes, mode bit in the PTE<br/>WALKS NEVER LEAVE THE TILE"]
   PA["PHYSICAL ADDRESS"]
   MODE{"mode bit<br/>one bit, one position above the top of DRAM<br/>stamped at ALLOCATION, never changes"}
@@ -2167,60 +2241,102 @@ Two further facts the diagram cannot show:
 - The **channel bits are removed** before a channel-local physical address is handed
   to that tile's ramulator2 instance (user #50, 2026-08-28T03:18:30Z).
 
-### C.3 Page types, and where each lands
+### C.3 Page types, and where each lands — FOUR TYPES OVER THREE SIZES, RULED
 
-**THE USER SAID THREE TYPES. This diagram draws FOUR. Read why before using it.**
+**[RULED - user ruling 2026-09-03. THIS SECTION IS REWRITTEN AND ITS DIAGRAM IS REPLACED. What
+stood here was a four-box taxonomy — STANDARD / REGULAR / GRAIN / DUPLICATE — in which REGULAR
+and GRAIN were the SAME page size and differed only in what the allocator was allowed to do, with
+REGULAR *identity-mapped* so that consecutive grains striped by the partition arithmetic. **That
+model is retired.** The four types below are separated by SIZE, the sizes are three, and the
+allocator is free at all of them. Part **P R115** carries the retirement of identity-mapped
+placement, **F.5b** is the canonical statement, ledger **L58**.]**
 
-*User #269, 2026-09-01T20:11:19Z — the newest and most complete statement, verbatim:*
-"**We have 3 page types. We have regular pages (striped across memory tiles), grains
-(silo'd to one tile), and duplicates (grain * N), same data across all tiles.**"
-*And earlier, user #56, 2026-08-28T03:49:08Z, counting them himself:* "Do we have 2
-different modes or 3? **We have regular pages, we have pages that represent a ROW in a
-channel, and we have congruent pages which own a slice on each channel
-simultaneously.** Right?"
+**THE RULING, verbatim, user ruling 2026-09-03:** "*This seems like a no-brainer? I would say
+yes, with the caveat that we would have 3 page sizes in total: 4 KiB, 1 grain, N grains. 4 KiB
+for standard pages, 1 grain for grain pages. N grains for standard (bad name, would prefer
+something meaningful) and duplicate pages. The only difference between standard and duplicate is
+that duplicates represent 1 grain of virtual space but N grains of physical space, while standard
+is 1 grain of virtual space per 1 grain of physical space.*"
 
-**The fourth box below is this document's own split of the user's single "regular"
-class, and it is drawn on the model's authority, not the user's.** The user's "regular
-pages (striped across memory tiles)" covers two *hardware* behaviours that the mode bit
-already distinguishes and that E.1's routing rule reads differently:
-**STANDARD** (mode bit 0, 4 KiB, blocks interleaved across every channel at 64 B) and
-**REGULAR** (mode bit 1, `G`-sized, striped across tiles at grain granularity)
-— the two encodings of DESIGN §5.3 D:625-645, with §5.4 D:647-659 fixing that NMFC data
-takes `G`-sized pages and everything else keeps 4 KiB, and
-`inc/nmfc/nmfc_trace.h:117-126` — the doc comment above the `region` enum — stating the same split in the enum's own words (the declaration itself is `:127-145`; **the two citations to this enum previously disagreed and are reconciled below**). They are
-one *class* in the user's taxonomy and two *encodings* in the machine. **If you are
-counting page types for a design document, the answer the user gave is three. If you are
-implementing the mode bit, the answer is four boxes. And if you are reading the trace
-format, the answer is a THIRD three — `STANDARD`, `NMFC`, `CODE` — which is not the user's
-three: it splits his "regular" as this diagram does, and it has no value for his "grains"
-at all.** The full four-box → three-value mapping is tabulated below the diagram. Nothing
-here contradicts #269; the split is a finer cut of its first class.
+**And the question it answers, verbatim, user ruling 2026-09-03:** "*The difference between a
+regular and grain page is just the size of each right? A regular page is large enough to cover
+all grains, a grain page is the exact size of a single grain? They should both use the same
+addressing mode though*"
 
-**Their sizes are not free parameters** — they follow from the machine's memory
-configuration. *That is the user's own statement, #269, and it should be cited to him
-and not to a model-authored note:* "**All of these pages are different sizes, and the
-size necessarily changes with the machine's memory configuration itself.** Note that the
-address mapping is clever here: **duplicate and grain pages are sized specifically so
-that they can control their internal layout, such that they can grab physical frames all
-on the same tile.**" (Corroborated at DESIGN §5.0.1 D:516-519 and by the memory note
-`nmfc-translation-design.md:16-19`, both tier 3.)
+**THREE SIZES — `4 KiB`, `G`, `N·G` — AND FOUR TYPES OVER THEM.** One addressing mode, one page
+table per address space, the size carried in the PTE as any multi-size table carries it (**R13**).
+**Full statement with every consequence at F.5b**; this section draws it and then says what the
+shipped toolchain can and cannot express.
 
 ```mermaid
 flowchart TB
   ALLOC["allocation — the OS, at translation time<br/>guided by the compiler's page TYPE and vtile LABEL"]
 
-  ALLOC --> STD["STANDARD<br/>mode bit 0, 4 KiB pages<br/>blocks interleaved across EVERY channel<br/>at 64 B granularity"]
-  ALLOC --> REG["REGULAR<br/>mode bit 1, G-sized<br/>grain g lands on tile g mod N<br/>striped across tiles at GRAIN granularity"]
-  ALLOC --> GRN["GRAIN<br/>mode bit 1, G-sized<br/>SILO'D: the whole grain on ONE tile,<br/>the tile the vtile asked for"]
-  ALLOC --> DUP["DUPLICATE<br/>mode bit 1, each copy is G-sized<br/>ONE VIRTUAL PAGE, N PHYSICAL COPIES<br/>ONE PER TILE, identical<br/>the replica set is an aligned N-run of grains<br/>READ-ONLY BY CONSTRUCTION"]
+  ALLOC --> HOST["HOST<br/>4 KiB virtual, 4 KiB physical<br/>block-interleaved across EVERY tile<br/>after the fabric, at the block<br/>MODE from the size class: block-interleaved"]
+  ALLOC --> GRN["GRAIN<br/>G virtual, G physical<br/>ONE tile — the one the vtile asked for<br/>MODE from the size class: grain-partitioned"]
+  ALLOC --> STR["STRIPED<br/>N x G virtual, N x G physical<br/>ONE GRAIN PER TILE, all N of them<br/>MODE from the size class: grain-partitioned"]
+  ALLOC --> DUP["DUPLICATE<br/>G virtual, N x G physical<br/>ONE FULL COPY PER TILE, all N identical<br/>replica set is an aligned N-run, copy t at base + t<br/>READ-ONLY BY CONSTRUCTION"]
 
-  STD --> STDU["for: small hot structures every core reads,<br/>e.g. a level frontier.<br/>WHY: under NMFC mode a 1 MiB frontier is ONE grain,<br/>lands entirely on one tile, and every invocation<br/>that reads it has to migrate there."]
-  REG --> REGU["for: ordinary NMFC data with no co-location need"]
-  GRN --> GRNU["for: data wanted spatially local to a function core"]
+  HOST --> HOSTU["for: ordinary HOST data, and any small hot structure<br/>every core reads — a level frontier, say.<br/>WHY: at G-sized pages a 1 MiB frontier is ONE grain,<br/>lands entirely on one tile, and every invocation<br/>that reads it has to migrate there."]
+  GRN --> GRNU["for: NMFC data with an OWNER —<br/>co-located by vtile, wanted spatially local<br/>to one function core."]
+  STR --> STRU["for: NMFC data with NO owner, spread for bandwidth.<br/>COST: allocation granularity is N x G,<br/>so it needs a free grain on EVERY tile — see F.5b consequence 3."]
   DUP --> DUPU["for: what EVERY core needs —<br/>function instruction pages,<br/>THE PAGE TABLE,<br/>read-only data.<br/>Occupies M = N x G bytes of physical memory,<br/>only M/N = G of it is writeable."]
 ```
 
-[CORRECTED — the STANDARD box previously ended "**— measured deadlock**", which no
+**[name proposed by the assistant - user to confirm]** — **HOST** and **STRIPED** are this
+document's names. The ruling calls the 4 KiB page "*standard*" and also calls the `N·G` page
+"*standard (bad name, would prefer something meaningful)*"; one word cannot be two types, so the
+4 KiB page is named **HOST** and the `N·G` page **STRIPED**. **GRAIN** and **DUPLICATE** are the
+user's own words. Rename here, at **F.5b**, **SELECTED CONFIGURATION**, **E.2**, **F.9**, Part
+**P** and Appendix **2** if either is wrong — **nothing in the machine reads a name.**
+
+**WHAT THE SIZE CLASS DECIDES, AND THE ONE THING IT DOES NOT.** The **mode bit follows the size
+class** — `4 KiB` ⇒ block-interleaved, `G`/`N·G` ⇒ grain-partitioned — so the fabric reads the
+mode off the size and no separate flag exists (**E.2**). **It does not separate GRAIN from
+DUPLICATE**, which share the `G` virtual size; **one replicate bit in the PTE does**, and with it
+the frame field names the replica set's base (**F.9**, **F.5b** consequence 2).
+
+**WHAT THIS REPLACES, KEPT SO THE OLD MODEL IS RECOGNISABLE WHERE IT SURVIVES IN CODE AND IN
+OLDER TEXT.** The retired taxonomy had **STANDARD** (mode bit 0, 4 KiB, block-spread) and
+**REGULAR** (mode bit 1, `G`-sized, identity-mapped so that grain *g* landed on tile *g mod N*),
+and it drew REGULAR and GRAIN as two allocator behaviours over one page size — "*the hardware
+cannot tell them apart and does not need to*". **Under the ruling that is no longer the model:**
+**STANDARD becomes HOST** (unchanged in behaviour, renamed because the user's own word "standard"
+was claimed by the `N·G` page), **REGULAR becomes STRIPED and changes size from `G` to `N·G`**,
+and **the identity mapping that produced its spread is retired outright** (**P R115**). **GRAIN
+is unchanged.** **DUPLICATE is unchanged and its arithmetic is unchanged**: one virtual page of
+size `G`, N physical copies of size `G` each, total `M = N × G`, of which only `M/N = G` is
+writeable. **Reading "grain × N" as an `N × G`-byte VIRTUAL page is still the error it always
+was** — it allocates N× too much and breaks the `base + t` construction — and it is now one
+letter away from STRIPED, which genuinely *is* `N·G` virtual. **That is the single most likely
+confusion in this section: STRIPED and DUPLICATE share the `N·G` PHYSICAL footprint and differ
+only in VIRTUAL extent.**
+
+**THE USER'S EARLIER THREE-TYPE STATEMENTS, kept because they are tier 1 and because the new
+model is their completion rather than their contradiction.** *User #269, 2026-09-01T20:11:19Z:*
+"**We have 3 page types. We have regular pages (striped across memory tiles), grains (silo'd to
+one tile), and duplicates (grain * N), same data across all tiles.**" *And user #56,
+2026-08-28T03:49:08Z:* "Do we have 2 different modes or 3? **We have regular pages, we have pages
+that represent a ROW in a channel, and we have congruent pages which own a slice on each channel
+simultaneously.** Right?" **#269's three are GRAIN, STRIPED and DUPLICATE** — his "regular pages
+(striped across memory tiles)" is the type now named STRIPED, and it is now `N·G`-sized, which is
+what makes "striped across memory tiles" a property of the page rather than of the allocator.
+**The fourth type, HOST, is the conventional 4 KiB mapping**, which #269 was not enumerating
+because it is not an NMFC page type at all — and the 2026-09-03 ruling names it explicitly
+("*4 KiB for standard pages*"), so the count of four is now the user's own.
+
+**Their sizes are not free parameters** — they follow from the machine's memory configuration.
+*That is the user's own statement, #269, and it should be cited to him and not to a model-authored
+note:* "**All of these pages are different sizes, and the size necessarily changes with the
+machine's memory configuration itself.** Note that the address mapping is clever here:
+**duplicate and grain pages are sized specifically so that they can control their internal
+layout, such that they can grab physical frames all on the same tile.**" (Corroborated at DESIGN
+§5.0.1 D:516-519 and by the memory note `nmfc-translation-design.md:16-19`, both tier 3.) **The
+2026-09-03 ruling makes that literal: `G` and `N·G` are both functions of the device geometry
+(E.3), so all three sizes move together when the memory configuration moves, and only `4 KiB` is
+fixed.**
+
+[CORRECTED — the HOST box previously ended "**— measured deadlock**", which no
 source says. Its tier-2 source, `tools/nmfc/annotate.cc:84-90`, says: "*NMFC mode is
 grain-granular, so a structure smaller than grain × tiles cannot span the machine — **a
 1 MiB frontier on a 1 MiB grain lands entirely on one tile, and every invocation that
@@ -2233,35 +2349,18 @@ migration on every read is what is measured; a deadlock is not.** The two checke
 event — the migration path holding a tile slot while waiting for fabric space, at cycle
 9,100,426 (I.1, DESIGN §23.1 D:1997-2002) — and conflating them overstates the case for a
 mechanism that does not need overstating. E.2a has the measurement that does justify it,
-64 : 1.]
+64 : 1. **[VOCABULARY - user ruling 2026-09-03: the tier-2 source's word "STANDARD" is what
+this document now calls HOST. The quotation is left verbatim.]**]
 
-**"DUPLICATE = grain × N" means the REPLICA SET is N grains, NOT that the page is
-`N × G` bytes.** One virtual page of size **`G`**; `N` physical copies of size `G` each;
-total physical footprint `M = N × G`, of which only `M/N = G` is writeable. The
-construction is in F.9: **a replica set is an aligned N-run of grains, so copy *t* is
-`base + t` and lands on tile *t* by construction, with no per-tile table.** Reading
-"grain × N" as a `N × G`-byte page allocates N× too much and breaks the `base + t`
-construction outright.
-
-**REGULAR and GRAIN differ in the ALLOCATOR, not in the hardware — and that distinction
-must not be implemented as a second mode bit or a per-page silo flag, because neither
-exists.** Both are mode bit 1, both are `G`-sized, and E.1's routing rule reads only the
-mode bit and the physical address: `tile = (pa >> log2(G)) mod N`. A *single* `G`-sized
-page is therefore on exactly one tile under either label. The difference appears only
-across a **multi-grain allocation**: REGULAR means the allocator hands out consecutive
-grains, so grain *g* lands on tile *g mod N* and the object is striped across tiles;
-GRAIN means the allocator picks frames whose grain indices are all congruent to the
-vtile's home, so the whole object sits on one tile. **The hardware cannot tell them
-apart and does not need to.** They are drawn as separate boxes because the *compiler*
-selects between them (F.2's page-TYPE lever), not because the machine has two modes.
-
-`[AND NOTHING UPSTREAM CAN TELL THEM APART EITHER — THE GRAIN PAGE TYPE IS NOT
-EXPRESSIBLE ANYWHERE IN THE SHIPPED TOOLCHAIN. Previously unrecorded. The sentence above
-says the *hardware* cannot distinguish REGULAR from GRAIN, which is fine because the
-compiler selects; this note says **the compiler cannot select**, which is not.]`
+`[AND NOTHING UPSTREAM CAN TELL GRAIN FROM STRIPED EITHER — THE GRAIN PAGE TYPE IS NOT
+EXPRESSIBLE ANYWHERE IN THE SHIPPED TOOLCHAIN. This finding is UNCHANGED by the 2026-09-03 ruling
+and is, if anything, sharper under it: the old model could at least say the hardware did not need
+to tell REGULAR from GRAIN apart, because they were the same size. **Under the ruling they are
+DIFFERENT SIZES, so the toolchain's inability to declare one is now a gap the PTE itself would
+have caught.**]`
 
 **`grep -rn vtile src/nmfc inc/nmfc tools/nmfc config/nmfc` returns ZERO HITS.** The
-`vtile` label the box above depends on — and that F.2 lists as a compiler lever — exists
+`vtile` label the GRAIN box depends on — and that F.2 lists as a compiler lever — exists
 in this document and in DESIGN, and in no source file, header, tool or config.
 
 **The manifest cannot say it.** `annotate.cc:83-104` parses a region line as
@@ -2278,39 +2377,41 @@ rest defaulting to `nmfc`) and the stale root `regions.txt`.
 const std::uint32_t tile = static_cast<std::uint32_t>((a >> opt.grain_bits) % opt.tiles);
 ```
 
-**That is `g mod N` — the REGULAR/striped rule, by definition.** A siloed region would
-need every one of its pages to carry the *same* tile; this line guarantees they carry
-consecutive ones. And `place_regions` (`:111-141`) exists to *preserve* that striping
+**That is `g mod N` — the retired identity-mapped REGULAR rule, by definition, and it is now
+doubly stale: the rule it implements is retired (P R115), and the type it would have to produce
+instead is a STRIPED page, which is `N·G` and which no manifest token can ask for.** A siloed
+GRAIN region would need every one of its pages to carry the *same* tile; this line guarantees
+they carry consecutive ones. And `place_regions` (`:111-141`) exists to *preserve* that striping
 across the real→simulated rebase.
 
 **The region enum has three values, not four.** `inc/nmfc/nmfc_trace.h:127-145`:
 `STANDARD = 0`, `NMFC = 1`, `CODE = 2`.
 
-**THE MAPPING FROM C.3's FOUR BOXES TO THE ENUM'S THREE VALUES, ALL FOUR OF THEM, so it
+**THE MAPPING FROM THIS SECTION's FOUR TYPES TO THE ENUM'S THREE VALUES, ALL FOUR OF THEM, so it
 does not have to be inferred:**
 
-| C.3's box | trace `region` value | how the enum's own comment identifies it |
+| type | trace `region` value | how the enum's own comment identifies it |
 |---|---|---|
-| **STD** | `STANDARD = 0` | "*keeps the classic layout (channel bits just above the block offset) so streaming traffic spreads across every channel*" |
-| **REG** | `NMFC = 1` | "*lifts the channel bits above the page offset … so a whole page lives on one tile … while the page's own blocks still spread across banks*" — **`NMFC` is REGULAR** |
-| **GRN** | **no value — it does not exist in the enum** | **There is no GRAIN.** The mode bit cannot express siloing, `annotate.cc:370` computes every hint's tile as `g mod N`, and no manifest column can declare one (above) |
-| **DUP** | **`CODE = 2`** | "*NMFC mode, and **replicated on every channel**. One virtual address, N physical pages — one per channel. Translating it is where the tile gets chosen … only sound because the pages are read-only*" — that is C.3's DUPLICATE box exactly |
+| **HOST** | `STANDARD = 0` | "*keeps the classic layout (channel bits just above the block offset) so streaming traffic spreads across every channel*" |
+| **STRIPED** | `NMFC = 1`, **and only approximately** | "*lifts the channel bits above the page offset … so a whole page lives on one tile … while the page's own blocks still spread across banks*" — **the enum's `NMFC` is the RETIRED identity-mapped REGULAR page, `G`-sized. STRIPED is `N·G`.** The enum can express the *striping*; it cannot express the *page*. |
+| **GRAIN** | **no value — it does not exist in the enum** | **There is no GRAIN.** `annotate.cc:370` computes every hint's tile as `g mod N` and no manifest column can declare one (above) |
+| **DUPLICATE** | **`CODE = 2`** | "*NMFC mode, and **replicated on every channel**. One virtual address, N physical pages — one per channel. Translating it is where the tile gets chosen … only sound because the pages are read-only*" — that is the DUPLICATE box exactly |
 
 [CORRECTED — this passage said "there is no GRAIN" and identified `STANDARD` and `NMFC`,
-and then never said what `CODE` was, leaving one of the four boxes unmapped. A reader had
+and then never said what `CODE` was, leaving one of the four types unmapped. A reader had
 to infer `DUPLICATE = CODE` from an aside four paragraphs later ("`CODE` replication is
 the one exception: it is siloing-by-replication and it does work"). The enum's own
 docstring says it outright and is quoted in the table above.]
 
-[CORRECTED, SECOND HALF — **the two citations to the same enum did not agree.** C.3's
+[CORRECTED, SECOND HALF — **the two citations to the same enum did not agree.** This section's
 preamble cited `inc/nmfc/nmfc_trace.h:118-133` for "the same split"; this line cited
 `:127-145`. **They are the same enum**: `:117-126` is the doc comment that describes the
 STANDARD/NMFC split in prose, and `:127-145` is the `enum class region` declaration
 itself, whose `CODE` member carries its own 15-line comment. Cite `:117-145` for both, or
-cite the comment and the declaration separately and say which is which — the preamble now
-does the latter. **The deeper point is unaffected and worth restating: the split C.3 draws
-(FOUR boxes) is not the split the enum encodes (THREE values), and the box with no
-encoding is GRAIN — the one the whole siloing claim rests on.**]
+cite the comment and the declaration separately and say which is which. **The deeper point is
+unaffected and is now stronger: the split this section draws (FOUR types over THREE sizes) is
+not the split the enum encodes (THREE values, one size class), and the type with no encoding is
+GRAIN — the one the whole siloing claim rests on.**]
 
 **And `PAGE_HINT` advertises the mechanism it never emits.** `nmfc_trace.h:74-81`:
 "*Virtual page `aux0` … should be backed by physical memory owned by tile `tile` … **This
@@ -2318,9 +2419,9 @@ is how the pseudo-compiler silos a data structure -- or a function's code -- ont
 memory tile.***" **Its only producer never emits a siloed tile.**
 
 **CONSEQUENCE, and it bounds a large part of Parts G, K and N: every result in this tree
-was measured on a REGULAR/striped layout.** The siloing property — the thing the grain
-formula exists to *license* (E.3: "*the tagging granularity, the siloing granularity, and
-the NMFC-data page size*" are one number) — **has never been exercised.** Any claim of the
+was measured on the retired identity-mapped striped layout.** The siloing property — the thing
+the grain formula exists to *license* (E.3: "*the tagging granularity, the siloing granularity,
+and the NMFC-data page size*" are one number) — **has never been exercised.** Any claim of the
 form "co-location did not help" or "the policy had nothing to move" must say this, because
 **the layout it would have moved data toward cannot be requested.** `CODE` replication is
 the one exception: it is siloing-by-replication and it does work (`nmfc_producer.cc:269`).
@@ -2329,7 +2430,10 @@ the one exception: it is siloing-by-replication and it does work (`nmfc_producer
 (`silo <tile>` or a `vtile` column), a `region::GRAIN`, and a branch at `annotate.cc:370`
 that emits the declared tile instead of `(a >> grain_bits) % tiles`. **The receiving side
 already works** — `nmfc_vmem.cc:555-559` honours `hint.tile` verbatim under
-`TRANSLATE_FIRST` (A.4a). Ledger **L41**.
+`TRANSLATE_FIRST` (A.4a). Ledger **L41**. **[AND THE 2026-09-03 RULING ADDS A FOURTH PLACE: a
+manifest token for a STRIPED page, which is `N·G` and which `standard|nmfc` cannot express
+either. ChampSim is FROZEN (R3), so none of this is a ChampSim work item; it is recorded as
+what the tooling would need.]**
 
 **Duplicates, precisely** (user #271, 2026-09-01T20:18:16Z, verbatim): "Duplicates are
 not independently-writeable in user-space, that is the whole point. **They appear as
@@ -2346,6 +2450,12 @@ bodies can be aliased this way **and the data they chase cannot**
 (`inc/nmfc/nmfc_trace.h:139-145`).
 
 ### C.4 An invocation's lifecycle
+
+**[RE-VALIDATED 2026-09-03 - the KILL branch below was added under user ruling 2026-09-03 and
+EVERY mermaid block in this document was re-run through the embedded checker printed later in
+this section: no `;`, balanced quotes, balanced brackets, balanced subgraph/end. All five blocks
+pass, and C.3's block was REPLACED wholesale in the same revision (the four-type page model,
+user ruling 2026-09-03) and passes as rewritten.]**
 
 `[CHECKED AGAINST DESIGN A, 2026-09-03 (morning) — NO CHANGE WAS NEEDED, and the check is
 recorded so it is not re-run blind.]` Every mermaid block in this document was scanned for a
@@ -2406,6 +2516,11 @@ sequenceDiagram
     X->>F: propagate to the host
     F->>K: kill the program and ALL of its contexts
     Note over F: every outstanding FTU entry of that program<br/>closes AT ONCE — register file ZEROED, ERROR FLAG set.<br/>A JOIN on any of them returns immediately with the error.<br/>Nothing waits on the user program (ruling O7).
+  else the program KILLS the invocation itself — KILL rH, UNPRIVILEGED
+    H->>F: KILL rH — name one of MY OWN outstanding invocations
+    Note over F: the entry takes the SAME path ruling O7 defines,<br/>register file ZEROED and ERROR FLAG set, so a later<br/>JOIN returns the error at once and nothing waits on the tile.<br/>A stale, retired or unowned handle is a NO-OP.
+    F->>X: kill packet — the same control path an invocation,<br/>a completion and a RESUME packet already take
+    X->>B: end the context wherever it is — sleeping on a load,<br/>parked after a fault, or in flight, where the migration ACK carries it.<br/>Any atomic-table hold is released.
   end
 ```
 
@@ -2488,6 +2603,17 @@ drawn above is: **tile faults → delivered to the host through the FTU as a tra
 handler runs → `RESUME handle` → the context resumes.** `RESUME` is recorded as a
 thirteenth instruction, **privileged** [RULED — user ruling 2026-09-03 O16, verbatim:
 "**Yes, privileged.**"] — see **I.6** and **I.3**.
+
+**AND THE LAST BRANCH OF THE DIAGRAM IS NEWER STILL, AND IT IS ALSO TIER 1.**
+[RULED - user ruling 2026-09-03, verbatim: "**Another correction: we probably need an
+instruction specifically to kill a failed program's contexts. KILL(hook) is probably the way to
+go. As to whether this is privileged, probably not?**"] **`KILL rH` is a FOURTEENTH instruction
+and it is UNPRIVILEGED**, so the lifecycle now has **three** ways an invocation can end other
+than by returning: an `END` with the return bit clear, the fatal-fault teardown (ruling **O7**),
+and a `KILL` the program issues against its own handle. **The kill branch reuses O7's path
+exactly** — zeroed file, error flag, `JOIN` returns immediately — which is why the diagram
+draws it as another `else` and not as a second mechanism. Full statement at **I.3a**; the fault
+path it borrows is **I.6**; ledger **L57**.
 
 **On "all 512 bits are live on entry", which an earlier revision of this diagram
 asserted.** The 512 bits are the context's *capacity*, transmitted whole because 64
@@ -3285,6 +3411,18 @@ architecture.**
 
 **One physical address bit, one position above the top of the DRAM range, applied at
 translation time, stamped at allocation, never changed.**
+
+**AND WHAT STAMPS IT IS NOW THE PAGE'S SIZE CLASS, NOT AN INDEPENDENT CHOICE.**
+**[derived from user ruling 2026-09-03 - the four-type / three-size page model, F.5b.]** The bit
+is unchanged as a mechanism — it is still a real, stored, carried, evicted **address** bit, for
+the cache-tagging reason below, and Part P **R11** and **R12** still stand — but **its VALUE is a
+property of the page size class**: `4 KiB` ⇒ **0**, block-interleaved (a **HOST** page); `G` and
+`N·G` ⇒ **1**, grain-partitioned (**GRAIN**, **STRIPED**, **DUPLICATE**). **The fabric reads the
+mode off the size class, and the allocator has no separate mode decision to get wrong.** A 4 KiB
+page in grain-partitioned mode, or a `G` page block-interleaved, **is not expressible** — which
+removes, by construction, the mixed-mode case F.9 measures at **6.7% of blocks colliding** and
+Part P **R21** rejects. **It does not remove the aliasing rule itself**: a group is still in
+exactly one mode, because a group is now in exactly one size class.
 
 *User #10, 2026-08-27T06:41:05Z, who reduced it to this form himself:* "Regarding
 mapping mode, I think this is actually even simpler than you designed: **we are really
@@ -4256,13 +4394,23 @@ something had to be designed:
    format, not by this document.
 3. **Multiple page sizes, as modern hardware already supports them.** A large-page
    terminator at an upper level is how a walk ends early; that is how huge pages already
-   work and it is why F.7's TLB probes **two arrays in parallel** — a 4 KiB array and a
-   `G`-sized array. **`G` is not 2 MiB or any other fixed size** (E.3), so "the huge page
-   size" is a device-derived quantity, not a constant.
+   work and it is why F.7's TLB probes **one array per size class in parallel**. **`G` is not
+   2 MiB or any other fixed size** (E.3), so "the huge page size" is a device-derived quantity,
+   not a constant. **[UPDATED - user ruling 2026-09-03: there are THREE virtual page sizes, not
+   two — `4 KiB`, `G` and `N·G` (**F.5b**) — so the TLB probes THREE arrays in parallel, and this
+   clause read "two arrays … a 4 KiB array and a `G`-sized array" before the ruling. The
+   `N·G` array is the one a STRIPED page hits. **The PTE carries the size**, exactly as R13
+   requires, plus one **replicate bit** to separate a DUPLICATE from a GRAIN, which share the
+   `G` size class (F.5b).]**
 4. **The mode bit lives IN THE PTE and rides on the physical address.** The bit that says
-   whether a frame is NMFC-mode (grain-silo'd) or STANDARD-mode (block-spread) is **stored
+   whether a frame is NMFC-mode (grain-partitioned: a **GRAIN**, **STRIPED** or **DUPLICATE**
+   page) or HOST-mode (block-spread: a **HOST** page) is **stored
    in the page-table entry** and is **carried as an extra bit on any physical address the
-   translation produces**. It is stamped at allocation and never changes (E.2). It survives
+   translation produces**. It is stamped at allocation and never changes (E.2). **[VOCABULARY,
+   and it is now a DERIVATION - user ruling 2026-09-03: this clause said "STANDARD-mode", which
+   the four-type model renames HOST (F.5b), and the bit's VALUE is no longer an independent
+   choice at all — it follows from the page's SIZE CLASS: `4 KiB` ⇒ block-spread, `G`/`N·G` ⇒
+   grain-partitioned. What is stored and carried is unchanged; what STAMPS it is the size.]** It survives
    `compact`/`expand` — which is exactly why those two are mode-correct without carrying
    the mode separately (C.2) — and it is **stripped at the DRAM port and nowhere earlier**,
    because a device decoder would otherwise collapse both modes onto the same row.
@@ -4276,6 +4424,120 @@ component that had one, which is why `memSize` is fatal at construction now (F.8
 
 **What is NOT settled here, and it is not a format question:** nothing. The old ruling
 question asking for a PTE specification is closed by R13.
+
+### F.5b THE FOUR PAGE TYPES AND THE THREE PAGE SIZES — RULED
+
+**[RULED - user ruling 2026-09-03. This section is new, and it REPLACES the page-type taxonomy
+this document used to carry at C.3 and in Part F's prose. Part F had no page-type section of its
+own before this revision — the taxonomy lived in a diagram — which is part of why the retired
+model survived as long as it did.]**
+
+**THE QUESTION THE USER PUT FIRST, verbatim, user ruling 2026-09-03:** "*The difference between a
+regular and grain page is just the size of each right? A regular page is large enough to cover
+all grains, a grain page is the exact size of a single grain? They should both use the same
+addressing mode though*"
+
+**AND THE RULING, verbatim, user ruling 2026-09-03:** "*This seems like a no-brainer? I would say
+yes, with the caveat that we would have 3 page sizes in total: 4 KiB, 1 grain, N grains. 4 KiB
+for standard pages, 1 grain for grain pages. N grains for standard (bad name, would prefer
+something meaningful) and duplicate pages. The only difference between standard and duplicate is
+that duplicates represent 1 grain of virtual space but N grains of physical space, while standard
+is 1 grain of virtual space per 1 grain of physical space.*"
+
+> **THREE PAGE SIZES: `4 KiB`, `G` (one grain), `N·G` (N grains). FOUR PAGE TYPES over them.
+> ONE addressing mode and ONE page table for all four; the size is carried in the PTE exactly as
+> any multi-size page table carries it (user ruling 2026-09-02 **R13**).**
+
+| type | virtual size | physical size | where the physical bytes land | what it is for |
+|---|---|---|---|---|
+| **HOST** | **4 KiB** | 4 KiB | **block-interleaved across every tile after the fabric**, at the block, exactly as a conventional machine interleaves across channels | ordinary host data — the conventional mapping, and the one a program gets unless something asks for otherwise |
+| **GRAIN** | **`G`** | `G` | **ONE tile — the vtile's** | NMFC-owned data co-located by vtile (**F.2**) |
+| **STRIPED** | **`N·G`** | `N·G` | **one grain per tile**, all N of them | NMFC data with **no owner**, spread for bandwidth |
+| **DUPLICATE** | **`G`** | **`N·G`** | **one full copy per tile**, all N identical | code, read-only data, **the page table itself** (**I3**) |
+
+**[name proposed by the assistant - user to confirm]** — **HOST** and **STRIPED** are this
+document's names, not the user's. The user's ruling calls the 4 KiB page "*standard*" and ALSO
+calls the `N·G` page "*standard (bad name, would prefer something meaningful)*", which is one
+word for two different types and is exactly the collision that has to be resolved before the
+taxonomy can be written down. **The choice made here: the 4 KiB page becomes HOST** (it is the
+host's ordinary mapping, and it is the only type that is not grain-partitioned), **and the `N·G`
+page becomes STRIPED** (it is what the page does — one grain per tile). **`GRAIN` and `DUPLICATE`
+are the user's own words and are not up for renaming.** If either proposed name is wrong, rename
+it here and at **C.3**, **SELECTED CONFIGURATION**, **E.2**, **F.9**, Part **P** and Appendix
+**2** — the model is unaffected either way, because **the names are labels on rows of the table
+above and nothing in the machine reads a name.**
+
+**STRIPED AND DUPLICATE ARE THE PAIR THAT MUST NOT BE CONFUSED, AND THE USER'S SENTENCE IS THE
+TEST.** "*The only difference between standard and duplicate is that duplicates represent 1 grain
+of virtual space but N grains of physical space, while standard is 1 grain of virtual space per
+1 grain of physical space.*" **They share the `N·G` PHYSICAL footprint and differ only in VIRTUAL
+extent:** striped is `N·G` virtual over `N·G` physical — one virtual grain per physical grain,
+which is why it is ordinary memory that happens to be spread — and duplicate is `G` virtual over
+`N·G` physical, which is why **only `M/N = G` of a duplicate is writeable** (user #271,
+2026-09-01T20:18:16Z: "*Although a duplicated page takes up M space, only M/N is write-able*")
+and why the replica set is an aligned N-run of grains with copy *t* at `base + t` (**F.9**).
+
+**SAME ADDRESSING MODE, AND THAT IS THE HALF OF THE QUESTION THE USER ANSWERED FIRST.** "*They
+should both use the same addressing mode though*" — and they do, and so do all four: **one page
+table per address space (I3, R12), one walk, one ASID-tagged TLB per tile (F.7).** The type is
+not a second translation path; it is a size plus, for the one pair the size cannot separate, one
+bit.
+
+**WHAT THE SIZE CLASS DECIDES BY ITSELF, AND WHAT IT DOES NOT.** **[derived from user ruling
+2026-09-03]**
+1. **The MODE BIT IS A PROPERTY OF THE SIZE CLASS, not a separate flag.** `4 KiB` ⇒
+   **block-interleaved**; `G` and `N·G` ⇒ **grain-partitioned**. **The fabric reads the mode off
+   the size class**, which is why the two mappings can share one table and one walk. E.2's
+   physical mode bit is unchanged as a *carried* bit — caches tag by address and an evicted line
+   has no PTE behind it (**E.2**, Part P **R11**/**R12**) — but **what STAMPS it at allocation is
+   now the size class, not an independent choice.** A 4 KiB page in grain-partitioned mode, or a
+   `G` page block-interleaved, is not expressible, which is the point: it was the unexpressible
+   combination that the old four-way taxonomy left open.
+2. **THE SIZE CLASS DOES NOT SEPARATE GRAIN FROM DUPLICATE, because they share the `G` VIRTUAL
+   size.** One further PTE bit does — the **replicate bit** — and with it the frame field names
+   the replica set's base rather than a single frame, so copy *t* is `base + t` (**F.9**). **That
+   is one bit and one reading of an existing field**, and it is the entire cost of holding four
+   types in three sizes. **A reader who expects the size class to name the type will get
+   DUPLICATE wrong**, which is the one place this model is not self-evident.
+3. **ALLOCATION GRANULARITY FOR A STRIPED OBJECT IS `N·G`.** That is the direct cost of making
+   spread a property of the page rather than of allocator policy, and it is not hypothetical:
+   **DESIGN §12's free-resource fragmentation risk applies here, at N times the unit it was
+   written for.** "*An NMFC unit needs N free rows on one tile, so a scattered free list can fail
+   an allocation while total free capacity is ample — the familiar huge-page problem*" (**O.4**,
+   risk 1). **A striped allocation needs a free grain on EVERY tile at the same group index**,
+   so the `(tile, row)` free bitmap and the reported *largest allocatable run per tile* are the
+   instruments that make it visible, and the fallbacks are the ones §12 already names: **spill
+   (F.8, ruling O6) or fall back to a GRAIN page and lose the spread.** Never a hard error
+   (**R18**: warn, never fatal).
+4. **AN UNHINTED OBJECT MUST BE ONE OF GRAIN OR STRIPED, AND THE CHOICE IS THE OWNER'S.**
+   [RULED - user ruling 2026-09-03 **O1**, verbatim: "*Unhinted grains are up to the OS/hardware
+   to place. So, presumably the OS could map it wherever was most convenient.*"] There is no
+   "spread by default" placement rule left to fall back on, because **spread is now a page type
+   and not a policy** — so the address space's owner picks GRAIN (cheap, `G`-granular, sits
+   wherever is convenient) or STRIPED (`N·G`-granular, spread for bandwidth). **No partition
+   semantics attach to the virtual address either way** (**F.3**), and nothing downstream may
+   depend on which was picked.
+
+**AND THE THING THIS MODEL RETIRES: "identity-mapped regular" as a PLACEMENT RULE.**
+**[derived from user ruling 2026-09-03]** The retired model made the old `REGULAR` page a
+`G`-sized page that was **identity-mapped**, so that consecutive grains striped across tiles by
+the partition arithmetic and no hint was involved: spread was a *consequence of where the
+allocator was forbidden to put things*. **That is gone.** Spread is now the `N·G` page's own
+definition, and **the allocator is free at every page type.** Part **P** carries the retirement
+as **R115**, with the two arena-overlap hazards it caused (DESIGN §30.3 D:3414-3429 — a
+`walkBase` check that ran before the value it checked was read, and **page tables sitting inside
+the frame arena**, both of which are what happens when page frames and page-table frames are
+drawn from one identity-mapped space). **What is NOT retired is Part P R6** — identity/direct
+mapping as the *address space's* structure, rejected at #6 for a different reason (a unified
+virtual address space, and graph scale). **R115 retires a placement rule; R6 rejects an address
+space. Do not merge them.**
+
+**WHERE THE FOUR TYPES ARE USED, so this table is not the only place they appear:** **C.3**
+draws them and maps them onto what the shipped toolchain can actually express; **E.2** carries
+the mode bit and now derives it from the size class; **F.9** carries the aligned-N-run
+construction that DUPLICATE and STRIPED both rest on; **SELECTED CONFIGURATION** records the
+page sizes each simulator was configured with; Part **P R115** carries the retirement; Appendix
+2 **S42** is the SST alignment item. Ledger **L58**.
 
 ### F.6 Walks must remain local
 
@@ -4416,7 +4678,7 @@ shared*"):
 
 | tier | what | on migration |
 |---|---|---|
-| the tile's shared TLB | ONE per tile, ASID-tagged, shared by every context on it: two arrays probed in parallel, small (4 KiB) and huge (G) | stays with the tile |
+| the tile's shared TLB | ONE per tile, ASID-tagged, shared by every context on it: **three** arrays probed in parallel — `4 KiB`, `G` and `N·G` (**F.5b**, user ruling 2026-09-03; this row said "two arrays … small (4 KiB) and huge (G)" before the ruling added the `N·G` size) | stays with the tile |
 | the walk | into the local copy of the one page table | stays with the tile |
 
 **THERE IS NO THIRD TIER ABOVE THE TLB, AND BUILDING ONE IS REJECTED — user ruling
@@ -4537,7 +4799,9 @@ result.]` Two separate bugs made translation look ruinous — **95% of arrivals 
 cold walk, page-table traffic at 0.61 references per instruction** — and both were
 artefacts:
 1. **The page size did not follow the page type.** `pageOf()` keyed grain and duplicate
-   regions at `G` but keyed **REGULAR** pages — which are NMFC-mode — at 4 KiB, throwing
+   regions at `G` but keyed **REGULAR** pages — the tier-4 name for the retired identity-mapped
+   `G`-sized type, whose replacement is the `N·G` **STRIPED** page (**F.5b**, user ruling
+   2026-09-03) — which are NMFC-mode, at 4 KiB, throwing
    away the reach the huge page exists to provide and silently demanding 256 adjacent
    4 KiB frames per silo. **That is the contiguity requirement the grain page was
    introduced to remove.**
@@ -4721,6 +4985,21 @@ layout; a replica set is an aligned N-run, so copy *t* is `base + t` and lands o
 made together** — a replicated grain existing on only some channels would silently
 turn "choose a copy" back into "choose among the tiles that happen to have one", which
 is the compile-time layout this exists to replace.
+
+**AND UNDER THE FOUR-TYPE MODEL THE SAME ALIGNED N-RUN IS WHAT A STRIPED PAGE IS, WHICH IS WHY
+THIS SECTION DID NOT HAVE TO CHANGE.** **[derived from user ruling 2026-09-03 - F.5b.]** A
+**STRIPED** page is `N·G` virtual over `N·G` physical, **one grain per tile**, so it *is* an
+aligned N-run of grains, allocated as a unit — the same object this section already describes
+for a replica set, differing only in that its N grains hold **different** bytes rather than N
+copies of the same ones. **DUPLICATE and STRIPED therefore share their allocation construction
+and differ only in virtual extent** (`G` versus `N·G`), which is exactly the user's own
+distinction: "*duplicates represent 1 grain of virtual space but N grains of physical space,
+while standard is 1 grain of virtual space per 1 grain of physical space*". **`grain g lives on
+tile g mod N` above is still the ROUTING rule** — it reads the physical address, as I9 requires
+— and it is **no longer also a PLACEMENT rule**: the identity mapping that used to make the two
+the same thing is retired (Part **P R115**). **The allocation granularity for a striped object
+is `N·G`**, and that is the cost, recorded at **F.5b** consequence 3 against DESIGN §12's
+fragmentation risk.
 
 ### F.10 The mechanisms must be RUNTIME-SWAPPABLE, and both must be measured
 
@@ -6323,12 +6602,35 @@ narrow→wide unsigned is the `slli`/`srli`-by-32 idiom RV64 already emits, **wr
 destination**; **wide→narrow is free**, because the low half of `d`*k* **is** `w`*2k*;
 narrow→wide float is `fcvt.d.s`, the correct instruction on a stock core too.
 
-> `[FLAGGED FOR THE USER — the integer-ALU row, and the one place this section departs from the
-> drafting instruction for this revision.]` The instruction that ordered this section named the
+> **[CONFIRMED - user ruling 2026-09-03. THIS IS THE BUILT RULE AT TIER 1, NOT A STRIKING THIS
+> DOCUMENT PERFORMED ON A PROPOSAL'S AUTHORITY. The tag that stood here was
+> `[FLAGGED FOR THE USER]` plus a `[USER TO CONFIRM]` at the end of the block, and both are
+> RETIRED.]** **The user's words, verbatim:** "**W1b: Not really sure what this is getting at? We can't do more than one op at once, so might as well make the ALU 64-bit always, it really makes no difference. FP/DP require floating point hardware we are already going to have to support alongside the integer ops.**"
+>
+> **WHAT THAT SETTLES, IN THE FOUR CLAUSES THIS SECTION IMPLEMENTS:** **(1)** the **integer ALU
+> always executes at 64 bits** — "*might as well make the ALU 64-bit always, it really makes no
+> difference*" — so **there is no "execute at the named width" mode** and W1b's premise is gone;
+> **(2)** a **32-bit-named integer source is SIGN-EXTENDED on read**, which is W2 above and is
+> RV64's own ratified convention, not a deviation; **(3)** the **write port keeps only the named
+> tile's bits**, which is W3; **(4)** **`*W` opcodes behave exactly as RV64 defines them** — 32-bit
+> execution for those ten opcodes and no others — which is the integer-ALU row of W1 as printed.
+> **The user's reason is the machine's own shape: "*We can't do more than one op at once*"** —
+> there is one execution unit per pipe and no width-selected duplicate of it, so a narrower ALU
+> buys nothing to trade against.
+>
+> **AND FLOATING POINT IS UNAFFECTED, WHICH THE SAME SENTENCE SAYS:** "*FP/DP require floating
+> point hardware we are already going to have to support alongside the integer ops.*" The **FPU
+> computes at the opcode's format** — `f32` in a `w` tile, `f64` in a `d` tile, exactly as the FP
+> rows of W1 already state — and that hardware is present under **`RV64IMAFD`** regardless
+> (ruling **O4**). **Float is not a width mode on the integer ALU and never was.**
+>
+> **THE DRAFTING INSTRUCTION IS WITHDRAWN.** The instruction that ordered this section named the
 > integer ALU rule as *"from the widest register operand; `*W` forms 32"*. **That is rule W1b of
-> `final-A-aliasing.md` §3, and `register-map-final.md` §3.3 STRIKES it.** The row above carries
-> the amended rule instead. **W1b is recorded, not deleted**, and here is why it was struck, in
-> the proposal's order:
+> `final-A-aliasing.md` §3, `register-map-final.md` §3.3 STRIKES it, and user ruling 2026-09-03
+> CONFIRMS the striking.** The row above carries the amended rule, which is now simply **the
+> rule**. **W1b is recorded, not deleted**, and here is why it was struck, in
+> the proposal's order — all three reasons survive the confirmation and none of them is now
+> load-bearing, because the user ruled on the substance rather than on the argument:
 > 1. **Not expressible in a standard back end.** An LLVM `RegisterClass` carries a single
 >    `RegSizeInBits` and an instruction's operand class is fixed at its definition, so there is
 >    no selectable form for an R-type drawing `rd` from a 64-bit class and its sources from a
@@ -6348,8 +6650,11 @@ narrow→wide float is `fcvt.d.s`, the correct instruction on a stock core too.
 > product tap for `mulh*`, and the 32-bit sentinel in the divider's overflow path
 > (`final-A-aliasing.md` §10.5, *"the part that is NOT free"*, deleted in full). **Ten ISA
 > deviations become nine and the execution-unit cost becomes zero.**
-> **[USER TO CONFIRM]** — if W1b was meant literally, say so and this row reverts, and SW2 and
-> §10.5's execution-unit work come back with it. *(`register-map-final.md` §3.3, §3.6a SW2.)*
+> **AND THAT DELETION IS NOW PERMANENT** [RULED - user ruling 2026-09-03]: **SW2 — XLEN as a
+> function of register allocation — cannot arise**, because there is no width-selected execution
+> mode for an allocator to select, and **§10.5's execution-unit work does not come back.** The
+> reversion this block used to hold open **is closed.** *(`register-map-final.md` §3.3,
+> §3.6a SW2.)*
 
 #### H.10.4 Legality — what the decoder traps
 
@@ -6805,7 +7110,8 @@ shift-and-mask through a scratch name at about 2–3 operations (**H.10.6**). **
 operations and nothing else: a SPEED optimisation, never a capability fix** — which is exactly why
 it is a hatch and not a requirement.]` **Its price is two tier-1 reopenings** — **R84**
 (bit-field insert/extract with an offset and a width, rejected at #233) and **the settled
-instruction count** — twelve user-level instructions plus the privileged `RESUME` (I.3, I.9) — and the user's #233 words stand against it
+instruction count** — twelve base instructions plus the privileged `RESUME` and the unprivileged
+`KILL`, fourteen in all (I.3, **I.3a**, I.9) — and the user's #233 words stand against it
 until then: "*We need to make sure EXTRACTION from the regs is possible. Regular bit manipulation
 can take you the rest of the way … Let's not overdesign.*" **The narrow, extract-only form
 (A2-r) satisfies #233 literally at one instruction instead of two.**
@@ -7173,7 +7479,9 @@ CONT.M   rPC, rADDR        extend: the tile fetches a fresh context
 2026-09-02, verbatim: "**RETC and ENDC are the same instruction, with a return bit.**"
 Ledger L44 is closed, and the count is settled at **TWELVE base instructions**. The
 mnemonics `RETC` and `ENDC` survive only as the assembler surface for `END.R` and `END`,
-and this document uses `END` with an explicit statement of the bit.]
+and this document uses `END` with an explicit statement of the bit.] **The BASE set is twelve
+and stays twelve; the machine's total is FOURTEEN** — 12 base + `RESUME` (privileged, R20 /
+O16) + `KILL` (unprivileged, user ruling 2026-09-03, **I.3a**).
 
 *(The forms and their meanings: DESIGN §23.3 D:2095-2098. [CONFLICT — tier 3 lists
 `RETC cCTX` at D:2095, WITH an operand.] `END` takes none, for the
@@ -7237,7 +7545,8 @@ including that `CONT` is the mechanism for §22's option 2 — splitting a funct
 for the file into a chain.)*
 
 **AND A THIRTEENTH, WHICH IS NOT PART OF THE BASE SET BECAUSE IT IS NOT A USER
-INSTRUCTION: `RESUME`.**
+INSTRUCTION: `RESUME`.** (The FOURTEENTH, `KILL`, **is** a user instruction and has its own
+section at **I.3a** — user ruling 2026-09-03.)
 
 ```
 RESUME   rH                PRIVILEGED; restart the faulted context named by handle rH
@@ -7271,6 +7580,119 @@ re-issue the instruction that faulted.** It allocates nothing, refuses nothing, 
 **held** across the fault, which is the one place a function core holds a slot for something
 other than execution; a fault is not a migration and there is nothing to re-place. See
 **I.6** for the fault path and **C.4** for the lifecycle.
+
+### I.3a `KILL` — the FOURTEENTH instruction, and it is UNPRIVILEGED
+
+```
+KILL     rH                UNPRIVILEGED; end the invocation whose FTU handle is in rH
+```
+
+**THIS IS RULED, AND IT OVERTURNS AN OLDER TIER-1 STATEMENT.** [RULED - user ruling 2026-09-03,
+verbatim: "**Another correction: we probably need an instruction specifically to kill a failed
+program's contexts. KILL(hook) is probably the way to go. As to whether this is privileged,
+probably not?**" This is **newer** than #224, 2026-09-01T04:32:31Z — "*Lets not build a KILL
+instruction though*" — and under the authority rule (#307, "*inside the session log, newest
+assertions take priority over older assertions*") the newer statement governs without exception.
+**#224 is not deleted**: it is recorded at **I.7**, and its objection is answered below rather
+than ignored. Part P **R77** is marked OVERTURNED for the same reason.]
+
+**`KILL(hook)` is read as `KILL rH`, a handle in a general register.** [NOTE - "hook" is read as
+"handle" because the FTU handle is the **only** per-invocation name this ISA has: `JOIN`, `JOINQ`
+and `RESUME` all take one, `FORK` returns one, and nothing else in the machine names an
+invocation. There is no other referent the word could have.]
+
+**IT IS UNPRIVILEGED, and the reason is that there is nothing for privilege to protect.**
+**[derived from user ruling 2026-09-03]** The user's own words leave it open — "*As to whether
+this is privileged, probably not?*" — and the derivation is short: **a handle is issued by the
+program's OWN FTU** (**I.5**), and the FTU can only act on entries it owns, so **`KILL` cannot
+name another program's contexts at all.** A handle from a different address space is not a
+handle here; it is a number that names nothing. So the instruction is **`pthread_cancel`, not
+`kill(2)`** — it ends work the caller already owns — and it sits in the same class as `FORK`
+and `JOIN`. **This is the exact opposite of `RESUME`'s case and for the exact opposite reason:**
+`RESUME` is privileged because the party that took delivery of the trap is the party that returns
+from it (**I.3**, ruling **O16**), whereas nothing about ending your own invocation touches the
+trap path.
+
+**WHAT IT DOES, AND IT IS ENTIRELY THE PATH RULING O7 ALREADY BUILT.** **[derived from user
+ruling 2026-09-03, on ruling O7]** There is **no new closure semantics**, which is the whole
+reason this instruction is cheap:
+
+| # | step | who |
+|---|---|---|
+| 1 | `KILL rH` retires on the host and the FTU looks the handle up **in its own entries** | the host, user-level |
+| 2 | the entry **closes at once: register file ZEROED, ERROR FLAG set** — the same one bit **I.4** and **I.6** already define | the FTU |
+| 3 | a kill packet goes out **as a control message — the same path an invocation packet, a completion and a `RESUME` packet already take** | the fabric |
+| 4 | the tile **ends the context wherever it is** — running, sleeping on its one outstanding load (**H.4**), parked across a fault (**I.6**), or **in flight**, in which case the migration ACK carries the kill to the destination — and **releases any atomic-table hold it is holding** (**H.7**) | the function core |
+| 5 | a later `JOIN` on that handle **returns immediately with the error flag set**; `JOINQ` reports the entry as returned. **Nothing waits on the tile and nothing waits on the program.** | the host |
+
+**AND STEP 3 NAMES A GAP RATHER THAN A CLASS, DELIBERATELY.** **[derived from user ruling
+2026-09-03.]** The canon's **three** ruled message classes are **COHERENCE, MIGRATION and FILL**
+(ruling **O5**, **C.5a**, **H.8**), and they are the classes for **data**: directory traffic,
+a migrating context, a line fill. **The canon has never assigned a class to the control traffic
+the ISA generates** — the invocation packet a `FORK` sends, the completion an `END` sends, the
+resume packet a `RESUME` sends — and **a kill packet joins that set rather than adding a fourth
+data class.** What binds it is only what already binds the rest: **it must not displace
+COHERENCE** (I14 makes NMFC priority an order), and **it must not be queueable behind a
+congested destination's fills**, because a teardown that a busy tile can delay is a teardown a
+failed program can outlive. **Where control traffic is queued is implementation** — SST gives it
+its own delivery budget (`controlDeliver`, SELECTED CONFIGURATION), ChampSim gives the function
+fabric per-destination deques for invocations, migrations and completions — **and this document
+records the gap rather than closing it on its own authority.**
+
+**A `KILL` ON A STALE, RETIRED OR UNOWNED HANDLE IS A NO-OP.** **[derived from user ruling
+2026-09-03]** It is not a fault, not a trap and not an error return — it is exactly what `JOIN`
+on a stale handle already is (**I.4**: a probe answer, "not a fault"). **This is what makes the
+instruction safe to issue from a teardown path that cannot know which of its invocations have
+already ended**, which is the situation the ruling names: a *failed* program does not know what
+it still has outstanding. A `KILL` that faulted on a handle the FTU had already reclaimed would
+put the teardown itself back in the position of needing to be correct about state it has lost.
+
+**IT ALLOCATES NOTHING AND CANNOT BE REFUSED.** Like `CONT` and `RESUME`, it names an entry that
+already exists, so it consumes no new resource. **It also cannot leave a resource held:** step 2
+frees the FTU entry and step 4 frees the tile slot, and neither waits on the other. That is
+**I.1** satisfied literally — nothing blocks — and **I.5**'s prohibition satisfied too, since
+the entry is freed by an instruction that always succeeds rather than by one that can be refused.
+
+**THERE IS NO ALL-KILL INSTRUCTION, AND THE FATAL-FAULT CASE DOES NOT NEED ONE.** **[derived
+from user ruling 2026-09-03, on ruling O7]** "*Kill a failed program's contexts*" **in the
+FATAL-fault case is the kernel iterating its own FTU entries and applying the O7 teardown**
+(**I.6**), which is already the ruled behaviour and needs no instruction at all. What `KILL`
+adds is the **user-level** case: a program that has decided *itself* that an invocation is
+failed, or that is unwinding, ends it without waiting for it. **One handle per instruction; no
+wildcard, no "all mine", no process argument** — a wildcard would be the one form that could
+reach beyond the caller, and the canon does not have one.
+
+**AND #224's OBJECTION IS ANSWERED, NOT OVERRULED BY SILENCE.** #224's reason for refusing
+`KILL` was that "*a context could be ended in an unsafe state*", so a kill would have to be
+**cooperative** — a "*I will accept a kill request at this time*" instruction, a protocol, and
+a liveness obligation on every function ever written. **None of that is built here, and it is
+not needed for what was ruled**, for two reasons: **(a)** the ruling scopes the instruction to a
+**failed** program's contexts, and a failed program's memory is already in a state nobody can
+reason about — **ruling O7 established that exact position for the fatal-fault path and did
+not require cooperation there either**; **(b)** the machine has **no unsafe state of its own** to
+leave behind — a killed context's register file is discarded, its FTU entry is closed with a
+well-formed error return, its atomic-table hold is released, and its stores are ordinary stores
+that either committed or did not. **What is NOT protected is the PROGRAM's own invariants**: a
+`KILL` issued against a healthy invocation half-way through updating a shared structure leaves
+that structure half-updated, and that is the caller's problem exactly as `pthread_cancel`'s is.
+**#224's concern therefore survives as a PROGRAMMING caveat and is retired as an architectural
+veto.** It is stated at **I.7** in that form.
+
+**ENCODING.** `KILL` takes a slot in the reserved `0x6`/`0x7` groups — the space DESIGN
+§23.7 D:2246-2247 has reserved for it from the beginning ("*`funct3` 0-5, with 6 and 7 left for
+§23.5's `KILL` and mailboxes*"), which is why adding it costs no encoding space. **Which value
+it takes the canon does not say**, because user ruling 2026-09-03 **O3** makes every
+`funct7`/`funct3` value an implementation choice; the number belongs in **SELECTED
+CONFIGURATION** with the rest of `nmfc_isa.h`'s. Operands: `rs1` = the handle, `rd` = `x0`,
+`funct3` = 2 (`XS1`) — the same shape as `RESUME`. See **I.9**.
+
+**THE COUNT IS NOW FOURTEEN: 12 base + RESUME (privileged) + KILL = 14.** The **base set is
+still the twelve** the 2026-09-02 ruling settled — that ruling was about `RETC`/`ENDC` and is
+untouched — and `KILL` is an addition to it, user-level but later, exactly as `RESUME` is an
+addition that is not. **Do not write "thirteen" as the machine's TOTAL anywhere in this
+document** — `RESUME` is still correctly called *a thirteenth instruction* as an ordinal in the
+sequence (I.3, I.6, I.9, C.4), and `KILL` is the fourteenth; **what is a regression is
+"thirteen instructions" as a count of the ISA.** Ledger **L57**.
 
 ### I.4 The two closing rules — deliberately asymmetric
 
@@ -7306,6 +7728,21 @@ flag is a well-formed return** — so the rule needs no "while the program is li
 and no entry is ever left that only a dead program's instruction could free (which is the
 shape **I.5** forbids). **The error flag is the only new state: one bit.** Full statement,
 with the five-step path, at **I.6**.
+
+**AND THERE IS A FOURTH CLOSURE, WHICH IS THE THIRD ONE ISSUED DELIBERATELY: `KILL`.**
+[RULED - user ruling 2026-09-03, verbatim: "**Another correction: we probably need an
+instruction specifically to kill a failed program's contexts. KILL(hook) is probably the way
+to go. As to whether this is privileged, probably not?**"]
+
+| | rule |
+|---|---|
+| **`KILL rH`, issued by the program itself** | the named entry **closes exactly as the row above closes it** — zeroed register file, error flag set — and the tile ends the context wherever it is. **It is UNPRIVILEGED**, because a handle is issued by the program's own FTU and names nothing outside it. **A stale, retired or unowned handle is a NO-OP**, in the same class as `JOIN` on a fire-and-forget handle: a probe answer, **not a fault**. |
+
+**THE TWO ROWS ARE ONE PATH AND THAT IS DELIBERATE.** The fatal-fault teardown is the
+**kernel** applying this closure to every entry of a dying program; `KILL` is the **program**
+applying it to one entry of its own. **No new closure semantics, no second error state, and
+the one-bit flag is still the only new architectural state.** Full statement at **I.3a**;
+ledger **L57**.
 
 `[CONFLICT — ChampSim closes a fire-and-forget entry at DISPATCH and sends no completion
 at all, so no ACK ever closes it.]` Tier 1 (#221, quoted in I.2) is explicit: "**even the
@@ -7373,8 +7810,10 @@ entry must never close without returning its values. So it fills and then refuse
 `FORK` returns 0 — and **refusal is architecturally visible because it cannot be handled
 invisibly. That is why `FORKQ` exists.** *(DESIGN §23.2 D:2072-2079.)*
 
-**THE ONE PATH THAT RECLAIMS AN ENTRY WITHOUT A `JOIN`, AND IT IS NOT AN EVICTION.**
-`[RULED — user ruling 2026-09-03 **O7**.]` On a **fatal** fault the kernel kills the
+**THE TWO PATHS THAT RECLAIM AN ENTRY WITHOUT A `JOIN`, AND NEITHER IS AN EVICTION.**
+**[RULED — user ruling 2026-09-03 **O7**, and, for the second path, user ruling 2026-09-03
+(`KILL`) - I.3a. This paragraph read "THE ONE PATH" until `KILL` was ruled, and the count is
+corrected here rather than left for a reader to notice.]** On a **fatal** fault the kernel kills the
 program, and **every outstanding entry of that program closes at once — register file
 zeroed, error flag set** — with any later `JOIN` returning the error immediately. **That is
 a closure, not an eviction:** the entry is not being reused while its owner still expects
@@ -7384,6 +7823,15 @@ collects them — which, without O7, would leave a killed program's entries perm
 unreclaimable, **the resource-held-forever shape this section forbids by name.** The kill
 path is the answer, and the user's reason is that any alternative "*could delay quit until
 the user program decides to join, which could be forever*". See I.4 and I.6.
+
+**THE SECOND PATH IS `KILL`, AND IT IS THE SAME CLOSURE ISSUED BY THE PROGRAM RATHER THAN THE
+KERNEL.** [RULED - user ruling 2026-09-03: "*we probably need an instruction specifically to kill
+a failed program's contexts. KILL(hook) is probably the way to go.*"] `KILL rH` closes ONE entry
+— **the caller's own** — with the same zeroed file and error flag, and a stale handle is a no-op.
+**It is not an eviction either**, and for the same reason: the entry is not being reused while
+its owner still expects it, because its owner is the party asking. **It cannot be refused**, so
+it can never leave an entry only a refused instruction could free. See **I.3a** and **I.4**;
+ledger **L57**.
 
 **Sizing it wrongly bounds the whole machine.** ChampSim records the lesson in
 its own CLI help: "The tracking unit is the ceiling on in-flight invocations for the
@@ -7441,6 +7889,15 @@ migration.
   rule from the other side: **the kernel is entered on a fault and not otherwise.**
 - **`RESUME` is a thirteenth instruction and it is not part of the base twelve**, because
   it is issued by the kernel, not by user code. See I.3 and I.9.
+- **A PARKED CONTEXT IS ALSO KILLABLE, AND THAT IS THE ONE PLACE THIS PATH MEETS `KILL`.**
+  [RULED - user ruling 2026-09-03; **I.3a**.] A context parked across a recoverable fault is
+  holding a slot for something other than execution, so a program that decides — while the
+  kernel handler is still running, or after it — that the invocation is failed can end it with
+  **`KILL rH`** instead of waiting for a `RESUME` that would only run it into the same fault
+  again. **The kill releases the held slot**, and the FTU entry closes on O7's path. **The
+  reverse is a no-op, not a race:** a `RESUME` naming an entry a `KILL` has already closed finds
+  no entry and does nothing, exactly as a `KILL` on a stale handle does. **Nothing in either
+  path waits on the other**, which is what keeps I.1 literal here.
 
 There is deliberately **no per-invocation fault status, no error code in the returned
 register file, and no fault probe** — those only make sense with user-defined fault
@@ -7494,7 +7951,19 @@ the only new architectural state**, and it is one bit in an entry that already c
 of state and one of retirement mode (I.5's ~65 bytes is unchanged).
 
 **Both mismatches and the fatal closure are counted** (I.4, O.4), so a killed program's
-entries are visible in the statistics rather than silently vanishing.
+entries are visible in the statistics rather than silently vanishing. **`KILL` closures are
+counted separately from fatal-fault closures**, for the same reason: they take the same path
+but they say different things about the run — one is the machine killing a program, the other
+is a program ending its own work. [RULED - user ruling 2026-09-03; **I.3a**, **O.4**.]
+
+**AND THE FATAL PATH NEEDS NO `KILL` INSTRUCTION TO DO ITS WORK, WHICH IS WORTH STATING SO THE
+TWO ARE NOT CONFLATED.** **[derived from user ruling 2026-09-03]** Step 4 above is **the kernel
+iterating its own FTU entries** and applying the closure — it is a kernel loop over a structure
+the kernel already addresses, not a stream of instructions. `KILL rH` is the **user-level**
+instruction for the *other* case, one handle at a time, and **there is no all-kill form of it**
+(**I.3a**). A reader who reads the ruling "*an instruction specifically to kill a failed
+program's contexts*" as *replacing* step 4 has given the kernel a user instruction to execute and
+a wildcard the ISA does not have.
 
 ### I.7 Deliberately absent — and why
 
@@ -7516,6 +7985,15 @@ change what "deliberately absent" covers.]`
    canon statement** — user ruling 2026-09-03 **O3** makes every `funct7`/`funct3` value
    implementation choice, so the canon says only that a slot exists and that the
    instruction is privileged.
+
+   2a. **AND `KILL` IS NO LONGER ABSENT EITHER — it is ADDED, it is UNPRIVILEGED, and it takes
+   the slot this section reserved for it.** [RULED - user ruling 2026-09-03, verbatim:
+   "*Another correction: we probably need an instruction specifically to kill a failed
+   program's contexts. KILL(hook) is probably the way to go. As to whether this is privileged,
+   probably not?*" This is **newer than #224** and supersedes it under #307. Full statement at
+   **I.3a**; ledger **L57**; Part P **R77** is marked OVERTURNED.] So of the two things the
+   `0x6`/`0x7` reservation was held for, **one is now built** — `KILL` — and the reservation
+   still covers **mailboxes**, `RESUME` and I.7a's entry marker.
 
 3. **A SEPARATE FLOATING-POINT REGISTER FILE IS DELIBERATELY ABSENT — and this is new,
    because `F` and `D` are new (user ruling 2026-09-03 **O4**, "*I think we want float, so
@@ -7596,12 +8074,29 @@ change what "deliberately absent" covers.]`
    > non-host-executability a thing the MACHINE ENFORCES rather than a property the record prices.
    > It is stated at **I.7a**, where the one mechanism recorded is marked PROPOSAL — NOT RULED.]`
 
-**`KILL`.** *User #224, 2026-09-01T04:32:31Z:* "**Lets not build a KILL instruction
-though. The idea that a context could be ended in an unsafe state is real, so the
+**~~`KILL`.~~ NO LONGER ABSENT — RULED IN, 2026-09-03, and this entry is kept in place rather
+than deleted so the reversal is auditable.** [RULED - user ruling 2026-09-03, verbatim:
+"**Another correction: we probably need an instruction specifically to kill a failed program's
+contexts. KILL(hook) is probably the way to go. As to whether this is privileged, probably
+not?**" **Newer than #224 below, and #307 admits no exceptions: newest wins.** `KILL rH` is
+built, **unprivileged**, at **I.3a**; the encoding space this entry reserved is what it takes;
+ledger **L57**; Part P **R77** is marked OVERTURNED.]
+
+*What #224 said, 2026-09-01T04:32:31Z, and it is still worth reading:* "**Lets not build a KILL
+instruction though. The idea that a context could be ended in an unsafe state is real, so the
 context would need a specific instruction that marks 'I will accept a kill request at
 this time'. A whole can of worms that doesn't appear strictly necessary at the moment.**"
-Encoding space is **reserved**. A kill must be *cooperative*, which is a new
-instruction, a protocol, and a liveness obligation on every function written thereafter.
+
+**WHAT SURVIVES OF IT AND WHAT DOES NOT.** **[derived from user ruling 2026-09-03]** The
+**cooperative protocol** #224 said a kill would require — an "*I will accept a kill request at
+this time*" instruction, and a liveness obligation on every function ever written — **is NOT
+built and is not needed**, because the ruling scopes `KILL` to a **failed** program's contexts
+and ruling **O7** already tears such a program down without cooperation. What survives is the
+**observation**, and it survives as a programming caveat: **a `KILL` against a healthy
+invocation part-way through updating a shared structure leaves that structure half-updated**,
+which the machine cannot and does not fix. **The architecture's own state is left clean** —
+register file discarded, FTU entry closed with a well-formed error return, atomic-table hold
+released (**I.3a** step 4). **#224 is retired as an architectural veto and kept as advice.**
 
 **Mailboxes — `SEND` / `RECEIVE` / `PRECEIVE`.** Proposed by the user at #221 and left
 undecided ("Not sure if they are yet"). They need **a context-to-location directory
@@ -7880,7 +8375,9 @@ ledger **L45**.)*
 
 **The six groups, and the two reserved.** `[SST-only — implementation choice]` for the group
 *numbers*; the **reservation** of two slots for `KILL` and mailboxes is tier 3
-(§23.7 D:2246-2247: "`funct3` 0-5, with 6 and 7 left for §23.5's `KILL` and mailboxes"),
+(§23.7 D:2246-2247: "`funct3` 0-5, with 6 and 7 left for §23.5's `KILL` and mailboxes") —
+**and `KILL` now OCCUPIES part of what was reserved for it** [RULED - user ruling 2026-09-03;
+**I.3a**], which is why adding it costs no encoding space —
 and the *membership* of every group is tier 3 (§23.2 D:2011-2017 host side, §23.3
 D:2095-2098 function side, §23.6 D:2191-2192 context registers).
 
@@ -7891,7 +8388,8 @@ NMFC_G_JOIN  0x2   JOIN
 NMFC_G_END   0x3   END  (+ RETURN BIT -- one instruction, two forms)
 NMFC_G_CONT  0x4   CONT    CONT.M
 NMFC_G_CTX   0x5   CXW     CXR
-0x6, 0x7 reserved -- KILL, mailboxes, and RESUME (privileged)
+0x6, 0x7 reserved -- KILL (UNPRIVILEGED, ruled 2026-09-03), RESUME (privileged),
+                   mailboxes (unbuilt), and I.7a's entry marker
 ```
 
 **TWELVE. The count is settled.** [RULED — user ruling 2026-09-02, verbatim: "**RETC and
@@ -7907,8 +8405,20 @@ separately.] The base set is:
 `[RULED — user ruling 2026-09-03 O16: "Yes, privileged."]`, so it is not part of the
 user-level twelve. It takes one of the reserved group slots (`0x6`/`0x7`); **which one the
 canon does not say**, because user ruling 2026-09-03 O3 makes every field value an
-implementation choice. See I.3 and I.6. **A.2, C.4 and this Part now all say twelve base
-plus a privileged RESUME.**
+implementation choice. See I.3 and I.6.
+
+**AND PLUS `KILL`, WHICH MAKES FOURTEEN — AND IT IS UNPRIVILEGED.** [RULED - user ruling
+2026-09-03, verbatim: "**Another correction: we probably need an instruction specifically to
+kill a failed program's contexts. KILL(hook) is probably the way to go. As to whether this is
+privileged, probably not?**"] It too takes a slot in the reserved `0x6`/`0x7` groups — **the
+space §23.7 reserved for it by name** — and **which slot the canon does not say**, for the same
+O3 reason. It is a **user-level** instruction, but it is **not part of the base twelve**,
+because that count was settled on 2026-09-02 and `KILL` is later. See **I.3a** and **I.6**;
+ledger **L57**.
+
+**THE COUNT THIS DOCUMENT WRITES EVERYWHERE IS: 12 base + RESUME (privileged) + KILL = 14.**
+**A.2, C.4, I.3, I.3a, I.6 and this Part all say it in those words**, and "thirteen" as a total
+is a regression wherever it appears.
 
 Variant bits. [DISAMBIGUATED — an earlier revision claimed these were "consistent
 across groups so a reader can decode without a table". They are not, in two ways, and
@@ -7964,6 +8474,7 @@ are tier 1 and tier 3 in every row**, and those citations are the last column. L
 | `CXW` lane *n* | `0x50 + 2n` | 6 | x0 | value | ctx number | **1** #231 ("a subset of bit-manip instructions added so that values can be retrieved/set"); **3** §23.6 D:2191 |
 | `CXR` lane *n* | `0x51 + 2n` | 3 | rD | ctx number | x0 | **1** #233 ("We need to make sure EXTRACTION from the regs is possible"); **3** §23.6 D:2192 |
 | **`RESUME`** — **PRIVILEGED** (RULED, user ruling 2026-09-03 **O16**) | **UNASSIGNED BY THE CANON, AND DELIBERATELY SO** (O3) — an implementation takes one of the reserved `0x6`/`0x7` groups | 2 (XS1) | x0 | FTU handle | x0 | **1** user ruling 2026-09-02 **R20** ("send a 'resume' instruction with the context handle to resume it"). **No tier-2, tier-3 or tier-4 source has it at all — it is new in this revision.** |
+| **`KILL`** — **UNPRIVILEGED** (RULED, user ruling 2026-09-03) | **UNASSIGNED BY THE CANON, AND DELIBERATELY SO** (O3) — a variant slot inside the reserved `0x6`/`0x7` groups, the space §23.7 D:2246-2247 reserved for `KILL` by name | 2 (XS1) | x0 | FTU handle | x0 | **1** user ruling 2026-09-03 ("*we probably need an instruction specifically to kill a failed program's contexts. KILL(hook) is probably the way to go. As to whether this is privileged, probably not?*"); **3** §23.5 D:2016 and §23.7 D:2246-2247 reserve the slot. **Semantics at I.3a: the O7 closure, a no-op on a stale handle.** |
 
 **Nothing in tier 1 or tier 2 names an encoding at all.** `grep -rn 'NMFC_G_FORK\|custom-0'
 src/nmfc inc/nmfc tools/nmfc` returns **no hits** — ChampSim has no decoder, no opcode
@@ -8107,7 +8618,8 @@ the offload aperture (I1, ledger L1). **Reasoning from them back to the architec
 same error the user has corrected once already.**
 
 **Option (b) — reserving `COMMITQ` encodings in group `0x6`/`0x7` — is NOT taken.** The
-reserved space stays for `KILL`, mailboxes and `RESUME`.
+reserved space stays for `KILL` — **which is now built into it** (user ruling 2026-09-03,
+**I.3a**) — `RESUME`, mailboxes and I.7a's entry marker.
 
 **What is required** (tier 1 #130/#131/#132, 2026-08-29T03:56-03:59; tier 3 §4.3
 D:369-415): the value is not returned, the invocation **writes a block to memory** and the
@@ -9872,6 +10384,14 @@ results. A larger FTU doesn't fix that problem.**" **Instrument the split, or th
 occupancy number says where the queue is and not what the machine is waiting on** — which
 is the same error as an ablation, arrived at with a better tool. See H.9 and ledger L33.
 
+**[ADDED - user ruling 2026-09-03 (`KILL`).]** **AND ENTRIES CLOSED WITHOUT A `JOIN` MUST BE
+REPORTED, SPLIT BY WHICH PATH CLOSED THEM: fatal-fault teardown (ruling O7) versus `KILL`
+(I.3a).** Both take the same closure — zeroed file, error flag — so a single counter would
+hide the difference between *the machine killing a program* and *a program ending its own
+work*, which are opposite diagnoses from the same number. **Report both, plus `KILL`s that
+found no entry**, which are no-ops by design (**I.3a**) and whose rate is the honest measure
+of how much a teardown path is guessing.
+
 `[AND NOTE: THE SPLIT WAS ALREADY TAKEN ONCE, AND IT ANSWERED.]` DESIGN §20.1
 (D:1591-1597) reports `FTU IN FLIGHT peak: 1024 of 1024` **with `DISPATCH STALLS: 0` and
 peak live bodies 665** — a full unit that **never once gated a fork**, which is the
@@ -10116,7 +10636,7 @@ Marked `[REBUILT]` where the record shows it was rejected and then built again a
 | R3 | **`VIRTUAL_FIRST` / `TRANSLATE_FIRST` as two live arrangements** | Not "one of two arrangements". One duplicated table is **the only one**, and no default may select the other. `[QUALIFIED — "delete the identifiers on sight" is too strong and F.10 says so: #118 requires the vmem-places-tiles policy to REMAIN SUPPORTED as a control ("That policy should be supported, but we don't want to use it"). **Delete them from PROSE that presents them as a live pair — I3, module headers, the hooks; RELABEL them in code as a control.**]` | I3; F.10; #118 (2026-08-28T23:51); DESIGN §5.1 D:576-585 |
 | R4 | **One page table on one channel, reached over the fabric** | It is a bug — **"and routing the walks is not the fix"** | I3; #283 (2026-09-02T02:18) |
 | R5 | **Routing page-table walks over the fabric** | Walks must be **local**; translation must never cause a migration or cross the fabric | #283; I3; F.6 |
-| R6 | **Identity / direct-mapped memory** | The host and function cores need a **unified virtual address space**; and at graph scale a direct-mapped space is "probably a deal-breaker" | #6 (2026-08-27T05:59); #7 |
+| R6 | **Identity / direct-mapped memory** — as the ADDRESS SPACE's structure | The host and function cores need a **unified virtual address space**; and at graph scale a direct-mapped space is "probably a deal-breaker". **[DISAMBIGUATED - user ruling 2026-09-03 added R115, which retires identity mapping as a PLACEMENT rule for one page type. The two are different claims and are both live: R6 says the machine does not have a direct-mapped VA↔PA space; R115 says no page type gets its spread from being mapped to the frame with its own index. Citing R6 for R115's subject, or the reverse, is a miscitation.]** | #6 (2026-08-27T05:59); #7; and **R115** for the placement rule |
 | R7 | **Fixed address spaces / apertures as a placement mechanism** | "I thought we rejected the idea of fixed address spaces?" — placement is a translation-time decision, not an address range | #20 (2026-08-27T17:45) |
 | R8 | **The compiler placing data by choosing virtual addresses** | Placement belongs to the OS at translation time. A workload that sorts by `tile_of(&x)` has assumed the answer and is testing the allocator, not the architecture | I4; DESIGN §5.5 D:670, §4.2 D:465 |
 | R9 | **A hint whose payload is a tile number** | A vtile is a **relation** — "these pages belong together" — not a location. Bucketing data by the tile owning an address bakes the tile count into the data structure and violates I12 and I4 | DESIGN §29 D:3290-3299 |
@@ -10135,6 +10655,7 @@ Marked `[REBUILT]` where the record shows it was rejected and then built again a
 | R22 | **A grain carrying two page TYPES** | Half of it cannot be duplicated on every tile while the other half is silo'd to one | I12 |
 | R23a | **Giving `.rodata` a vtile and co-locating it with the code** | **"This misreads what a vtile does. A vtile gathers a coherent set onto *one* tile; code is wanted on *all* of them. Duplication is not a stronger form of co-location, it is a different type"**, and the read-only restriction is what makes duplication sound. This is the sharpest statement in the record of the vtile-vs-duplicate distinction, and getting it wrong puts every constant on one tile — see the scar "`.rodata` left striped → every context on every other tile migrated on its first constant" (Appendix 2 D7) | DESIGN §26.1 D:2738-2742; C.3; F.2 |
 | R23 | **Forking `PageTableWalker` and `CACHE`** to get huge pages and dual sizes | One `channel` model does it: a stock walker cannot terminate early so it cannot express a huge page, and a TLB is a cache with fixed offset bits so one array cannot hold both sizes | DESIGN §6 D:885, D:891 |
+| R115 | **IDENTITY-MAPPED PLACEMENT — "a `G`-sized NMFC page is mapped to the frame with the same index, so consecutive grains stripe across tiles by the partition arithmetic"** — i.e. spread obtained by FORBIDDING the allocator to relocate, rather than by a page type. The old `REGULAR` page. SST builds it: `PageType::REGULAR` with `t.frame = addr` (`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCPageTable.h:309`, and `:280`, `:402`, `:431-437`) `[ADDED - user ruling 2026-09-03.]` | **RETIRED BY THE FOUR-TYPE PAGE MODEL.** [RULED - user ruling 2026-09-03, verbatim: "*we would have 3 page sizes in total: 4 KiB, 1 grain, N grains … N grains for standard (bad name, would prefer something meaningful) and duplicate pages*".] **Spread is now the `N·G` STRIPED page's own definition (F.5b), so the allocator is free at every page type** and no placement rule depends on a frame index equalling a page index. **THE REASON IT IS A REJECTION AND NOT JUST A REPLACEMENT: identity mapping made page frames and page-table frames draw from one identity-mapped space, and DESIGN §30.3 D:3414-3429 records the two hazards that produced** — a `walkBase` check that ran **before** the value it checked was read, and **page tables sitting inside the frame arena**, "*silently, because a walk's data is never inspected*". Appendix 2 **D7** carries the third: "*identity-mapped frames colliding with allocated ones — the header had said 'above anything the program image occupies' from the beginning and nothing checked it*". **DO NOT CONFUSE THIS WITH R6.** R6 rejects identity/direct mapping as the ADDRESS SPACE's structure, for a different reason (#6: a unified virtual address space, and graph scale). **R115 retires a PLACEMENT rule.** Both stand, separately | user ruling 2026-09-03; **F.5b**, **C.3**, **F.9**, **E.2**; ledger **L58**; Appendix 2 **S42**, **D7**; DESIGN §30.3 D:3414-3429 |
 | R114 | **A PER-CONTEXT TRANSLATION CACHE** — a few `va → pa` entries held inside each context and consulted before the tile's TLB: DESIGN §7's `ctx_xlat`, ChampSim's `ctx_xlat_cache` (`inc/nmfc/nmfc_types.h:112`, held at `:150`), SST's `CtxXlat` (`NMFCTile.h:122`, `:135`, parameter `ctxXlat` default 2) `[ADDED — user ruling 2026-09-03.]` | "**I don't see how a shared TLB would be thrashed. There should be minimal address-space contention (a single program and all it's contexts share ONE address space) so it is highly beneficial for the TLB contents to be shared, otherwise you are forcing retranslation on the same function code, the same data pages that other functions have already walked. I really don't understand how that design can be considered an improvement over just a regular TLB for each NMFC core.**" **A tile has ONE shared, ASID-tagged TLB, as a regular core does** (I3). **AND THE MEASUREMENT SAYS THE SAME.** On the stress workload: `xlatCtxHits` **3.2M**, `xlatTlbHits` **1.15M**, `xlatWalks` **239k**. The per-context cache sits *in front of* the TLB, not instead of it, so **every one of those 3.2M hits is an entry the shared TLB holds or is about to hold** — it saves nothing a TLB does not, and it drops its contents on every migration. **PROVENANCE OF THE REJECTED RATIONALE, recorded so it is not re-derived: DESIGN §7 listed the mechanism with NO justification at all, and the “many contexts would thrash a shared TLB” argument was this document's own invention on 2026-09-03. It is withdrawn, not weakened.** | user ruling 2026-09-03; **F.7**, **C.2**, **I3**; ledger **L55**; Appendix 2 **S41**; DESIGN §7 D:768, §7.1 D:794 |
 
 ### P.2 Decomposition and the unit of work
@@ -10213,7 +10734,7 @@ Marked `[REBUILT]` where the record shows it was rejected and then built again a
 | R74 | **"A load in the offload aperture is a fork" as a machine mechanism** `[REBUILT]` | The aperture is a **trace-record encoding**. "Your hack will make it into the design spec if you keep doing this" | #96, #97 (2026-08-28T20:52-20:55); I1 |
 | R75 | **Any blocking instruction** | "a resource held while waiting for a resource" — the shape that deadlocked the machine. **Making it impossible to express is cheaper than auditing for it** | #222 (2026-09-01T04:16); DESIGN §23.1 |
 | R76 | **A separate blocking `JOIN` and permissive `PJOIN`** | They are the same instruction; the blocking one was only a spin the hardware performed for you | DESIGN §23.1 D:2005-2008 |
-| R77 | **A `KILL` instruction** | A context killed mid-update leaves memory in a state nobody can reason about, so a kill must be **cooperative** — a new instruction, a protocol, and a liveness obligation on every function written thereafter. **Encoding space reserved** | #224 (2026-09-01T04:32) |
+| R77 | ~~**A `KILL` instruction**~~ **OVERTURNED - user ruling 2026-09-03. `KILL` IS BUILT, and it is UNPRIVILEGED.** The row is kept in place, struck rather than deleted, because Part P is the regression list and a reader who remembers this rejection must be able to find out what replaced it | *The rejection, kept for the record:* a context killed mid-update leaves memory in a state nobody can reason about, so a kill must be **cooperative** — a new instruction, a protocol, and a liveness obligation on every function written thereafter. **[OVERTURNED - user ruling 2026-09-03, verbatim: "*Another correction: we probably need an instruction specifically to kill a failed program's contexts. KILL(hook) is probably the way to go. As to whether this is privileged, probably not?*" NEWER than #224 and therefore controlling (#307). **The cooperative protocol is still NOT built** — it is not needed, because the ruling scopes `KILL` to a FAILED program's contexts and ruling O7 already tears such a program down without cooperation. #224's observation survives as a PROGRAMMING caveat: a `KILL` against a healthy invocation mid-update leaves the program's own structure half-updated, and the machine does not fix that. See **I.3a**, **I.7**, ledger **L57**.]** | #224 (2026-09-01T04:32), **OVERTURNED by user ruling 2026-09-03**; **I.3a**; ledger **L57** |
 | R78 | **Mailboxes (`SEND`/`RECEIVE`/`PRECEIVE`)** | Need a context-to-location directory updated **on every migration** (8.9M on one measured run) and a bounded buffer that can fill = hold-and-wait. Functions already communicate through memory, and ownership makes that coherent without protocol. **Encoding space reserved** | DESIGN §23.5 D:2173-2179; #89 |
 | R79 | **`context_id` / `tile_id` CSRs** — **NOT A REJECTION. Unbuilt, pending an answer to the user's question.** | `[AUTHORITY CORRECTION — this row previously read "proposed and dropped" with a rationale the user never gave. #222 item 7 is a QUESTION: "I am not sure how context_id or tile_id are used practically by the core? FTU occupancy makes sense and is buildable. context_id would be the context_id of what specifically? same with tile_id, the tile_id of what?"]` Nothing uses them and nobody has named a referent, so nothing is built. **The "exposing a tile id invites the R8/R9 violation" argument is this document's, not the user's** — a real objection to answer, but do not attribute it to him. **This row is retained in Part P as a pointer, not as a settled rejection.** | #222 (2026-09-01T04:16); I.7 |
 | R80 | **Per-invocation fault status / error codes / a fault probe** | They only make sense with user-defined fault handlers, which this machine does not have | #223; DESIGN §23.4 |
@@ -10264,14 +10785,17 @@ Every place the sources disagree, which authority won, and why. Authority order:
 user-vs-ChampSim conflicts, or genuinely open questions, that this document does not
 resolve on its own authority.
 
-**Count: 56 conflicts (L1–L56, no gaps).** **[UPDATED — L56 added 2026-09-03: liveness is
+**Count: 58 conflicts (L1–L58, no gaps).** **[UPDATED - L58 added 2026-09-03: the page model,
+four types over three sizes, and identity-mapped placement retired - user ruling 2026-09-03.]**
+**[UPDATED - L57 added 2026-09-03: `KILL`, refused at #224 and RULED IN, unprivileged - user
+ruling 2026-09-03.]** **[UPDATED — L56 added 2026-09-03: liveness is
 bounded by 512 bits and scratch, not by names — user ruling 2026-09-03 (liveness).]**
 **[UPDATED — L55 added 2026-09-03: the
 per-context translation cache, REJECTED.]** **[UPDATED — L50–L53 added 2026-09-03 (morning): the
 four register-naming questions and their rulings. L54 added in the same revision's correction
 pass: W1b, the struck drafting instruction, which had a live `[USER TO CONFIRM]` tag at H.10.3
-and no row here to find it by. Four subjects took that tag; **L50, L51 and L52 were all confirmed by the
-user later on 2026-09-03 and retired, so ONE carries it now — L54.**
+and no row here to find it by. Four subjects took that tag; **all four were confirmed by the
+user later on 2026-09-03 — L50, L51 and L52 first, then L54 (W1b) — so NONE carries it now.**
 They sit at the END of this appendix, after L49.]** [CORRECTED — this header read "37" while the
 file carried 42 rows, so a reader auditing the ledger by its own count stopped five rows
 early. `grep -cE '^\*\*L[0-9]+ —' docs/nmfc/CANON.md` is the check; run it after
@@ -10279,28 +10803,34 @@ adding a row. Seven rows are new this revision — **L43**–**L49**, all from P
 mechanisms Part I depends on.]
 
 **Twenty-six rows carry a `RULED` bullet dated 2026-09-02, naming the ruling that closed
-them; two more — L2 (R12) and L13 — were closed in editing; and **FIVE rows carry a
+them; two more — L2 (R12) and L13 — were closed in editing; and **EIGHT rows carry a
 `RULED` bullet dated 2026-09-03**: **L38** (`O1`, the unhinted-grain default), **L43**
-(`O3`, the encoding), **L46** (`O4`, the RISC-V subset), **L55** (the per-context
-translation cache, rejected), and **L56** (liveness in bits plus scratch, not in names).
+(`O3`, the encoding), **L46** (`O4`, the RISC-V subset), **L54** (W1b, the integer ALU is
+64-bit always — CONFIRMED, and it was the last unsettled item in this document), **L55** (the
+per-context translation cache, rejected), **L56** (liveness in bits plus scratch, not in names),
+**L57** (`KILL`, ruled in and unprivileged) and **L58** (the page model — four types over three
+sizes, identity-mapped placement retired). **[UPDATED - the tally read FIVE before user ruling
+2026-09-03 added L57 and L58 and confirmed L54.]**
 **No row has been deleted.**
 
-`[AND A NEW TAG EXISTS AS OF 2026-09-03 (morning): `[USER TO CONFIRM]`. It is NOT
+**[AND A NEW TAG EXISTS AS OF 2026-09-03 (morning): `[USER TO CONFIRM]`. It is NOT
 `[FOR THE USER TO RULE]` — the user DID rule, and the ruling is applied; what is recorded for
 confirmation is the ASSISTANT'S READING of a ruling given in words that did not answer the
 question as posed — **or, in one case, a DRAFTING INSTRUCTION this document struck on a
 proposal's authority.** **FOUR rows took it: L50 (Q3, in its own wording), L51 (Q2, `f`*n* ≡
 `x`*n*), L52 (Q4, the scope of the trap requirement), and L54 (W1b, the integer-ALU width rule).
-ONE REMAINS.** **L50, L51 and L52 were all CONFIRMED by the user on 2026-09-03 — "*Q3: Accepted,
-function should not be host-executable*", "*…then keep them the same*" and "*I think that is
-okay*" — and their tags are retired everywhere, so only **L54** still awaits the reader's act.**
+ALL FOUR ARE NOW CONFIRMED AND NONE REMAINS.** **L50, L51 and L52 were confirmed by the user on
+2026-09-03 — "*Q3: Accepted, function should not be host-executable*", "*…then keep them the
+same*" and "*I think that is okay*" — and **L54 was confirmed later the same day**, "**W1b: Not really sure what this is getting at? We can't do more than one op at once, so might as well make the ALU 64-bit always, it really makes no difference. FP/DP require floating point hardware we are already going to have to support alongside the integer ops.**" —
+so **every one of the four tags is retired everywhere and the count is ZERO.**
 `[CORRECTED — this note used to say TWO rows plus L50, and omitted L54 entirely; W1b had a live
 tag at H.10.3 with no ledger row and no front-matter row to find it by.]` **[UPDATED AGAIN —
-L50 was confirmed on 2026-09-03 and the count fell from TWO to ONE.]** That one is the only
-unsettled thing in this document, and it is flagged again at its point of use. **The tag is
+L50 was confirmed on 2026-09-03 and the count fell from TWO to ONE.]** **[UPDATED A THIRD TIME -
+user ruling 2026-09-03 on W1b: the count fell from ONE to ZERO. Nothing in this document is
+awaiting the reader's act any more.]** **The tag is
 not retired as a vocabulary** — the notation table's first retirement applies to its old
-`RESUME`-privilege subject, and the 2026-09-03 confirmations retire three of its four
-second-subject instances; that table is the authority.]`
+`RESUME`-privilege subject, and the 2026-09-03 confirmations retire all four of its
+second-subject instances; that table is the authority.]**
 
 **NO `[FOR THE USER TO RULE]` TAG IS STILL LIVE ANYWHERE IN THIS APPENDIX.** The last two
 — L38 (`O1`) and L43 (`O3`) — were closed by the 2026-09-03 rulings; L47's was stale, since
@@ -11149,6 +11679,9 @@ on by default, and selected by a checked-in device file.**
 
 **L40 — "Check congruence on every run" (I9): the assertion is still gated, in 29 of 33
 configs and on every STANDARD page. [RULED 2026-09-02 — see the RULED bullet at the end of this row]**
+**[VOCABULARY - user ruling 2026-09-03: `STANDARD` here is the tier-2 tree's name for what this
+document now calls a **HOST** page — 4 KiB, block-interleaved, tile in a block field, so
+congruence has nothing to say about it (F.5b). The row is unchanged.]**
 - *Tier 1 / canon (I9, DESIGN §0.9 D:62-70):* "A grain sits on the tile its physical
   address names ... **Check it, on every run.**"
 - *Tier 2 (ChampSim):* `nmfc_vmem.cc:302` gates the `exit(-1)` on
@@ -11173,13 +11706,18 @@ configs and on every STANDARD page. [RULED 2026-09-02 — see the RULED bullet a
 - **RULED by the freeze — user ruling 2026-09-02 R3.** Ungating the assertion is a ChampSim change and is not available. **The function core's always-on instrument is the operative enforcement**: read `INCONGRUENT among nmfc-stamped` from every run (I9). Ungating remains queued, not abandoned. Status: **frozen.**
 
 **L41 — The GRAIN page type — siloing — cannot be expressed by any shipped tool, so every
-result in the tree is a REGULAR/striped layout. [BLOCKING for any co-location claim]**
+result in the tree is a striped layout. [BLOCKING for any co-location claim]** **[VOCABULARY -
+user ruling 2026-09-03: the tier-2/tier-4 name `REGULAR` in this row is the RETIRED
+identity-mapped `G`-sized type; its replacement is the `N·G` **STRIPED** page (F.5b, P.1 R115).
+The finding is unchanged and is sharper under the new model, because GRAIN and STRIPED are now
+different SIZES and the toolchain can declare neither.]**
 - *Canon (C.3, F.2, E.3):* GRAIN is a compiler-selected page type; the grain formula exists
   to license **siloing**; `vtile` is the label that selects it.
 - *Tier 2 (ChampSim):* `grep -rn vtile src/nmfc inc/nmfc tools/nmfc config/nmfc` = **0
   hits**. `annotate.cc:83-104` accepts only `<name> <base> <bytes> [standard|nmfc]` and
   dies on any other token (`:100`); neither checked-in manifest has a tile column.
-  `nmfc_trace.h:127-145` has three regions (STANDARD/NMFC/CODE) — **`NMFC` is REGULAR;
+  `nmfc_trace.h:127-145` has three regions (STANDARD/NMFC/CODE) — **`STANDARD` is HOST,
+  `NMFC` is the retired REGULAR and only approximates STRIPED, `CODE` is DUPLICATE, and
   there is no GRAIN**. Every hint's tile is **computed**: `annotate.cc:370`,
   `(a >> opt.grain_bits) % opt.tiles`, which is the striped rule by definition, and
   `place_regions` (`:111-141`) rotates region bases specifically to preserve it.
@@ -11187,8 +11725,12 @@ result in the tree is a REGULAR/striped layout. [BLOCKING for any co-location cl
   pseudo-compiler silos a data structure ... onto one memory tile**" — a mechanism its only
   producer never emits.
 - **RULING: not a conflict — a MISSING CAPABILITY, and the canon's silence about it is the
-  defect.** C.3 said the *hardware* cannot tell REGULAR from GRAIN apart (true, and fine,
-  because the compiler selects); it did not say **nothing upstream can either**. **Every
+  defect.** C.3 said the *hardware* cannot tell REGULAR from GRAIN apart (true **under the
+  retired model, where they were one size**, and fine, because the compiler selects); it did not
+  say **nothing upstream can either**. **[SHARPENED - user ruling 2026-09-03: under the four-type
+  model the hardware CAN tell them apart, because GRAIN is `G` and STRIPED is `N·G` and the size
+  is in the PTE. The missing capability is now purely upstream, in the manifest and the trace
+  format, and a fourth missing piece is added: no token can ask for an `N·G` page either (C.3).]** **Every
   measurement in Parts G, K and N was taken on a striped layout**, so "co-location did not
   help" is not yet a statement about co-location. **The receiving side already works**
   (`nmfc_vmem.cc:555-559` honours `hint.tile`); the missing pieces are a manifest token, a
@@ -11242,7 +11784,7 @@ is in the tree the document says never decides anything. [FOR THE USER TO RULE]*
   ("*Variant bits, consistent across groups so a reader can decode without a table*") and
   then `[DISAMBIGUATED]` it as false **without naming the source it was correcting**. Now
   named, in I.9.
-- **RULED — user ruling 2026-09-03 O3, verbatim: "I think this is just a simulator thing and not a meaningful design choice, so I say we describe it as implementation choice."** **Option (a): THE CANON ASSIGNS NO FIELD VALUES AT ALL.** `funct7` and `funct3` values are **implementation choice**. What the canon *does* fix is unchanged and is the whole of what it fixes: the **count** (twelve base plus a privileged `RESUME`, L44), the **membership of the groups** (tier 3), the **RoCC split** (funct7 = group + variant, funct3 = operand flags, §26.6), and that **`RESUME` takes a slot** — but not which one. **`nmfc_isa.h` is one implementation's choice**, recorded in **SELECTED CONFIGURATION** with its file and line, and **never quoted as canon**. The tag on every value in I.9 changes from `[SST-only — unratified]` — which implied a ratification still pending — to **`[SST-only — implementation choice]`**, because none is pending: none is wanted. **This is R6–R10 applied to an encoding**, which is exactly where the narrowed question pointed. Applied at **I.9**, **I.7**, **SELECTED CONFIGURATION**. **The `[FOR THE USER TO RULE]` tag on this row is CLOSED, and it was the last one live in this appendix.**
+- **RULED — user ruling 2026-09-03 O3, verbatim: "I think this is just a simulator thing and not a meaningful design choice, so I say we describe it as implementation choice."** **Option (a): THE CANON ASSIGNS NO FIELD VALUES AT ALL.** `funct7` and `funct3` values are **implementation choice**. What the canon *does* fix is unchanged and is the whole of what it fixes: the **count** (**12 base + RESUME (privileged) + KILL = 14**, L44 and L57 — the `KILL` term added by user ruling 2026-09-03), the **membership of the groups** (tier 3), the **RoCC split** (funct7 = group + variant, funct3 = operand flags, §26.6), and that **`RESUME` and `KILL` each take a slot** — but not which one. **`nmfc_isa.h` is one implementation's choice**, recorded in **SELECTED CONFIGURATION** with its file and line, and **never quoted as canon**. The tag on every value in I.9 changes from `[SST-only — unratified]` — which implied a ratification still pending — to **`[SST-only — implementation choice]`**, because none is pending: none is wanted. **This is R6–R10 applied to an encoding**, which is exactly where the narrowed question pointed. Applied at **I.9**, **I.7**, **SELECTED CONFIGURATION**. **The `[FOR THE USER TO RULE]` tag on this row is CLOSED, and it was the last one live in this appendix.**
 
 **L44 — Thirteen instructions or twelve? DESIGN.md says both. [RULED 2026-09-02 — see the RULED bullet at the end of this row]**
 - *Tier 3, list A (§23 enumerates THIRTEEN mnemonics):* §23.2 D:2011-2017 — `FORK.R`,
@@ -11262,6 +11804,7 @@ is in the tree the document says never decides anything. [FOR THE USER TO RULE]*
   internal to tier 3 and is not resolved here.** For the user: thirteen, or twelve with
   END counted once? **Answered: twelve, END counted once — see the RULED bullet below.**
 - **RULED — user ruling 2026-09-02: "RETC and ENDC are the same instruction, with a return bit."** **TWELVE**, and DESIGN §23.7 D:2241 was the half of tier 3 that was right; §23's thirteen-mnemonic enumeration counted the two END forms separately. The base set is `FORK.R` `FORK.M` `FORKF.R` `FORKF.M` `FORKQ` `JOIN` `JOINQ` `END`(+ret bit) `CONT` `CONT.M` `CXW` `CXR`. **Plus `RESUME` (R20), privileged, which makes thirteen and is not part of the user-level twelve.** See I.3, I.9. **CLOSED.**
+- **AND UPDATED 2026-09-03: the TOTAL is now FOURTEEN.** [RULED - user ruling 2026-09-03: "*we probably need an instruction specifically to kill a failed program's contexts. KILL(hook) is probably the way to go. As to whether this is privileged, probably not?*"] **`KILL` is added, UNPRIVILEGED**, and it takes the encoding space §23.7 already reserved for it. **The BASE set is unchanged at twelve** — this ruling does not touch the `RETC`/`ENDC` finding — so the count this document writes is **12 base + RESUME (privileged) + KILL = 14**. See **I.3a** and ledger **L57**. **STILL CLOSED; only the total moved.**
 
 **L45 — DESIGN.md still carries the SUPERSEDED encoding, and records nowhere that it was
 superseded.**
@@ -11384,9 +11927,12 @@ H.10.3.]` **These are NOT conflicts between sources.** L50–L53 are the four qu
 register-naming proposals put to the user, the rulings that closed them, and — for **three** of
 them — the assistant's reading of a ruling the user gave in words that did not answer the question
 as posed. **L54 is not a ruling at all**: it is a drafting instruction this document struck on a
-proposal's authority. **THREE OF THE FOUR ARE NOW CONFIRMED — L51 (Q2), L52 (Q4's scope) and L50 (Q3), all by the
-user later on 2026-09-03 — so the ONE still unsettled is L54**, which is
-tagged `[USER TO CONFIRM]` here and at its point of use. **[UPDATED TWICE — this paragraph read
+proposal's authority. **ALL FOUR ARE NOW CONFIRMED — L51 (Q2), L52 (Q4's scope), L50 (Q3) and, later the same day,
+L54 (W1b) — all by the user on 2026-09-03, so NOTHING here is still unsettled and no
+`[USER TO CONFIRM]` tag survives in this appendix.** **[UPDATED A THIRD TIME - user ruling
+2026-09-03 on W1b: "**W1b: Not really sure what this is getting at? We can't do more than one op at once, so might as well make the ALU 64-bit always, it really makes no difference. FP/DP require floating point hardware we are already going to have to support alongside the integer ops.**" L54 is CONFIRMED, its tag is retired here, at the row, at H.10.3
+and in Appendix 3, and the count of unsettled items in this document is ZERO.]**
+**[UPDATED TWICE — this paragraph read
 "Those FOUR — L50, L51, L52, L54 — are the only things in this document that are not settled",
 then that "two have since been confirmed". THREE have; the rows below carry the user's words
 verbatim. L50's confirmation also carried a NEW REQUIREMENT — that the machine refuse to execute
@@ -11523,8 +12069,8 @@ reserved]**
   (J.1: the PC does not change on migration). **What remains of B's cost is segment alignment and
   padding**, plus the object still existing. Verbatim at **H.10.9**. **CLOSED.**
 
-**L54 — W1b: the integer-ALU width rule this revision was instructed to write, and struck.
-[STRUCK on a proposal's authority — USER TO CONFIRM]** **[ADDED — this row did not exist while a
+**L54 — W1b: the integer-ALU width rule this revision was instructed to write, struck, and now
+CONFIRMED AS THE BUILT RULE. [RULED - user ruling 2026-09-03: the ALU is 64-bit always]** **[ADDED — this row did not exist while a
 live `[USER TO CONFIRM]` tag on W1b sat at H.10.3 with no front-matter row and no ledger row.
 That is why it is here: an item nobody can find by the document's own audit paths is not
 flagged, it is buried.]**
@@ -11542,9 +12088,26 @@ flagged, it is buried.]**
   the second 32-bit comparator tap, the width-dependent shift-amount mask, the second `mulh*`
   product tap, the divider's 32-bit overflow sentinel (`final-A-aliasing.md` §10.5, deleted in
   full). **Ten ISA deviations become nine; execution-unit cost becomes zero.**
-- **THE FLAG: if W1b was meant literally, say so — H.10.3's row reverts, SW2 comes back, and
-  §10.5's execution-unit work comes back with it.** `[USER TO CONFIRM.]` **OPEN as a
-  confirmation; the amended rule is what is written and implemented meanwhile.**
+- **RULING APPLIED: CONFIRMED, AND W1b IS WITHDRAWN.** *What the user said, verbatim, user ruling
+  2026-09-03:* "**W1b: Not really sure what this is getting at? We can't do more than one op at once, so might as well make the ALU 64-bit always, it really makes no difference. FP/DP require floating point hardware we are already going to have to support alongside the integer ops.**" **The amended rule is not a striking this document performed on a
+  proposal's authority any more — it is the BUILT rule at tier 1**, in four clauses: **(1)** the
+  integer ALU **always executes at 64 bits**, and no "execute at the named width" mode exists;
+  **(2)** a **32-bit-named integer source is sign-extended on read**, which is RV64's own ratified
+  convention (H.10.3 W2); **(3)** the **write port keeps only the named tile's bits** (W3);
+  **(4)** **`*W` opcodes behave exactly as RV64 defines them.** The user's reason is structural —
+  "*We can't do more than one op at once*" — one execution unit per pipe, so a narrower ALU has
+  nothing to trade against. **Floating point is untouched and was never the question:** "*FP/DP
+  require floating point hardware we are already going to have to support alongside the integer
+  ops*" — the FPU computes **at the opcode's format** (`f32` in a `w` tile, `f64` in a `d` tile)
+  and that hardware is present under `IMAFD` regardless (ruling **O4**).
+- **WHAT THE CONFIRMATION MAKES PERMANENT:** **SW2 — XLEN as a function of register allocation —
+  cannot arise**, because there is no width-selected execution mode for an allocator to select;
+  and **§10.5's execution-unit work stays deleted** (the second 32-bit comparator tap, the
+  width-dependent shift-amount mask, the second `mulh*` product tap, the divider's 32-bit
+  overflow sentinel). **Ten ISA deviations stay nine and the execution-unit cost stays zero.**
+- **THE FLAG IS RETIRED**, at **H.10.3**, in the front-matter RULINGS table, in this appendix's
+  preamble, in the notation table's membership check and in Appendix 3 item 6. **This was the
+  last live `[USER TO CONFIRM]` in the document; the count is now ZERO.** **CLOSED.**
 
 **L55 — the per-context translation cache (`ctx_xlat`) versus one shared TLB per tile.
 [RULED — user ruling 2026-09-03: REJECTED]** **[ADDED — this row exists because the
@@ -11638,6 +12201,107 @@ this document's own, was repeated in eight places here and in seven of the eleve
   not.** The published `nmfc-canon.html` artifact carries it too and must be regenerated.
 - **CLOSED as a ruling; OPEN as a propagation task** against the proposals and the artifact.
 
+
+**L57 — `KILL`: refused at #224, RULED IN on 2026-09-03, and UNPRIVILEGED.
+[RULED - user ruling 2026-09-03]** **[ADDED - this row exists because the ruling OVERTURNS a
+tier-1 statement rather than closing an open question, and Part P R77 had recorded the older one
+as settled. A reader who finds R77 must be able to find out what replaced it.]**
+- *The conflict, and it is tier 1 against tier 1:* **#224, 2026-09-01T04:32:31Z** — "**Lets not
+  build a KILL instruction though. The idea that a context could be ended in an unsafe state is
+  real, so the context would need a specific instruction that marks 'I will accept a kill request
+  at this time'. A whole can of worms that doesn't appear strictly necessary at the moment.**"
+  Recorded as **P.5 R77** and at **I.7** under "deliberately absent", with encoding space
+  reserved in the `0x6`/`0x7` groups.
+- *What the user said later, verbatim, user ruling 2026-09-03:* "**Another correction: we probably
+  need an instruction specifically to kill a failed program's contexts. KILL(hook) is probably the
+  way to go. As to whether this is privileged, probably not?**"
+- **WHICH GOVERNS, AND WHY IT IS NOT A JUDGEMENT CALL.** #307: "*inside the session log, newest
+  assertions take priority over older assertions*" — **without exception.** The 2026-09-03 ruling
+  is newer. **`KILL` is built.**
+- **RULING APPLIED: `KILL rH`, UNPRIVILEGED, ONE handle per instruction.** Written at **I.3a**
+  (the full statement), **I.3** (the count), **I.4** (the fourth closure), **I.5** (the second
+  path that reclaims an entry without a `JOIN`), **I.6** (a parked context is killable, and the
+  fatal path still needs no instruction), **I.7** (the "deliberately absent" entry, struck in
+  place), **I.9** (the encoding row and the count), **C.4** (the lifecycle branch), **A.2** and
+  **O.4** (the statistic). Part **P R77** is marked **OVERTURNED**; Appendix 2 **S3** becomes half
+  a build item.
+- **THE SEMANTICS, so they are not re-derived:** the FTU entry closes on **ruling O7's** path —
+  **zeroed register file, error flag set**, a later `JOIN` returns the error immediately, nothing
+  waits on the tile; the tile ends the context **wherever it is**, including in flight, where the
+  migration ACK carries the kill, and **releases any atomic-table hold**; a **stale, retired or
+  unowned handle is a NO-OP**, in the same class as `JOIN` on a fire-and-forget handle. **No new
+  closure semantics and no new architectural state** — the error flag is the same one bit I.4 and
+  I.6 already define.
+- **WHY UNPRIVILEGED, and it is a derivation and not the user's words:** **[derived from user
+  ruling 2026-09-03]** a handle is issued by the program's **own** FTU and the FTU can only act on
+  entries it owns, so `KILL` **cannot name another program's contexts at all**. It is
+  `pthread_cancel`, not `kill(2)`. The user's words leave it open — "*probably not?*" — and this
+  is the reason the answer is *not*.
+- **WHAT #224 KEEPS:** its **observation** survives as a programming caveat — a `KILL` against a
+  **healthy** invocation mid-update leaves the program's own structure half-updated — while the
+  **cooperative protocol** it demanded is not built and is not needed, because the ruling scopes
+  the instruction to a **failed** program and **O7** already tears such a program down without
+  cooperation. **Retired as an architectural veto; kept as advice.**
+- **COUNT:** the base set is unchanged at twelve (**L44**); the total becomes **12 base + RESUME
+  (privileged) + KILL = 14**. **CLOSED.**
+
+**L58 — The page model: four types over three sizes, and identity-mapped placement retired.
+[RULED - user ruling 2026-09-03]** **[ADDED - this row exists because the ruling replaces a
+taxonomy this document had carried in a DIAGRAM and nowhere else, and because the thing it
+retires — identity mapping as a placement rule — is named in the ledger, in Part P, in Appendix 2
+and in DESIGN's own failure record, under four different descriptions.]**
+- *What this document said, and it is the model being replaced:* four boxes at **C.3** —
+  **STANDARD** (mode bit 0, 4 KiB, block-spread) and **REGULAR** (mode bit 1, `G`-sized,
+  **identity-mapped**, so consecutive grains striped across tiles by the partition arithmetic),
+  plus **GRAIN** and **DUPLICATE** — with REGULAR and GRAIN drawn as **two allocator behaviours
+  over one page size**, and the note that "*the hardware cannot tell them apart and does not need
+  to*". **Spread was a consequence of forbidding the allocator to relocate.**
+- *What the user asked, verbatim, user ruling 2026-09-03:* "**The difference between a regular and
+  grain page is just the size of each right? A regular page is large enough to cover all grains, a
+  grain page is the exact size of a single grain? They should both use the same addressing mode
+  though**"
+- *What the user ruled, verbatim, user ruling 2026-09-03:* "**This seems like a no-brainer? I would
+  say yes, with the caveat that we would have 3 page sizes in total: 4 KiB, 1 grain, N grains.
+  4 KiB for standard pages, 1 grain for grain pages. N grains for standard (bad name, would prefer
+  something meaningful) and duplicate pages. The only difference between standard and duplicate is
+  that duplicates represent 1 grain of virtual space but N grains of physical space, while standard
+  is 1 grain of virtual space per 1 grain of physical space.**"
+- **RULING APPLIED: THREE SIZES — `4 KiB`, `G`, `N·G` — AND FOUR TYPES OVER THEM.** **HOST**
+  (`4 KiB` virtual / `4 KiB` physical, block-interleaved across every tile after the fabric);
+  **GRAIN** (`G` / `G`, on **one** tile, the vtile's); **STRIPED** (`N·G` / `N·G`, **one grain per
+  tile**); **DUPLICATE** (`G` virtual / `N·G` physical, **one full copy per tile**). **One
+  addressing mode and ONE page table for all four; the size is carried in the PTE** exactly as
+  R13 requires of a multi-size table. Written at **F.5b** (the canonical statement), **C.3** (the
+  diagram, replaced and re-validated), **E.2** (the mode bit), **F.9** (the aligned N-run),
+  **I12**, **SELECTED CONFIGURATION** (two new rows), Part **P R115**, Appendix 2 **S42**.
+- **THE NAMES `HOST` AND `STRIPED` ARE THIS DOCUMENT'S, NOT THE USER'S**, and they are tagged
+  **[name proposed by the assistant - user to confirm]** at **F.5b** and **C.3**. The ruling calls
+  the 4 KiB page "*standard*" and **also** calls the `N·G` page "*standard (bad name, would prefer
+  something meaningful)*"; one word cannot name two types. **`GRAIN` and `DUPLICATE` are the
+  user's own words.** **This is a vocabulary item, not a design question** — the model is
+  identical under any names, because nothing in the machine reads a name.
+- **THE FOUR CONSEQUENCES, drawn in the body and marked there:** **(1)** **identity-mapped
+  "regular" is RETIRED as a placement rule** (Part **P R115**) — it was the source of the frame-
+  arena overlap class DESIGN §30.3 D:3414-3429 records (a `walkBase` check that ran before the
+  value it checked was read, and page tables sitting **inside** the frame arena) and of Appendix 2
+  **D7**'s "*identity-mapped frames colliding with allocated ones*"; **(2)** the **mode bit is a
+  property of the size class**, not a separate flag — `4 KiB` ⇒ block-interleaved, `G`/`N·G` ⇒
+  grain-partitioned, and the fabric reads it from the size (**E.2**); **(3)** **allocation
+  granularity for a striped object is `N·G`**, so DESIGN §12's free-resource fragmentation risk
+  applies here at N times the unit it was written for (**F.5b** consequence 3, **O.4** risk 1);
+  **(4)** **an unhinted object must be GRAIN or STRIPED, at the owner's choice** — ruling **O1**
+  — because spread is now a page type and there is no default placement rule left to fall back on.
+- **THE ONE THING THE SIZE CLASS DOES NOT DECIDE:** **GRAIN and DUPLICATE share the `G` virtual
+  size**, so one further **replicate bit** in the PTE separates them, and with it the frame field
+  names the replica set's base rather than a single frame (**F.9**'s `base + t`). **One bit and
+  one re-reading of an existing field is the entire cost of holding four types in three sizes**,
+  and it is the one place this model is not self-evident.
+- *What is NOT closed by this row:* **the toolchain still cannot express GRAIN** (**L41**), and
+  now cannot express **STRIPED** either, since no manifest token names an `N·G` page. **ChampSim
+  is FROZEN (R3)**, so that is recorded, not scheduled. SST's alignment item is **S42**.
+- **CLOSED as a ruling; OPEN as an alignment task** against SST, and as a naming confirmation
+  against the two proposed names.
+
 ---
 
 ## APPENDIX 2 — DIVERGENCES: SST IMPLEMENTATION vs CANON
@@ -11646,7 +12310,8 @@ this document's own, was repeated in eight places here and in seven of the eleve
 2026-09-02T18:32. **Authority tier 4 — lowest. Nothing here decides anything.** This is
 a checklist for the next work session, not a description of the machine.
 
-**Count: 41 divergences** (**S41 added 2026-09-03 — SST's per-context translation
+**Count: 42 divergences** (**S42 added 2026-09-03 — SST's PageType enum and its identity
+mapping, both superseded by the four-type / three-size page model**; **S41 added 2026-09-03 — SST's per-context translation
 entries, rejected and to be removed**; **S40 added 2026-09-03 (morning) — register naming**; S39 added;
 **S13 re-tagged from `[WRONG]` to `[NOTE]`** — it is a documented, scoped, announced trade-off,
 not a defect; **S18 re-tagged from `[WRONG]` to `[ARTEFACT]`** — its warning tests a hardcoded
@@ -11750,7 +12415,7 @@ SST or it is not measured, and this document says which.
 |---|---|---|
 | **S1** `[GAP]` | **`FORK.M` / `FORKF.M` are fatal at the tile** (`NMFCTile.cc:548-555`). Encodable, decoded by both hosts, carried across the fabric — and then it aborts. | I.2 — the memory fork form exists precisely so the context need not already be loaded |
 | **S2** `[GAP]` | **`CONT.M` is fatal at the tile** (`NMFCTile.cc:1738-1746`). | I.3 — `CONT.M` replaces the context wholesale |
-| **S3** `[GAP]` | ISA groups 0x6, 0x7 (reserved for KILL and mailboxes) are fatal. | I.7 — reserved, unbuilt: correct, but the reservation should be a clean refusal, not a crash |
+| **S3** `[GAP — and half of it is now a BUILD ITEM, updated 2026-09-03]` | ISA groups 0x6, 0x7 (reserved for KILL and mailboxes) are fatal. **`KILL` IS NO LONGER UNBUILT** [RULED - user ruling 2026-09-03, **I.3a**]: one variant slot in these groups now decodes to `KILL rH` — unprivileged, the O7 closure, a no-op on a stale handle — so SST must **implement** that slot rather than refuse it. The rest of the reserved space (mailboxes, `RESUME`, I.7a's entry marker) keeps the original note. | **I.3a** — `KILL` is built and unprivileged; I.7 — the remainder is reserved and unbuilt: a clean refusal, not a crash |
 | **S4** `[GAP]` | **SST IMPLEMENTATION LAYOUT, TIER 4 — NOT THE DESIGN.** SST's harness hard-codes exactly one register layout, `x1..x8 × 64-bit` (the same convenience its `NMFC_CTX_WORDS = 8` / `in[0..7]` context array expresses), and no compiler produces another. **Read it as a tier-4 implementation convenience and never as a statement about the context.** The design is **512 bits, BIT-PACKED** — not eight registers, not eight lanes, not `x1`–`x8` (user #232, #238; the 512-bit rule at I2 and H.3). | I2/I.8, H.3, K.6 — 512 bits divided per function; **bit-packing is compile-side work and is not done** |
 | **S5** `[GAP]` | The **bit-level admission test is never exercised**: nothing produces a layout other than the default, so the bits-used figure is always 512. | K.6 — admission is a test on bits |
 | **S6** `[WRONG — as of user ruling 2026-09-03 O4]` | The tile's core is **RV64IM+A only** — no FP, CSR, FENCE, RVC, MULH*, ecall — while `main` on the host is full RV64G. **The ruled subset is `RV64IMAFD`** (user ruling 2026-09-03 **O4**, "*I think we want float, so C*"), so this tile would **trap on the floating-point instructions the canon admits**. It changed from a declared asymmetry to a divergence when O4 was ruled. **And the fix is not a second register file:** `F`/`D` values are packed into the **same 512-bit context** under two register namespaces (I.0, I.7); a separate FP file breaks invariant 2 and grows a migration past 72 B. | **I.0** (the subset and the namespaces), **K.6** (admission), H.1 |
@@ -11763,7 +12428,7 @@ SST or it is not measured, and this document says which.
 | # | divergence | canon reference |
 |---|---|---|
 | **S9** `[WRONG]` | **The migration slot-admission asymmetry.** Migration admission uses a **strict** `>` against tile capacity while invocation admission uses `>=`, so **a tile can be pushed one context past its announced capacity by a migration** — and the tile then **fatals** if it has no free slot (`NMFCTile.cc:1369-1376`). | H.8 — a full tile must always be able to evacuate; a fatal here is the deadlock shape wearing a different coat |
-| **S10** `[WRONG]` | **A NUCA move of a GRAIN or DUPLICATE grain is recorded and never applied**: `PageTable::lookup` consults the remapped frame **only on the REGULAR path**. | G.4, F.8 — remap is how the policy acts |
+| **S10** `[WRONG]` | **A NUCA move of a GRAIN or DUPLICATE grain is recorded and never applied**: `PageTable::lookup` consults the remapped frame **only on the REGULAR path**. **[AND THE REASON IS S42's - user ruling 2026-09-03: `REGULAR` is the only type SST relocates because it is the only one SST does NOT identity-map, and the four-type model retires that split entirely (F.5b, P.1 R115). Fixing S42 fixes this row; fixing this row alone leaves the retired model in place.]** | G.4, F.8 — remap is how the policy acts; **F.5b**, **S42** |
 | **S11** `[WRONG]` | `NMFCTile::heldWord` requires an **exact size match**, so a 4-byte access to an 8-byte held word reads *around* the held value. | H.7 — the lock is on the operand, and the held value must be authoritative |
 | **S12** `[WRONG]` | `driveMoves()` processes only the **front** move per cycle, so concurrent grain moves are serialised. | G.4 — components move as a unit |
 | **S13** `[NOTE — NOT a divergence. Re-tagged.]` | When a `standard` region exists, the slice/controller address-range check is widened to all of memory, leaving the fabric's routing as the only partition enforcement. [AUTHORITY CORRECTION — this row was tagged `[WRONG], which this appendix's own legend defines as "SST builds something the canon forbids or does differently". It is neither: it is a **documented, scoped, announced trade-off**, and the two clauses that make it one were dropped when the row was written.]` DESIGN §32.1 D:3707-3717, in full: memHierarchy **cannot express the union of two interleaves**, so a configuration carrying block-spread data gives up the downstream check — "*This is a real loss of the check invariant 9 asks for, **and it is confined to configurations that ask for it: nothing declares standard data by default, and every other run keeps the grain-interleaved check. `build()` says so on stderr rather than doing it quietly.***" **Scoped, defaulted-off, and announced. There is nothing here to go and repair**; what a reader must know is that a config declaring `NMFC_STD_DATA` has one enforcement point instead of two. See **E.2a**. | I9 — check congruence on every run; **E.2a** for the full §32 context, including the congruence check's step-size hole, which IS a real defect |
@@ -11774,6 +12439,7 @@ SST or it is not measured, and this document says which.
 | **S18** `[ARTEFACT — re-tagged; the warning fires on a HARDCODED CONSTANT, not on the geometry]` | SST warns that `G = 256 KiB × ntiles` is "not a whole number of bank sweeps at 1 or 3 tiles" and proceeds. **That warning presupposes `sweep := 512 KiB fixed`.** On the checked-in reference device a sweep is `row_bytes × banks_per_channel` = `4096 × 64` = **256 KiB**, so `G / sweep = total_channels = N` **exactly, at every tile count** — G(3) = 768 KiB = 3 sweeps. **The condition the warning tests is never true for this device; it is testing SST's own constant.** Fix the constant (derive the sweep from the device) or delete the warning. | **E.5**, which now defines `sweep` and records that the odd-tile-count caveat was an artefact of the same fixed 512 KiB — it does not exist for either device in the tree |
 | **S19** `[WRONG]` | The per-tile entry-point rewrite (`pc + t·G`) documented at `NMFCFabricComponent.h:60` is **implemented nowhere** — correctly, because code is on duplicate pages, but the doc still asserts it. | J.1 — the PC does not change on migration |
 | **S40** `[GAP — the implementation step, added 2026-09-03 (morning)]` | **REGISTER NAMING: SST models 8 × 64-bit lanes; DESIGN A IS TO BE IMPLEMENTED.** SST resolves a register name through a **per-function `RegLayout`** — 32 × (`uint16` offset + `uint8` width) = **768 bits per resident function** (`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCRegLayout.h:40-42`), read at **every** register access (`NMFCTile.cc:461-475`, `return c.regs.read( layout_.field[r] );`), and nothing in the tree produces a layout other than the hard-coded `x1..x8 × 64-bit` default (see **S4**, **S5**). **The canon is now Design A** (H.10): the register number **is** the bit range, resolved by ≈7 gates or a 310-bit ROM per tile, with **nothing fetched**. **This is the largest single divergence in this appendix and it is a BUILD ITEM, not a defect to argue about.** The build order — steps, files and line counts — is `docs/nmfc/proposals/register-map-final.md` **§9**, and its unresolved engineering items are **§9.1 U1–U7**. In outline: delete `struct RegLayout` and `defaultLayout()`, keep `RegField` and `Context512`, **delete `Context512`'s straddle branches** (provably dead — no slice crosses a 64-bit word), add the ~8-line `constexpr` decoder, delete `RegLayout layout_` from `NMFCTile.h:448-450`, add the three width/extension-class bits to the `dbufReg`/`dbufValue` pair (`NMFCTile.h:85-86`), and add the decoder's legality rules. **Net ≈ −60/+15 lines in the layout header alone.** **`RegLayout::illegal()`'s run-time trap (`NMFCTile.cc:464`, `:472`) does not survive** — a total map leaves it nothing to fire on — and **its replacement is the admission-time placement verifier**, which does not exist yet and whose owner is undecided (**U3**). **ChampSim is FROZEN (R3): none of this is a ChampSim work item.** | **H.10** (the whole section), **I2**, **I7**, **K.6**; and **S4**/**S5**, which this supersedes as the *reason* the 8×64 layout must not be read as the design |
+| **S42** `[WRONG — added 2026-09-03. THE ALIGNMENT-PASS ITEM FOR THE PAGE MODEL.]` | **SST'S PAGE TYPES AND ITS IDENTITY MAPPING ARE THE RETIRED MODEL, IN BOTH HALVES.** `enum class PageType { REGULAR, GRAIN, DUPLICATE, STANDARD }` (`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCPageTable.h:42-46`), defaulting to `REGULAR` (`:68`, `:87`, `:207`, `:365`), parsed from the region string's fourth field (`:207-214`, which accepts `grain`, `duplicate`, `standard` and `regular` and rejects everything else); **`REGULAR` is IDENTITY-MAPPED** — `t.frame = addr` with the comment "*identity: nothing relocates yet*" (`:309`), "*REGULAR is mapped identically: striping across tiles is what the …*" (`:280`), "*identity-mapped: its own grain index is a unique key*" (`:402`), and the NUCA relocation path explicitly excludes it (`:431-437`: "*Nothing identity-mapped may reach this*"). **REPLACE BOTH.** [RULED - user ruling 2026-09-03, verbatim: "*we would have 3 page sizes in total: 4 KiB, 1 grain, N grains. 4 KiB for standard pages, 1 grain for grain pages. N grains for standard (bad name, would prefer something meaningful) and duplicate pages. The only difference between standard and duplicate is that duplicates represent 1 grain of virtual space but N grains of physical space, while standard is 1 grain of virtual space per 1 grain of physical space.*"] **What the alignment pass must do, in three parts: (1)** the four types become **HOST** (`4 KiB`/`4 KiB`, block-interleaved), **GRAIN** (`G`/`G`, one tile), **STRIPED** (`N·G`/`N·G`, one grain per tile) and **DUPLICATE** (`G` virtual / `N·G` physical) — i.e. `REGULAR` **becomes STRIPED and changes size from `G` to `N·G`**, and `STANDARD` **becomes HOST**; **(2)** the **size goes in the PTE**, as R13 already requires of a multi-size table, and the **mode is read off the size class** rather than carried as an independent flag, with **one replicate bit** separating DUPLICATE from GRAIN inside the `G` class; **(3)** **the identity mapping goes** — every type is relocatable, which is what unblocks **S10** and removes the frame-arena overlap class DESIGN §30.3 records. **This is a BUILD ITEM, not a defect to argue about**, and it is the largest page-side divergence in this appendix. **ChampSim is FROZEN (R3)**, so none of it is a ChampSim work item. | **F.5b** (the model), **C.3** (the diagram), **E.2** (the mode bit follows the size class), **F.9** (the aligned N-run), Part **P R115** (identity mapping retired), ledger **L58**; and **S10**, which this supersedes as the *reason* the relocation path has a REGULAR-only branch |
 | **S41** `[WRONG — added 2026-09-03]` | **SST BUILDS PER-CONTEXT TRANSLATION ENTRIES, WHICH THE CANON NOW REJECTS.** `struct CtxXlat` and `CtxXlat xlat[4]` (`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCTile.h:122`, `:135`), parameter `ctxXlat` default **2** ("*Translation entries carried in each context (§7)*"), with the statistics `xlatCtxHits`, `xlatTlbHits`, `xlatWalks` and `xlatColdAfterMigration`, plus the `coldXlat` flag. **TO BE REMOVED in the alignment pass** — the tile keeps ONE shared, ASID-tagged TLB and its local walk, and a context consults that directly. **`xlatColdAfterMigration` SURVIVES** and is re-pointed at the destination tile's shared TLB. ChampSim's `ctx_xlat_cache` (`inc/nmfc/nmfc_types.h:112`, held at `:150`) is **frozen history**: ChampSim is frozen (R3), so it is not a work item there. | **F.7**, **P.1 R114**, ledger **L55**, **I3** |
 
 ### D3 — Accounting and modelling artefacts that distort numbers
@@ -11927,7 +12593,22 @@ These are not divergences; they are the scars, and each is a test the canon shou
      REINSTATED the tag with a different subject and four live instances — L50, L51, L52, L54;
      **L50, L51 and L52 were all CONFIRMED by the user later on 2026-09-03 and their tags
      retired, so ONE remains: L54.**
-     The notation table is the authority and it is rewritten to say so.]**
+     The notation table is the authority and it is rewritten to say so.]** **[AND NOW ZERO -
+     user ruling 2026-09-03 on W1b: "*might as well make the ALU 64-bit always, it really makes
+     no difference*". L54 is CONFIRMED, so the original line is true again on its own terms:
+     **every `[USER TO CONFIRM]` tag in this document is gone, on every subject.**]**
+   - **`KILL` — RULED IN, and it is UNPRIVILEGED** (user ruling 2026-09-03, "*we probably need an
+     instruction specifically to kill a failed program's contexts. KILL(hook) is probably the way
+     to go. As to whether this is privileged, probably not?*"). It closes ONE of the caller's own
+     FTU entries on ruling **O7**'s path — zeroed file, error flag, `JOIN` returns the error at
+     once — and is a **no-op on a stale handle**. **The instruction count is now 12 base +
+     RESUME (privileged) + KILL = 14.** #224's refusal and Part P **R77** are **OVERTURNED**;
+     #224 survives as a programming caveat. **I.3a**, ledger **L57**.
+   - **THE PAGE MODEL — FOUR TYPES OVER THREE SIZES** (user ruling 2026-09-03: "*3 page sizes in
+     total: 4 KiB, 1 grain, N grains*"). **HOST** 4 KiB, **GRAIN** `G` on one tile, **STRIPED**
+     `N·G` one grain per tile, **DUPLICATE** `G` virtual over `N·G` physical. **Identity-mapped
+     "regular" is RETIRED as a placement rule** (P.1 **R115**); the **mode bit follows the size
+     class**; striped allocation granularity is `N·G`. **F.5b**, **C.3**, ledger **L58**.
    - **O5 — three message classes on the one fabric: COHERENCE, MIGRATION, FILL**,
      per-destination queues, **coherence strictly first, then migration and fill at EQUAL
      WEIGHT** — the precondition of invariant 11's parity.
@@ -12068,7 +12749,8 @@ These are not divergences; they are the scars, and each is a test the canon shou
    - **`ADAPTIVE_ROUTER`'s `GRAINS PER TILE` / `grains_per_tile`** — it counts **remaps**,
      not grain placements (A.4, L42).
    - **`INCONGRUENT: n of m`** — use **`INCONGRUENT among nmfc-stamped`** for invariant 9;
-     the bare figure legitimately counts STANDARD pages, whose tile is a block field (I9,
+     the bare figure legitimately counts STANDARD pages — **HOST** pages in the vocabulary
+     user ruling 2026-09-03 settled (F.5b) — whose tile is a block field (I9,
      L40).
    - **the per-context state budget: ~87 bytes**, not 64. 22 KiB/tile at 256, **87 KiB at
      1024**, where it competes with the LLC slice; **1024 is ~4× over-provisioned** (H.2,
