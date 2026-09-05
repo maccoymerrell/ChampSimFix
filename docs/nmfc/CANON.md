@@ -374,6 +374,9 @@ are pointed at from **K.6** and Appendix 2 **S40**.
 | **fabric queue depth** | **128** — `nmfc_4tile.json:717` | control queue, `controlDeliver` 4/cycle — `NMFCCoherenceFabric.h:70` | queue **per destination**, never one shared queue (H.8) |
 | **`G` / `grain_bits`** | declared **21** — `nmfc_4tile.json:8`; **derived 20** (`make_config.py:496-546` over `config/nmfc/ramulator/tile_ddr5.yaml:33`). **31 of 33 configs declare 21, and the two memory models the shipped configs actually use — ChampSim's DEFAULT memory controller (`make_config.py:171-172`) and the ramulator DDR5 device (`ramulator/tile_ddr5.yaml`) — BOTH require 20** — ledger L20. **[DISAMBIGUATED — this cell read "both devices require 20", which the next row's two *ramulator device files* (DDR5 and HBM3) make false: E.3 and E.4 both compute HBM3 at 1024 B × 64 banks × 4 channels = **256 KiB**, i.e. `grain_bits` **18**. "Both devices" here names the DEFAULT controller and ramulator DDR5, the pair L20's arithmetic runs on. HBM3 is a third geometry in the tree, and it derives 18 — which is the point, not an exception: `G` follows the device.]** | **1 MiB** at `N`=4 — `test/coherent_memory.py:59-82` (`grain()`), from `DRAM_ROW_BYTES` 8 KiB × `DRAM_BANKS` 32 × `ntiles`. **[CORRECTED — BOTH SST FACTORS ARE WRONG BY THE CONSTRAINT IN THE NEXT COLUMN, AND THEY CANCEL. E.4 rules DDR5's `row_bytes` = columns × channel width = 1024 × 4 B = **4096 B**, not 8 KiB (SST's constant is 2× too large); and `banks_per_channel` must include **ranks**, so the checked-in DDR5 channel is **64** flat, not the **32** per-rank figure SST uses (2× too small — see the very next row, which states the same 64-vs-32 split). 4096 × 64 = 8192 × 32 = **256 KiB**, so the product lands on the right 1 MiB at `N`=4 **by cancellation, not by derivation.** They will not cancel at any other geometry — a device with a different rank count or a different column count breaks the tie instantly, and HBM3's four levels break it in the tree today. **This is exactly the failure the GEOMETRY ruling exists to prevent: the sweep must be DERIVED from the device, never assembled from two hardcoded constants.** Tracked with divergence **S18**, which is the same constant in its other guise.]** | **`G = row_bytes_per_channel × banks_per_channel × total_channels`**, where `banks_per_channel` is the product of **every** organisation level between the channel and the row — **ranks included** — and `total_channels` is DEVICE channels (E.3, E.4). **Any geometry within a 48-bit physical address space must work**: arbitrary banks, ranks, bank groups, rows, columns and channels. **Never lock a count.** |
 | **DRAM device geometry** | DDR5 `[1, 2, 8, 4, 65536, 1024]` — `config/nmfc/ramulator/tile_ddr5.yaml:33`; HBM3 in `tile_hbm3.yaml` | DDR5, timings generated — `config/tile_ddr5.yaml` | the same rule. The **32 banks/channel** figure in older text is DDR5 **at one rank** and is not a spec (GEOMETRY ruling). |
+| **memory-controller-to-device link** `[ADDED 2026-09-05 — the DDR-vs-CXL option]` | **none** — ChampSim models nothing below the memory controller, so the option is not expressible there and is not being back-ported | **`NMFC_MEMLINK`, default `ddr`** — `test/nmfc_memlink.py`, `src/NMFCMemLinkBackend.{h,cc}`, registered in `libnmfc.cc`. `ddr` is **pass-through**: `device_models_bus=1`, every request forwarded untouched because ramulator2 already charges the data bus, the BL16 burst, `tCCD` and the read/write turnaround, and it **enables no statistic at all**, so a `ddr` run's `stats.csv` is byte-identical to `NMFC_MEMLINK=none` (the graph as it stood before the framework existed) and to the pre-option machine's. `cxl`, `custom` and `none` are the other selections; `NMFC_MEMLINK_<PARAM>=value` overrides one parameter of whichever preset is selected | **The link is BELOW the partition (I13) and the option changes nothing above it** — not the fabric, the slice, the tile, the coherence protocol, the page types, translation, the function core or the host, and not the DRAM device by one cycle. **DDR5 is the default and stays byte-identical**; CXL is an option, off unless asked for. The design content is that the interface below a memory controller is **configuration** — see **E.7**. Measured: **N.9c**. |
+| **CXL preset — width, rate and framing** `[ADDED 2026-09-05]` | none | **x16 @ 128 GT/s**, 256 B flit (2 B header + 240 B payload of 15 × 16 B slots + 8 B CRC + 6 B FEC). **Every ratio is DERIVED by `NMFCMemLinkBackend::derive()` and read back out of the run** as `cfg_payload_bytes`, `cfg_peak_read_mbps`, `cfg_peak_write_mbps`, `cfg_serialisation_ps`, `cfg_link_clock_khz`: link efficiency `240/256 = 0.9375`; read `× 64/(64+8) = 0.8333` ⇒ **213.3 GB/s**; write `× 64/(64+16) = 0.75` ⇒ **192.0 GB/s**; serialisation **1.0 ns** per flit | **Derivation, not a chosen number, and the derivation is the design content.** Pin budget `P` = **128 signal pins** — one DDR5 channel's controller interface, JEDEC-derived (64 DQ + 16 DQS + 8 DM + 26 CA + 4 CS + 8 CK + `RESET_n` + `ALERT_n`). A lane is two differential pairs = **4 pins**, so `floor(128/4) = 32` lanes, **rounded down to the widest width CXL actually has: x16** = 64 lane pins + ~5 auxiliary = **69 of the 128**. **Alternative pin counts change nothing**: DM disabled 120, ×4 non-ECC 136, client EC4 ECC UDIMM 140, ×8 EC8 RDIMM 126, ×4 EC8 RDIMM 146, one 32-bit subchannel alone ~64 — a spread of **120–146, −6% to +14%**, and **every one lands on x16**. Rate: **PCIe 7.0, ratified 11 Jun 2025**, the newest ratified base spec (PCIe 8.0 was announced 5 Aug 2025 and is excluded); **CXL 4.0, 18 Nov 2025**, is the CXL that rides it. `results/cxl/sizing.md` §1–§4. |
+| **CXL preset — added latency** `[ADDED 2026-09-05]` | none | **96.0 ns unloaded round trip**, and it is a **reported sum of ten stage accumulators**, not a configured number: serialisation 1 ns ×2, CRC 1 ×2, FEC 1 ×2, PHY pipeline 25 ×2, retimer 5 ×2, wire flight 5 ×2 (the one ANALOG term: `wire_length_m = 0.75` / `propagation_velocity_mps = 1.5e8`), expander transaction layer 20 charged once inbound. `stage_total_ps` is a separate accumulator again and agrees with the parts **to the picosecond** on every run and every channel | **96 ns is the OPTIMISTIC end and must be quoted as one.** It is derived — the CXL spec's 80 ns pin-to-pin target for a CXL.mem access to DRAM plus the ~20 ns expander-internal path that target implies — and it sits **below the empirical floor**: every published direct-attached measurement is worse (**+92, +153, +154, +211, +245 ns** idle adder over local DDR). A result at 96 ns understates a real expander by up to 115 ns. The single defensible conservative alternative is **+154 ns**, the median of the five. **Latency under load is not modelled at all** (measured CXL sits at 400–550 ns near its own peak), which is defensible only because this machine never approaches the knee — **a condition of validity, not a property of CXL.** **One number is configured, never swept**: the hard rule forbids ablation sweeps of implementation knobs, and this is one. |
 | **LLC slice size** | **512 KiB** — 512 sets × 16 ways × 64 B, `nmfc_4tile.json:730-731`; aggregate pinned at 2 MiB by `--llc-sets 2048` (D.5). **Part L and N.1 were measured at 4 MiB, which was never committed** (L28c) | **4 MiB** — `test/coherent_memory.py:175` (`slice_size`) | **"*modern LLC size / DRAM channel* as our indicator for LLC size per tile"** (#76) and "*the same magnitude as modern processors*" (#288). That rule yields **single-digit MiB per tile**; 512 KiB is about an order of magnitude below it. |
 | **LLC slice banking** | **1** — `--llc-banks` defaults to 1 (`make_config.py:583`) and **no shipped config banks the slice**. **Under R3 this flag is INERT**: banking is derived from the DRAM device geometry ramulator declares, not from a flag. | banked to the channel's **per-rank** bank count (**32**, not the flat 64) — `test/coherent_memory.py:249-265` | **A cache bank and its DRAM bank must be the same partition of the address space** (#76, #144, #291 item 1). Bank on the **per-rank** count: two flat banks differing only in rank are the same bank index at the same address position (D.2, DESIGN §30.2). The count follows the device; **it is not a design constant.** |
 | **FTU entries** | **1024** — `nmfc_4tile.json:2128`; **64** — `nmfc_4tile_ramulator.json:1835`; 2048/4096 sweeps in `phys_ft/` | — | it **refuses rather than evicts** (I.5), so it must be large enough not to bound the machine artificially — and **a full FTU is not evidence that the FTU binds** (#180, #171, H.9). `[RE-READ — user 2026-09-04: the run that produced the full-FTU numbers was on the IN-ORDER host, which throttles the NMFC side as well as the baseline — FORK and JOIN retire in order at one per cycle, so the HOST'S ISSUE RATE was the admission limit and "FTU full, tiles idle" is a starved feed. Whether the FTU binds on the out-of-order host is BEING MEASURED and is NOT KNOWN — do not size this row from either answer yet. H.9, L63.]` §23.2's derivation prices 64 and 256 entries at ~65 B each. |
@@ -4305,6 +4308,31 @@ and came OFF the actionable verdict**, and the closing clause lost its marker en
 "It is BUILT" is precisely the fact E.5's own `[CORRECTED — BLOCKING]` block says an
 engineer reading in order would otherwise miss, and would then "have re-implemented a
 built mechanism". The sentence is now split so that no emphasis run contains another.]
+
+
+### E.7 The memory-controller-to-device link is CONFIGURATION — DDR or CXL, below the partition, invisible to the fabric
+
+**The interface between a memory tile's memory controller and its DRAM device is configuration,
+not design.** E.6 fixes the structure — one ramulator2 instance per tile, one channel declared
+internally, channel bits stripped before the address is handed down — and says nothing about the
+*electrical interface* underneath, because nothing in the design depends on it. **The link sits
+BELOW the partition**, which is the one architectural change this machine makes (**I13**): the
+address partition moves to the fabric, slicing LLC → memory controller → channel vertically, and
+the controller-to-device link is below all of that. Selecting a different one therefore touches
+the memory controller's back end and nothing else — **not the fabric, not the LLC slice, not the
+tile, not the coherence protocol, not the page types, not translation, not the function core,
+not the host**, and not the DRAM device by one cycle. There is still one fabric (I13), still one
+duplicated page table (I3), still physical-address partitioning (I12); the tile still owns one
+channel. What changes is only how the controller talks to the DRAM behind it, and **the fabric
+cannot see which link is underneath.** Two are configured: **DDR5-4800, the default, which stays
+byte-identical** — its preset is pass-through and enables no statistic, so a run under it
+produces the same `stats.csv` as the machine before the option existed — and **CXL 4.0 x16 over
+PCIe 7.0, an option, off unless asked for**, sized to the DDR5 channel's own pin budget and
+carrying a derived 96 ns round trip in front of an unchanged device. The values, their
+derivations and the reasons the derivation rather than the value is what binds are in SELECTED
+CONFIGURATION; **the measurement is N.9c.** The general statement is the one that matters here:
+**an implementation may put any interface below the memory controller that the DRAM device can
+be reached through, and the design is unchanged by the choice.**
 
 ---
 
@@ -11129,6 +11157,173 @@ retire.**
   bounds. Simulated results are unaffected.
 - **SST remains tier 4 and decides nothing**; Appendix 2 **S38** still forbids comparing any
   SST number to a ChampSim number.
+
+---
+
+#### N.9c THE MEMORY-LINK OPTION — DDR AGAINST CXL, ON THE THREE SWEEPS (2026-09-05)
+
+`[IMPLEMENTATION EVIDENCE — tier 4, SST]` **Placed here, ahead of N.9b, because it is an
+out-of-order measurement and belongs with N.9a's material; the in-order secondary column
+follows it unchanged.**
+
+`[user request 2026-09-04, verbatim: "Swap out our memory interface for DDR to CXL. This is an
+option, for comparison. CXL is serial, but should offer higher peak bw per pin. Higher latency,
+more bandwidth. Time it assuming the total CXL pins are limited to the original pins reserved by
+the mem controller interface, and it can't be clocked faster than the newest PCIE version."]`
+
+**What was swapped, and what was not.** Only the link between a tile's memory controller and its
+DRAM device — **below the partition, invisible to the fabric (I13, E.7)**. The DDR5 path is the
+default and stays byte-identical: its preset is pass-through, enables no statistic, and produces
+a `stats.csv` byte-identical to the graph as it stood before the option existed. The sizing, the
+lane count, the rate and the 96 ns adder are **configuration with a stated derivation**, in
+SELECTED CONFIGURATION; none is a constant in C++, and every ratio below is read back out of the
+runs' own `cfg_*` counters. Full record: `results/cxl/RESULTS-CXL.md`, with `sizing.md`,
+`bfs.md`, `shuffled-sum.md`, `hashtable.md` and `confirm/` beside it.
+
+**PROVENANCE, AND IT IS NOT CLEAN.** The three sweeps were taken on frozen
+**`72205e646711ad0b54c7dd67a90a3f9aee92de4e`**, with every DDR row **re-taken beside its CXL row
+on that same build** rather than copied from any other campaign. `72205e6` is a descendant of
+`8365318` — what `results/ooo/FROZEN` read when this measured — but an **ancestor** of
+**`e380c34`**, which N.9a is frozen at. **The three commits between them include both
+out-of-order deadlock fixes**, so on `72205e6` the swept BFS binaries and the shuffled-sum
+STRIPED sub-grain points **deadlock**, and those rows are absent from the sweeps below. **A
+bounded confirmation sweep was therefore run on `e380c34` itself, under both links**
+(`results/cxl/confirm/`), and it establishes three things: where both builds ran the same point
+the results agree **to the cycle under both links** (the hash table's P0, all twelve phase
+figures identical); the confirmation's DDR column **reproduces N.9a's own numbers exactly**
+(shuffled-sum 1 str 589,310 / 572,409 ns and 2 str 2,432,113 / 1,315,032 ns; BFS G/4, G and 4G
+bottom-up steps 0.4648, 1.9301 and 21.1761 ms, and 36.15× against 36.096× measured for the 4G
+speedup); and **it supplies the missing rows** — the swept BFS curve at three sizes and the
+striped shuffled-sum points at two, all with identical answer digests between links. **What it does not
+cover is P4h — the one point the central claim rests on — because re-running it on both links is
+four hours of one machine. That is the outstanding gap and it is named, not argued away.**
+
+**THE SIZING, IN ONE ROW PER STEP.** `P` = **128 signal pins**, one DDR5 channel's controller
+interface, JEDEC-derived. A lane is 4 pins ⇒ `floor(128/4) = 32` ⇒ rounded **down** to the widest
+width CXL has ⇒ **x16** = 69 of the 128. **PCIe 7.0** (ratified 11 Jun 2025, the newest ratified
+base spec) at **128 GT/s**; **CXL 4.0** (18 Nov 2025) is the CXL that rides it. 256 B flit ⇒
+link efficiency 0.9375; read `× 64/72` ⇒ **213.3 GB/s**; write `× 64/80` ⇒ **192.0 GB/s**;
+aggregate **405.3 GB/s** full duplex against DDR5's one shared 38.4 GB/s bus — **19.6× the
+bandwidth per signal pin used, 10.6× charging CXL the whole 128-pin budget.** Adder **96.0 ns**,
+the reported sum of ten stages. **Alternative pin counts span 120–146 (−6% to +14%) and every
+one of them lands on x16**, which is the useful property: the sizing does not depend on winning
+the pin-count argument.
+
+**THE ROW THAT DECIDES THE EXPERIMENT.** The device behind the expander is **unchanged** — the
+same DDR5-4800, the same `count`, the same timing vector, the same mapping. So a tile draws
+**19.2 GB/s at ~102 ns on DDR and 19.2 GB/s at ~198 ns on CXL**: the link is **11.1× oversized
+by construction** and nothing in this machine can reach past the device to spend it. **This is a
+latency study and cannot be a bandwidth study** — I13 forbids widening the fabric as part of the
+option, and the fabric is what would have to widen. Anyone quoting a bandwidth-per-pin figure
+from this section must quote that sentence with it.
+
+**THE SWEEPS.** Percentages are CXL against DDR at the same size on the same build.
+
+| workload | size | DDR speedup | CXL speedup | host Δ | **offloaded Δ** | busiest channel's link occupancy |
+|---|---|---:|---:|---:|---:|---:|
+| BFS `tile_bfs.c` | 0.34 MiB | *whole-run ratio 2.043×* | *2.044×* | +0.084% | **+0.124%** | 0.59% |
+| BFS `tile_bfs.c` | 11.00 MiB | *1.512×* | *1.512×* | +0.002% | **+0.007%** | 0.13% |
+| BFS `bfssw` **(`e380c34`)** | 0.25 MiB | **1.786×** | **1.781×** | +0.021% | **+0.342%** | 0.05% |
+| BFS `bfssw` **(`e380c34`)** | 1.00 MiB | **3.622×** | **3.618×** | +0.027% | **+0.136%** | 0.06% |
+| BFS `bfssw` **(`e380c34`)** | 4.00 MiB | **36.096×** | **36.067×** | **−0.0003%** | +0.079% | 0.03% |
+| shuffled-sum GRAIN | 256 KiB | **2.491×** | **2.484×** | +0.033% | **+0.314%** | 0.01% |
+| shuffled-sum GRAIN | 16 MiB | **12.101×** | **12.100×** | +0.007% | **+0.015%** | 0.00% |
+| shuffled-sum STRIPED **(`e380c34`)** | 256 KiB | **1.030×** | **1.028×** | +0.031% | **+0.141%** | **1.03%** |
+| shuffled-sum STRIPED **(`e380c34`)** | 1 MiB | **1.849×** | **1.849×** | **−0.010%** | +0.042% | 0.30% |
+| hash table sep | 0.69 MiB | **0.5428×** | **0.5433×** | +0.182% | **+0.077%** | 0.10% |
+| hash table sep | 4.00 MiB | **1.1560×** | **1.1560×** | +0.007% | +0.006% | 0.05% |
+| hash table int | 4.00 MiB | **1.2692×** | **1.2692×** | +0.003% | +0.002% | 0.05% |
+| hash table sep | 16.00 MiB | *baseline dropped* | *dropped* | — | **+0.0013%** | 0.04% |
+| **hash table sep** | **32.00 MiB** | *baseline dropped* | *dropped* | — | **+0.0021%** | **0.56%** |
+
+**Every speedup is unchanged to four significant figures.** Answer digests are identical between
+links at every point, on every workload.
+
+**THE TWO TOPOLOGY ROWS, AT THE MIDDLE SIZE POINT OF EACH WORKLOAD.** These are not an ablation
+of an implementation knob — they are **the two ways the pin budget can be spent**, which is the
+question the link was sized against. `channels_per_link=2` puts two tiles' channels on ONE x16
+link (**half the pins per tile**); `lanes_per_channel=32` gives each channel two links' worth of
+lanes (**twice the pins, above the DDR5 budget, and labelled as such**).
+
+| workload, middle point | half the pins | twice the pins |
+|---|---:|---:|
+| shuffled-sum point 3 (4 MiB, GRAIN), compute cycles | **11,289,635 — the same integer as plain CXL** | 11,288,935, **−0.0062%** |
+| hash table P2 (4 MiB) work phase | **+0.00001%** sep, **+0.00000%** int | **−0.00012%** sep, **−0.00021%** int |
+| BFS 131,072 V offloaded step | **+0.00000%** | **−0.00087%** |
+
+**Halving the pin budget is free and doubling it buys nothing, and the adder says why: 96, 96,
+95 ns.** Only serialisation scales with width — 1.0 ns per flit at x16, 0.5 at x32, charged twice
+— and it is 2 ns of the 96. **Widening a CXL link does not make it a lower-latency link.**
+
+**P4h — THE ONE POINT WHERE THE PREMISE IS UNDER TEST, AND IT HOLDS.** 32 MiB is twice the
+machine's whole last-level cache and the only working set in the campaign that puts a function
+core's own load on the far side of the link.
+
+| P4h separated, offloaded, 4 tiles × 128 contexts, FTU 256 | DDR5 | CXL | |
+|---|---:|---:|---:|
+| mean load sleep at the tile (`loadSleepCycles / loads`) | 55.91 ns | **76.86 ns** | **+37.48%** |
+| contexts in use, mean per tile of 128 | 5.376 | **6.434** | **+19.68%** |
+| tile idle (contexts resident, no pipe issuing) | 41.10% | 34.65% | **−6.45 pts** |
+| migrations | 1,548,302 | 1,548,302 | **0** |
+| **work phase — the function cores** | **248.5392 ms** | **248.5443 ms** | **+0.0021%** |
+| **verify phase — one host core walking every chain** | **219.6188 ms** | **307.6098 ms** | **+40.0653%** |
+
+**The conversion closes by Little's law to a quarter of a percent**: the tiles issue 0.05062
+loads per tile-cycle in both runs, so `0.05062 × (76.86 − 55.91) = 1.0605` more resident contexts
+is predicted and **1.0582** is measured. The tiles got **less** idle, not more. **The ratio
+between the two phases of that one run is a factor of nineteen thousand** — and it is not a
+comparison between two machines, two binaries or two builds, which removes every confound a
+two-binary comparison has. **This is the one measurement in the project where H.2/H.4's
+latency-into-bandwidth premise is under test and closes by the equation it predicts.**
+
+**THE VERDICT, AS IT MAY BE QUOTED.** **CXL does not help this architecture, and it does not hurt
+it either — which is the more interesting half.** Its bandwidth is **unreachable by construction
+and measured to be unreached**: across three workloads, twenty-three points measured on both links, two page
+formulations and four link topologies the busiest single channel's link occupancy anywhere is **1.03%
+of the time**, its busiest byte-rate against the derived read peak **0.31%**, and `retries` and `ingress_stalls` are
+**0 everywhere**. Its latency is **paid by the host and absorbed by the tiles**: at every working
+set that fits in the 16 MiB of slices neither side feels it — **and that is a null about a cache,
+not a result about a machine**, because the baseline, which has no concurrency mechanism at all,
+was equally unaffected — while at the one size that does not fit, the offloaded phase pays
+**+0.0021%** and the host walk in the next phase of the same run pays **+40.07%**. **The
+resource actually in use is still the fabric** — 50–57% of 64 B/cycle on shuffled-sum, 59–63% of
+fabric bytes as control traffic on BFS from 16,384 vertices up, 0.33–0.66 of ten ports on the
+hash table — **and not one of those moved by more than the third decimal under CXL.** **O.1
+applies at full strength: no fabric ablation has ever been run, and three structures before it
+have claimed to be the constraint and been wrong.** What this adds is one-sided and real: **the
+memory interface is not the limit, and that has now been tested by changing it and watching
+nothing happen.**
+
+**FIVE THINGS THIS DOES NOT ESTABLISH, AND THEY TRAVEL WITH EVERY QUOTATION OF IT.**
+**(1)** It is not a bandwidth study and cannot be turned into one; the follow-on the sizing
+implies — the same 128 pins carrying **5.6 DDR5 channels' worth** of read bandwidth behind one
+expander — is the actual architectural argument for CXL here and **this sweep deliberately does
+not test it.** **(2)** The **96 ns adder is the optimistic end**, below the empirical floor of
+every measured direct-attached device (+92, +153, +154, +211, +245 ns); the projection that a
++245 ns expander would ask for 2.70 more resident contexts per tile instead of 1.06 is a
+projection from a measured rate, not a measurement. **(3)** Loaded latency is not modelled and
+**the model never applied backpressure** — at the two striped points 920 requests were resident
+in one channel's expander ingress and a real bounded buffer would have had to push back.
+**(4)** No fabric ablation. **(5)** The central claim rests on **one size point, run once per
+link, in the offloaded build, on the older of the two builds**; P4 at 64 MiB was never attempted
+and P4h's own host baseline was dropped at 13,000 s on both links, so **P4h has no speedup, only
+a DDR-against-CXL pair.**
+
+**ONE INSTRUMENTATION FINDING, RECORDED BECAUSE TWO REPORTS LEAN ON THE COUNTER.**
+`stage_total_ps` and `stage_expander_queue_ps` are **residency integrals over requests in
+flight**, not requester-visible latency: at shuffled-sum's striped 256 KiB point, channel 2
+accumulated **1.4647 s** of expander-queue time over 16,390 requests in a run whose
+`link_elapsed_ps` is **1.592 ms** — a ratio of **920**, which is an occupancy — while the device
+behind it saw the same 16,390 reads, a read queue of **3.66 (DDR) against 3.65 (CXL)** and a mean
+read latency of **397.77 against 397.66**. **Where `stage_expander_queue_ps` is zero — which is
+every point in the three sweeps above, on every channel — the identity `stage_total = device +
+96 ns` holds exactly and every link figure is sound.** The one claim in the non-zero regime is
+`results/cxl/shuffled-sum.md` §8.3's reading of point 6's setup phase ("*339.8 ns of waiting for
+a slot*"): **the arithmetic is right and the words are not** — it is a residency figure, and it
+should say the queue was deeper, not that each request waited 340 ns. **The conclusion it
+supports is unaffected and is now better evidenced: CXL relocates the queue that forms in front
+of a saturated DRAM from the controller to the expander ingress rather than adding one, and the
+device does not notice.**
 
 ---
 
