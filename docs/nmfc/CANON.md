@@ -374,8 +374,8 @@ are pointed at from **K.6** and Appendix 2 **S40**.
 | **fabric queue depth** | **128** — `nmfc_4tile.json:717` | control queue, `controlDeliver` 4/cycle — `NMFCCoherenceFabric.h:70` | queue **per destination**, never one shared queue (H.8) |
 | **`G` / `grain_bits`** | declared **21** — `nmfc_4tile.json:8`; **derived 20** (`make_config.py:496-546` over `config/nmfc/ramulator/tile_ddr5.yaml:33`). **31 of 33 configs declare 21, and the two memory models the shipped configs actually use — ChampSim's DEFAULT memory controller (`make_config.py:171-172`) and the ramulator DDR5 device (`ramulator/tile_ddr5.yaml`) — BOTH require 20** — ledger L20. **[DISAMBIGUATED — this cell read "both devices require 20", which the next row's two *ramulator device files* (DDR5 and HBM3) make false: E.3 and E.4 both compute HBM3 at 1024 B × 64 banks × 4 channels = **256 KiB**, i.e. `grain_bits` **18**. "Both devices" here names the DEFAULT controller and ramulator DDR5, the pair L20's arithmetic runs on. HBM3 is a third geometry in the tree, and it derives 18 — which is the point, not an exception: `G` follows the device.]** | **1 MiB** at `N`=4 — `test/coherent_memory.py:59-82` (`grain()`), from `DRAM_ROW_BYTES` 8 KiB × `DRAM_BANKS` 32 × `ntiles`. **[CORRECTED — BOTH SST FACTORS ARE WRONG BY THE CONSTRAINT IN THE NEXT COLUMN, AND THEY CANCEL. E.4 rules DDR5's `row_bytes` = columns × channel width = 1024 × 4 B = **4096 B**, not 8 KiB (SST's constant is 2× too large); and `banks_per_channel` must include **ranks**, so the checked-in DDR5 channel is **64** flat, not the **32** per-rank figure SST uses (2× too small — see the very next row, which states the same 64-vs-32 split). 4096 × 64 = 8192 × 32 = **256 KiB**, so the product lands on the right 1 MiB at `N`=4 **by cancellation, not by derivation.** They will not cancel at any other geometry — a device with a different rank count or a different column count breaks the tie instantly, and HBM3's four levels break it in the tree today. **This is exactly the failure the GEOMETRY ruling exists to prevent: the sweep must be DERIVED from the device, never assembled from two hardcoded constants.** Tracked with divergence **S18**, which is the same constant in its other guise.]** | **`G = row_bytes_per_channel × banks_per_channel × total_channels`**, where `banks_per_channel` is the product of **every** organisation level between the channel and the row — **ranks included** — and `total_channels` is DEVICE channels (E.3, E.4). **Any geometry within a 48-bit physical address space must work**: arbitrary banks, ranks, bank groups, rows, columns and channels. **Never lock a count.** |
 | **DRAM device geometry** | DDR5 `[1, 2, 8, 4, 65536, 1024]` — `config/nmfc/ramulator/tile_ddr5.yaml:33`; HBM3 in `tile_hbm3.yaml` | DDR5, timings generated — `config/tile_ddr5.yaml` | the same rule. The **32 banks/channel** figure in older text is DDR5 **at one rank** and is not a spec (GEOMETRY ruling). |
-| **DRAM device per tile** `[ADDED 2026-09-05 — the denominator, after the N.9 correction]` | one 32-bit DDR5-4800 subchannel — `config/nmfc/ramulator/tile_ddr5.yaml:36` (`channel_width: 32`) | **one 32-bit DDR5-4800 subchannel, 19.2 GB/s peak** — `config/tile_ddr5.yaml` `channel_width: 32`; aggregate at `N`=4 is **76.8 GB/s** | **`channel_width` is BITS, and one ramulator2 instance is a SUBCHANNEL, not a JEDEC DDR5 channel** (a DDR5 DIMM channel is two independent 32-bit subchannels). With `internal_prefetch_size` 16 the burst is 32 bits × 16 / 8 = 64 B, which is a subchannel's BL16. So per-tile peak is 4800 MT/s × 4 B = **19.2 GB/s**, not the 38.4 GB/s of a full channel, and **every "percent of channel peak" must be against 19.2** — **E.3**, DESIGN §17. The design fixes no geometry (E.3, E.4, I12): this is the configuration, not a constant. Measured against it: **N.9**. |
-| **memory-controller-to-device link** `[ADDED 2026-09-05 — the DDR-vs-CXL option]` | **none** — ChampSim models nothing below the memory controller, so the option is not expressible there and is not being back-ported | **`NMFC_MEMLINK`, default `ddr`** — `test/nmfc_memlink.py`, `src/NMFCMemLinkBackend.{h,cc}`, registered in `libnmfc.cc`. `ddr` is **pass-through**: `device_models_bus=1`, every request forwarded untouched because ramulator2 already charges the data bus, the BL16 burst, `tCCD` and the read/write turnaround, and it **enables no statistic at all**, so a `ddr` run's `stats.csv` is byte-identical to `NMFC_MEMLINK=none` (the graph as it stood before the framework existed) and to the pre-option machine's. `cxl`, `custom` and `none` are the other selections; `NMFC_MEMLINK_<PARAM>=value` overrides one parameter of whichever preset is selected | **The link is BELOW the partition (I13) and the option changes nothing above it** — not the fabric, the slice, the tile, the coherence protocol, the page types, translation, the function core or the host, and not the DRAM device by one cycle. **DDR5 is the default and stays byte-identical**; CXL is an option, off unless asked for. The design content is that the interface below a memory controller is **configuration** — see **E.7**. Measured: **N.9c**. |
+| **DRAM device per tile** `[ADDED 2026-09-05 — the denominator, after the N.9 correction]` | one 32-bit DDR5-4800 subchannel — `config/nmfc/ramulator/tile_ddr5.yaml:36` (`channel_width: 32`) | **one 32-bit DDR5-4800 subchannel, 19.2 GB/s peak** — `config/tile_ddr5.yaml` `channel_width: 32`; aggregate at `N`=4 is **76.8 GB/s** | **`channel_width` is BITS, and one ramulator2 instance is a SUBCHANNEL, not a JEDEC DDR5 channel** (a DDR5 DIMM channel is two independent 32-bit subchannels). With `internal_prefetch_size` 16 the burst is 32 bits × 16 / 8 = 64 B, which is a subchannel's BL16. So per-tile peak is 4800 MT/s × 4 B = **19.2 GB/s**, not the 38.4 GB/s of a full channel, and **every "percent of channel peak" must be against 19.2** — **E.3**, DESIGN §17. The design fixes no geometry (E.3, E.4, I12): this is the configuration, not a constant. Measured against it: **N.9**, **N.10**. |
+| **memory-controller-to-device link** `[ADDED 2026-09-05 — the DDR-vs-CXL option]` | **none** — ChampSim models nothing below the memory controller, so the option is not expressible there and is not being back-ported | **`NMFC_MEMLINK`, default `ddr`** — `test/nmfc_memlink.py`, `src/NMFCMemLinkBackend.{h,cc}`, registered in `libnmfc.cc`. `ddr` is **pass-through**: `device_models_bus=1`, every request forwarded untouched because ramulator2 already charges the data bus, the BL16 burst, `tCCD` and the read/write turnaround, and it **enables no statistic at all**, so a `ddr` run's `stats.csv` is byte-identical to `NMFC_MEMLINK=none` (the graph as it stood before the framework existed) and to the pre-option machine's. `cxl`, `custom` and `none` are the other selections; `NMFC_MEMLINK_<PARAM>=value` overrides one parameter of whichever preset is selected | **The link is BELOW the partition (I13) and the option changes nothing above it** — not the fabric, the slice, the tile, the coherence protocol, the page types, translation, the function core or the host, and not the DRAM device by one cycle. **DDR5 is the default and stays byte-identical**; CXL is an option, off unless asked for. The design content is that the interface below a memory controller is **configuration** — see **E.7**. Measured: **N.9c**, and on the restructured workloads with the device sized to saturate the link, **N.10d**. |
 | **CXL preset — width, rate and framing** `[ADDED 2026-09-05]` | none | **x16 @ 128 GT/s**, 256 B flit (2 B header + 240 B payload of 15 × 16 B slots + 8 B CRC + 6 B FEC). **Every ratio is DERIVED by `NMFCMemLinkBackend::derive()` and read back out of the run** as `cfg_payload_bytes`, `cfg_peak_read_mbps`, `cfg_peak_write_mbps`, `cfg_serialisation_ps`, `cfg_link_clock_khz`: link efficiency `240/256 = 0.9375`; read `× 64/(64+8) = 0.8333` ⇒ **213.3 GB/s**; write `× 64/(64+16) = 0.75` ⇒ **192.0 GB/s**; serialisation **1.0 ns** per flit | **Derivation, not a chosen number, and the derivation is the design content.** Pin budget `P` = **128 signal pins** — one DDR5 channel's controller interface, JEDEC-derived (64 DQ + 16 DQS + 8 DM + 26 CA + 4 CS + 8 CK + `RESET_n` + `ALERT_n`). A lane is two differential pairs = **4 pins**, so `floor(128/4) = 32` lanes, **rounded down to the widest width CXL actually has: x16** = 64 lane pins + ~5 auxiliary = **69 of the 128**. **Alternative pin counts change nothing**: DM disabled 120, ×4 non-ECC 136, client EC4 ECC UDIMM 140, ×8 EC8 RDIMM 126, ×4 EC8 RDIMM 146, one 32-bit subchannel alone ~64 — a spread of **120–146, −6% to +14%**, and **every one lands on x16**. Rate: **PCIe 7.0, ratified 11 Jun 2025**, the newest ratified base spec (PCIe 8.0 was announced 5 Aug 2025 and is excluded); **CXL 4.0, 18 Nov 2025**, is the CXL that rides it. `results/cxl/sizing.md` §1–§4. |
 | **CXL preset — added latency** `[ADDED 2026-09-05]` | none | **96.0 ns unloaded round trip**, and it is a **reported sum of ten stage accumulators**, not a configured number: serialisation 1 ns ×2, CRC 1 ×2, FEC 1 ×2, PHY pipeline 25 ×2, retimer 5 ×2, wire flight 5 ×2 (the one ANALOG term: `wire_length_m = 0.75` / `propagation_velocity_mps = 1.5e8`), expander transaction layer 20 charged once inbound. `stage_total_ps` is a separate accumulator again and agrees with the parts **to the picosecond** on every run and every channel | **96 ns is the OPTIMISTIC end and must be quoted as one.** It is derived — the CXL spec's 80 ns pin-to-pin target for a CXL.mem access to DRAM plus the ~20 ns expander-internal path that target implies — and it sits **below the empirical floor**: every published direct-attached measurement is worse (**+92, +153, +154, +211, +245 ns** idle adder over local DDR). A result at 96 ns understates a real expander by up to 115 ns. The single defensible conservative alternative is **+154 ns**, the median of the five. **Latency under load is not modelled at all** (measured CXL sits at 400–550 ns near its own peak), which is defensible only because this machine never approaches the knee — **a condition of validity, not a property of CXL.** **One number is configured, never swept**: the hard rule forbids ablation sweeps of implementation knobs, and this is one. |
 | **LLC slice size** | **512 KiB** — 512 sets × 16 ways × 64 B, `nmfc_4tile.json:730-731`; aggregate pinned at 2 MiB by `--llc-sets 2048` (D.5). **Part L and N.1 were measured at 4 MiB, which was never committed** (L28c) | **4 MiB** — `test/coherent_memory.py:175` (`slice_size`) | **"*modern LLC size / DRAM channel* as our indicator for LLC size per tile"** (#76) and "*the same magnitude as modern processors*" (#288). That rule yields **single-digit MiB per tile**; 512 KiB is about an order of magnitude below it. |
@@ -11779,6 +11779,270 @@ MACHINE NOW". **And the BFS pair is not a host comparison**: the in-order 18.70�
 
 ---
 
+### N.10 THE RESTRUCTURED-WORKLOAD CAMPAIGN ON THE FROZEN BUILD (2026-09-05, `4eb1325` + sst-elements `9e0dd62`, with the BFS sweep re-run on `0ad0c8c`)
+
+`[IMPLEMENTATION EVIDENCE — tier 4, SST]` **Frozen build
+`4eb13257e7dd84fcee523de3781bedfb2695e855`** (NMFC-Rev, `main`, pushed), with sst-elements
+`9e0dd62637a8da11e8b659a8e81ef733a05fc945` (`nmfc/nmfc-ramulator2`, pushed), written to
+`results/hostb/FROZEN` and `results/hostb/measure/BUILD` before the first simulation and
+verified by the two library checksums the runs actually loaded (`libnmfc.so`
+`47dd3377da988aab634f92fcea1d8259`, `libvanadis.so` `ac65f84dbbb4dff38349e19372ee728a`).
+`src/rev` untouched, nothing under `/mnt/md0/ChampSim` touched. **The host is the
+out-of-order Vanadis core** (3.0 GHz, 352-entry ROB, 6-wide, 32 KiB L1I / 48 KiB L1D,
+2 MiB L2); `NMFC_ALLOW_INORDER` was never set and `inorder-nmfc.py` was never run. Below
+it: 4 tiles × 128 contexts × 4 pipes, MOESIF directory on the fabric, a 4 MiB LLC slice and
+one 32-bit DDR5-4800 subchannel per tile (**76.8 GB/s aggregate**, the E.3 denominator),
+`G = 1,048,576 B`, tracking unit 256 and control queue 256 from `include/nmfc_isa.h`,
+`NMFC_PLACEMENT=first_touch`. An invocation carries a **512-bit context, bit-packed**.
+**No wall cap on any run** — the point of the campaign is that N.9a's dropped points are
+measured here. Full records: `results/hostb/RESULTS-HOSTB.md`, with `bfs.md`,
+`shuffled-sum.md`, `hashtable.md` and `cxl.md` beside it, and the reader page at
+`results/nmfc-results.html`.
+
+**THREE THINGS MOVED THE NUMBERS RELATIVE TO N.9a, AND ONLY THE THIRD IS THE SUBJECT.**
+(i) Vanadis's issue stage became wakeup-and-select (sst-elements `fecf50342`): the old stage
+would not let a consumer read a register until every in-flight writer had **retired** at the
+head of a 352-entry ROB, which on these workloads is very often a load out in the fabric.
+Measured per point it is worth **1.40×–9.53×** of the cycles and it is worth **more to the
+baselines than to the offloaded builds** (2.48× against 2.05× on one hash-table pair), so
+**every speedup below is against a stronger baseline than N.9a's**. (ii) A workload's input
+is placed by the loader, untimed (`e4a0654`), so only the algorithm phase is timed on both
+arms; measured on the shuffled-sum this is baseline **+27.1%**, offload **−42.4%**, and on
+the hash table baseline **+2.9%**, offload **−0.5%**. (iii) All three programs were
+restructured so an invocation is meaningful work and the host loop never waits on a named
+handle — **that is what N.10 measures**, and ledger **L66** carries the diagnostic it
+answers. **Because (i) and (ii) changed the machine and the measurement, N.9a's
+milliseconds are not comparable with N.10's; only the ratios are, and the *before* columns
+below are quoted as ratios or as counters and never mixed into a speedup.**
+
+#### N.10a BFS — SWEPT OVER GRAPH SIZE, BOTH ARMS RE-RUN ON THE BFS-FIX BUILD
+
+`[PROVENANCE — the ONE library change in this campaign, and it is separated from the
+measurement rather than folded into it.]` The first attempt at this sweep produced no table:
+ten of twelve runs died in `VanadisBasicLoadStoreQueue` with `load response does not fit the
+register`, at `0x40000fffc0` on every one. **The same class of defect as L64 — the host MMU
+damaging the core's own request — but a different field.** `NMFCHostMMU::mapRequest()`
+overwrote every request's **virtual** address with the address it was about to translate; the
+load/store queue is configured with `address_mask` 0xFFFFFFFF, narrows the request address to
+the 4 GiB the machine models, keeps the WIDE address in its own entry, and reunites a response
+with that entry by `ev->vAddr - load_address`. Clobbering `vAddr` made that difference −2^38
+for a load issued at `0x40000fffc0` and answered at `0xfffc0`, so the queue was asked to place
+8 bytes 2^38 into an 8-byte register and called `out->fatal`. **Below 4 GiB pAddr == vAddr and
+the overwrite was invisible, which is why only a wrong-path load ever found it**: the load is
+architecturally unreachable — the neighbour loop is guarded at both ends, and one adjacency
+slot past a maximum-degree (13) vertex is the next record's `st` = −1, read as neighbour index
+0xFFFFFFFF, and `node[]` is at 0x100000 with a 64-byte record, so 0x100000 + (0xFFFFFFFF<<6) =
+0x40000fffc0. **Removing the mask instead was tested and is NOT the fix** — the untruncated
+address then reaches the fabric and dies with `cannot find a destination for address
+40000fffc0`. **THE FIX (NMFC-Rev `0ad0c8c`, pushed):** `vAddr` is filled in only when the
+caller supplied none and left alone when supplied — byte-identical for every request whose
+`vAddr` is 0 (Rev) or equals `pAddr` (every architectural access), and `q_nmfc` and `1g_nmfc`
+`stats.csv` are **byte-identical to the earlier build's**. **THE GATE:**
+`src/nmfc/test/host_hiaddr.c` loads 8/4/1 B through `&probe`+2^32 and +2^38 and requires each
+to come back in the register the core opened for it — FATAL before, `NMFC HOSTHIADDR: PASS`
+after — wired into `run_coherent.sh` on the OoO host. All three suites re-run green on the
+rebuilt library (`NMFC SUITE: PASS`; `NMFC COHERENT SUITE: PASS [host: out-of-order (Vanadis,
+352-entry ROB)]` ×2) **before any measurement**, and **both arms of every row in N.10a are
+from that one rebuilt library**. `src/nmfc/src` is the only tree that moved; N.10b, N.10c and
+N.10d are on `4eb1325` and are unaffected, which is checked rather than asserted (no C, no
+C++, no configuration file and no hash-table or shuffled-sum binary differs between them).
+
+`[IMPLEMENTATION EVIDENCE — tier 4, SST]` The offloaded step is the **bottom-up phase**; the
+unit of work is a **vertex range** (64 vertices at G/4, 256 at G and 4G, 1,024 / 2,048 /
+4,096 at the three largest), so the host passes bounds and the function core generates its
+own work. Twelve runs, `NMFC BFSSWEEP: PASS` and `rc=0` on all twelve, **answer digests
+identical baseline-against-offloaded at all six points**. Both arms are from this one run on
+one library from one source; no archived baseline is quoted. The DRAM column is split
+because ramulator2's counters are whole-run and this workload's run is dominated by graph
+construction: charging every byte to the bottom-up window is an upper bound, and at 32G/64G
+that bound is too loose to decide anything.
+
+| point | V | working set | range | host ms | NMFC ms | **speedup** | contexts of 512 (peak) | mig/load | slice hit | DRAM % of 76.8 GB/s, whole run | bound on the window | host IPC base / offl | ROB of 352 base / offl |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| G/4 | 4,096 | 0.25 MiB | 64 | 0.1779 | 0.1441 | **1.23x** | 58.2 (64) | 0.000 | 0.8806 | 0.36% | ≤2.5% | 0.686 / 0.614 | 163 / 215 |
+| G | 16,384 | 1.00 MiB | 256 | 0.7251 | 0.5277 | **1.37x** | 61.6 (64) | 0.000 | 0.8818 | 0.36% | ≤2.6% | 0.690 / 0.615 | 163 / 216 |
+| 4G | 65,536 | 4.00 MiB | 256 | 3.4663 | 0.5647 | **6.14x** | 164.2 (398) | 0.395 | 0.9396 | 0.23% | ≤9.8% | 0.309 / 0.339 | 267 / 264 |
+| 16G | 262,144 | 16.00 MiB | 1,024 | 33.4781 | 4.5925 | **7.29x** | 146.5 (406) | 0.519 | 0.9582 | 0.21% | ≤6.0% | 0.233 / 0.261 | 287 / 288 |
+| 32G | 524,288 | 32.00 MiB | 2,048 | 54.1558 | 9.0699 | **5.97x** | 194.8 (512) | 0.352 | 0.5417 | 1.48% | ≤78.6% | 0.128 / 0.147 | 307 / 290 |
+| 64G | 1,048,576 | 64.00 MiB | 4,096 | 165.8148 | 32.3169 | **5.13x** | 220.5 (512) | 0.427 | 0.4078 | 1.76% | ≤60.4% | 0.114 / 0.139 | 309 / 294 |
+
+**Reading it.** The curve's shape is set by **where the graph lives, not by the offload**.
+At G/4 and G the whole working set is one grain and therefore one tile, so 384 of 512
+contexts and three of four channels are unreachable **by construction** and the gain is
+1.2–1.4×; from 4G up all four tiles hold graph and the gain jumps to 6.1×. **The peak at 16G
+is the LLC**: four 4 MiB slices are 16 MiB, the working set is 64 B/vertex, the slices
+answer 95.8% at 16G against 54.2% and 40.8% at 32G and 64G, the row-hit rate falls 0.80 →
+0.31, and the speedup falls with them. **What limits it is memory latency per context and
+nothing the design added**: 75–92% of resident contexts are asleep on a load, the function
+cores use 14–36% of their issue slots, `forkRefused` = 0 at every point, `invocationQueueFull`
+= 0 with a peak of 7 of 256, and the fabric carries under 1% of its ports' bytes. **The host
+is not the bottleneck and three counters say so**: FTU OUTSTANDING 59–247 against RETURNED
+≤ 2.91; a finished result waits 0.0–1.3% of its FORK→JOIN life; and 98.5–99.99% of each
+bottom-up level is *drain* (at 64G, 96.94 of 96.95 million cycles). **Migration is the
+mechanism working** — 0.35–0.52 per tile load above 4G, which is also why FTU outstanding
+exceeds tile residency (232 against 220 at 64G): a migrating context is on the fabric and on
+no tile. Bandwidth is a plausible limit **only** at 32G/64G and the measurement cannot settle
+it; that is the split DRAM column and it is stated as an open item, not as a finding.
+
+#### N.10b SHUFFLED-SUM — BOTH PAGE FORMULATIONS, BOTH INVOCATION LENGTHS, EVERY SIZE
+
+`[IMPLEMENTATION EVIDENCE — tier 4, SST]` The unit of work is a run of **K consecutive
+chains** (K = 64 → 256 dependent loads and ≈2,850 tile instructions per invocation; K = 256
+→ 1,024 and ≈11,400), carried as a start index and a count so a fork costs one CXW and the
+FORK. 72 simulations, 45 min 35 s of wall clock at 12 concurrent, every one finished, every
+checksum equal across baseline, checked offload and not-self-checked offload. The *before*
+column is the one-chain program of N.9a and is **ratios only**.
+
+| working set | M | grain K=64 | grain K=256 | striped K=64 | striped K=256 | *before, one chain (grain / striped)* |
+|---|---:|---:|---:|---:|---:|---|
+| 256 KiB | 8,192 | **16.11x** | 5.61x | **8.94x** | 7.60x | 2.49x / 1.03x |
+| 1 MiB | 32,768 | **16.67x** | 16.59x | **9.25x** | 9.24x | 2.58x / 1.85x |
+| 4 MiB | 131,072 | **29.44x** | 29.57x | **29.68x** | 29.89x | 7.78x / 7.78x |
+| 16 MiB | 524,288 | **41.34x** | 41.68x | **47.63x** | 48.01x | *baseline dropped at the wall cap* |
+| 32 MiB | 1,048,576 | **55.84x** | 55.83x | **68.84x** | 68.82x | *not attempted* |
+| 64 MiB | 2,097,152 | **60.18x** | 60.11x | **73.90x** | 73.51x | *not run* |
+
+**Reading it.** The strongest statement here **is not a ratio of times**: at 64 MiB striped
+the baseline and the offload issue the same DRAM reads to within 0.02% (6,754,838 against
+6,753,652 — invariant I8, the same algorithm over the same memory) and move them at
+**0.377 GB/s against 27.876 GB/s**, a ratio of 73.9× against a measured speedup of 73.90×.
+**The speedup IS the memory-level-parallelism ratio.** DRAM utilisation is low below 32 MiB
+because the four slices hold the working set at an 83–88% hit rate; at 32 and 64 MiB it
+reaches **24.0–36.3%** of 76.8 GB/s against the baseline's 0.42–0.49% over the same bytes.
+**What limits it at those sizes is the FTU's DEPTH, by arithmetic over counters and not by a
+sweep** (O.1, and the no-ablation rule): an invocation is one context with one load
+outstanding, so 256 entries admit at most 256 resident contexts on a machine with 512, and
+`ftuOutstandingOccupancy` reads 253.3–255.3 of 256 from 4 MiB up while the tiles hold
+150.5–230.6 of 512. Loads-outstanding × latency × miss rate **predicts the measured DRAM
+rate to within 0.15%** at 32 and 64 MiB; run backwards it says **486 outstanding loads would
+saturate the four channels at 64 MiB** — more than 256 and close to 512. Below 32 MiB the
+constraint is the fabric's **per-agent ports**: 15.6–19.5% by bytes but **31–39% port
+serialisation**, 96–98% of messages waiting a mean 42–51 cycles at 4 and 16 MiB, and
+**control is the largest byte class** because a migration carries a 512-bit context at
+0.75–1.0 migrations per load. Two placement effects are measured and neither is fatal: a
+striped extent ≤ G is one grain on one tile (8.94×/9.25× against 16.11×/16.67× for grain at
+the same sizes, tile 0 holding 126–127 of 128), and the grain formulation concentrates on
+the entry tile at the top two sizes because layer 0 is indexed by a hash of the chain number
+and has no reuse, which is why striped is 3–9% faster there.
+
+#### N.10c CHAINED HASH TABLE — TWO PHASE STRUCTURES, TWO BATCH LENGTHS, P3 AND P4 MEASURED FOR THE FIRST TIME
+
+`[IMPLEMENTATION EVIDENCE — tier 4, SST]` The unit of work is a **batch of B operations**
+(B = 32 and B = 128, two binaries and not two settings of a dial), the host binning the op
+stream by tile and passing a pointer and a count; a lookup's answer is written into its own
+op record, so there is **one JOIN per B operations** and none per lookup. Thirty runs, 6.9
+CPU-hours, 1 h 43 min of wall clock at 12 concurrent, **no wall cap** — the P4 host baseline
+alone is 103 minutes, two and a half times the cap that dropped P3 and P4 from N.9a. The
+*before* column is N.9a's and is **ratios only**.
+
+| point | working set / load factor | max chain | sep B=32 | sep B=128 | int B=32 | int B=128 | *before (sep / int)* |
+|---|---|---:|---:|---:|---:|---:|---|
+| P0 | 0.69 G / 0.125 | 3 | 1.07x | 0.96x | 1.11x | 0.59x | 0.54x / 0.83x |
+| P1 | 1.00 G / 0.333 | 5 | 0.89x | 0.89x | 1.13x | 0.87x | 0.56x / 0.86x |
+| P2 | 4.00 G / 2.333 | 11 | 1.67x | **1.78x** | 1.73x | **1.81x** | 1.16x / 1.27x |
+| P3 | 16.00 G / 10.333 | 26 | 8.41x | **9.04x** | 7.41x | **7.61x** | *not reached* |
+| P4 | 32.00 G / 21.000 | 41 | 25.93x | **27.48x** | **19.92x** | 19.52x | *not reached* |
+
+**Reading it.** **The whole of the speedup is a flat line meeting a falling one.** The
+offload costs **152–167 host cycles per operation at P2, P3 and P4** — across an eightfold
+change in working set, nine times the operations and a load factor of 2.3 → 21.0 it does not
+move (17.9–19.7 M ops/s); the baseline's cost goes **279 → 1,400 → 4,342** cycles per
+operation (10.8 → 2.1 → 0.69 M ops/s). Nothing gets faster; the baseline stops keeping up.
+**The host's instruction count did not fall — its character changed**: at P3 the baseline
+retires 149.8 instructions per op at **IPC 0.136** (a dependent chase) and the offload 145.6
+at **IPC 0.644** (independent stores into an op array), and that is also the ceiling,
+because the host still touches every operation. **Little's law closes on all twenty
+offloaded points to 0.0000%**: batches ÷ work cycles × mean `invocationCycles` = the measured
+FTU occupancy, and **the batch length cancels out of it** (28.87 → 31.00 at P3 separated when
+B goes 32 → 128), so **B is not the lever on occupancy; the host's cost per operation is**.
+Tile residency tracks the **load factor**, not the size — 3.4 contexts/tile at 0.125, 6.9 at
+10.3, **15.7 at 21.0**, of which **9.63 are asleep on a load** — and a tile cannot be filled
+by sixteen contexts: four pipes and a re-issue depth of eight need **32 runnable contexts**
+to fill, and `reissueStalls` is 3.3 per instruction issued. DRAM over the **work phase** goes
+0.49–1.04% at P0–P3 to **6.4–11.0% at P4**, the first point whose table does not fit the four
+slices (hit rate 98% → 79.5%); the baseline falls off the same cliff with a **worse** hit
+rate (65.0%) and 0.33% DRAM, because one core walking one chain has one miss outstanding at
+IPC 0.045. **A second ceiling is named by the peak counters**: `peak in flight` 254 of 256
+and `contextPeak` 64 of 128 at P4 separated — 256 entries is the most this interface can
+hold whatever the host does, on a machine with 512 context slots. **Recorded as a finding,
+not proposed as a change** (O.1).
+
+**AN OPEN DEFECT, WITH A REPRODUCTION, FOUND BY THIS SWEEP.** Three of the thirty runs fail
+their own answer check and they are **one shape — interleaved, B = 32, at P2, P3 and P4** —
+with **1 of 76,458, 4 of 338,602 and 2 of 688,128** answers wrong. The table digest is
+identical across the baseline and both batch lengths at every failing point, all fourteen
+other in-program checks pass, and at **B = 128 the answer digest equals the baseline's bit
+for bit over 688,128 lookups**. Only the interleaved phase walks a chain while it grows, and
+only it fails. **The candidate mechanism is a node that straddles a coherence line**:
+`ht_node` is 24 B (`key` +0, `value` +8, `next` +16) packed at that stride, so **one node in
+three straddles a 64 B line** and its key and value become visible independently, and one of
+the four wrong answers is a `found` with the wrong value — a walker that saw the link before
+the second line. **A fence is inadmissible in a kernel (H.10.4 rule 5, `admit.py`)**, so the
+repairs available to a program are to pad the node to 32 B or to publish through a form the
+ISA allows; neither is taken here. **That it is a race is measured, not argued**: on one
+binary, one configuration and one seed, stepping `NMFC_HOP_LATENCY` 2/4/6/8/16 gives
+**0/1/0/4/0** wrong answers, with the digest equal to the baseline's under three of the five
+— a **directed diagnostic to localise a defect, not an ablation, and it appears in no result
+column** (O.1). The gate that would name it exactly — one bucket, one appender, one walker on
+different tiles, node stride swept over 24 and 32 B — **does not exist yet**. The three runs
+completed and are marked in the table by what they got wrong rather than dropped.
+
+#### N.10d THE MEMORY LINK ON THE RESTRUCTURED WORKLOADS — DDR AGAINST CXL, DEVICE SIZED TO SATURATE
+
+`[IMPLEMENTATION EVIDENCE — tier 4, SST]` This is N.9c's option re-measured on the
+restructured programs, with the **hungriest formulation per workload** (shuffled-sum striped
+K=64; hash table `sep` B=128), which biases the test **towards** finding a link effect. Only
+the link below the memory controller moves (I13, E.7); the `ddr` preset is pass-through and
+registers no statistic. Behind the CXL link the device is **sized to saturate it** — twelve
+DDR5-4800 subchannels per expander against one per tile on DDR — because a link with one
+channel behind it measures the channel. `device bus busy` is nBL ÷ the mean column-command
+gap and is the counter that orders every row.
+
+| workload | point | host ms DDR / CXL | NMFC ms DDR / CXL | **speedup DDR / CXL** | **DDR bus busy** | slice hit | CXL lane occupancy | digests agree |
+|---|---|---|---|---|---:|---:|---:|:--:|
+| shuffled-sum | P5 striped K=64, 64 MiB | 1145.849 / 1359.576 | 15.504 / 13.955 | **73.91x / 97.42x** | **87.2%** | 19.6% | 11.5% | yes |
+| shuffled-sum | P6 striped K=64, 32 MiB | 482.069 / 554.400 | 7.001 / 6.705 | **68.86x / 82.69x** | **68.9%** | 42.5% | 8.5% | yes |
+| hash table | P4 sep B=128, 32 MiB | 2987.510 / **NOT COMPLETED** | 108.731 / 107.797 | 27.48x / — | 9.3% | 79.5% | 1.03% | yes |
+| hash table | P3 sep B=128, 16 MiB | 474.171 / 474.469 | 52.448 / 52.443 | 9.04x / 9.05x | 1.4% | 98.0% | 0.17% | yes |
+| BFS | G, 1 MiB | *host aborts on this build* | 1.055 / 1.055 | — | 1.4% | 88.2% | 0.11% | yes |
+| BFS | G/4, 256 KiB | *host aborts on this build* | 0.288 / 0.288 | — | 2.4% | 88.1% | 0.11% | yes |
+
+**Reading it.** **The link matters exactly as much as the DDR bus is busy, and not
+otherwise, and the ordering is monotone in that one counter.** At the shuffled-sum's largest
+point the DDR5 subchannel's data bus is **87.2% occupied** — 80.4% of column commands at the
+minimum 8-cycle gap, read queue 9.815 deep, non-empty 99.8% of cycles with nothing issuable
+for 67.9% — and two unrelated counters agree to a tenth of a point (the achieved 27.87 GB/s
+over four channels is 87.1% of what those buses can carry at the clock this model ticks them
+at). **This is the first program in this tree to run its memory system out of room**, and it
+is the answer to "bandwidth unexploited": the bandwidth is unexploited **by the baseline**,
+which leaves the same bus **1.2%** busy issuing **the same 6.75 million requests**. Where the
+bus is idle — hash table 1.4–9.3%, BFS 1.4–2.4%, because **79.5–98.0%** of accesses never
+leave the slices — the two links agree to **0.01%** (BFS at G: 3,166,084 against 3,165,778
+host cycles, the same 16,756 DRAM lines, 88.194 against 88.183 ns per tile load). **A 96 ns
+link cannot be seen through 16,756 requests, and that is the design working, not the offload
+failing.** **The latency is paid by the host and hidden by the tiles**: with the same device
+on both sides the baseline pays **+41.27%** and the offloaded step **+1.08%**, a factor of
+38, which is Little's law again — one ROB against two hundred contexts. **And the −10% at the
+presets' defaults is NOT the link.** The controls, one variable at a time on the far side:
+the **CXL link alone costs +15.33%**, twelve channels behind it win **−12.36%**, and the
+remaining **−10.94% is the device's clock** (the `ddr` preset advances DDR5-4800 with the
+1 GHz controller against a 416 ps tCK, so the part runs at 41.6% of itself and one bus
+carries 8.0 GB/s, not 19.2 — **utilisations quoted against 19.2 GB/s per subchannel anywhere
+in this document are against a rate this configuration cannot reach**). **Like for like, with
+the same device on both sides, CXL is 1.08% SLOWER.** Both framings are printed and neither
+prices pins, power or board area.
+
+**THE POINT THAT WAS NOT COMPLETED, NAMED RATHER THAN OMITTED.** The **P4 hash-table HOST
+baseline over CXL was stopped after seven hours** (`rc=143`, no statistics written); its DDR
+counterpart needed 103 minutes. No CXL speedup is quoted at that point and its cell reads
+NOT COMPLETED. **BFS contributes only G and G/4**, both of which fit in the slices: this
+comparison was taken before `0ad0c8c` and every `bfssw_host_*` run aborts on it (**the same
+class as L64 — the host MMU overwrote a request's `vAddr`; the provenance note at the head of
+N.10a, and `results/hostb/bfs.md`**), which was checked under **both** links rather than
+assumed.
+
+---
+
 ## PART O — INSTRUMENTATION OVER ABLATION, AND THE OTHER METHOD RULES
 
 ### O.1 The rule
@@ -14488,6 +14752,106 @@ host. [FIXED — NMFC-Rev `b6949b6`, in the frozen build `e380c34`. Opens no rul
   placement finding: **1.03x against 2.49x at 256 KiB on the same program and the same data**,
   because a striped extent of ≤ G is one grain and one grain is one tile. Ledger **L62** carries
   the host ruling that exposed it.
+
+
+**L66 — THE HOST-BOTTLENECK RULE, AS MEASURED: A FULL TRACKING UNIT WITH EMPTY TILES MEANS THE
+STANDARD CORE IS THE BOTTLENECK, AND THE TWO READINGS ARE TOLD APART BY WHICH KIND OF ENTRY
+FILLS THE UNIT. [MEASURED AND CLOSED as a diagnosis for all three workloads at N.10; the
+architectural item it uncovered — 256 tracking-unit entries against 512 context slots — is
+OPEN and is recorded as a finding, not as a proposed change.]**
+
+- **THE RULE, in the form the counters take.** `ftuOccupancy` alone says nothing. It is split
+  into **OUTSTANDING** — dispatched and not yet ended, work the *tiles* owe the host — and
+  **RETURNED** — ended and waiting for its `JOIN`, work the *program* owes itself. **Which
+  half is large is the whole diagnosis.** A unit that is full of RETURNED entries while the
+  tiles hold a handful of contexts is a **host** bottleneck, and it has exactly three causes,
+  each with the counter that decides it: the program **idles when work has returned**
+  (`hostIdleWithReturnedWork`, read together with `returnedWaitCycles` per collected
+  invocation, because the first is a cycle census and the second is per result); there is
+  **too much overhead per result** (`forkRefused`, `joinq/join`, `overheadInsnsPerNmfcInsn`,
+  and fork/join/collect instructions per unit of program work); or **the functions are too
+  small to represent meaningful execution** (dependent loads and tile instructions per
+  invocation). A unit that is full of OUTSTANDING entries with the tiles asleep on loads is
+  the **machine working**, and the limit is elsewhere.
+
+- **THE READING THAT RAISED IT, and it was correct.** On the pre-restructure programs, at the
+  shuffled-sum's smallest point on the out-of-order host: **RETURNED 224.24 of 256** against
+  **OUTSTANDING 23.47**, a finished result waiting a mean **19,370 cycles** — **90.5% of its
+  whole `FORK`→`JOIN` life** — `hostIdleWithReturnedWork` **92.5%**, and the tiles holding
+  **3.41 contexts of 128**. The hash table read the same shape from the third cause: one
+  operation per invocation is seven host instructions around a chain walk of **one** load at
+  the small points, with the unit at 54–108 of 256 and **1.0–1.7 contexts per tile**.
+
+- **WHAT THE RESTRUCTURE DID TO THOSE COUNTERS — the same measurement, after (N.10).** Each
+  program's unit of work was made large enough to be worth offloading and each host loop was
+  rewritten to sweep a ring of live handles rather than wait on a named one. **The unit is as
+  full as it was; what is in it changed sides.**
+
+  | counter, shuffled-sum 256 KiB grain | before (1 chain) | **after (K=64)** |
+  |---|---:|---:|
+  | FTU **OUTSTANDING** — work the tiles owe | 23.47 | **123.48** |
+  | FTU **RETURNED** — finished work the host has not collected | **224.24** | **0.89** |
+  | a finished result's wait for its `JOIN`, mean | 19,370 cy | **1,230 cy** |
+  | that wait as a share of the invocation's `FORK`→`JOIN` life | **90.5%** | **0.7%** |
+  | `hostIdleWithReturnedWork` | **92.5%** | **5.35%** |
+  | tile contexts resident, mean of 128 | 3.41 | **20.1** |
+  | fork/join/collect instructions **per chain** | 6.00 | **0.063** (0.016 at K=256) |
+  | dependent loads per invocation | 4 | **256** (1,024 at K=256) |
+
+  **Across the whole 24-point shuffled-sum sweep the unit holds between 0.01 and 1.96
+  RETURNED entries of 256**, and the host's tardiness measured **per result** is **0.0–0.8%**
+  of an invocation's life at every combination. On the hash table the same three causes close
+  on their own terms: **operations in flight at P2 went from 57–108 to 2,318–2,513** (the unit
+  of account changed — an entry now carries B operations — so the comparison that means
+  anything is in operations); an invocation is **205–3,674 dependent loads and 1,073–17,405
+  tile instructions**; accelerator instructions per operation fell **7.35 → 0.29–0.31** at P3
+  separated; and `forkRefusedFTU` and `invocationQueueFull` are **0 at every one of the thirty
+  points**. On BFS the unit reads **OUTSTANDING 59–247 against RETURNED ≤ 2.91** at every
+  size, with `hostIdleWithReturnedWork` **0.41–9.93%**, and a finished result waits
+  **0.0–1.3%** of its life.
+
+- **AND ONE COLUMN MUST NOT BE READ AS THE RULE'S TEST.** `hostIdleWithReturnedWork` *rises*
+  with size on the restructured shuffled-sum — 17.0% at 16 MiB, 36.5% at 64 MiB striped at
+  K=64 — and that rise is **the machine getting further ahead, not the host falling behind**:
+  at 64 MiB striped those 36% of cycles are cycles in which **0.72 results of 256** were
+  waiting, each for **1,027 cycles of a 362,473-cycle life**. It is a **cycle census** — "was
+  anything at all waiting this cycle?" — and with a quarter of a million cycles of work in
+  flight the answer is often yes while nothing is held up. **The per-result counters beside it
+  are the ones that answer the question.** The same applies to the hash table, where the
+  census reads 34–79% while the program's own `waitcyc` — host cycles actually **blocked** —
+  reads **0.1–13.6% from P2 up** and under 3.3% at B = 32.
+
+- **THE POSITIVE EVIDENCE THAT THE HOST NOW HAS SPARE CAPACITY: IT POLLS.** `JOINQ` per `JOIN`
+  runs **157–1,914** across the shuffled-sum sweep against **1.00** in the old structure at
+  every grain point — and `joinq/join = 1.00` is the exact signature of the old shape: every
+  poll hit, because a finished result was always already waiting, so the host was never asking
+  early and always arriving late. A host that asks two hundred times per result is a host with
+  nothing else to do. Its feed rate roughly doubled all the same, to **0.118–0.139 NMFC
+  instructions per host cycle** against 0.052–0.070 before.
+
+- **WHAT THE RULE THEN HANDED OVER, and this half is OPEN.** With the host cleared, the limit
+  on the shuffled-sum is the **tracking unit's DEPTH**, by arithmetic over counters and not by
+  a sweep (O.1, and the no-ablation rule — `NMFC_FTU` was not touched): an invocation is one
+  context with **one load outstanding at a time**, so 256 entries admit at most 256 resident
+  contexts and 256 outstanding loads **on a machine with 4 × 128 = 512 context slots**.
+  `ftuOutstandingOccupancy` is **253.3–255.3 of 256** from 4 MiB up while the tiles hold
+  150.5–230.6 of 512; loads-outstanding × latency × miss rate predicts the measured DRAM rate
+  to **within 0.15%** at the top two sizes, and run backwards says **486 outstanding loads
+  would saturate the four channels** — more than 256, close to 512. The hash table reaches the
+  same ceiling from the other side, in bursts: **peak in flight 254 of 256** and `contextPeak`
+  **64 of 128** at P4 separated, with its own rate set by **152–167 host cycles of marshalling
+  per operation**, flat across an eightfold change in working set. **Whether 256 entries
+  against 512 contexts is the right ratio is a decision to take deliberately rather than to
+  inherit from `include/nmfc_isa.h`. It is recorded here as a finding and no change is
+  proposed** — O.1's standing warning applies: three structures have each reported themselves
+  the constraint in this project's history and been wrong, and this is a measurement of one
+  configuration.
+
+- **STATUS.** The diagnostic is **CLOSED** on all three workloads: no run in N.10 shows a unit
+  full of returned work, `forkRefused` is 0 at every point of every sweep, and tile residency
+  rose 6–12× on the shuffled-sum and about 9× on the hash table. Ledger **L63** (the FTU
+  occupancy finding re-labelled as an in-order artefact) and **L62** (the out-of-order host as
+  the default) are its ancestors; the architectural item above is the successor and is open.
 
 
 ---
