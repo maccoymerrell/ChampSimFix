@@ -404,6 +404,102 @@ earlier tree, their configurations unreproducible from git, and ChampSim stays f
 See N.0 and each Part's preamble. **This table describes what CAN be run now; it does not
 and cannot describe what produced Parts G, K, L and N.**
 
+### THE HOST CORE — THE FULL CONFIGURATION, AND WHERE EVERY VALUE COMES FROM
+
+**This subsection replaces the earlier one-line description of the host as "an out-of-order
+Vanadis core, 352 reorder-buffer slots, 6-wide".** That description is still true and is
+still the label the suites print, but it named three numbers out of thirty and none of them
+had a source. Every number below now has one. The host is the out-of-order core of the SST
+simulator's Vanadis element, configured by `src/nmfc/test/vanadis-nmfc.py` with its caches
+built by `src/nmfc/test/coherent_memory.py`. **Nothing here is design; it is what the
+reference machine was set to, so that a comparison against it can be defended.**
+
+The three published cores it is sized against are Intel **Golden Cove** (Alder Lake and
+Sapphire Rapids performance core), **AMD Zen 4**, and **Arm Neoverse V2** (AWS Graviton 4,
+NVIDIA Grace). Where the three disagree, the value is the middle of their range and the
+table says so.
+
+| parameter | value | published range | source |
+|---|---|---|---|
+| clock | 3.0 GHz | 2.8 GHz (Neoverse V2 in Graviton 4) to 5.7 GHz | server end of the range |
+| fetch / decode / issue width | 6 / 6 / 6 | 4 to 8 | Golden Cove decodes 6; Zen 4 dispatches 6 macro-ops; Neoverse V2 dispatches 8 |
+| retire width | **8** | 8 | AMD *Software Optimization Guide for the AMD Zen4 Microarchitecture* (57647 rev 1.00) §2.10.3 |
+| reorder buffer | 352 | 320 (Zen 4) to 512 (Golden Cove) | inside the range; unchanged |
+| integer physical registers | **256** | 224 (Zen 4) to 280 (Golden Cove) | mid-range |
+| floating-point physical registers | **256** | 192 (Zen 4) to 332 (Golden Cove) | mid-range |
+| integer arithmetic units / latency | **5** / 1 cycle | 4 (Zen 4) to 6 (Neoverse V2); 1 cycle everywhere | mid-range |
+| integer divide | 1 unit, 12 cycles | 5-20 (Neoverse V2), 8 + 1 per 9 quotient bits (Zen 4) | inside the range |
+| floating-point arithmetic | 2 units, **3 cycles** | FADD 2, FMUL 3 (Neoverse V2); FP add ~2 (Golden Cove) | mid-range |
+| floating-point divide | 1 unit, 12 cycles | 7-15 double (Neoverse V2) | inside the range |
+| branch units | 2, 1 cycle | 2 (Golden Cove, Neoverse V2) | on par |
+| branch target cache | **1536 entries** | 1536 first level, 7680 second (Zen 4) | Zen 4's first level — the structure this cache resembles |
+| decoded-instruction cache | **4096 entries** | 4K micro-ops (Golden Cove), 6.75K (Zen 4) | the lower figure, because this decoder caches whole instructions |
+| loads / stores in flight | 192 / 114, one shared queue | 88-192 loads, 64-114 stores | Golden Cove |
+| memory operations per cycle | **3** | 3 (Zen 4's three address-generation units; Golden Cove's 3 load + 2 store) | on par |
+| L1I | 32 KiB, 8-way, 4 cycles, 16 outstanding misses | 32-64 KiB | on par; the miss count is unsourced and unchanged |
+| L1D | 48 KiB, 12-way, 5 cycles, **20 outstanding misses** | 32-64 KiB at 4-5 cycles; 12-16 fill buffers (Golden Cove), 24 miss address buffers (Zen 4) | Golden Cove's geometry; the miss count is mid-range, and was 48 |
+| L2 | 2 MiB, 16-way, 16 cycles, 64 outstanding misses | 1-2 MiB at 14-15 cycles | on par; the miss count is unsourced and unchanged |
+| cache line | 64 B | 64 B | fixed in the cache model, not a parameter |
+
+**Sources.** Chips and Cheese, *Popping the Hood on Golden Cove* and *Going Armchair
+Quarterback on Golden Cove's Caches*, and Wikipedia's Golden Cove article, for that core's
+width, register files, queues, micro-op cache and caches; HWCooling's Alder Lake
+microarchitecture analysis for its 12-16 L1 fill buffers. AMD's own *Software Optimization
+Guide for the AMD Zen4 Microarchitecture* (publication 57647, rev 1.00, April 2023) for
+every Zen 4 figure quoted, and Chips and Cheese's Zen 4 front-end article for its
+320-entry reorder buffer and 192-entry floating-point register file. Arm's *Neoverse V2
+Core Software Optimization Guide* (issue 3.0) for that core's pipelines and instruction
+latencies, its *Core Technical Reference Manual* (r0p2) for its caches, and Chips and
+Cheese for its 2.8 GHz clock in Graviton 4.
+
+**What moved when these values were applied**, measured on six points of the three
+workloads in both builds, twenty-four runs in all: no workload's speedup moved by more than
+5% and five of the six moved by less than 1%; host cycle counts moved by at most 4.2% and
+by less than 1% on eight of the twelve runs. The one visible shift is breadth-first search
+at four grains, where the *baseline* traversal slowed 4% — that arm's misses are dense
+enough to feel the L1D dropping from 48 outstanding misses to 20, which is the point of the
+change — and its speedup therefore rose from 3.30x to 3.46x. The larger branch target cache
+cuts the offloaded shuffled sum's mispredict rate from 8.10% to 7.35% at 1 MiB and from
+10.32% to 9.30% at 4 MiB. **Every workload's digest of what it computed is byte-identical
+before and after**; only the programs' own cycle counters and the counters that follow from
+timing differ.
+
+**FIVE THINGS THE HOST MODEL DOES NOT HAVE, AND NO CONFIGURATION CAN GIVE IT.** They bound
+what any measurement against this baseline may claim.
+
+1. **No branch DIRECTION predictor.** The branch unit is a cache of last-seen TARGETS,
+   updated at retirement and read at decode; a branch it holds is predicted to repeat, one
+   it does not hold falls through. There is no direction predictor, no global history, no
+   indirect predictor, no return address stack. Only the entry count is configurable. This
+   is why mispredict rates on this host (13% on breadth-first search, 34% on the shuffled
+   sum's baseline) run far above what a modern predictor would suffer on the same code, and
+   **a baseline that mispredicts more than a real core is a baseline that flatters every
+   speedup taken against it.**
+2. **No scheduler separate from the reorder buffer** — issue selects out of all 352 slots,
+   where the reference cores select from ~97 entries (Golden Cove) or four smaller queues
+   plus a 64-entry holding queue (Zen 4). Optimistic, and not parameterised.
+3. **No multiply latency class** — multiplies execute on the integer arithmetic units at
+   one cycle, against 2 (Neoverse V2) to 3 (Zen 4). Raising the arithmetic latency would
+   slow addition too, so the optimism is recorded rather than faked.
+4. **No address-generation units and no separate memory ports** — memory throughput is set
+   entirely by the load/store queue's own issue rate, which is the parameter set to 3 above.
+5. **No TLB and no page-walk cost on the host** — the modelled operating system runs with
+   its memory management unit disabled and the translation component in front of the caches
+   has neither buffer nor latency. Translation on the host is functional and free.
+
+A sixth, not structural: **no hardware prefetcher at any level of the host hierarchy**,
+while all three reference cores prefetch into L1 and L2 — which makes this host pessimistic
+on streaming patterns and optimistic on none.
+
+**One further divergence is known and deliberately left standing.** A host L2 miss that
+hits in the last level costs of order 70 ns, because the coherence fabric and the
+last-level slices are clocked at 1 GHz while the core runs at 3 GHz — several times the 50
+cycles AMD documents for Zen 4's L3. Charging the same hop, directory and slice counts at
+the core's own clock would put it inside the published range. It is left alone because that
+fabric carries the near-memory traffic as well as the host's, so speeding it moves both
+sides of every comparison at once: it is a question about which machine is being modelled,
+not a correction to the host.
+
 ## AUTHORITY, NOTATION, AND HOW TO READ THIS DOCUMENT
 
 **Authority order (the user's ruling, 2026-09-02T23:37:02Z, session log item #307,
