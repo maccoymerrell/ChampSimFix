@@ -464,41 +464,32 @@ cuts the offloaded shuffled sum's mispredict rate from 8.10% to 7.35% at 1 MiB a
 before and after**; only the programs' own cycle counters and the counters that follow from
 timing differ.
 
-**FIVE THINGS THE HOST MODEL DOES NOT HAVE, AND NO CONFIGURATION CAN GIVE IT.** They bound
-what any measurement against this baseline may claim.
+**WHAT THE HOST MODEL NOW HAS.** Five structures the earlier version of this subsection
+recorded as missing, and two further divergences it recorded as left standing, have since
+been built. Each is a parameter whose default is the value below, and the machine with all of
+them turned off reproduces the earlier one exactly.
 
-1. **No branch DIRECTION predictor.** The branch unit is a cache of last-seen TARGETS,
-   updated at retirement and read at decode; a branch it holds is predicted to repeat, one
-   it does not hold falls through. There is no direction predictor, no global history, no
-   indirect predictor, no return address stack. Only the entry count is configurable. This
-   is why mispredict rates on this host (13% on breadth-first search, 34% on the shuffled
-   sum's baseline) run far above what a modern predictor would suffer on the same code, and
-   **a baseline that mispredicts more than a real core is a baseline that flatters every
-   speedup taken against it.**
-2. **No scheduler separate from the reorder buffer** — issue selects out of all 352 slots,
-   where the reference cores select from ~97 entries (Golden Cove) or four smaller queues
-   plus a 64-entry holding queue (Zen 4). Optimistic, and not parameterised.
-3. **No multiply latency class** — multiplies execute on the integer arithmetic units at
-   one cycle, against 2 (Neoverse V2) to 3 (Zen 4). Raising the arithmetic latency would
-   slow addition too, so the optimism is recorded rather than faked.
-4. **No address-generation units and no separate memory ports** — memory throughput is set
-   entirely by the load/store queue's own issue rate, which is the parameter set to 3 above.
-5. **No TLB and no page-walk cost on the host** — the modelled operating system runs with
-   its memory management unit disabled and the translation component in front of the caches
-   has neither buffer nor latency. Translation on the host is functional and free.
+| structure | value | source |
+|---|---|---|
+| branch DIRECTION predictor | **TAGE-SC-L**, the 64 KiB CBP-2016 entry: tagged tables over geometrically spaced history lengths, a statistical corrector and a loop predictor, plus a **32-entry return address stack** | A. Seznec, CBP-2016 64 KiB entry; the tables, dimensions, index and tag functions, allocation policy and update rules are the entry's, unchanged. The history is kept twice — speculative for the next prediction, architected for repair — because this front end is out of order; the tables are written only at retirement. A hashed perceptron of the same table budget is the alternative selection |
+| speculative memory pipeline | a load may issue past an older store whose address is unknown; a store that covers a load's bytes is **forwarded from**; a memory-dependence predictor of **4,096** two-bit counters, indexed by load address, holds back a load that has aliased before; a store resolving onto bytes a younger load already read re-executes that load at the head of the reorder buffer | the structures are Golden Cove's 192 loads and 114 stores in flight; the two-bit-counter design is the standard store-set-free predictor and `store_pc` is the alternative selection |
+| last-level path | **18 ns** — 4 ns out, 2 ns directory, 8 ns slice, 4 ns back — stated in nanoseconds and converted to whole cycles of each component's clock at configuration time. A function core reaching its own slice pays **10 ns**; a tile-to-tile hop **1 ns** | published last-level hit times: 8–9 ns for a Zen 4 4 MiB slice and ~13 ns of load-to-use at a sustained clock; 25 ns for Neoverse V2's 36 MiB system-level cache in Graviton 4; over 38 ns for the 114 MiB one in Grace (Chips and Cheese on each part). A mesh hop is 0.4–0.6 ns and a corner-to-corner traversal 5.4–7.2 ns (AnandTech, *Intel's New On-Chip Topology: A Mesh*). **The directory's 2 ns has no published figure of its own** and is the remainder of the budget |
+| L1D prefetcher | **Berti**, 8-deep queue, 2 issued per cycle; a prefetch leaving the triggering access's page is issued only if the cache already holds that page's translation, and is dropped and counted otherwise | *Berti: an Accurate Local-Delta Data Prefetcher*, MICRO 2022, ported from the published ChampSim implementation and checked against it request for request; the queue depth and per-cycle rate are ChampSim's own L1D configuration |
+| L2 prefetcher | **AMPM**, 16-deep queue, 1 issued per cycle | *Access Map Pattern Matching*, ICS 2009, ported from the published ChampSim implementation and checked against it; the queue depth and per-cycle rate are ChampSim's own L2C configuration. Filling in the level below is not expressible at this coherence point, so those fills land in the L2 and are counted |
+| issue queues | **97 integer / 64 floating point / 108 memory / 97 branch**, taken at dispatch and released at issue, a full queue stopping dispatch | Golden Cove's 97-entry math scheduler (its 97/70/38 split sums to the 205 the same source gives) and Zen 4's four 24-entry integer schedulers totalling 96; Zen 4's 2×32 floating-point macro-op scheduler; Golden Cove's 70 load plus 38 store. **The branch queue is DERIVED, not published** — no reference core has a branch-only scheduler — and takes the integer queue's size |
+| multiply | **1 unit, 3 cycles** | Zen 4's fully pipelined 64-bit multiply on one integer pipe (AMD SOG 57647); Neoverse V2's `SMULH` 3, `MUL` 2 |
+| address generation and memory ports | **3 address-generation units, 1 cycle; 3 load ports and 2 store ports** | Zen 4's three address-generation units; Golden Cove's three load plus two store ports. Ordering is preserved by construction: a fence, load-linked, store-conditional or locked access is handed over only when the pipeline is empty |
+| translation | **48-entry fully associative buffer each side; 2,048-entry 8-way second level shared, 5 cycles; 2 walkers; 3 levels** | Neoverse V2's structures and its published five cycles (Arm *Core Technical Reference Manual*). A walk's price is **three real reads through the real cache hierarchy** at the addresses an Sv39 table would be read at, on the load/store queue's own interface, competing for ports and evicting lines; the responses are discarded, so the unit decides **when** a translation is available and what it cost, never **what** it is. **The number of concurrent walkers is UNVERIFIED** — no reference publishes it |
 
-A sixth, not structural: **no hardware prefetcher at any level of the host hierarchy**,
-while all three reference cores prefetch into L1 and L2 — which makes this host pessimistic
-on streaming patterns and optimistic on none.
-
-**One further divergence is known and deliberately left standing.** A host L2 miss that
-hits in the last level costs of order 70 ns, because the coherence fabric and the
-last-level slices are clocked at 1 GHz while the core runs at 3 GHz — several times the 50
-cycles AMD documents for Zen 4's L3. Charging the same hop, directory and slice counts at
-the core's own clock would put it inside the published range. It is left alone because that
-fabric carries the near-memory traffic as well as the host's, so speeding it moves both
-sides of every comparison at once: it is a question about which machine is being modelled,
-not a correction to the host.
+**What this does to every measurement taken against this baseline.** The mispredict rates the
+earlier text warned about are gone: on breadth-first search at 16 grains the baseline
+mispredicts 3.98 per cent of its branches where it used to mispredict 13.25, and on the
+shuffled sum's baseline at 16 MiB it mispredicts 115 branches out of 3,146,928 where it used
+to mispredict 1,048,911. The baselines run **1.4 to 7.1 times faster** in cycles on the same
+instruction counts, and every speedup falls by that factor divided by whatever the offloaded
+arm of the same workload gained from the same processor — which is 1.00 where the offloaded
+step is all tile work and 1.26x to 1.63x where it is not. **N.10e is the re-measurement**, and
+it carries both numbers at every point; N.10a–d's ratios are the earlier processor's.
 
 ## AUTHORITY, NOTATION, AND HOW TO READ THIS DOCUMENT
 
@@ -11875,7 +11866,7 @@ MACHINE NOW". **And the BFS pair is not a host comparison**: the in-order 18.70�
 
 ---
 
-### N.10 THE RESTRUCTURED-WORKLOAD CAMPAIGN, RE-MEASURED AFTER THREE DEFECT FIXES (2026-09-09, frozen `043c9cb` + sst-elements `9e0dd62`; the first pass was 2026-09-05 on `4eb1325`, and every table below is the re-measurement with the first pass in a *before* column)
+### N.10 THE RESTRUCTURED-WORKLOAD CAMPAIGN `[SUPERSEDED FOR EVERY RATIO BY N.10e, WHICH RE-MEASURES ALL THREE WORKLOADS ON THE FINISHED HOST PROCESSOR. N.10a-d's tile-side counters carry across unchanged; their speedups and milliseconds are an earlier processor's.]` RE-MEASURED AFTER THREE DEFECT FIXES (2026-09-09, frozen `043c9cb` + sst-elements `9e0dd62`; the first pass was 2026-09-05 on `4eb1325`, and every table below is the re-measurement with the first pass in a *before* column)
 
 `[IMPLEMENTATION EVIDENCE — tier 4, SST]` **Frozen build
 `4eb13257e7dd84fcee523de3781bedfb2695e855`** (NMFC-Rev, `main`, pushed), with sst-elements
@@ -12222,6 +12213,139 @@ end** inside the bound — 2,892 s and 3,280 s against a 3,600 s deadline — an
 `NMFC SHUFFLED-SUM: PASS`. **BFS now contributes three COMPLETE PAIRS** (4G, G, G/4) where the
 first campaign had offloaded-only points because every `bfssw_host_*` run aborted on that
 build (L64's class); all three still fit in the slices and still say nothing about a link.
+
+#### N.10e THE SAME THREE WORKLOADS ON THE FINISHED HOST PROCESSOR (2026-09-09, frozen NMFC-Rev `703891b` + sst-elements `f535e5e39` + ramulator2 `526406a`; `libnmfc.so` md5 `3bbb7b70a24ac7770527070fae345771`, `libvanadis.so` md5 `60dc9db0a0761ee464673d6925b985a0`, `libmemHierarchy.so` md5 `0136aacb39e31eda9c081be0a7c2ff3b`)
+
+**`[EVERY TABLE IN N.10a, N.10b, N.10c AND N.10d WAS TAKEN ON A HOST PROCESSOR THAT NO LONGER
+EXISTS.]`** Between `043c9cb` and `703891b` the host gained the eight structures listed at
+SELECTED CONFIGURATION — a TAGE-SC-L branch predictor, a speculative memory pipeline with
+store-to-load forwarding and a memory-dependence predictor, a last-level path priced in
+nanoseconds, Berti and AMPM prefetchers, four bounded issue queues, a multiply latency class,
+address-generation units and memory ports, and a translation buffer hierarchy with a real
+page-table walker. **Nothing below the coherence fabric changed**: the function cores, the
+slices, the fabric, the coherence protocol and the DRAM model are the same, and the check that
+says so is that every answer digest of all three workloads is byte-identical to N.10a–c's, in
+both arms, at every point (72 shuffled-sum checksums, 29 hash-table digests, 10 graph-search
+digest triples; **0 differing**).
+
+**THE RESULT, IN ONE SENTENCE: every speedup falls, by the factor the baseline gained, and the
+offloaded step does not move.** The processor's factor on the baseline runs from 1.40x to
+7.11x. Where the offloaded step is almost all tile work — the graph search's bottom-up phase
+and the shuffled sum's chase — the offloaded arm is within one per cent of N.10a/b and the
+speedup falls by the whole of the baseline's factor. Where the offloaded build still does real
+work on the processor — the hash table, which batches, forks, sweeps a ring of handles and
+joins on the core — that arm gains 1.26x to 1.63x too and the two partly cancel.
+
+`[IMPLEMENTATION EVIDENCE — tier 4, SST]` 111 points run end to end under a one-hour bound
+each, every one `PASS` and `rc=0`; four points projected past the bound and were measured as
+sampled windows instead. Full campaign, with every run, every counter and every launch command:
+`results/host2/{FROZEN.md,bfs.md,shuffled-sum.md,hashtable.md,RESULTS-HOST2.md}`.
+
+##### N.10e-1 BFS, the bottom-up step
+
+| point | working set | host ms | NMFC ms | **speedup** | campaign speedup | **delta** | baseline, campaign ms | the processor's factor | offloaded step, campaign ms | its factor |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| G/4 | 0.25 MiB | 0.0987 | 0.1425 | **0.69x** | 1.24x | **-44.4%** | 0.1779 | **1.80x** | 0.1439 | 1.010x |
+| G | 1.00 MiB | 0.4165 | 0.5255 | **0.79x** | 1.37x | **-42.3%** | 0.7251 | **1.74x** | 0.5279 | 1.005x |
+| 4G | 4.00 MiB | 1.6089 | 0.5609 | **2.87x** | 6.14x | **-53.3%** | 3.4664 | **2.15x** | 0.5648 | 1.007x |
+| 16G | 16.00 MiB | 16.2936 | 4.5815 | **3.56x** | 7.15x | **-50.2%** | 32.8636 | **2.02x** | 4.5941 | 1.003x |
+| 32G | 32.00 MiB | 27.7902 | 4.6912 | **5.92x** | 7.75x | **-23.6%** | 38.9921 | **1.40x** | 5.0312 | 1.072x |
+
+64G was projected past the bound. Its sampled estimate is of the **whole program** and not of
+the bottom-up step, because on this workload more than half the instructions fall in the one
+interval where the program's own work counter does not advance; the estimate is
+742,262,325 cycles for the baseline against 722,470,796 for the offloaded build, its sampling
+interval reaches zero on one arm, and **no speedup is quoted from it**.
+
+##### N.10e-2 SHUFFLED-SUM, the compute phase
+
+| formulation | K | 256 KiB | 1 MiB | 4 MiB | 16 MiB | 32 MiB | 64 MiB |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **grain** | 64 | **2.01x** (13.98x, -85.6%) | **2.12x** (14.37x, -85.3%) | **4.61x** (27.12x, -83.0%) | **5.77x** (39.41x, -85.4%) | **9.15x** (50.20x, -81.8%) | **10.26x** (57.06x, -82.0%) |
+| **grain** | 256 | **0.82x** (5.04x, -83.8%) | **2.10x** (14.20x, -85.2%) | **4.62x** (27.16x, -83.0%) | **5.77x** (39.43x, -85.4%) | **9.14x** (50.16x, -81.8%) | **10.26x** (57.08x, -82.0%) |
+| **striped** | 64 | **1.21x** (8.59x, -85.9%) | **1.30x** (8.55x, -84.8%) | **4.63x** (27.25x, -83.0%) | **6.64x** (45.26x, -85.3%) | **10.61x** (59.28x, -82.1%) | **11.91x** (65.72x, -81.9%) |
+| **striped** | 256 | **1.17x** (7.11x, -83.6%) | **1.30x** (8.59x, -84.8%) | **4.64x** (27.35x, -83.0%) | **6.64x** (45.41x, -85.4%) | **10.62x** (59.32x, -82.1%) | **11.90x** (65.69x, -81.9%) |
+
+Each cell is **this build's speedup**, then in brackets the campaign's speedup at the same point and the change between them.
+
+And what the processor did to each side of that ratio, at K = 64:
+
+| working set | pages | baseline, campaign cycles | baseline, this build | **the processor's factor** | offloaded, campaign cycles | offloaded, this build | its factor |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 256 KiB | grain | 2,493,558 | 351,183 | **7.10x** | 179,069 | 176,299 | 1.016x |
+| 256 KiB | striped | 2,496,619 | 351,319 | **7.11x** | 289,758 | 289,027 | 1.003x |
+| 1 MiB | grain | 10,136,622 | 1,487,312 | **6.82x** | 708,578 | 707,745 | 1.001x |
+| 1 MiB | striped | 10,228,755 | 1,545,482 | **6.62x** | 1,195,940 | 1,191,003 | 1.004x |
+| 4 MiB | grain | 75,717,072 | 12,833,162 | **5.90x** | 2,790,118 | 2,785,485 | 1.002x |
+| 4 MiB | striped | 75,710,169 | 12,833,174 | **5.90x** | 2,778,649 | 2,774,885 | 1.001x |
+| 16 MiB | grain | 437,083,220 | 63,905,870 | **6.84x** | 11,090,567 | 11,077,223 | 1.001x |
+| 16 MiB | striped | 437,130,240 | 63,957,476 | **6.83x** | 9,660,052 | 9,641,738 | 1.002x |
+| 32 MiB | grain | 1,155,441,886 | 209,392,139 | **5.52x** | 23,014,594 | 22,876,086 | 1.006x |
+| 32 MiB | striped | 1,173,827,965 | 208,586,244 | **5.63x** | 19,789,643 | 19,662,349 | 1.006x |
+| 64 MiB | grain | 2,655,742,836 | 474,001,500 | **5.60x** | 46,538,136 | 46,203,751 | 1.007x |
+| 64 MiB | striped | 2,671,982,429 | 480,446,563 | **5.56x** | 40,653,705 | 40,343,833 | 1.008x |
+
+##### N.10e-3 CHAINED HASH TABLE, the operation phase
+
+| point | phase | B | answer check | host ms | NMFC ms | **speedup** | campaign speedup | **delta** | campaign answer check |
+|---|---|---:|:--|---:|---:|---:|---:|---:|:--|
+| P0 | sep | 32 | PASS | 0.222 | 0.475 | **0.47x** | 0.92x | **-49.5%** | PASS |
+| P0 | sep | 128 | PASS | 0.222 | 0.523 | **0.42x** | 0.82x | **-48.2%** | PASS |
+| P0 | int | 32 | PASS | 0.424 | 0.663 | **0.64x** | 0.96x | **-33.2%** | PASS |
+| P0 | int | 128 | PASS | 0.424 | 1.108 | **0.38x** | 0.51x | **-24.2%** | PASS |
+| P1 | sep | 32 | PASS | 0.555 | 1.191 | **0.47x** | 0.79x | **-40.9%** | PASS |
+| P1 | sep | 128 | PASS | 0.555 | 1.193 | **0.47x** | 0.78x | **-40.5%** | PASS |
+| P1 | int | 32 | PASS | 1.055 | 1.498 | **0.70x** | 1.00x | **-29.4%** | PASS |
+| P1 | int | 128 | PASS | 1.055 | 1.847 | **0.57x** | 0.77x | **-25.7%** | PASS |
+| P2 | sep | 32 | PASS | 7.883 | 8.038 | **0.98x** | 1.66x | **-41.0%** | PASS |
+| P2 | sep | 128 | PASS | 7.883 | 7.530 | **1.05x** | 1.77x | **-41.0%** | PASS |
+| P2 | int | 32 | PASS | 10.616 | 9.451 | **1.12x** | 1.67x | **-32.7%** | PASS |
+| P2 | int | 128 | PASS | 10.616 | 9.173 | **1.16x** | 1.74x | **-33.5%** | PASS |
+| P3 | sep | 32 | PASS | 181.884 | 35.478 | **5.13x** | 8.45x | **-39.3%** | PASS |
+| P3 | sep | 128 | PASS | 181.884 | 32.922 | **5.52x** | 9.09x | **-39.2%** | PASS |
+| P3 | int | 32 | PASS | 167.066 | 41.908 | **3.99x** | 7.41x | **-46.2%** | PASS |
+| P3 | int | 128 | PASS | 167.066 | 41.064 | **4.07x** | 7.61x | **-46.6%** | PASS |
+
+The two P4 baselines were projected past the bound and estimated from 20 sampled windows each;
+both offloaded arms at P4 ran to their end. The estimate is checkable here, because each
+offloaded arm was estimated **and** run: 1.053 and 0.992 times the measured cycle counts, both
+inside the estimator's band for this workload.
+
+| phase | B | baseline, **estimated** ms | 95% sampling interval | offloaded, measured ms | **speedup** | *N.10c* | **delta** |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| sep | 32 | **1398.377** | 1278.586 to 1518.169 | 72.098 | **19.40x** | 22.17x | **-12.5%** |
+| sep | 128 | **1398.377** | 1278.586 to 1518.169 | 67.099 | **20.84x** | 23.84x | **-12.6%** |
+| int | 32 | **1078.856** | 1029.903 to 1127.809 | 86.186 | **12.52x** | 17.60x | **-28.9%** |
+| int | 128 | **1078.856** | 1029.903 to 1127.809 | 87.663 | **12.31x** | 17.48x | **-29.6%** |
+
+And what the processor did to each side of that ratio, at B = 128:
+
+| point | phase | baseline, campaign ms | baseline, this build | **the processor's factor** | offloaded (B=128), campaign ms | this build | its factor |
+|---|---|---:|---:|---:|---:|---:|---:|
+| P0 | sep | 0.698 | 0.222 | **3.14x** | 0.853 | 0.523 | 1.63x |
+| P0 | int | 0.872 | 0.424 | **2.06x** | 1.726 | 1.108 | 1.56x |
+| P1 | sep | 1.500 | 0.555 | **2.70x** | 1.916 | 1.193 | 1.61x |
+| P1 | int | 1.980 | 1.055 | **1.88x** | 2.576 | 1.847 | 1.39x |
+| P2 | sep | 21.188 | 7.883 | **2.69x** | 11.942 | 7.530 | 1.59x |
+| P2 | int | 20.203 | 10.616 | **1.90x** | 11.606 | 9.173 | 1.27x |
+| P3 | sep | 476.290 | 181.884 | **2.62x** | 52.376 | 32.922 | 1.59x |
+| P3 | int | 394.893 | 167.066 | **2.36x** | 51.858 | 41.064 | 1.26x |
+| P4 | sep | 2545.426 | *1398.377* | **1.82x** | 106.790 | 67.099 | 1.59x |
+| P4 | int | 1927.037 | *1078.856* | **1.79x** | 110.226 | 87.663 | 1.26x |
+
+**Reading it.** The crossing from "not worth offloading" to "worth offloading" moves outward on
+all three workloads: on the shuffled sum from 256 KiB to about 4 MiB, on the hash table from
+about a 1 MiB table to about 4 MiB, and on the graph search the two one-grain points become
+losses (0.69x and 0.79x against 1.24x and 1.37x). **The peak did not move; the crossing did.**
+What survives is what a near-memory accelerator is for — four memory channels reached without
+crossing a fabric — and that advantage is unchanged in absolute terms and still grows with the
+working set: 5.92x at 32 grains of graph, 11.91x at 64 MiB of striped chase, and **20.84x** at
+a load factor of 21. **N.10a–d's ratios must not be quoted against this processor**, and the
+milliseconds in them are that processor's; only the tile-side counters carry across, and they
+carry across exactly.
+
+`[OPEN]` The graph search's fall from 32G to 64G, recorded as open at N.10a, is **neither
+confirmed nor explained here**: 64G was not run to its end on this build.
 
 ---
 
