@@ -470,7 +470,7 @@ timing differ.
 `src/nmfc/test/coherent_memory.py`, read from the tree the measurements were built from
 (NMFC-Rev `68aa84c6`, sst-elements `c59ff503`, ramulator2 `526406ac`). Each has an environment
 override, which is how the other arm of a comparison is reached; none was set for any number in
-N.10g. There is no structure of a modern core that the three workloads exercise and this model
+N.10g or N.10h, except the memory link, which N.10h-4 names. There is no structure of a modern core that the three workloads exercise and this model
 leaves out.]`
 
 | structure | value in force | where the value comes from | how it was checked |
@@ -496,9 +496,7 @@ leaves out.]`
 | `addw` and the fourteen W forms | `ADDW` builds a **32-bit** add: the carry out of bit 31 discarded, bit 31 sign-extended into 63:32, the sources' upper halves ignored | the RISC-V unprivileged specification's definition of a W form; L75 | `host_rv64` and `host_wform`, the second exercising every one of the fourteen. The other thirteen were audited and were already correct, as were the five-bit shift mask, the sign-extension of the unsigned divide and remainder, and INT32_MIN / -1. `parity/ADDW.md` |
 
 **WHAT THIS MEANS FOR EVERY RATIO IN PART N.** The baselines of N.10a–d were measured on a core
-without any of the above; N.10e's were measured on it without the last five rows. **N.10g is the
-campaign on the host as tabulated here**, and it carries N.10f's number beside every one of its
-own; N.10f is the same three workloads on this host without its front end. Only tile-side counters carry across all three: they are byte-identical, and the check that
+without any of the above; N.10e's were measured on it without the last five rows. **N.10h is the campaign on the host as tabulated here and is the one to quote** — it is the first made under I15, against the best program a single core can run rather than the textbook one, and every ratio in it is of per-arm totals. **N.10g is the same host with the textbook host programs**, and it carries N.10f's number beside every one of its own; N.10f is the same three workloads on this host without its front end. Only tile-side counters carry across all three: they are byte-identical, and the check that
 says so is 117 hash-table, 72 shuffled-sum and 15 graph-search answer digests, **0 differing**.
 
 ## AUTHORITY, NOTATION, AND HOW TO READ THIS DOCUMENT
@@ -2065,6 +2063,49 @@ against I14 until the loader path is fixed.** Separately, DESIGN §5.9 D:830-838
 priority mechanism firing **once in 33,317 requests**, i.e. "exercised rather than merely
 compiled, but it is not yet a measured effect, and **it should not be reported as one**";
 that remains true.
+
+**I15 — A RESULT IS THE MACHINE'S BEST ALGORITHM AGAINST THE HOST'S STATE OF THE ART,
+ESTIMATED PER ARM.** `[owner ruling 2026-09-11, measured 2026-09-12 in N.10h.]`
+A speedup is a property of two programs, not of one machine, so the comparison has two halves
+and both of them bind. **On the machine's side**, the program measured is the best formulation
+the machine can express for the problem — designed from I3, I5, I10, I11 and Part K rather than
+ported — and the formulations it beat are reported beside it. **On the host's side**, the
+program measured is the best one a single core can run on the same problem, which means the
+published technique for that access pattern and not the textbook formulation: a dependent
+pointer chase gets group prefetching, a hash bucket gets tags and a line, a graph traversal gets
+direction optimisation. **Never a weaker algorithm on either side** — a weak machine program
+undersells hardware that works, and a weak host program condemns the reader to a number that
+measures a data structure.
+Two consequences are mechanical and neither is optional.
+* **The two arms are different programs, so they have no common work unit**, and a work-axis
+  ratio — which pairs regions by the program's own count of what it has produced — cannot be
+  formed between them. The ratio is of **per-arm totals**: each arm's whole-program cycles
+  estimated on its own timing-independent instruction axis, then divided. Part O's sampling
+  rules apply to each arm separately.
+* **The previously reported figure must be decomposed, not replaced in silence.** State what the
+  old host program was, what the new one is, what the new one is worth against the old one, and
+  what is left. N.10h does this at the largest size of all three workloads; in one of them the
+  host program alone accounts for thirteen of the twenty-five times that had been reported.
+`[MEASURED 2026-09-12, and it refines the first bullet without weakening it]` **What binds is
+PER-ARM: each arm estimated on its own and the two totals divided, never a ratio formed inside a
+window that both arms share.** That holds on either coordinate, and N.10h computed both for every
+point. The first bullet's premise — that two differently-written programs share no work unit — did
+not hold for these three problems as built: each pair counts the same problem's own work (chains
+summed, operations performed, vertices settled), so a per-arm work-axis total exists for both arms
+and is what N.10h quotes, because it covers exactly the phase that was moved. The
+counted-instruction total is carried beside it and covers the whole program. **The two agree to
+within 3 % wherever the moved phase is most of the program and disagree by up to 57 % where it is
+not** (hash table at 1.00 MiB: 1.51 against 0.96, the difference being a table allocation and a key
+generation that nothing offloads). Neither is wrong; they answer different questions, and a result
+must name which. Where a workload declares NO work counter on one arm, or where the phases outside
+the counter are the point, the counted-instruction axis is the only one available and regions should
+be PLACED on it (`--counted-axis`) so that its rate is measured where it is applied.
+**Measured consequence, and it is the reason this is an invariant rather than a preference.**
+Re-measuring the three standing workloads under this rule moved the reduction from 10.14 to
+7.93, the graph search from 4.55 to 6.78, and the hash table from 25.43 to 3.78 — and in the
+last of those the machine's own program got **48.96** times faster than the program the earlier
+comparison used, while the host's got **12.95** times faster. Both sides improved; only the
+ratio of good programs says anything about the machine.
 
 ---
 
@@ -12401,7 +12442,7 @@ occupancy on the parallel bus. Serial-over-parallel simulation wall ratios 0.96�
 established**. No ablation was run, by Part O's rule; the figure is reported and not attributed.
 
 
-#### N.10g THE THREE WORKLOADS AND THE MEMORY LINK ON THE COMPLETED HOST WITH ITS FRONT END (2026-09-10, frozen NMFC-Rev `68aa84c6` + sst-elements `c59ff503e` + ramulator2 `526406ac`; `libnmfc.so` md5 `ed905b6faa3c62a200f797f5fe961074`, `libvanadis.so` md5 `ed25279b3088e33b8cc562ece7bfed78`, `libmemHierarchy.so` md5 `0136aacb39e31eda9c081be0a7c2ff3b`, `libramulator.so` md5 `04b9663e0914652ecc1f594cb8969473`) `[SUPERSEDES N.10f, WHOSE TABLES ARE THE "earlier campaign" COLUMN OF EVERY TABLE BELOW. N.10a–d's speedups remain older processors' and must not be quoted.]`
+#### N.10g THE THREE WORKLOADS AND THE MEMORY LINK ON THE COMPLETED HOST WITH ITS FRONT END `[SUPERSEDED FOR EVERY RATIO BY N.10h, WHICH RE-MEASURES ALL THREE WORKLOADS AGAINST THE HOST'S STATE OF THE ART UNDER I15 AND WITH THE MACHINE'S SIDE REDESIGNED. N.10g's tables are the "previously reported" column of N.10h; its tile-side counters stand, and so does its finding that the DDR preset is byte-identical pass-through.]` (2026-09-10, frozen NMFC-Rev `68aa84c6` + sst-elements `c59ff503e` + ramulator2 `526406ac`; `libnmfc.so` md5 `ed905b6faa3c62a200f797f5fe961074`, `libvanadis.so` md5 `ed25279b3088e33b8cc562ece7bfed78`, `libmemHierarchy.so` md5 `0136aacb39e31eda9c081be0a7c2ff3b`, `libramulator.so` md5 `04b9663e0914652ecc1f594cb8969473`) `[SUPERSEDES N.10f, WHOSE TABLES ARE THE "earlier campaign" COLUMN OF EVERY TABLE BELOW. N.10a–d's speedups remain older processors' and must not be quoted.]`
 
 **WHAT SEPARATES THIS CAMPAIGN FROM N.10f**, all of it in the host processor or in one program:
 a front end that predicts in two stages and ends the wrong path at **execute** (L76); `addw`
@@ -12533,6 +12574,286 @@ was not run to its end on this build either.
 `[OPEN]` The second-level branch target buffer and the instruction prefetcher are **present and
 not exercised** by these three workloads — 73–270 marked fetch blocks against 1536 first-level
 entries, and 70–118 prefetches a run. Both are tested only by directed benchmarks.
+
+
+---
+
+#### N.10h THE THREE WORKLOADS REDESIGNED AND RE-MEASURED AGAINST THE HOST'S STATE OF THE ART (2026-09-12, frozen NMFC-Rev `26ccd298` + sst-elements `3b066152` + ramulator2 `526406ac`; `libnmfc.so` md5 `0550a109f33c5baa4d260055fe184bfe`, `libvanadis.so` md5 `727993a3402369738553e882272fa495`, `libmemHierarchy.so` md5 `0136aacb39e31eda9c081be0a7c2ff3b`, `libramulator.so` md5 `04b9663e0914652ecc1f594cb8969473`) `[SUPERSEDES N.10g FOR EVERY RATIO. N.10g's tables are the "previously reported" column below. N.10a–g's speedups are all against weaker host programs and must not be quoted. This is the first campaign made under I15.]`
+
+**WHAT SEPARATES THIS CAMPAIGN FROM N.10g**, and it is not the machine. Ten commits to
+`src/nmfc/src` and one to the host separate the builds — listed in the campaign's own `FROZEN.md`
+— and of those, two change what a program may do: **a function core may not write a duplicate
+page** (`7d1c59e`, L78) and **the tracking unit covers every context the machine has**
+(`5c5d714`), 512 here rather than a written-down 256. Everything else that moved is a program.
+Each of the three workloads was **redesigned** from Part B and Part K, the designs were reviewed
+against Part P before anything was built, and a **state-of-the-art host program** was built beside
+each one, which is what I15 requires and what N.10a–g never had.
+
+`[IMPLEMENTATION EVIDENCE — tier 4, SST]` **Every number in this section is sampled.** No arm was
+run end to end for a figure; end-to-end runs were made only as correctness gates at the smallest
+size that shows the property. **Each arm is estimated on its own and the two totals are divided**, which is I15's
+requirement and holds on either coordinate; no window of one arm is ever paired with a window of the
+other. BOTH coordinates were computed for every point and the campaign reports both. The **work
+axis** — cycles per unit of the program's own work, times the unit count the functional simulator
+reports — covers the phase that was moved to the engines and nothing else, and is what every table
+below quotes. The **counted-instruction axis** — cycles per instruction retired outside the declared
+wait span, times the program's exact count of such instructions — covers the WHOLE program, the
+phases the work counter cannot see included, and is carried in a column beside each table. `[MEASURED,
+and it is the reason the two are reported side by side]` Where the moved phase is most of the program
+the two agree to within three per cent (hash table 4–32 MiB: 2.32/2.32, 4.10/4.01, 3.78/3.80);
+where it is not, they do not, and the disagreement is the size of the phase nothing was offloaded
+from (hash table 0.69 and 1.00 MiB: 1.00/0.97 and 1.51/0.96). The counted-instruction figure is the
+second and not the first because these regions were PLACED on the work axis, so it measures a rate
+inside the moved phase and applies it to a count that reaches outside it; placing regions on the
+counted axis (`--counted-axis`) is what would make it primary. Regions **tile whole units of collection** on an offloaded arm — one window a level in
+the graph search, one a half-turn of the reduction's ring, one a chunk of the hash table's queue —
+because an invocation's work reaches the host's counter only when the host joins it. Four suites
+were clean on this build before anything was measured: `run_nmfc.sh`, `run_coherent.sh` over 174
+simulations, and both halves of the sampling gates.
+
+##### N.10h-1 SHUFFLED SUM — a block of chain indices, against sixteen chains carried side by side
+
+The machine's program owns a contiguous block of chain indices, returns one 64-bit lane, and reads
+arrays that are written once before the measured phase; 480 bits of 512 live at the peak across
+eleven values. The only change from N.10g's program is that the ring of live handles is as deep as
+the tracking unit really is (512) and a run is `M/2048` chains. The host's program is the same
+arithmetic with **sixteen chains carried side by side**, which is the published remedy for a
+dependent chase. Milliseconds, striped layout.
+
+| working set | the obvious loop | sixteen chains side by side | N.10g's offloaded program | the redesign | **redesign ÷ best host** | redesign ÷ obvious loop |
+|---|---:|---:|---:|---:|---:|---:|
+| 256 KiB | 0.120 | 0.126 | 0.102 | 0.102 | **1.23** | 1.18 |
+| 1 MiB | 0.525 | 0.537 | 0.418 | 0.417 | **1.29** | 1.26 |
+| 4 MiB | 4.681 | 3.876 | 0.887 | 0.873 | **3.85** | 4.64 |
+| 16 MiB | 22.405 | 18.057 | 3.385 | 3.076 | **5.38** | 6.67 |
+| 32 MiB | 68.429 | 51.012 | 6.947 | 6.325 | **7.96** | 10.68 |
+| 64 MiB | 156.764 | 116.339 | 15.836 | 14.431 | **7.93** | 10.68 |
+
+**The host's own gain from the published technique is 1.21–1.35× above 4 MiB and NEGATIVE below
+it** (0.95 and 0.98): under 2 MiB the working set is inside the host's 2 MiB L2, there is no miss
+latency to hide, and carrying sixteen chains only costs the registers. The design's estimate that
+a better host program would be 3.4× the obvious loop was therefore **a quarter too large**, and it
+is the only figure in the design that the measurement improved on rather than deflated. On named
+per-tile regions at the two smallest sizes the machine takes 0.061 and 0.239 ms against the best
+host time of 0.120 and 0.525 — **1.97× and 2.20×**, where section 8 of the design predicted a tie.
+
+`[MEASURED, and it contradicts the design's central claim]` **The redesign is worth 1.10× and not
+the 1.8× predicted, because the fabric and not the tracking unit is the cap.** Fabric port
+occupancy is **0.994–1.000** at every size from 4 MiB up on the redesign and on N.10g's program
+alike. The unit holds 243 of 512 entries and refuses no fork; of those, only about 95 are contexts
+on the four engines and the rest are queued in the fabric or crossing it. **Live contexts per
+engine are 22.2–24.6 of 128.** Two formulations the design ranked above this one could not be
+built at all: both need a record buffer on the same tile as the array range whose work it carries,
+and co-location is expressible only between vtile-sharing GRAIN regions (I12) while these arrays
+are STRIPED — computing a tile from an address is forbidden. Recorded, not worked around.
+
+`[MEASURED]` **`hostIdleWithReturnedWork` falls from 60.1 % to 7.3 % at 64 MiB between two arms
+that run within ten per cent of each other.** That counter never measured a bottleneck; it
+measured how often the host walked its ring of handles. Compare O.1a.
+
+##### N.10h-2 CHAINED HASH TABLE — a line-resident bucket fed by four bytes, against three group-prefetched host programs
+
+The machine's program replaces the chain with a 64-byte header (count, up to seven segment
+indices, a vector of one-byte tags) and contiguous runs of 16-byte pairs allocated from the pool of
+the tile that owns the bucket: **1.85 lines an operation at any load factor**, against 12.8 at load
+21 and 94 at the largest expressible table. A request reaches the owner as a **4-byte stream
+index** rather than a 32-byte record, the engine rebuilds and hashes the key itself, and every
+answer is folded into a digest inside the invocation's own 512 bits so nothing is written back.
+Every kernel-written array is a GRAIN region of the writing tile's own memory; the one DUPLICATE
+page holds four region bases and a phase word and **is written by the host once a phase** (L78).
+Migrations are zero by construction. The host baseline is the fastest of three programs, each given
+the published group prefetching that advances a dozen independent operations a step at a time.
+Separated phases, milliseconds.
+
+| program | 0.69 MiB, load 0.125 | 1.00 MiB, 0.33 | 4.00 MiB, 2.33 | 16.00 MiB, 10.33 | 32.00 MiB, 21.0 |
+|---|---:|---:|---:|---:|---:|
+| N.10g's host program (the chain, one node at a time) | 0.304 | 0.684 | 10.826 | 201.121 | 1297.474 |
+| the host baseline, best of three group-prefetched | 0.250 | 0.655 | 7.823 | 52.537 | 100.168 |
+| **the redesign** | **0.251** | **0.434** | **3.365** | **12.813** | **26.500** |
+| self-routing by migration, for comparison | 0.108 | 0.263 | 1.710 | 10.578 | 33.047 |
+
+| ratio | 0.69 MiB | 1.00 MiB | 4.00 MiB | 16.00 MiB | 32.00 MiB |
+|---|---:|---:|---:|---:|---:|
+| **redesign ÷ host baseline** | **1.00** | **1.51** | **2.32** | **4.10** | **3.78** |
+| redesign ÷ N.10g's host program | 1.21 | 1.58 | 3.22 | 15.70 | 48.96 |
+| host baseline ÷ N.10g's host program | 1.22 | 1.04 | 1.38 | 3.83 | **12.95** |
+| redesign ÷ host baseline, interleaved phases | 1.22 | 1.34 | 1.95 | 3.08 | 3.30 |
+
+**N.10g's 25.43× at P4 decomposes exactly**: 48.96 of it is the machine's own program against the
+host program N.10g used, 12.95 of it is what that host program was giving away, and **3.78 is
+what is left**. The third row of that table is the single most important measurement in this
+section and the reason I15 exists.
+
+`[MEASURED]` The self-routing formulation is faster at four of five sizes and is **not** the
+sweep's program: it requires the key to be a closed-form function of its position in the request
+stream, and it loses at the largest size because 0.29–0.47 migrations an operation cost more than
+four bytes of hand-over. Against a 32-byte record it would have won everywhere — **a request
+should be compacted before anything else about it is decided.**
+
+`[MEASURED]` **This workload is bound by the host's hand-over, and the tracking unit's split says
+so.** Of about 237 entries held, **110–128 hold an invocation that has already finished and is
+waiting to be collected** (correction (b): an entry is not a live context), and the host spends
+50–52 % of its cycles with a finished result in the unit and no offload instruction issued. The
+engines show it from the other side: their contexts are asleep on memory **1.0 of 27.1** at the
+largest table, because a header and its entry are both in the tile's own 4 MiB slice and a load
+takes 10–12 engine cycles. A program touching 1.85 lines an operation is not waiting for memory.
+
+##### N.10h-3 BREADTH-FIRST SEARCH — the sweep's own program, and five redesigns that failed to beat it
+
+`own2ad` is unchanged and remains the sweep's program: direction chosen per level by the published
+edge rule, frontier and reached bits on host-written DUPLICATE pages read out of each engine's own
+copy, what a level settled in four owner-local double-buffered STRIPED blocks, 256 ranges a level.
+The host arm is the published direction-optimising traversal, which is already the state of the
+art, so this workload needed no new baseline. A traversal is the sum of its level windows and the
+levels tile it exactly, so **every figure in this table is a sum of measurements and carries no
+sampling interval at all** — the only one of the three workloads for which that is true.
+
+| working set | vertices | the processor's program, ms | the machine's program, ms | **speedup** | the windows behind each total |
+|---|---:|---:|---:|---:|---|
+| 0.25 MiB | 4,096 | 0.121 | 0.435 | **0.28** | 6 levels, summed |
+| 1.00 MiB | 16,384 | 0.538 | 0.513 | **1.05** | 7 levels, summed |
+| 4.00 MiB | 65,536 | 2.051 | 0.541 | **3.79** | 7 levels, summed |
+| 16.00 MiB | 262,144 | 17.513 | 2.368 | **7.39** | 8 levels, summed |
+| 32.00 MiB | 524,288 | 32.012 | 4.722 | **6.78** | 8 levels, summed |
+
+`[MEASURED — a defect of the INSTRUMENT, and the 64 MiB point is withdrawn because of it]` **An
+entry-point whole-program image is not a warm-up.** Since `4d5a6db` the producer's image 0 is the
+program at its entry point, holding nothing the program has built, so a window warmed from it
+re-runs the program's graph construction at full cycle accuracy first. At 32 MiB that replay alone is
+about 800 s of the 900 s a window is allowed; one window (the processor arm's level 6) was killed at
+the deadline on the serial link and finished at 880 s on the parallel bus. **The level plan's
+warm-up rule was therefore amended** — the entry-point image is never used when a later image lies
+before the window's own start, and the oldest such image is taken so the warm-up is as long as the
+images allow — and the amended rule was applied to **every arm of this workload at every size**. The
+level measured is unchanged in every case, so the levels still tile the traversal; the re-planned
+level-6 window agrees with the window it replaces to 1.9 % and runs in 85 s instead of 880. At
+64 MiB the rule does not help levels 1–5, whose regions lie before the first image that holds a
+graph, and all five exceeded the deadline: **five of nine windows produced no measurement, a
+traversal is the sum of its levels, and the point is withdrawn rather than imputed.** What would
+restore it is an image set whose early spacing follows instructions rather than units of work, so
+that one image lands at the end of the construction. `tools/sampling/levels.sh` now carries the rule.
+
+**Five redesigns were built and measured and none beat it**, which is the result. Ratios to the
+reference, worst to best: every level bottom-up 0.22–0.36, every level top-down over STRIPED bits
+0.36–0.50, every level top-down over DUPLICATE bits 0.47–0.67, family A at 512 ranges 0.57–0.88,
+the compacted per-owner record 0.87–0.96, and 512 ranges alone 0.98–1.05 — a tie inside a measured
+6 % code-placement floor.
+
+`[MEASURED — this falsifies the design's main lever]` **A wider fork wave buys queue, not
+parallelism.** Accesses in flight ÷ latency, which is the rate at which an engine completes
+accesses, is **9.0/20.8 = 0.433 at 256 ranges and 14.3/33.0 = 0.433 at 512** (16 MiB); 0.235 →
+0.247 at 32 MiB and 0.243 → 0.247 at 64 MiB. Engine instructions and migrations are identical to
+0.1 %. The engine is at its memory system's service rate, not short of latency to hide. Compare
+O.1a: this is the same law used the other way round, to show that residency bought nothing.
+
+`[MEASURED]` **Migrations per edge were predicted well and one prediction missed for a stated
+reason.** Top-down over STRIPED bits: predicted exactly 2 per cross-tile edge = 1.50, measured
+**1.494 and 1.500**. Bottom-up over DUPLICATE bits: predicted nowhere, measured **22 migrations in
+a whole 64 MiB traversal**. Top-down over DUPLICATE bits: predicted 0.19, measured **0.42–0.45**,
+because the reached table is refreshed only between levels, so several claimers travel to the same
+unreached neighbour within a level and one wins the swap.
+
+`[MEASURED]` **The replicated table still earns its refresh, and by 20–40 % rather than an order of
+magnitude.** Putting the two bits beside their vertices (family A) costs 1.73× at 16 MiB — more
+than the migrations alone predicted, because a probe then needs two loads and twelve instructions
+against one and four. This is the F.5b trade measured at each size rather than asserted.
+
+##### N.10h-4 THE MEMORY LINK — THE SAME SIX POINTS OVER A PARALLEL BUS AND A SERIAL ONE
+
+E.7's configuration axis, at the two largest points of each workload, both arms, one window plan per
+arm across the two links so that each pair is two runs of one plan. The `ddr` preset is the
+pass-through (N.10g's finding stands and was re-checked: the DDR runs register no link statistics at
+all, the serial ones register 48 per channel); the `cxl` preset is sixteen lanes at 213.3 GB/s of
+read bandwidth, full duplex, with enough subchannels behind the expander to saturate it.
+
+| workload | working set | the processor, parallel bus, ms | the processor, serial link, ms | the processor's change | the machine, parallel bus, ms | the machine, serial link, ms | the machine's change | **speedup, parallel bus** | **speedup, serial link** |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| the reduction | 64 MiB | 116.352 | 206.250 | +77.3 % | 14.431 | 17.620 | +22.1 % | **8.06** | **11.71** |
+| the reduction | 32 MiB | 51.011 | 91.321 | +79.0 % | 6.325 | 7.468 | +18.1 % | **8.06** | **12.23** |
+| the hash table | 16 MiB | 53.941 | 78.927 | +46.3 % | 13.121 | 13.134 | +0.1 % | **4.11** | **6.01** |
+| the hash table | 32 MiB | 100.606 | 149.549 | +48.6 % | 26.470 | 26.418 | -0.2 % | **3.80** | **5.66** |
+| the graph search | 16 MiB | 17.513 | 19.276 | +10.1 % | 2.368 | 2.426 | +2.4 % | **7.39** | **7.95** |
+| the graph search | 32 MiB | 32.012 | 42.261 | +32.0 % | 4.722 | 3.622 | -23.3 % | **6.78** | **11.67** |
+
+`[MEASURED — and this is the clearest statement of the machine's thesis in the whole campaign]`
+**The serial link costs the HOST 46–79 per cent and the ENGINES 0–22 per cent.** A host walking a
+dependent chain over a link pays its serialisation on every dependent step and can hold only a few
+dozen steps; an engine beside the memory pays it on almost nothing, because the chain is walked where
+the data is. The speedup rises on the serial link at five of six points.
+
+`[MEASURED — one arm is FASTER on the serial link]` The machine's graph search at 32 MiB gains
+23.1 %, and it is the one point in the campaign where the engines are genuinely waiting on memory
+(23.84 of 41.8 contexts asleep, loads at 101 cycles, N.10h-5): there the bandwidth behind the
+expander is worth more than the latency in front of it. Compare N.10g-4, which found the same sign
+at the same point.
+
+`[MEASURED — and it inverts N.10g's reading of this workload]` **The hash table could not tell the
+two links apart in N.10g and now tells them apart sharply**, because its HOST program changed. The
+textbook chain walked one node at a time lost 0.6 % to the serial link; the group-prefetched
+line-resident bucket loses 46–49 %. Making the host program three times faster made it three times
+more sensitive to the link, because what the old program spent walking a chain inside its own cache
+the new one spends on memory. A link comparison is therefore a property of the two PROGRAMS as much
+as of the two links.
+
+`[LIMIT OF THE INSTRUMENT]` The link's own counters — lane occupancy, ingress stalls, retries — are
+published by the model at `finish()`, and a sampled window ends at its region boundary, so they read
+zero in every window here. N.10g-4's occupancy figures are whole-run and stand; this section reports
+what each link did to each program's time and nothing about the wire.
+
+##### N.10h-5 THE COUNTERS, ALL THREE WORKLOADS ON ONE AXIS
+
+Over the measured regions only, from the difference between the statistic dumps a window brackets.
+Live contexts are per engine of 128, averaged over that engine's own cycles, and the three states
+exclude one another. Tracking-unit entries are of 512, split per correction (b). **`fabric ports
+busy`** is new in this campaign and it is the column that carries the reduction's diagnosis: it is
+the fraction of the region in which the coherence fabric's ports carried anything at all.
+
+| workload | working set | live per engine, of 128 | executing | asleep on memory | runnable | instr/cycle, of 4 | load latency, cycles | migrations per unit of work | fabric ports busy | entries working | entries finished, uncollected | host idle with work returned | DRAM GB/s of 76.8 | DRAM row-hit, whole window |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| the reduction | 4 MiB | 22.2 | 1.41 | 12.88 | 7.89 | 1.41 | 93 | 0.980 /probe | 99.4 % | 240.7 | 2.84 | 44.5 % | 8.1 | 0.174 |
+| the reduction | 16 MiB | 23.8 | 1.55 | 13.37 | 8.84 | 1.55 | 86 | 0.723 /probe | 99.8 % | 242.7 | 0.78 | 18.5 % | 9.2 | 0.045 |
+| the reduction | 32 MiB | 24.6 | 1.49 | 14.55 | 8.53 | 1.49 | 97 | 0.709 /probe | 99.9 % | 242.8 | 0.37 | 11.2 % | 21.6 | 0.024 |
+| the reduction | 64 MiB | 23.6 | 1.34 | 14.81 | 7.46 | 1.34 | 112 | 0.707 /probe | 100.0 % | 243.0 | 0.16 | 7.3 % | 26.3 | 0.014 |
+| the hash table | 4 MiB | 27.8 | 1.85 | 1.20 | 24.70 | 1.85 | 13 | 0.000 /operation | 47.7 % | 116.3 | 80.72 | 34.3 % | 4.4 | 0.225 |
+| the hash table | 16 MiB | 28.3 | 1.82 | 0.91 | 25.57 | 1.82 | 10 | 0.000 /operation | 46.9 % | 114.5 | 122.81 | 50.4 % | 3.2 | 0.090 |
+| the hash table | 32 MiB | 27.1 | 1.74 | 1.01 | 24.31 | 1.74 | 12 | 0.000 /operation | 44.9 % | 109.5 | 127.79 | 52.3 % | 3.8 | 0.075 |
+| the graph search | 4 MiB | 20.4 | 2.26 | 4.49 | 13.63 | 2.26 | 18 | 0.067 /edge | 82.1 % | 86.1 | 0.12 | 6.3 % | 8.2 | 0.676 |
+| the graph search | 16 MiB | 49.6 | 3.22 | 9.21 | 37.15 | 3.22 | 22 | 0.019 /edge | 86.9 % | 201.8 | 0.52 | 5.3 % | 8.0 | 0.636 |
+| the graph search | 32 MiB | 41.9 | 2.12 | 23.87 | 15.90 | 2.12 | 101 | 0.093 /edge | 88.8 % | 182.8 | 0.07 | 3.8 % | 12.4 | 0.378 |
+
+**`tileDuplicateWriteRefused` = 0 in every run of every arm of all three workloads**, which is
+L78's gate discharged on the whole campaign: not one kernel ever formed an address in a page with
+one copy per engine and tried to write it.
+
+**Three workloads, three different limits, none of them the one its design predicted.** The
+reduction is held by a saturated fabric; the hash table by how fast one host core can hand work
+over; the graph search by its memory system's service rate. **No arm of any workload is held by
+the tracking unit** — no fork was refused anywhere, and the deepest occupancy seen is 243 of 512.
+
+##### N.10h-6 WHAT MOVED AGAINST N.10g, DECOMPOSED
+
+| workload | largest size | N.10g | its host program | N.10h | its host program |
+|---|---|---:|---|---:|---|
+| shuffled sum | 64 MiB | 10.14 | one chain at a time | **7.93** | sixteen chains side by side |
+| hash table | 32 MiB | 25.43 | a chain walked one node at a time | **3.78** | best of three group-prefetched |
+| graph search | 32 MiB | 4.55 | the published traversal, bottom-up step only | **6.78** | the same traversal, whole |
+
+Three different things happened and they must not be conflated. The **reduction** lost a fifth of
+its factor, because its old host program was already close to the best one. The **hash table** lost
+six-sevenths, because 25.43 measured a data structure. The **graph search gained**, and for
+bookkeeping rather than speed: N.10g reported the speedup of the one step it offloads, timed inside
+a program that ran both steps; N.10h reports whole traversal against whole traversal, and the host
+figure is the same to the cycle.
+
+`[OPEN]` The reduction's candidates D and F are **unbuilt**, because co-location of a record buffer
+with an array range is inexpressible while the arrays are STRIPED. Their predicted 1.2–1.7× is
+untested and needs a layout ruling first.
+`[OPEN]` Two of the three host baselines were **written for this campaign** and have no independent
+provenance; they implement published techniques and were checked by answering identically to the
+programs they replace. If a better host program exists for either, every ratio in N.10h-1 and
+N.10h-2 falls.
+`[OPEN]` The reduction's **fill phase** is outside every figure here. Offloaded it is 2.7–4.2×
+faster than on the host, which is larger than the reduction itself earns at the small sizes.
 
 
 ---
@@ -15746,6 +16067,82 @@ withdrawn.]`**
   repair that matters most.
 
 ---
+
+**L79 — EVERY REPORTED SPEEDUP WAS AGAINST THE TEXTBOOK HOST PROGRAM. `[RULE ADDED AS I15,
+owner ruling 2026-09-11; MEASURED 2026-09-12 in N.10h; N.10a–g's ratios superseded, their
+tile-side counters kept.]`**
+
+- *The gap.* Every campaign from N.10a to N.10g compared the machine against **one** host program
+  per workload, and in two of the three that program was the textbook formulation: a pointer chain
+  walked one node at a time, and a reduction walked one chain at a time. Neither holds more than one
+  memory access in flight on a 352-entry out-of-order core, and the published remedy for both —
+  group prefetching, 2004 — had never been built. Nothing in the canon required it to be.
+- *The ruling.* **I15.** A result is the machine's best algorithm against the host's state of the
+  art, each arm's whole-program cycles estimated on its own timing-independent axis and then
+  divided, because the two arms are different programs with no common work unit.
+- *What it cost, measured at the largest size of each workload.* The hash table: **25.43 → 3.78**,
+  of which the machine's own redesign is worth 48.96× against the old host program and the published
+  prefetching is worth **12.95×** on the host. The reduction: **10.14 → 7.93**; its old host program
+  was already close to the best one (1.21–1.35× above 4 MiB, and *negative* below it). The graph
+  search: **4.55 → 6.77**, and that one *rose*, because its host arm was already the published
+  direction-optimising traversal and the change was from reporting one offloaded step to reporting
+  the whole traversal. **Both sides improved in all three; only the ratio of good programs says
+  anything about the machine.**
+- *What this does NOT withdraw.* Every tile-side counter of N.10a–g, which is byte-identical work;
+  the DDR preset's byte-identical pass-through (N.10g-4); L78's audit; and the machine itself, which
+  did not change for this. What is withdrawn is **the number**: no ratio from N.10a–g may be quoted.
+- *The process finding.* The redesigns were reviewed against Part B and Part P **before** they were
+  built, which is what L78 said was the missing link, and the review refused two formulations and
+  conditioned four more. Three of the designs' central predictions were then falsified by
+  measurement (N.10h-1, N.10h-3), which is the system working: a design that cannot be falsified by
+  one run was not specific enough.
+
+**L80 — THE RUN THAT COUNTS A PROGRAM'S TOTALS USED A 256-ENTRY TRACKING UNIT. `[DEFECT, FIXED
+IN THE SAMPLER, 2026-09-12, commit `26ccd29`.]`**
+
+- *What it was.* `tools/sampling/run_producer.sh`'s totals-counting run carried a written-down
+  256-entry tracking unit, so any binary that forks more than 256 invocations hung there — which is
+  every program written to use the unit's real depth after `5c5d714` made it 512. The unit is now
+  read from the machine, as it is everywhere else.
+- *Why it matters beyond itself.* The axis the totals estimator multiplies is produced by that run.
+  A program that cannot finish it has no total, and an arm with no total cannot be compared under
+  I15 at all.
+
+**L81 — CO-LOCATING A RECORD BUFFER WITH A STRIPED ARRAY RANGE IS INEXPRESSIBLE. `[OPEN — two
+designed formulations unbuilt; needs a layout ruling.]`**
+
+- *What was found.* Two of the reduction's formulations (the staged-record and the
+  one-array-partitioned forms, design candidates D and F) require a buffer of records to sit on the
+  **same tile** as the range of the array whose work it carries. The machine expresses co-location
+  in exactly one way — two GRAIN regions sharing a vtile (**I12**, `NMFCPageTable::place`) — and a
+  STRIPED region carries no vtile. Two STRIPED objects co-locate only if their offsets inside the
+  one group-aligned extent differ by a multiple of the tile count in grains, which is arithmetic on
+  the tile mapping and is forbidden; and no instruction tells a function core which tile it is
+  standing on, so there is no run-time lookup either.
+- *The consequence, recorded rather than worked around.* Both become expressible if the arrays stop
+  being STRIPED and become per-tile GRAIN parts — the layout the hash table already uses. That is a
+  change to the page types the standing sweep fixes, so it was not made. Their predicted 1.2–1.7× is
+  **untested**.
+
+**L82 — A WIDE ADDRESS FORMED ON A WRONG PATH ENDS A HASH-TABLE POINT. `[OPEN — reproduction
+recorded, cause not established, no result affected.]`**
+
+- *What happens.* Three points of the chained hash table's standing sweep, all at the shorter batch
+  length (P3 interleaved, P4 separated and interleaved at B=32), stop themselves after an address no
+  memory in the machine holds reaches the memory path: `0x9e3779b97f4a7c00` and
+  `0xffffffffffff00c0`. Since `f82a8a3` the machine's response is deliberate — the access is a
+  translation fault, it is not sent, `addr_outside_space` counts it, and the instruction is flagged
+  so that a squash discards it and a retirement stops the core — and the same address appears
+  harmlessly on wrong paths elsewhere (it is the golden-ratio constant the key hash multiplies by,
+  loaded as an address by a speculated instruction).
+- *What is not established.* Whether the retirement that stops the core is a real dependence in the
+  program or a mis-speculation the core should have discarded. **No figure in N.10h depends on those
+  three points**: the redesigned hash table is measured at the longer batch length at all five
+  sizes, and the four sizes where both lengths ran are what the per-invocation cost of N.10h-2 is
+  derived from.
+
+---
+
 
 ## APPENDIX 2 — DIVERGENCES: SST IMPLEMENTATION vs CANON
 
