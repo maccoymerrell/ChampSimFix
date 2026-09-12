@@ -157,25 +157,685 @@ carries it between tiles as the 64 bytes of register file and the program counte
 
 ### 1.4 The instruction set
 
-Fourteen instructions, of which twelve are the user-level base set:
+The extension adds **fourteen instructions** to an otherwise ordinary 64-bit RISC-V machine,
+and one further word that marks the entry point of a function. Eight of the fourteen execute
+on the host and start, probe, collect or cancel an invocation; three execute on a function
+core and end or extend one; two move 64 bits between a host general register and a host
+context register; one, `RESUME`, is privileged and belongs to the fault path. Twelve of them
+form the user-level base set; `KILL` is user-level as well but was added after that set was
+closed, and `RESUME` is not user-level at all.
 
-`FORK.R` `FORK.M` `FORKF.R` `FORKF.M` `FORKQ` `JOIN` `JOINQ` `END` (with a return bit)
-`CONT` `CONT.M` `CXW` `CXR` — plus `KILL`, which is also unprivileged and tears down a
-failed program's contexts, and `RESUME`, which is privileged and returns from a fault.
+Every host instruction is a **try**. It reports in a general register whether it succeeded,
+and none of them blocks. A program that wants to wait writes the loop itself, which is why
+each try has a probe beside it that asks the same question without moving anything.
 
-`FORK` takes a general register holding the callee's entry address and a 512-bit context
-register that *is* the callee's register file; `JOIN` retrieves it. The `.M` forms take the
-context from memory instead of from a context register; the fire-and-forget forms do not
-reserve a result. `FORKQ` and `JOINQ` ask the machine a question — how many entries the
-tracking unit has free, and whether a given invocation has finished — which is how a
-program discovers the machine's capacity at run time instead of being compiled against a
-constant. `END` finishes an invocation, with or without returning the register file.
-`CONT` hands a context to a successor invocation without returning to the host. `CXW` and
-`CXR` move bits between the host's ordinary registers and a context register.
+#### 1.4.1 Where the extension sits in the encoding space
 
-Underneath those fourteen, a function core executes ordinary RISC-V: loads, stores,
-integer arithmetic, branches and atomics. There is no floating point, no vector unit and no
-system instruction on the engines.
+The whole extension occupies **one** opcode: RISC-V `custom-0`, `0b0001011` = 0x0b, in bits
+6:0 of every instruction word. The table below says what the four custom opcodes are used
+for here.
+
+| opcode | bits 6:0 | used for |
+|---|---|---|
+| `custom-0` | `0b0001011` (0x0b) | the whole of this extension |
+| `custom-1` | `0b0101011` (0x2b) | free, held for a second reservation |
+| `custom-2` | `0b1011011` (0x5b) | avoided: claimed by the 128-bit base instruction set |
+| `custom-3` | `0b1111011` (0x7b) | avoided, for the same reason |
+
+Only one opcode is taken because the instruction is identified by `funct7`, not by the
+opcode, and `funct7` has room to spare.
+
+Inside that opcode the two function fields are split unusually, and the split is what lets
+the same instructions run on an out-of-order host through a coprocessor interface.
+**`funct3` is not a selector**: it carries three flags saying which register fields the
+instruction actually uses, so that a host which hands a coprocessor operand *values* knows
+which values to hand over. **`funct7` identifies the instruction**: its top three bits are a
+group and its low four bits a variant within that group.
+
+| field | bits | meaning |
+|---|---|---|
+| `funct3` bit 0 | 12 | the instruction writes `rd` |
+| `funct3` bit 1 | 13 | the instruction reads `rs1` |
+| `funct3` bit 2 | 14 | the instruction reads `rs2` |
+| `funct7` bits 6:4 | 31:29 | the group |
+| `funct7` bits 3:0 | 28:25 | the variant within the group |
+
+Six of the eight `funct3` combinations occur — `000`, `001`, `010`, `011`, `110`, `111` —
+because no instruction in the set reads `rs2` without also reading `rs1`.
+
+Three bits of group are exactly enough for the six groups the set needs, and four bits of
+variant are exactly enough for the widest one, a context-lane move that carries a direction
+and a lane number. That gives 128 `funct7` values, of which **30 are taken and 98 are free**.
+
+| group | `funct7` range | instructions | variants used | variants free |
+|---|---|---|---|---|
+| `000` fork | 0x00–0x0f | `FORK.R` `FORK.M` `FORKF.R` `FORKF.M` | 0–3 | 12 |
+| `001` probe | 0x10–0x1f | `FORKQ` `JOINQ` | 0–1 | 14 |
+| `010` join | 0x20–0x2f | `JOIN` | 0 | 15 |
+| `011` end | 0x30–0x3f | `END`, `END.R` | 0–1 | 14 |
+| `100` continue | 0x40–0x4f | `CONT` `CONT.M` | 0–1 | 14 |
+| `101` context lane | 0x50–0x5f | `CXW` and `CXR`, eight lanes each | 0–15 | none |
+| `110` control | 0x60–0x6f | `KILL` `RESUME` | 0–1 | 14 |
+| `111` marker | 0x70–0x7f | the function-entry marker | 0 | 15 |
+
+The context-lane group is the only one that is full, because its variant field is not a flag
+word: it is a lane number and a direction, and all sixteen combinations name something.
+
+#### 1.4.2 The instruction format
+
+Every instruction of the extension, without exception, is an ordinary RISC-V **R-type** word:
+four fixed fields and three register fields in their usual places, so a host's fetch, rename
+and register read need no special case for it.
+
+| bits 31:25 | 24:20 | 19:15 | 14:12 | 11:7 | 6:0 |
+|---|---|---|---|---|---|
+| `funct7` | `rs2` | `rs1` | `funct3` | `rd` | opcode |
+| group and variant | second source | first source | operand flags | destination | `0b0001011` |
+
+Unused register fields are encoded as `x0`, and the corresponding `funct3` flag is clear, so
+an unused field is both harmless to read and marked as unread.
+
+The one field with internal structure is `funct7`, drawn here over the instruction word's own
+bit numbers.
+
+| bits 31:29 | 28:25 |
+|---|---|
+| group | variant |
+
+In the context-lane group the variant divides again: three bits of lane number and one bit of
+direction. Nothing else in the extension subdivides its variant.
+
+| bits 31:29 | 28:26 | 25 |
+|---|---|---|
+| group `101` | lane, 0–7 | 0 = write the lane, 1 = read it |
+
+That layout is why a lane move needs no extra register: the lane is a constant at every call
+site, so it costs a field instead of an instruction.
+
+#### 1.4.3 The instructions
+
+The fourteen entries follow. Each gives the assembly syntax, the encoding with every field's
+value, which side of the machine executes it, what its operands carry, what it does, what it
+can raise, and anything that would otherwise be a surprise. In the encodings below, a field
+written as a name is supplied by the programmer and a field written in binary or hex is fixed
+by the instruction.
+
+There is no assembler mnemonic for any of this in the toolchain as it stands. Programs emit
+the words through the assembler's generic `.insn r` directive, which takes the opcode, the
+two function fields and the three register fields directly; the header that defines the
+encoding and the C wrappers over it are what call sites actually use. The syntax given in
+each entry is the intended mnemonic form, and it follows the usual destination-first
+convention, which for two instructions is *not* the field order — `JOIN` and `CXW` are called
+out where that happens.
+
+---
+
+**`FORK.R rH, rPC, cCTX`** — start an invocation from a context register.
+
+*Encoding.* `funct7` = 0x00 (group `000`, variant `0000`) · `rs2` = `cCTX` · `rs1` = `rPC` ·
+`funct3` = `111` (writes `rd`, reads `rs1`, reads `rs2`) · `rd` = `rH` · opcode = `0b0001011`.
+
+*Executed by* the host, user-level.
+
+*Operands.* `rs1` holds the callee's entry address. `rs2` holds a **number**, 0–7, naming one
+of the host's eight 512-bit context registers — not a register field, a value, because the
+coprocessor interface hands over operand values and only the index of `rd`. `rd` receives the
+handle.
+
+*Operation.*
+
+```
+if the word at rs1 is not the function-entry marker:   rd <- 0; done
+if the tracking unit has no free entry:                rd <- 0; done
+if the fabric has no free context credit:              rd <- 0; done
+h <- tracking unit allocates an entry, return mode = join
+send { h, entry = rs1, the 512 bits of context register rs2 } to a tile
+rd <- h
+```
+
+The 512 bits are copied out of the context register at this instruction; nothing later can
+change what the invocation received. A tile that accepts the message allocates a context slot
+for it, and the fabric credit spent here is what that slot costs.
+
+*Exceptions.* None. All three failures above are **refusals**, answered with a zero handle,
+because a handle of zero is not a valid handle and a program can test for it. A context
+number outside 0–7 names nothing the machine has and is reported as a program error rather
+than executed.
+
+*Notes.* Zero is reserved as the "no handle" answer, so a live handle is never zero. The
+refusal for a target that is not a function is what stops a wild pointer being executed as a
+kernel: the first word of every function is the marker of §1.4.3's last entry, and dispatch
+reads it before anything is sent.
+
+---
+
+**`FORK.M rH, rPC, rADDR`** — start an invocation from a context in memory.
+
+*Encoding.* `funct7` = 0x01 (group `000`, variant `0001`) · `rs2` = `rADDR` · `rs1` = `rPC` ·
+`funct3` = `111` · `rd` = `rH` · opcode = `0b0001011`.
+
+*Executed by* the host, user-level.
+
+*Operands.* `rs1` the entry address; `rs2` the address of a 64-byte context; `rd` the handle.
+
+*Operation.* Exactly `FORK.R`, with one difference: the message carries the **address**, and
+**the tile reads the 64 bytes**, not the host. Only an address crosses the fabric, and the
+load happens where the context probably already lives.
+
+*Exceptions.* None on the host. The dereference happens on the function core, so a bad address
+is that core's fault: a recoverable one parks the context and is handled as §1.4.3's `RESUME`
+entry describes, a fatal one tears the invocation down and the handle answers with the error
+flag.
+
+*Notes.* Because another core reads those bytes, the stores that built them must be visible
+first; the wrapper emits a release fence ahead of the instruction, and no correct use of the
+form omits it. `FORK.R` needs none — a context register is not memory.
+
+---
+
+**`FORKF.R rH, rPC, cCTX`** — start an invocation whose result nobody will collect.
+
+*Encoding.* `funct7` = 0x02 (group `000`, variant `0010`) · `rs2` = `cCTX` · `rs1` = `rPC` ·
+`funct3` = `111` · `rd` = `rH` · opcode = `0b0001011`.
+
+*Executed by* the host, user-level.
+
+*Operation.* `FORK.R`, with the entry's return mode set to *acknowledge* instead of *join*.
+The entry is still allocated and still occupies the tracking unit; it closes when the
+invocation's acknowledgement arrives, rather than at a `JOIN`.
+
+*Exceptions.* None; the same three refusals.
+
+*Notes.* It still returns a handle. There is no use for it today, but it keeps every
+invocation addressable and the four fork encodings uniform, and adding it later would have
+broken every fork. `JOIN` and `JOINQ` on such a handle cannot succeed, because there is
+nothing to collect.
+
+---
+
+**`FORKF.M rH, rPC, rADDR`** — fire-and-forget, context read from memory by the tile.
+
+*Encoding.* `funct7` = 0x03 (group `000`, variant `0011`) · `rs2` = `rADDR` · `rs1` = `rPC` ·
+`funct3` = `111` · `rd` = `rH` · opcode = `0b0001011`.
+
+*Executed by* the host, user-level.
+
+*Operation.* The two variant bits are independent: bit 0 says the context comes from memory,
+bit 1 says the result is not to be collected. This is both.
+
+*Exceptions.* As `FORK.M`. The same release fence applies.
+
+---
+
+**`FORKQ rN`** — how much room the tracking unit has.
+
+*Encoding.* `funct7` = 0x10 (group `001`, variant `0000`) · `rs2` = `x0` · `rs1` = `x0` ·
+`funct3` = `001` (writes `rd` only) · `rd` = `rN` · opcode = `0b0001011`.
+
+*Executed by* the host, user-level.
+
+*Operation.* `rd <- the number of free tracking-unit entries`. Nothing else is read or
+changed.
+
+*Exceptions.* None. It cannot fail.
+
+*Notes.* A **count**, not a flag, so a program can size a batch instead of probing once per
+fork. It is a sizing hint and never a contract: it may be stale by the next instruction, and
+a `FORK` answering zero is the authoritative answer. It earns its own encoding because of
+fire-and-forget: an entry freed by a remote acknowledgement is released asynchronously, so
+occupancy cannot be computed from the instruction stream. This is one of the two instructions
+with which a program discovers the machine's real capacity instead of being compiled against
+a constant.
+
+---
+
+**`JOIN rOK, cDST, rH`** — try to collect an invocation's 512 bits.
+
+*Encoding.* `funct7` = 0x20 (group `010`, variant `0000`) · `rs2` = `cDST` · `rs1` = `rH` ·
+`funct3` = `111` · `rd` = `rOK` · opcode = `0b0001011`.
+
+*Executed by* the host, user-level.
+
+*Operands.* **The mnemonic order is not the field order.** `rs1` is the handle, which is the
+*third* operand written; `rs2` is the destination context-register number, which is the
+*second*. The mnemonic is destination-first, as assembly conventions are, and the field order
+is fixed by the coprocessor interface; they do not coincide for an instruction that writes a
+context register.
+
+*Operation.*
+
+```
+e <- the tracking-unit entry named by rs1
+if there is none:                    rOK <- 0; done
+if e was killed:                     ctx[rs2] <- 64 zero bytes
+                                     rOK <- ok | error; done
+if e is fire-and-forget:             rOK <- 0; done
+if e has not returned:               rOK <- 0; done          # destination untouched
+ctx[rs2] <- e's 512 bits             # all zero if the invocation ended in error
+free e
+rOK <- ok, or ok | error
+```
+
+The answer is a bit field: bit 0 is *collected*, bit 1 is *ended in error*. Zero means *not
+back yet*; 1 means the 512 bits are the function's; 3 means the invocation was killed or died
+and the 512 bits delivered are zero.
+
+*Exceptions.* **None — a `JOIN` never faults on itself.** That is deliberate: a joining
+program always gets a well-formed answer it can test, so the error path is an ordinary branch
+on a flag rather than a second trap. A handle naming no live entry, and a handle naming a
+fire-and-forget invocation, answer zero; the simulators can be configured to stop on either,
+since both are program errors rather than machine states, but the architecture's answer is
+zero. A destination number outside 0–7 is a program error, and it is examined only once the
+entry is one this `JOIN` would collect.
+
+*Notes.* On a *not back yet* answer the destination context register is **not written**: an
+invocation that has not returned must not leave a plausible-looking value behind. A machine
+that renames must therefore treat the destination as a source as well.
+
+---
+
+**`JOINQ rOK, rH`** — has it returned?
+
+*Encoding.* `funct7` = 0x11 (group `001`, variant `0001`) · `rs2` = `x0` · `rs1` = `rH` ·
+`funct3` = `011` (writes `rd`, reads `rs1`) · `rd` = `rOK` · opcode = `0b0001011`.
+
+*Executed by* the host, user-level.
+
+*Operation.*
+
+```
+e <- the entry named by rs1
+if there is none:        rOK <- 0
+else if e was killed:    rOK <- 1        # a killed entry reports as returned
+else if fire-and-forget: rOK <- 0        # its result can never be read
+else                     rOK <- (e has returned) ? 1 : 0
+```
+
+*Exceptions.* None.
+
+*Notes.* The probe beside `JOIN`, and the reason it earns an encoding is that **it moves no
+64 bytes**. Polling with `JOIN` would move a register file on every failed attempt. Together
+with `FORKQ` it is how a program asks the machine about its own state at run time.
+
+---
+
+**`END` / `END.R`** — finish this invocation. The assembler spellings are `ENDC` and `RETC`.
+
+*Encoding.* `funct7` = 0x30 for `END`, 0x31 for `END.R` (group `011`, variant `0000` or
+`0001`) · `rs2` = `x0` · `rs1` = `x0` · `funct3` = `000` (no register used) · `rd` = `x0` ·
+opcode = `0b0001011`.
+
+*Executed by* a function core, user-level.
+
+*Operands.* **None, in either form.** `END` returns the register file of the context that
+executes it, and a context has exactly one; there is nothing to name. Context registers are a
+host-side structure, and a function core has none, so an operand naming one could not be
+resolved here at all.
+
+*Operation.*
+
+```
+r <- funct7 bit 0                       # the return bit
+if this context has stores outstanding: # it cannot retire before they land
+    remember r; stop executing; the last store response finishes it
+else:
+    send { handle, r ? the 512 bits : nothing } to the host
+    free the context slot and return the fabric credit
+```
+
+*Exceptions.* On a **host** core this word is illegal: `END` belongs to a function core, and a
+host has no invocation to end. Both host models reject it.
+
+*Notes.* Bit 0 of the variant — **the return bit** — is the whole of the difference between
+the two forms, which is why they are one instruction and the base set is twelve rather than
+thirteen. The bit and the fork form are chosen independently and may disagree, and every
+combination still answers: a fire-and-forget invocation that sets the bit has its 64 bytes
+dropped, and a join-expected invocation that clears it still produces an acknowledgement and
+a **zeroed** register file, so that no entry can become uncollectable.
+
+---
+
+**`CONT rPC`** — hand this context to a successor.
+
+*Encoding.* `funct7` = 0x40 (group `100`, variant `0000`) · `rs2` = `x0` · `rs1` = `rPC` ·
+`funct3` = `010` (reads `rs1`) · `rd` = `x0` · opcode = `0b0001011`.
+
+*Executed by* a function core, user-level.
+
+*Operands.* `rs1` holds the successor's entry address. It must be a **64-bit** register name:
+an address is 64 bits whatever the data width is.
+
+*Operation.*
+
+```
+pc <- rs1
+```
+
+and nothing else moves. The context slot, the 512 bits and the tracking-unit entry on the
+host all stay exactly as they are.
+
+*Exceptions.* A 32-bit or reserved name in `rs1` is a decode error. On a host core the
+instruction is illegal.
+
+*Notes.* **It cannot be refused**, and that is the point: it inherits the entry rather than
+allocating one, so it consumes no new resource. The handle the host holds stays valid across
+an arbitrary chain of successors, and whatever the last link returns is what the `JOIN`
+receives. It is also how a function too large for one 512-bit register file is split into a
+chain whose links are individually admissible, with no link able to be denied.
+
+---
+
+**`CONT.M rPC, rADDR`** — a successor with a fresh context.
+
+*Encoding.* `funct7` = 0x41 (group `100`, variant `0001`) · `rs2` = `rADDR` · `rs1` = `rPC` ·
+`funct3` = `110` (reads `rs1` and `rs2`) · `rd` = `x0` · opcode = `0b0001011`.
+
+*Executed by* a function core, user-level.
+
+*Operands.* `rs1` the successor's entry address, `rs2` the address of a 64-byte context. Both
+must be 64-bit names.
+
+*Operation.*
+
+```
+pc  <- rs1
+the 512 bits <- the 64 bytes at rs2      # fetched by this tile, replacing the file wholesale
+```
+
+The context keeps its slot and waits for the fetch; the successor begins with the new
+register file and no trace of the old one.
+
+*Exceptions.* As `CONT`, plus whatever the fetch of the new context raises: a recoverable
+fault parks the context, a fatal one ends the invocation with the error flag.
+
+*Notes.* The 512 bits fetched **are** the context — there is nothing to merge them with,
+which is why the replacement is wholesale rather than a partial update.
+
+---
+
+**`CXW cD, lane, rS`** — write one 64-bit lane of a context register.
+
+*Encoding.* `funct7` = 0x50 + 2·lane (group `101`, variant = lane in bits 3:1, direction bit
+0 clear); 0x50 for lane 0 through 0x5e for lane 7 · `rs2` = `cD` · `rs1` = `rS` ·
+`funct3` = `110` (reads `rs1` and `rs2`) · `rd` = `x0` · opcode = `0b0001011`.
+
+*Executed by* the host, user-level.
+
+*Operands.* **The mnemonic order is not the field order, and it is the opposite way round
+from `CXR`.** `rs1` is the value, written *third*; `rs2` is the context-register number,
+written *first*; the lane is not a register at all but the `funct7` field above.
+
+*Operation.*
+
+```
+ctx[rs2] lane <- rs1                    # 64 bits, at bits [64*lane, 64*lane+64)
+```
+
+Nothing is answered: the destination field is `x0`.
+
+*Exceptions.* A context number outside 0–7 is a program error. The lane cannot be out of
+range: it is three bits and the register has eight lanes. On a function core the instruction
+is illegal — context registers exist only on the host, which is why functions do not nest.
+
+*Notes.* Lane *k* is exactly the 64-bit name `d`*k* that the callee sees, and the two 32-bit
+names `w`2*k* and `w`2*k*+1 are its halves, so every named value in the callee's file is
+reachable in exactly one move. There is deliberately **no** bit-field insert: once 64 bits can
+be moved, any packing inside them is reached with shifts and masks the base instruction set
+already has, and a field straddling a lane boundary is two moves and the same arithmetic.
+Staging two 32-bit arguments means building the lane in a general register first and writing
+it once — never patching one half of a live lane, whose other half is another architectural
+value and not spare room.
+
+---
+
+**`CXR rD, cS, lane`** — read one 64-bit lane of a context register.
+
+*Encoding.* `funct7` = 0x51 + 2·lane (group `101`, variant = lane in bits 3:1, direction bit
+0 set); 0x51 for lane 0 through 0x5f for lane 7 · `rs2` = `x0` · `rs1` = `cS` ·
+`funct3` = `011` (writes `rd`, reads `rs1`) · `rd` = `rD` · opcode = `0b0001011`.
+
+*Executed by* the host, user-level.
+
+*Operation.*
+
+```
+rD <- ctx[rs1] lane
+```
+
+*Exceptions.* A context number outside 0–7 is a program error. Illegal on a function core.
+
+*Notes.* Here the mnemonic order *does* match the field order. `CXW` and `CXR` are
+deliberately asymmetric in mnemonic order and symmetric in encoding: the direction is one bit
+and everything else about them is the same.
+
+---
+
+**`KILL rH`** — end one of my own outstanding invocations.
+
+*Encoding.* `funct7` = 0x60 (group `110`, variant `0000`) · `rs2` = `x0` · `rs1` = `rH` ·
+`funct3` = `010` (reads `rs1`) · `rd` = `x0` · opcode = `0b0001011`.
+
+*Executed by* the host, and it is **unprivileged**: a handle is issued by the program's own
+tracking unit and names nothing outside it, so this is cancelling one's own work, not signalling
+somebody else's.
+
+*Operation.*
+
+```
+e <- the entry named by rs1
+if there is none, or it is already killed:   do nothing
+else:
+    e's 512 bits <- zero
+    e's error flag <- set
+    e is marked returned and stays READABLE
+    broadcast the kill: the tile holding that context ends it, the others drop the message
+    e is freed when that tile's acknowledgement arrives
+```
+
+*Exceptions.* **None, and it cannot fail.** A stale, already-joined or already-killed handle
+is a **no-op** — not a fault, not a trap, not an error return — which is what makes it safe
+to issue from a teardown that cannot know which of its invocations have already ended. A
+recycled handle is not a special case: it names the new invocation.
+
+*Notes.* The entry does not disappear at the instruction. It closes, and until the tile
+acknowledges it is readable and answers: `JOINQ` reports it as returned, `JOIN` collects the
+zeroed file with the error flag. That is what keeps the rule that a join-expected entry never
+closes without returning something literally true, and it is also why the same acknowledgement
+frees a killed *fire-and-forget* entry, which no `JOIN` could ever reclaim. A context parked
+across a recoverable fault is killable too, and killing it releases the slot it was holding.
+
+---
+
+**`RESUME rH`** — restart a context parked by a recoverable fault.
+
+*Encoding.* `funct7` = 0x61 (group `110`, variant `0001`) · `rs2` = `x0` · `rs1` = `rH` ·
+`funct3` = `010` (reads `rs1`) · `rd` = `x0` · opcode = `0b0001011`.
+
+*Executed by* the host, and it is **privileged**.
+
+*Operation.* It names a parked context by its handle and tells it to re-issue the instruction
+that faulted. It allocates nothing, refuses nothing and cannot fail: the entry already exists,
+and the context's slot was held across the fault — the one place a function core holds a slot
+for something other than execution. A `RESUME` naming an entry a `KILL` has already closed
+finds nothing and does nothing.
+
+*Exceptions.* **Executing it from user code traps**, and that trap is the privilege check.
+A recoverable fault is delivered to the kernel through the tracking unit, the kernel's handler
+runs, and the kernel resumes the context — the same shape as returning from any other trap,
+where the party that took delivery is the party that returns from it. If it were user-level,
+any program could restart any context whose handle it could name or guess, and user code has
+no reason to resume a context it did not know had faulted.
+
+*Notes.* There is no operating system in the configurations measured here, so no kernel code
+exists to issue one: both host models decode the instruction and both trap it, and the
+kernel's own resume is modelled inside the tracking unit that took delivery of the fault. The
+machine's fault path is otherwise ordinary — the fault travels to the host through the
+tracking unit, because the tile does not know which host to trap and the entry does.
+
+---
+
+**The function-entry marker** — not one of the fourteen, but part of the encoding.
+
+*Encoding.* `funct7` = 0x70 (group `111`, variant `0000`) · `rs2` = `x0` · `rs1` = `x0` ·
+`funct3` = `000` · `rd` = `x0` · opcode = `0b0001011`. The whole word is `0xe000000b`.
+
+*What it is.* The **first instruction word of every function**. On a function core it executes
+as a no-op and costs one instruction slot per invocation. On a host core it is an **illegal
+instruction** and traps. At `FORK` it is checked: dispatch reads the word at the target
+address and refuses the fork when it is absent.
+
+*Why it exists.* A function-core binary is not host-executable, and nothing at run time could
+otherwise tell: the same bytes mean different things on the two cores, because a register
+number on a function core is a bit range of the 512-bit context and on the host is an ordinary
+register. `add x3, x8, x9` assembles, disassembles and executes on a stock 64-bit RISC-V core,
+while on a function core `x3` is a reserved name that traps. A host that fell into a function
+by a wild pointer or a bad function table would otherwise compute a plausible wrong answer,
+quietly. The marker is in the extension's own opcode for exactly that reason: an innocuous
+word would let the host run on.
+
+*Reserved space.* Variants 1–15 of the marker group are reserved and are rejected by both
+function-core decoders.
+
+#### 1.4.4 Encoding summary
+
+Every field of every instruction, in one table, in encoding order rather than mnemonic order.
+The lane *n* runs 0–7.
+
+| instruction | `funct7` | group | variant | `funct3` | `rd` | `rs1` | `rs2` |
+|---|---|---|---|---|---|---|---|
+| `FORK.R` | 0x00 | `000` | `0000` | `111` | handle | entry address | context number |
+| `FORK.M` | 0x01 | `000` | `0001` | `111` | handle | entry address | context address |
+| `FORKF.R` | 0x02 | `000` | `0010` | `111` | handle | entry address | context number |
+| `FORKF.M` | 0x03 | `000` | `0011` | `111` | handle | entry address | context address |
+| `FORKQ` | 0x10 | `001` | `0000` | `001` | free count | `x0` | `x0` |
+| `JOINQ` | 0x11 | `001` | `0001` | `011` | answer | handle | `x0` |
+| `JOIN` | 0x20 | `010` | `0000` | `111` | answer | handle | context number |
+| `END` | 0x30 | `011` | `0000` | `000` | `x0` | `x0` | `x0` |
+| `END.R` | 0x31 | `011` | `0001` | `000` | `x0` | `x0` | `x0` |
+| `CONT` | 0x40 | `100` | `0000` | `010` | `x0` | successor address | `x0` |
+| `CONT.M` | 0x41 | `100` | `0001` | `110` | `x0` | successor address | context address |
+| `CXW` lane *n* | 0x50 + 2*n* | `101` | *n*`0` | `110` | `x0` | value | context number |
+| `CXR` lane *n* | 0x51 + 2*n* | `101` | *n*`1` | `011` | value | context number | `x0` |
+| `KILL` | 0x60 | `110` | `0000` | `010` | `x0` | handle | `x0` |
+| `RESUME` | 0x61 | `110` | `0001` | `010` | `x0` | handle | `x0` |
+| marker | 0x70 | `111` | `0000` | `000` | `x0` | `x0` | `x0` |
+
+Reading the table with §1.4.2's format gives the 32-bit word directly, and §1.4.5 lists the
+word each row assembles to.
+
+#### 1.4.5 What a function core runs underneath these instructions
+
+A function core is a 64-bit RISC-V machine with integer, multiply/divide and atomic
+instructions, and with floating-point *opcodes* that operate on the same register names as
+everything else rather than on a second register file. Its decoder implements:
+
+- the integer base: `lui`, `auipc`, `jal`, `jalr`, the branches, the register–immediate and
+  register–register operations, and their 32-bit `*w` forms;
+- multiply and divide, including the 32-bit forms; the high-half multiplies are absent from
+  the cycle-accurate core and present in the functional one, which is a divergence rather than
+  a decision, recorded in §1.4.6;
+- loads and stores of every width, including the floating-point ones;
+- **atomics of both kinds**: the load-reserved / store-conditional pair and the
+  read-modify-write operations;
+- floating-point arithmetic in both widths, with the operand's *type* coming from the opcode
+  and the operand's *bits* from the ordinary register name — so there is no second file, no
+  boxing of a 32-bit value inside 64 bits, and a migration carries no more state because a
+  function computes in floating point.
+
+It implements **no compressed instructions**, **no fences** and **no system instructions** at
+all: no control registers, no environment call, no breakpoint. Anything outside the subset
+fails at decode rather than executing at a guessed width.
+
+The register-name rule is the part a reader has to know before reading any function's
+assembly, and it is decoded, not conventional. A five-bit register field names a bit range of
+the 512-bit context, exactly as §1.3's table sets out — that table writes the names `r0`–`r31`
+and assembly writes them `x0`–`x31`, and they are the same five-bit field: `x0` reads zero;
+`x1`–`x7` name the whole file and its halves and quarters; `x8`–`x15` are the eight 64-bit
+lanes `d0`–`d7`; `x16`–`x31` are the sixteen 32-bit lanes `w0`–`w15`. From that the decoder enforces four rules:
+
+1. **`x1`–`x7` are illegal as any operand and trap.** No operation in the subset is wider than
+   64 bits, so those seven names denote nothing the machine can compute on. The consequence is
+   worth stating plainly: the conventional return-address and stack-pointer registers are
+   `x1` and `x2`, so a prologue, an epilogue and a `ret` are all decode-illegal. There is no
+   stack, and a body ends with `END`.
+2. **An address or base operand must be a 64-bit name**, `x8`–`x15`. An address is 64 bits
+   whatever the data width is, and a 32-bit name cannot hold one.
+3. **An operand whose opcode fixes its width must be named by a slice of exactly that width.**
+   The bits above a 32-bit name are another architectural value, not spare room.
+4. **A jump may not form a link**: `jal` and `jalr` are legal only with `rd` = `x0`, which is
+   an unconditional jump and an indirect jump. There is nowhere to save a return address.
+
+Two further rules live in the memory path rather than the decoder, and both are properties of
+this machine rather than of RISC-V. A **function core may not write a duplicated page** — a
+page held as one copy per tile: such a store resolves to the writing tile's own copy, the
+other copies would diverge with nothing able to observe it, and keeping them equal would need
+exactly the coherence across copies that duplication exists to avoid. The store is therefore
+refused: not sent, memory unchanged, counted, and the invocation continues. The same applies
+to an atomic that writes; a load-reserved, which only reads, is left alone. A store by the
+**host** to the same page is legal and reaches every copy. And a translation the tile cannot
+complete is a **fault**, which parks the context and enters the path `RESUME` returns from.
+
+#### 1.4.6 How these encodings were checked, and where the decoders disagree
+
+The encoding is decoded independently in four places: the host attachment and the tile of the
+cycle-accurate model, and the host and the function core of the functional model that writes
+the cycle-accurate model's starting images. All four read their field values from one header,
+and the functional model's private copy of that header is compared against it at build time.
+
+What was checked for this document:
+
+1. **Assembled.** One word per instruction — all fourteen, both `END` forms, the lane-0 and
+   lane-7 forms of `CXW` and `CXR`, and the marker — through the ordinary assembler, from the
+   same header the simulators decode with. Eighteen words, then disassembled back to the words
+   below.
+2. **Decoded.** Every assembled word was taken apart again into opcode, `funct3`, `funct7`,
+   group and variant, and recomposing `funct7` from the group and the variant reproduced the
+   word exactly. All eighteen matched the instruction intended.
+3. **Copies compared.** The functional model's copy of the encoding was checked against the
+   header: sixteen constants, the marker's `funct7`, and the marker's whole 32-bit word. It
+   matches.
+4. **Register maps compared.** The two register-name decoders — the tile's and the functional
+   function core's — were run over all 32 five-bit encodings and agree on every one: same bit
+   offset, same width, same legality, same zero.
+5. **Routing read.** Each word was traced through the dispatch of all four decoders, and
+   through the host core's own decoder, which routes this opcode to its coprocessor and reads
+   `funct3` as the three operand flags in the same bit order the header assigns them.
+
+The words, which are what any future decoder must agree with:
+
+| instruction | word | instruction | word |
+|---|---|---|---|
+| `FORK.R` | `0x00c5f50b` | `CONT` | `0x8005a00b` |
+| `FORK.M` | `0x02c5f50b` | `CONT.M` | `0x82c5e00b` |
+| `FORKF.R` | `0x04c5f50b` | `CXW` lane 0 | `0xa0c5e00b` |
+| `FORKF.M` | `0x06c5f50b` | `CXW` lane 7 | `0xbcc5e00b` |
+| `FORKQ` | `0x2000150b` | `CXR` lane 0 | `0xa205b50b` |
+| `JOINQ` | `0x2205b50b` | `CXR` lane 7 | `0xbe05b50b` |
+| `JOIN` | `0x40c5f50b` | `KILL` | `0xc005a00b` |
+| `END` | `0x6000000b` | `RESUME` | `0xc205a00b` |
+| `END.R` | `0x6200000b` | marker | `0xe000000b` |
+
+Those words use `x10` as the destination and `x11`, `x12` as the sources wherever the
+instruction has one; the register fields are not part of the instruction's identity.
+
+**All four decoders agree on all eighteen defined words.** Four disagreements were found, and
+none of them is reachable by an assembled program today:
+
+- **Reserved variants of the control group.** The functional host treats every variant of that
+  group other than 0 as `RESUME` and traps it; both cycle-accurate host models treat only
+  variant 1 as `RESUME` and every other variant as `KILL`. A future instruction placed at
+  variant 2 would be decoded two different ways.
+- **Reserved variants of the probe group.** The cycle-accurate hosts reject any probe variant
+  above 1; the functional host decodes bit 0 alone, so variants 2–15 read as `FORKQ` or
+  `JOINQ` rather than being rejected.
+- **High-half multiply.** The functional function core implements the three high-half
+  multiplies; the cycle-accurate tile rejects them as illegal. It also special-cases the one
+  signed division that overflows — the most negative value divided by −1 — which the
+  cycle-accurate tile does not.
+- **Operand flags on the out-of-order host.** That host's coprocessor instruction declares
+  `rs1` and `rs2` as sources and `rd` as a destination unconditionally, ignoring the `funct3`
+  flags, where every other decoder reads only the fields the flags name. It changes no result,
+  because every unused field is encoded `x0`, but on that host the flags are advisory.
 
 ### 1.5 The tracking unit, sized to the contexts
 
