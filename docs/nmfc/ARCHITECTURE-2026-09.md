@@ -153,7 +153,7 @@ cycle-accurate model and the functional one that produces its starting images ag
 sixteen checks, and each of the seven reserved names kills a build with the same diagnostic
 in both. Where the whole file moves, no register is named at all: `FORK` carries it in,
 `JOIN` carries it back, the continue instruction hands it to a successor, and a migration
-carries it between tiles as a 64-byte transmit unit.
+carries it between tiles as the 64 bytes of register file and the program counter, and nothing else: the instruction slot and the data slot stay behind, because an instruction or a value fetched on one tile belongs to that tile's view of memory, and the context re-fetches its instruction and re-issues its memory operation on the tile it arrives at.
 
 ### 1.4 The instruction set
 
