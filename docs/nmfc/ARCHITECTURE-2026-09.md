@@ -500,7 +500,9 @@ from that entry and never touches the bank. A partially covered load is not forw
 waits and reads the array. Both are counted, and whether byte-merging logic is worth
 building is decided by how large the partial count turns out to be.
 
-**An atomic is a read-modify-write at the bank.** The entry reaches the head for its
+**A load-reserved / store-conditional pair is a serialisation point in the queue, and nothing else.** The load-reserved opens it and the store-conditional closes it; while it is open, every other entry to that address waits behind it in the same queue, so nothing intervenes and the store-conditional completes. There is no reservation unit and no reservation table: the queue's order *is* the reservation.
+
+**A read-modify-write atomic is one entry, performed at the bank.** The entry reaches the head for its
 address; the bank reads the word, a small arithmetic unit beside the bank applies the
 operation, the bank writes the result back, all as one indivisible bank occupancy; the old
 value returns to the context, which wakes. If the line is absent the bank acquires it first
