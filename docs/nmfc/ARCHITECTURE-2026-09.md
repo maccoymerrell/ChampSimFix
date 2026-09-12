@@ -396,13 +396,7 @@ adequate. So the rate tracks the pipes, and the sizing arithmetic of §2.4 is re
 that rate. Whether a queue drains strictly in order — and therefore whether a miss blocks
 hits behind it — is stated per configuration and counted as head-blocked cycles.
 
-**A walk's own reads need reserved capacity.** A walk's memory references are ordinary
-accesses on this tile, so they must themselves pass the delivery window and a memory queue,
-while a full window applies backpressure to the translation queues. Without a reservation
-the stalled structure would be waiting on the structure that is stalling it. Each memory
-queue therefore reserves at least one entry for a walk, a counter records cycles a walk
-could not be admitted, and the reservation is justified by measuring zero reserved entries
-against one on a directed test rather than by assertion.
+**Where a walk's own reads go is a design choice, and it is left open for measurement.** A walk's memory references can take one of two paths, and both are configurations of the model. Through the *data cache*: the reads pass the delivery window and a memory queue like any access, page-table lines compete with data for the cache, and to keep a full window from stalling the walk that would free it each memory queue reserves at least one entry for a walk, with a counter for cycles a walk could not be admitted. Directly to the *last-level slice*: every walk step pays the slice's latency, but translation traffic never pressures the data cache and the reservation is unnecessary. The trade is latency against data-cache congestion, and which wins depends on the translation buffer's hit rate and on the ratio of walk reads to data requests: if the buffer hits nearly always the choice is immaterial; if walks are frequent and the ratio approaches one, the data cache is severely pressured; in between, whether a page-table hit or a data hit is worth more decides it. The analysis is the counters on each path across the workloads: buffer hit rate, walk reads per thousand data requests, page-table line reuse in the data cache, walk latency on each path, and the data-cache misses the page-table lines cause.
 
 ### 2.4 The cross-connection: one window, oldest-per-bank
 
@@ -502,7 +496,7 @@ building is decided by how large the partial count turns out to be.
 
 **A load-reserved / store-conditional pair is a serialisation point in the queue, and nothing else.** The load-reserved opens it and the store-conditional closes it; while it is open, every other entry to that address waits behind it in the same queue, so nothing intervenes and the store-conditional completes. There is no reservation unit and no reservation table: the queue's order *is* the reservation.
 
-**A read-modify-write atomic is one entry, performed at the bank.** The entry reaches the head for its
+**A read-modify-write atomic is one entry, performed at the bank by a small arithmetic unit beside it.** Such a unit is ordinary in real memory systems: RISC-V implementations execute their atomic operations with an arithmetic unit inside the data cache, graphics processors execute atomics in their last-level cache slices, the AMBA CHI interconnect defines far atomics performed at the home node, and PCI Express defines atomic operations completed at the target; the operation set is nine operations at two widths, so the unit is an adder, a comparator and a few logic gates. The entry reaches the head for its
 address; the bank reads the word, a small arithmetic unit beside the bank applies the
 operation, the bank writes the result back, all as one indivisible bank occupancy; the old
 value returns to the context, which wakes. If the line is absent the bank acquires it first
