@@ -303,14 +303,9 @@ before the numbers exist is to take the smallest block whose waiting-for-instruc
 are within measurement noise of the largest. One instruction remains a legal setting and is
 the reference point, because it is what the model does today.
 
-**The load slot** holds the one memory access a context is waiting on: its virtual address,
-the destination register name, the access width and the sign-extension class. It is the
-context's *single* outstanding memory access, so on return there is nothing to disambiguate
-and no staging area is needed. The context wakes only when the data arrives and has been
-written into the named bits.
+**The load slot** holds the one memory operation a context is waiting on, whatever its kind: a load, a store, or an atomic read-modify-write. It carries the operation, the virtual address, the access width and sign-extension class, the destination register name, and for a store or an atomic the value operand. It is the context's *single* outstanding memory operation, so on return there is nothing to disambiguate and no staging area is needed. A load wakes the context when its data has been written into the named bits; an atomic is performed at the bank, in the memory queue that owns its address, and wakes the context the same way with the old value in the named bits. Atomics are ordinary traffic on this path and the queues exist in large part to make them cheap.
 
-One outstanding access per context is policy, not an accident, and the default applies to
-stores as well: a store occupies the slot exactly as a load does, so a context has at most
+One outstanding operation per context is policy, not an accident. A load and an atomic occupy the slot until their value returns. The default applies to stores as well: a store occupies the slot exactly as a load does, so a context has at most
 one memory request anywhere in the machine at any time and its own accesses are in program
 order whatever the delivery window does. A relaxed rule — a store released at queue
 admission, with a small per-context count of outstanding stores that must reach zero before
