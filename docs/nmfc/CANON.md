@@ -1219,6 +1219,27 @@ specifically for this purpose? The one we write function instructions into?"; us
 be possible LOCALLY, on the same memory TILE. No crossing of the fabric, no
 migration.")*
 
+`[NOTE ADDED — owner ruling 2026-09-12; P.1 R116.]` **WHO MAY WRITE A DUPLICATE PAGE, since
+I3 rests the whole translation story on one.** The page table is itself a duplicate page, and
+it is kept consistent by the **privileged** path: a mapping change is a **REMAP**, applied to
+every copy (**F.8**, ledger **L59**). That is the pattern, and it generalises. A duplicate
+page is **one virtual address over N real physical addresses**, so:
+
+* **THE HOST MAY WRITE ONE.** Its store goes through the fabric's directory, which owns the
+  block or broadcasts the write, and all N copies are updated together. This is how a
+  duplicate page's contents come to exist outside the loader, and how a host that must
+  refresh a replicated table between phases does it.
+* **AN NMFC CORE MAY NOT.** A function core's walk resolves the address to **its own copy**,
+  because that locality is the whole point of the type (**I12**: routing happens after
+  translation, and a duplicate page is always the asking tile's). So a kernel store lands in
+  one copy and the others silently diverge — and no coherence state can represent it, the
+  directory being keyed by physical address. **REJECTED at P.1 R116**, and faulted by the
+  model.
+
+The asymmetry is not an accident of the implementation: it is why duplication is sound at
+all (**C.3**). N read-only copies need no protocol; N writeable ones would need exactly the
+protocol the type exists to avoid.
+
 `[DISAMBIGUATED]` The older framing **"N roots ⇒ table partitioned / one root ⇒ table
 duplicated"** is not a live *pair* of options in the sense the hook presents it, but the
 authority for saying so must be stated correctly, because it was stated wrongly once.
@@ -2475,12 +2496,12 @@ flowchart TB
   ALLOC --> HOST["HOST<br/>4 KiB virtual, 4 KiB physical<br/>block-interleaved across EVERY tile<br/>after the fabric, at the block<br/>MODE from the size class: block-interleaved"]
   ALLOC --> GRN["GRAIN<br/>G virtual, G physical<br/>ONE tile — the one the vtile asked for,<br/>or, UNHINTED, wherever the OS finds convenient (F.8, ruling O1)<br/>MODE from the size class: grain-partitioned"]
   ALLOC --> STR["STRIPED<br/>N x G virtual, N x G physical<br/>ONE GRAIN PER TILE, all N of them<br/>MODE from the size class: grain-partitioned"]
-  ALLOC --> DUP["DUPLICATE<br/>G virtual, N x G physical<br/>ONE FULL COPY PER TILE, all N identical<br/>replica set is an aligned N-run, copy t at base + t<br/>READ-ONLY BY CONSTRUCTION"]
+  ALLOC --> DUP["DUPLICATE<br/>G virtual, N x G physical<br/>ONE FULL COPY PER TILE, all N identical<br/>replica set is an aligned N-run, copy t at base + t<br/>READ-ONLY FOR THE RUN — TO THE NMFC CORES.<br/>the HOST may write one: coherence reaches every copy.<br/>A KERNEL MAY NOT: REJECTED, P.1 R116"]
 
   HOST --> HOSTU["for: ordinary HOST data, and any small hot structure<br/>every core reads — a level frontier, say.<br/>WHY: at G-sized pages a 1 MiB frontier is ONE grain,<br/>lands entirely on one tile, and every invocation<br/>that reads it has to migrate there."]
   GRN --> GRNU["for: NMFC data with an OWNER —<br/>co-located by vtile, wanted spatially local<br/>to one function core."]
   STR --> STRU["for: NMFC data with NO owner, spread for bandwidth.<br/>COST: allocation granularity is N x G,<br/>so it needs a free grain on EVERY tile — see F.5b consequence 3."]
-  DUP --> DUPU["for: what EVERY core needs —<br/>function instruction pages,<br/>THE PAGE TABLE,<br/>read-only data.<br/>Occupies M = N x G bytes of physical memory,<br/>only M/N = G of it is writeable."]
+  DUP --> DUPU["for: what EVERY core needs —<br/>function instruction pages,<br/>THE PAGE TABLE,<br/>data that is READ-ONLY TO THE NMFC CORES.<br/>Occupies M = N x G bytes of physical memory,<br/>only M/N = G of it is writeable —<br/>and the writer is the HOST or the loader, never a kernel."]
 ```
 
 **[name proposed by the assistant - user to confirm]** — **HOST** and **STRIPED** are this
@@ -4761,7 +4782,18 @@ is 1 grain of virtual space per 1 grain of physical space.*"
 | **HOST** | **4 KiB** | 4 KiB | **block-interleaved across every tile after the fabric**, at the block, exactly as a conventional machine interleaves across channels | ordinary host data — the conventional mapping, and the one a program gets unless something asks for otherwise |
 | **GRAIN** | **`G`** | `G` | **ONE tile.** *Which* tile: **the vtile's, when the object HAS a vtile**; when it does not, **wherever the OS finds convenient** — ruling **O1**, stated at **F.8**, and **no partition semantics attach to the virtual address either way** (**F.3**) | NMFC-owned data co-located by vtile (**F.2**), **and the cheap choice for an UNHINTED object** (consequence 4 below) |
 | **STRIPED** | **`N·G`** | `N·G` | **one grain per tile**, all N of them | NMFC data with **no owner**, spread for bandwidth |
-| **DUPLICATE** | **`G`** | **`N·G`** | **one full copy per tile**, all N identical | code, read-only data, **the page table itself** (**I3**) |
+| **DUPLICATE** | **`G`** | **`N·G`** | **one full copy per tile**, all N identical | code, **the page table itself** (**I3**), and data that is **READ-ONLY FOR THE RUN TO THE NMFC CORES**. **The HOST may write one** — its store goes through the fabric's directory, which owns the block or broadcasts the write, so all N copies are updated together; that is how such a page is built and how a host that refreshes a replicated table between phases does it, at the cost of one linear pass per phase. **A FUNCTION CORE MAY NOT** — its walk resolves the address to its own copy, so a kernel store would land in that copy alone and the rest would diverge with nothing able to observe it. **REJECTED: P.1 R116** |
+
+**THE REFRESH IS A COST, AND IT IS A COST A DESIGN ARGUES FOR `[NOTE ADDED — owner ruling
+2026-09-12]`.** A replicated table the **host** rewrites every phase is a legal and sometimes
+excellent shape: it turns a probe that would have migrated into a load that never leaves the
+asking tile. It is not free. The host pays a linear pass over the table once per phase —
+serial work, on the critical path between phases, while the function cores wait — and the
+table is one phase stale by construction, so it **filters** and cannot decide. **A design that
+wants it states the trade at review:** the refresh bytes and cycles per phase, against the
+migrations the replication removes, at the sizes being claimed. That is a **performance
+judgement, not a prohibition** — the prohibition is only on a **kernel** writing the page
+(**P.1 R116**), which is a correctness matter and not a trade at all.
 
 **[name proposed by the assistant - user to confirm]** — **HOST** and **STRIPED** are this
 document's names, not the user's. The user's ruling calls the 4 KiB page "*standard*" and ALSO
@@ -12843,6 +12875,7 @@ Marked `[REBUILT]` where the record shows it was rejected and then built again a
 | R23 | **Forking `PageTableWalker` and `CACHE`** to get huge pages and dual sizes | One `channel` model does it: a stock walker cannot terminate early so it cannot express a huge page, and a TLB is a cache with fixed offset bits so one array cannot hold both sizes | DESIGN §6 D:885, D:891 |
 | R115 | **IDENTITY-MAPPED PLACEMENT — "a `G`-sized NMFC page is mapped to the frame with the same index, so consecutive grains stripe across tiles by the partition arithmetic"** — i.e. spread obtained by FORBIDDING the allocator to relocate, rather than by a page type. The old `REGULAR` page. SST builds it: `PageType::REGULAR` with `t.frame = addr` (`/mnt/md0/NMFC-Rev/src/nmfc/src/NMFCPageTable.h:309`, and `:280`, `:402`, `:431-437`) `[ADDED - user ruling 2026-09-03.]` | **RETIRED BY THE FOUR-TYPE PAGE MODEL.** [RULED - user ruling 2026-09-03, verbatim: "*we would have 3 page sizes in total: 4 KiB, 1 grain, N grains … N grains for standard (bad name, would prefer something meaningful) and duplicate pages*".] **Spread is now the `N·G` STRIPED page's own definition (F.5b), so the allocator is free at every page type** and no placement rule depends on a frame index equalling a page index. **THE REASON IT IS A REJECTION AND NOT JUST A REPLACEMENT: identity mapping made page frames and page-table frames draw from one identity-mapped space, and DESIGN §30.3 D:3414-3429 records the two hazards that produced** — a `walkBase` check that ran **before** the value it checked was read, and **page tables sitting inside the frame arena**, "*silently, because a walk's data is never inspected*". Appendix 2 **D7** carries the third: "*identity-mapped frames colliding with allocated ones — the header had said 'above anything the program image occupies' from the beginning and nothing checked it*". **DO NOT CONFUSE THIS WITH R6.** R6 rejects identity/direct mapping as the ADDRESS SPACE's structure, for a different reason (#6: a unified virtual address space, and graph scale). **R115 retires a PLACEMENT rule.** Both stand, separately | user ruling 2026-09-03; **F.5b**, **C.3**, **F.9**, **E.2**; ledger **L58**; Appendix 2 **S42**, **D7**; DESIGN §30.3 D:3414-3429 |
 | R114 | **A PER-CONTEXT TRANSLATION CACHE** — a few `va → pa` entries held inside each context and consulted before the tile's TLB: DESIGN §7's `ctx_xlat`, ChampSim's `ctx_xlat_cache` (`inc/nmfc/nmfc_types.h:112`, held at `:150`), SST's `CtxXlat` (`NMFCTile.h:122`, `:135`, parameter `ctxXlat` default 2) `[ADDED — user ruling 2026-09-03.]` | "**I don't see how a shared TLB would be thrashed. There should be minimal address-space contention (a single program and all it's contexts share ONE address space) so it is highly beneficial for the TLB contents to be shared, otherwise you are forcing retranslation on the same function code, the same data pages that other functions have already walked. I really don't understand how that design can be considered an improvement over just a regular TLB for each NMFC core.**" **A tile has ONE shared, ASID-tagged TLB, as a regular core does** (I3). **AND THE MEASUREMENT SAYS THE SAME.** On the stress workload: `xlatCtxHits` **3.2M**, `xlatTlbHits` **1.15M**, `xlatWalks` **239k**. The per-context cache sits *in front of* the TLB, not instead of it, so **every one of those 3.2M hits is an entry the shared TLB holds or is about to hold** — it saves nothing a TLB does not, and it drops its contents on every migration. **PROVENANCE OF THE REJECTED RATIONALE, recorded so it is not re-derived: DESIGN §7 listed the mechanism with NO justification at all, and the “many contexts would thrash a shared TLB” argument was this document's own invention on 2026-09-03. It is withdrawn, not weakened.** | user ruling 2026-09-03; **F.7**, **C.2**, **I3**; ledger **L55**; Appendix 2 **S41**; DESIGN §7 D:768, §7.1 D:794 |
+| **R116** | **A DUPLICATE PAGE THAT AN NMFC CORE WRITES** — duplication as a message medium between tiles, or as a placement lever for data a kernel writes. Includes: a per-level frontier or reached table that a kernel sets bits in; an object declared DUPLICATE so a kernel's write "fans out"; any use of the type to make one tile's store visible to another `[ADDED — owner ruling 2026-09-12.]` | **A duplicate page is ONE VIRTUAL ADDRESS OVER N REAL PHYSICAL ADDRESSES.** A **host** write is fine: it goes through the fabric's directory, which owns the block or broadcasts it, so all N copies are updated together. A **function core's** is not: its walk resolves the address to **its own copy** (`NMFCPageTable::lookup`, `case PageType::DUPLICATE`: `t.tile = askingTile`), so the store lands in that copy alone and the other N−1 keep the old bytes — and nothing in the machine can observe the disagreement, because the directory is keyed by **physical** address and each copy *is* a different physical address. Making it work needs **coherence across the replica set**, which is the exact cost duplication exists to avoid (**C.3**: "N *writable* copies would need a coherence protocol; N copies of read-only code need nothing"). The owner, verbatim: "**If a duplicate table needs to be written, it shouldn't be duplicated in the first place. Either the algorithm needs to change such that writes are collocated with reads, you need to accept some amount of migration, etc.... duplicate pages do not exist so you can pass messages. That is not their purpose, it defeats a core part of the architecture to do so. Duplicate pages primarily exist for page tables and instructions. Without those, they have no reason to exist except for duplicating some read-only info.**" **THE REDESIGN, not the edit:** put the bits beside the data they describe so the owner of a range writes that range locally and probes from other tiles **migrate** (**I5**, **I11** — 72 bytes for the 64-byte line it replaces, and migration is evidence about placement, not a cost to engineer away); or choose the formulation whose probes are local; or **let the host do the rewriting**, which is allowed and costs a refresh pass (see the note at **C.4**). **ENFORCED:** `NMFCTile::issueStore()` and `issueAtomic()` fault such an access, do not send it, and count it in `tileDuplicateWriteRefused`, which every suite gate requires to be **zero**. | owner ruling 2026-09-12; **C.3**, **C.4**, **I3**, **I12**; directed test `src/nmfc/test/tile_dupwrite.c` |
 
 ### P.2 Decomposition and the unit of work
 
@@ -15672,6 +15705,45 @@ implements. NMFC-Rev `6c6a7e9`.]**
   rather than NV records, would pay for itself here: not measured, and not free, because the
   bottom-up step runs on the function cores and would have to write the bitmap. No threshold
   other than the published pair was tried. The rebuild was never offloaded.
+
+**L78 — WHO MAY WRITE A DUPLICATE PAGE. `[RULE SHARPENED, owner ruling 2026-09-12; no result
+withdrawn.]`**
+
+- *The gap.* The canon said a duplicate page is "read-only" (**C.3** figure, **C.3** quote of
+  user #271, **C.4** table) without saying **read-only to whom**. Both readings were taken
+  downstream: the design brief and the rules digest dropped the clause entirely and described
+  the type by geometry alone, and a BFS design document paraphrased "read-only data" as
+  "read-mostly tables" and then specified a **kernel** write to one
+  (`BFS-ALGORITHMS.md:362`: `next[]`, DUPLICATE, "written by the owner of the range the bits
+  belong to; the write fans out to the copies").
+- *The ruling.* **The host may write a duplicate page; an NMFC core may not.** A host store is
+  carried by the fabric's directory to every copy. A kernel's walk resolves to its own copy, so
+  its store would diverge the replica set with no coherence state able to represent it, and
+  keeping N writeable copies equal is the cost duplication exists to avoid. Recorded at
+  **P.1 R116**, in the **C.3** figure, the **C.4** row, and as a note under **I3**.
+- *What this does NOT withdraw.* `NMFCHostMMU::fanOutDuplicateWrite()` (commit `524de2c`,
+  2026-09-02) is the **host** path and is correct; its "replication beats placement" measurement
+  stands; `tile_bfs_rep`/`tile_bfs_dup` are host-side writers and keep running, the latter as the
+  suite's coverage for the legal half. **And no BFS result is superseded:** `bfs_own.c` and
+  `bfs_own2.c` keep their kernels off duplicate pages deliberately — `bfs_own2.c:46-51` says the
+  refresh "is the host's work and never a kernel's", and `:295` says the pointer table is "read by
+  the kernels and written by the host". Verified in the assembly (in `nmfc_own{,2}.S` the register
+  holding the bitmap is a `lwu` base only; every store and atomic targets `nmfc_own{,2}_node`,
+  `nmfc_own_nxt` or `nmfc_own2_rec`, all **STRIPED**) and by four-tile runs at the `q` point:
+  `own2ad` / `own2co` / `ownpub` all PASS with `tileDuplicateWriteRefused = 0` on every tile and
+  the host's `duplicateWrites` 1295 / 1311 / 1291 fanned out 3× as `duplicateCopies`. **N.10g and
+  every BFS section stand. `own2ad` remains the sweep's program.**
+- *What was closed.* The **tile** side had no rule and no check: `NMFCTile::issueStore()` sent a
+  kernel's store to a duplicate page down its own stack into its own copy — `tr.tile == tile_`
+  always, so not even a migration — and the other copies went stale with nothing counted. It now
+  faults, counted in `tileDuplicateWriteRefused`, zero-gated in both suites, with
+  `src/nmfc/test/tile_dupwrite.c` proving the kernel fault, that no copy diverged (read back
+  through a kernel standing on each tile), and that a host store to the same page reaches all
+  four copies. Full reconstruction: `tmp/audit/AUDIT-DUPLICATE-PAGES.md`.
+- *The process finding.* The design ran design → build → measure in one pass with **no review of
+  the design against Part B and Part P before building**. That is the only link in the chain that
+  would have caught `BFS-ALGORITHMS.md:362` regardless of how the digest was worded, and it is the
+  repair that matters most.
 
 ---
 
