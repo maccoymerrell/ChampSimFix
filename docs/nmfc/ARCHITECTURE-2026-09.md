@@ -266,7 +266,7 @@ detectable defect rather than an argument.
 
 ### 2.1 The two context slots
 
-A context has exactly two small private holding registers, and that count is structure.
+A context has exactly two small private holding registers, and that count is structure. Each context is an independent thread with its own program counter, its own instruction in hand and its own outstanding access; contexts do not execute in step and no two need be at the same instruction. The engine is a fine-grained multithreaded core, not a vector or single-instruction-multiple-thread machine.
 
 **The instruction slot** holds what the context will execute next. A context cannot be
 scheduled without its instruction in hand. At the end of a dispatch the tile already knows
@@ -275,9 +275,7 @@ decoded is a branch the shared branch-target buffer knows, the predicted target 
 address is sent to the instruction path immediately, a full re-issue window before the
 context can use the answer. Nothing executes on the prediction: a wrong target means the
 slot holds an instruction the context will not use, and the cost is exactly the refill a
-machine with no predictor pays every time. The buffer is shared by every context on the
-tile, because every context runs the same replicated code, so it does not grow with the
-context count.
+machine with no predictor pays every time. The buffer is shared by every context on the tile, as a target buffer indexed by program counter is in any multithreaded core; contexts run independent instruction streams, each with its own program counter and its own slots, and sharing the buffer is what keeps it from growing with the context count.
 
 Because the slot holds the next instruction and one speculative fetch covers the whole
 re-issue window, the tile needs **no decoupled fetch engine and no run-ahead fetch stream**.
@@ -745,9 +743,7 @@ contains in their place. The table states it plainly, one row per mechanism.
 Three further pieces are worth naming as absent on purpose rather than missing. There is no
 reorder buffer, renaming or speculative execution on an engine, and no structure that lets a
 load issue before an older store's address is resolved — the queues hold only requests whose
-physical address is already known, issue nothing on a prediction and never replay. There is
-no per-context branch predictor: the buffer is shared, because every context runs the same
-code. And there is no data prefetcher.
+physical address is already known, issue nothing on a prediction and never replay. There is no per-context branch predictor: the target buffer is one shared structure indexed by program counter that any context consults for its own next instruction; contexts do not share an instruction stream. And there is no data prefetcher.
 
 ---
 
