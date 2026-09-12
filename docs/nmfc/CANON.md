@@ -12728,10 +12728,14 @@ images allow — and the amended rule was applied to **every arm of this workloa
 level measured is unchanged in every case, so the levels still tile the traversal; the re-planned
 level-6 window agrees with the window it replaces to 1.9 % and runs in 85 s instead of 880. At
 64 MiB the rule does not help levels 1–5, whose regions lie before the first image that holds a
-graph, and all five exceeded the deadline: **five of nine windows produced no measurement, a
-traversal is the sum of its levels, and the point is withdrawn rather than imputed.** What would
-restore it is an image set whose early spacing follows instructions rather than units of work, so
-that one image lands at the end of the construction. `tools/sampling/levels.sh` now carries the rule.
+graph, and all five exceeded the deadline on BOTH arms; on the processor arm a sixth window failed for
+a different reason — the widest level there is cut into pieces and the piece beginning at 901,815
+settled vertices has no image nearer than 656,912 vertices behind it, so its warm-up alone exceeds any
+other window's region. **Six windows of fifteen produced no measurement, a traversal is the sum of its
+levels, and the point is withdrawn rather than imputed.** What would restore it is a DENSER image set:
+early spacing on instructions rather than work units, so an image lands at the end of the
+construction, and later spacing close enough that no window warms over two-thirds of a level. This is
+a limit of Part O's image production, not of the machine. `tools/sampling/levels.sh` now carries the rule.
 
 **Five redesigns were built and measured and none beat it**, which is the result. Ratios to the
 reference, worst to best: every level bottom-up 0.22–0.36, every level top-down over STRIPED bits
