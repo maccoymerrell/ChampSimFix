@@ -928,6 +928,29 @@ arrives, because deferring a protocol response behind a busy link is how a direc
 deadlocks, so what is charged for those two is their occupancy and the contention they cause
 rather than their own latency.
 
+**What the counters say when one port is busy, and how to read a port's name.** A port's `in`
+direction is the endpoint *driving* the fabric, not traffic arriving at it; and in the machine
+before this rebuild a single port carried both directions at once. A reading of "the host's
+inbound port at 89 %" taken on that machine is therefore neither inbound nor one direction, which
+is the first thing the rebuild was for. Read correctly, the busiest window measured so far is the
+**16 MiB** graph search's level 7, in which a tile data cache's pooled miss-status file — 32
+entries, the structure §1.6's per-bank derivation replaces — was full for 511,347 of 686,408
+cycles. The link carrying the load is **the host's second-level cache's**, configured in that
+machine at 64 B per 1 GHz cycle (`bytesPerCycle=64`), at 89.2 % occupancy with 110,758,839 cycles
+of packets waiting behind it. What fills it is **line data**: 201,269 packets of 72 B holding it
+402,538 cycles, 65.8 % of its busy time, against 209,509 coherence packets of 8 B and **zero**
+control bytes — returned contexts ride the operating system's attachment, at 0.1 % occupancy. The
+sender is the host's own second-level cache, answering 200,504 snoop-fetches against 4,152 misses
+of its own, and the requesters are the four tile data caches through the home nodes. The binding
+resource is **the port, not the directory**: the four home nodes, configured at two transactions
+per fabric cycle each (`directoryRate=1`, `directoryClock=2GHz`), run at 9 % with **zero** cycles
+of waiting. What the same counters do *not* support is worth stating with it. In the corrected arm
+the fabric is not the limit at all — busiest port 29 %, home nodes 4 %, no miss-status file full —
+while the tiles hold 18.8 of 128 contexts with 15.5 of them ready per cycle and issue into only
+29.9 % of pipe slots. Why that is remains unsettled: the counter that would name the resource
+postdates this window, and no simulation was run for this account, which reads per-port,
+per-direction, per-kind counters that were already in that window's statistics file.
+
 **A miss-status file is per bank, and its size is derived from the contexts it serves.** Such
 a register holds one outstanding miss — the tag being fetched, the requests waiting on it, and
 how the fill will land — and all three are properties of one bank, so a banked cache has one
@@ -956,17 +979,27 @@ separately — waiting cycles, depth every cycle, deepest ever — so a cache wi
 told apart from a cache short of registers everywhere.
 
 **The host's predictors, and one reporting rule.** The host's memory-dependence predictor is
-the two-bit counter this machine ran before this work. A path-history predictor is built and
-reachable by name, and is **not** the default: measured, it held fewer loads and violated far
-more, and the cause was in the wiring rather than the table — the path history advanced when a
-memory instruction entered the queue, so a load whose address resolves many cycles later was
-predicted and trained on a route through instructions it was never reached along. A load now
-takes a token for the history as it enters the queue and carries it in its own entry, and the
-directed test that drives the predictor in the queue's order separates the two paths through
-one load exactly where the live-history arrangement, instantiated beside it as the control,
-separates nothing. It becomes the default when it has been measured that way, which is one
-point, one program, eight windows, and has not been done; presenting an "after" for it before
-then would be presenting a unit test as a simulation.
+now the path-history predictor, and it is the default. The machine ran a two-bit counter before
+this work; a path-history predictor was built beside it and, first measured, held fewer loads and
+violated far more, and the cause was in the wiring rather than the table — the path history
+advanced when a memory instruction entered the queue, so a load whose address resolves many cycles
+later was predicted and trained on a route through instructions it was never reached along. A load
+now takes a token for the history as it enters the queue and carries it in its own entry, and the
+directed test that drives the predictor in the queue's order separates the two paths through one
+load exactly where the live-history arrangement, instantiated beside it as the control, separates
+nothing. It has now been measured the way a default is owed: one host-only program, the chained
+hash table at 16 MiB, and eight sampled windows that every arm ran identically, from the same plan
+with the same warm-up and the same measured width. Whole-program cycles are 153,357,038 for the
+path-history predictor, 159,972,624 for the store-address predictor and 211,491,906 for the two-bit
+counter — **1.3791× faster than the counter**, Fieller interval [1.3154, 1.4457], and **1.0431×
+faster than the store-address predictor**, [1.0019, 1.0866], both intervals excluding 1. The
+counters say why: the path-history arm holds 2,835,355 loads against the store-address arm's
+3,226,392, twelve per cent *fewer*, while taking 23,498 memory-order violations against 182,668 and
+4,776 replays against 75,885; the counter arm holds a third as many loads and pays 4,938,411
+violations. Capacity is not what separates them — the path-history predictor peaks at 165 live
+entries of the 20,480 it has. The store-address arm reproduced its earlier total to the cycle,
+which is the check that the machine under the three arms did not move between the two
+measurements.
 
 > **The reporting rule for the bimodal control.** A figure that quotes the bimodal branch
 > predictor as a control must print `execute_squash` beside `branch_mispredicts`. That control
@@ -1037,9 +1070,24 @@ what, and what the counters say*
 the path into the tile and deletes the mechanism it replaces — the table of words held above
 the data cache, with its cache pins, its snoop merges and its unbounded waiter list — in the
 same change, so that no interval exists in which the tree holds two mechanisms for one job.
-Three defect sweeps have run over it since. What each of them found is stated beside the
-mechanism it is about rather than collected at the end, and what is still designed and not
-built is now a short list, which §3 gives.
+Three defect sweeps have run over it since, and the whole stress population has since been run
+under both simulators as a cross-check. Every seed is built once, so the cycle model and the
+functional model execute the same bytes: 10,382 cross-model runs over 6,369 seeds, comparing
+45,545 quantities — four per seed, plus the entire final memory image on the 4,013 seeds with no
+exchange phase — across every risk class the generator makes, from plain atomics to contended
+atomics, migration, exchange and migrating pairs. There was **one** disagreement, and it was a
+mechanism no seed reaches, so it was the mechanism's own directed test that found it: the
+functional model *performed* a kernel store to a duplicate page, where the ratified definition
+requires the store to be refused, counted and to leave memory unchanged. The definition decides,
+not a majority of two models, and the functional model was fixed (commit `a660cbf`). Two further
+apparent disagreements were faults in the comparison rather than in either model and are now
+checked identities — issued instructions minus migrations equals instructions executed, and
+`FORK.R` executed minus refusals equals forks taken — and the cycle model's 150,087,496
+function-core instructions and 1,372,952 migrations reconcile exactly against a functional model
+that has neither. The whole population fitted in 2.6 process-hours against a 32-hour budget, so
+nothing was sampled. What each defect sweep found is stated beside the mechanism it is about
+rather than collected at the end, and what is still designed and not built is now a short list,
+which §3 gives.
 
 ### 2.1 The two context slots
 
@@ -1356,6 +1404,24 @@ pair sees each stage at its full configured size and is byte-identical. Nothing 
 nothing is serialised: the order accesses to an address are performed in remains the memory
 queue's, assigned on admission there.
 
+*Before and after.* The rule was built without one, so the machine was given a name for it —
+`pointReserve`, default unchanged — and seven unit checks proving the name selects the older stage
+(commit `f34d150`). Paired at the configured depths on the directed two-agent pair test, the two
+arms produce **byte-identical statistics files**: 51,369 and 51,531 host cycles at one tile and at
+four, 26,519 tile cycles standalone, with 507 points opened and 384 closed by their own
+store-conditional. At the configuration everything here is measured under, the rule costs exactly
+zero. At a memory-queue depth of 8 it is the difference between finishing and not: with the rule
+the test passes in 26,635 cycles, and without it no invocation ever returns and the run does not
+end. Depth 2 fails either way and nothing is claimed for it.
+
+> **A defect the pairing found, and it is not yet corrected.** At a delivery window of width 1 the
+> reservation does harm rather than nothing. The refusal triggers when `occupancy + 1 ≥ width`,
+> which at a width of 1 is true of an *empty* window — so while any point is open the window's
+> capacity for ordinary traffic is zero rather than one less, and that arm fails where the
+> rule-off arm passes in 40,999 cycles. Nothing configured is affected, the window being 4 slots
+> wide and the queue 16 deep, but the reservation needs a floor of two units at each stage, and
+> that correction has not been made.
+
 **A load-reserved for another address may not take over an open point.** A queue holds one
 point at a time; a load-reserved arriving for a different address in the same queue used to
 take it, and two pairs on two words of one queue could then stop each other for ever with
@@ -1623,7 +1689,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 
 | mechanism | in the model today | designed, not yet modelled |
 |---|---|---|
-| Host: out-of-order core, two-stage front end with override predictor, wrong-path modelling, two-level TLB and walker at the cache management units, data prefetchers, memory-dependence prediction | **yes**, each with its own counters. The memory-dependence default is the two-bit counter; the path-history predictor is built, corrected and not the default | the one measurement that would make the path-history predictor the default: one point, one program, eight windows |
+| Host: out-of-order core, two-stage front end with override predictor, wrong-path modelling, two-level TLB and walker at the cache management units, data prefetchers, memory-dependence prediction | **yes**, each with its own counters. The memory-dependence default is now the path-history predictor, measured over eight paired windows at 1.3791× the two-bit counter [1.3154, 1.4457] and 1.0431× the store-address predictor [1.0019, 1.0866]; the other two remain selectable by name | — |
 | Fabric: a port per endpoint per direction, 32 B at 2 GHz, ten endpoints, traffic counted per port and per direction as control, coherence and data; the directory one home node per slice at one transaction per port cycle | **yes** (§1.6) | — |
 | Caches' miss-status files: one file per bank, sized from the contexts the cache serves | **yes** (§1.6), on both tile caches; the last-level slice holds the sum in one pool | the per-bank arrangement inside the slice, which lives in a library outside this tree |
 | Coherence: directory at the fabric, four tiles each with a last-level slice, memory controller and channel | **yes** | — |
