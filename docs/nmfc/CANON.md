@@ -6453,6 +6453,14 @@ all, while its title-matching tier-3 section was one of the sections never cited
 
 ### H.7 Atomics — enforced, and practically free. THE ATOMIC TABLE IS ONE STRUCTURE.
 
+**[SUPERSEDED IN IMPLEMENTATION — 2026-09-23. The ruling below stands and is what the machine
+obeys; the STRUCTURE that obeys it is no longer a table of words held above the data cache.
+The tile's atomicity, ordering and forwarding are now properties of the per-bank memory
+queues, and the held-word table, its cache pins, its snoop merge and its waiter list have been
+deleted from the tree. Read H.11 first: it states what the ruling's three verbs — obtain,
+release, pass — cost in the built machine, and why the full-structure rule of this section is
+satisfied by construction there. Nothing in this section is withdrawn as a requirement.]**
+
 *User #238, 2026-09-01T06:19:05Z:* "Regarding atomics, **we enforce them, but they are
 practically free. Atomics are supported instructions, and we have a unified atomic
 table that enforces atomic relationships. Otherwise, if we just blatantly remove the
@@ -7662,6 +7670,76 @@ measures a demand for either.**
 - **Nothing in H.10 is a design constant.** The map is design; **SELECTED CONFIGURATION gains no
   row** (user ruling 2026-09-02 **R6–R10**: "*Do ISAs define how many cores they support? NO!*").
 
+---
+
+### H.11 THE TILE CORE AS BUILT — one memory path, and the table above the cache is gone
+
+**Status: BUILT and in the machine, 2026-09-23.** This section records the structure that now
+implements H.4 (one outstanding operation per context), H.6 (stores) and H.7 (atomics). It
+adds no requirement and withdraws none; it says which object carries each one.
+
+**Two pipelines that share nothing.** A memory operation's *virtual* address leaves the
+context's data slot into a **translation path** — queues indexed by the virtual page,
+completing at a rate **derived from the pipe count**, with any other rate refused at
+construction. What returns is a *physical* address, and only then does the operation enter the
+data side: a **delivery window** carries it into the **memory queue** that owns that address,
+oldest-per-bank, at most one delivery per queue per cycle. There are exactly as many memory
+queues as data-cache banks and the two pick the bank by the same function, so
+
+> **two accesses to the same address are always in the same queue, and that queue is in order.**
+
+Everything H.7 asks for follows from that one line. **Ordering** is the queue's sequence
+number, assigned at admission. **Forwarding** is a comparator over a few entries: the newest
+older overlapping entry decides a load, and a partial cover is counted rather than merged.
+**An atomic is one entry performed at the bank** by a small arithmetic unit beside it, inside
+one indivisible bank occupancy; if the line is absent the bank acquires it first, so a
+read-modify-write never spans a cache miss. A queue of *k* atomics to one word costs *k* bank
+occupancies rather than *k* memory round trips — which is H.7's "practically free", bought by
+an ordinary cache hit instead of by a word living outside the cache. **A coherence request
+acts on the bank, never on a queue**, so it allocates nothing the core's own traffic can fill;
+where it meets queued writes the bank defers for a bound *derived* as queue depth × bank
+access latency and then yields, and both the expiry and the re-acquisition are counted.
+
+**H.7's full-structure rule is satisfied by construction.** The ruling permits exactly two
+behaviours for a full structure: unachievable, or safely blocking. This one blocks by credit —
+a full queue withholds credit for its bank, the window keeps the entry, a full window stops
+accepting from translation, and the context waits in its own slot exactly as a context asleep
+on a load does. No timeout, no retry counter, no capacity fault, and no resource held while
+waiting for a resource. The depth sweep shows a curve and not a cliff: queue-full cycles 0, 1,
+368, 6,417 as the queue goes 32, 8, 4, 2, with the program's answer unchanged at every point.
+
+**A load-reserved / store-conditional pair is the queue and nothing else** — the load-reserved
+opens a serialisation point for its address, the store-conditional closes it, and there is no
+reservation unit. Three rules, each written after a defect, complete it: a point has exactly
+three ends (its own store-conditional, the line being taken away, the departure of the context
+that opened it) and no timer; while a point is open, one entry of the translation queue, one
+slot of the delivery window and one entry of the memory queue are **reserved for the close**,
+off entirely when no point is open; and a load-reserved for another address in the same queue
+**waits** rather than taking the point over. A host core updating the same word takes the line
+into its own cache and the directory arbitrates — ownership, which is Part K's one serialising
+mechanism, not a remote read-modify-write engine, which Part J forbids — and a line the tile
+loses breaks every point over it, so the store-conditional fails and the retry loop absorbs it.
+
+**What was deleted in the same change, so that no interval holds two mechanisms for one job:**
+the held-word table and its line index, the waiter list, the hand-off bound and its parameter,
+the `PARKED` context state, the in-flight atomic fields on every context, the cache pins and
+the fill-retry that asked a client to surrender a pinned line, and the snoop merge. The number
+of structures that must agree with each other falls from four — table, pins, notification path,
+directory — to one: a queue entry against another entry in the same queue, resolved by
+position. **The honest trade, reported as a trade:** bank accesses go up and fabric traffic
+goes down, because a load the old mechanism answered above the cache is now a bank hit.
+
+**Zero gates.** Six counters are gated to zero across every program either suite runs:
+misroute, untranslated admit, a context's own two overlapping accesses admitted out of program
+order, an answer no queue entry owns, a delivery into a queue with no credit, and a privileged
+page-table write arising from a kernel store. `memqLrscSpuriousSuccess` and
+`memqLrscPointsTimedOut` join them.
+
+**What is open and named as open:** which path a walk's own reads take (both arms built, under
+analysis); the block instruction slot; the relaxed store-release rule; a fairness bound at the
+serialisation point under a rate of contention; and, at the memory controller, one
+low-complexity queue per bank, which is not built. The full record is
+`docs/nmfc/ARCHITECTURE-2026-09.md` §2 and §3.
 
 ---
 
@@ -13329,7 +13407,17 @@ Every place the sources disagree, which authority won, and why. Authority order:
 user-vs-ChampSim conflicts, or genuinely open questions, that this document does not
 resolve on its own authority.
 
-**Count: 65 conflicts (L1–L65, no gaps), and NONE of them is open.** **[UPDATED — 2026-09-04
+**Count: 65 conflicts (L1–L65, no gaps), and NONE of them is open.** **[UPDATED — 2026-09-23:
+**L83–L91** added, and the header's count has been stale for several revisions —
+`grep -cE '^\*\*L[0-9]+ —' docs/nmfc/CANON.md` is the check and now reports 92 rows over 91
+numbers, L61 appearing twice. The nine new rows are the tile-core sweep's fixed defects (the
+miss-status register taken without asking; the pair that deadlocked a queue; the delivery
+window's counter that could not fire; the yielded line that left a point open; the two gates
+that were not counters of this machine; the store-conditional reported as spurious; the host
+and a function core sharing a word; the abandoned point closed by the wrong timer) and one
+refused design alternative, the pipe-bound issue rule. Every one is a defect in an
+implementation or a measured refusal, class R5, so none opens a ruling and the front matter's
+"zero questions open" is unaffected.]** **[UPDATED — 2026-09-04
 (evening): **L64** and **L65** added — the two `src/nmfc` defects that moving to the default
 out-of-order host exposed (the host MMU mutating the core's own `Request`; the fabric charging a
 queued migration against the destination's capacity), both **FIXED** in the frozen build
@@ -16144,6 +16232,122 @@ recorded, cause not established, no result affected.]`**
   three points**: the redesigned hash table is measured at the longer batch length at all five
   sizes, and the four sizes where both lengths ran are what the per-invocation cost of N.10h-2 is
   derived from.
+
+**L83 — A STORE AND AN UPGRADE TOOK A MISS-STATUS REGISTER WITHOUT ASKING. `[DEFECT, FIXED,
+2026-09-23. Class R5.]`**
+
+- *What it was.* Five paths in the cache take a miss-status register; three asked whether the
+  bank's file had room and two did not — a write-through cache's store, and an upgrade of a line
+  held without write permission. Found by `mshrBankOverCapacity` on the first suite run after the
+  counter existed, before a test was written for it: 36,393 events over 48 runs, all but two in the
+  host's L1 data cache, which is the write-through one.
+- *Why it matters.* A cache that never refuses a store a register carries as many outstanding
+  stores as the program offers it and reports the latency of a part with unbounded miss-status
+  registers. Every figure taken from it is a figure about a machine nobody could build.
+- *Where the sizes come from.* A file is per bank and its depth is `ceil(contexts ÷ banks)` times an
+  over-provision for the banks' unequal shares, measured at 1.31 on this machine and rounded to 1.5.
+  Recorded at ARCHITECTURE-2026-09 §1.6.
+
+**L84 — TWO CONTEXTS PERFORMING ONE PAIR DEADLOCKED THE MEMORY QUEUE. `[DEFECT, FIXED, 2026-09-23.
+Class R5.]`**
+
+- *What it was.* Two rules of the queue, each correct alone, formed a cycle: a serialisation point
+  holds every other entry to its address, and an entry may go to its bank only when no older
+  overlapping entry is ahead of it. A second context's load-reserved joined the queue ahead of the
+  first's store-conditional, and each then held the other. Minimised to two invocations of one
+  iteration; one invocation of any number completes.
+- *The fix.* The closing store-conditional is admitted past entries its own point is holding. The
+  order accesses are performed in is still the queue's, assigned at admission.
+
+**L85 — `deliveryLimitedCycles` COULD NOT FIRE, AND A CLAIM WAS MADE FROM IT. `[DEFECT, FIXED,
+2026-09-23. Class R5 — and a REPORTING defect, which is the part worth keeping.]`**
+
+- *What it was.* The counter asked whether an entry sitting *beyond* the delivery window would have
+  been delivered by a wider one. The window refuses an entry at its width, so nothing is ever beyond
+  it: the predicate was false on every cycle of every run ever made, and a build record concluded
+  from its zero that "the cross-connection was never the constraint".
+- *The rule this leaves.* A counter reading zero proves nothing until something has made it fire. It
+  now asks what the structure can answer — the window full at end of cycle with a paid-for
+  completion still held by translation — and the machine's timing is byte-identical across the fix.
+
+**L86 — A LINE HANDED TO ANOTHER AGENT LEFT THE POINT OVER IT OPEN. `[DEFECT, FIXED, 2026-09-23.
+Class R5.]`**
+
+- *What it was.* A queue's order is an order over *this tile's* accesses. The tile yielded a line in
+  two places and told the queue in neither, so a store-conditional could report that nothing had
+  touched its address while another agent held permission to write it — the one thing the pair
+  promises it cannot do. `memqLrscSpuriousSuccess` could not have caught it, being set only by a
+  write performed from a queue entry.
+- *The fix.* A line the tile loses breaks every point over it, in both places it is yielded, and the
+  store-conditional fails; counted as `memqLrscPointsBrokenByCoherence`.
+
+**L87 — TWO ZERO-GATED COUNTERS WERE NOT COUNTERS OF THIS MACHINE. `[DEFECT, FIXED, 2026-09-23.
+Class R5.]`**
+
+- *What it was.* The queue kept three gates; the tile added two of them into one statistic — one of
+  which is a different property, admission order against performance order — and never read the
+  third at all. A finding on either would have named the other's mechanism.
+- *The fix.* Each is its own registered statistic, read out unconditionally including its zero, so
+  that a rename cannot make a gate pass forever.
+
+**L88 — EVERY STORE-CONDITIONAL WAS REPORTED AS A SPURIOUS SUCCESS. `[DEFECT, FIXED, 2026-09-23.
+Class R5.]`**
+
+- *What it was.* "Is this a write" was asked of the request's *class*, and a load-reserved is of the
+  atomic class, so every pair marked its own bytes as having moved: 256 spurious successes out of 256
+  pairs on the first run that ever read the counter. The same mistake made a coherence request defer
+  for a queued load-reserved, which is an entry that never writes the line.
+- *The fix.* The question is asked of the request rather than of its class. The gate failed the suite
+  the first time it was read out, which is what a gate is for.
+
+**L89 — NO CONFIGURATION LET A HOST AND A FUNCTION CORE UPDATE ONE WORD ATOMICALLY. `[DEFECT, FIXED
+IN THE MACHINE'S CONFIGURATION AND HALF-FIXED EVERYWHERE, 2026-09-23. Class R5.]`**
+
+- *What it was.* In the flat configuration the host's sixty-four atomic additions to a shared word
+  came out as one and the tile was never told it had lost the line, with `snoopsToBank` zero on the
+  very run written to make it fire; in the coherent configuration the simulation aborted, because the
+  memory link carried reads and writes only and an out-of-order host expands every `amo*` into a
+  load-reserved / store-conditional pair.
+- *The mechanism, and why it is this one.* Part K's rule — a unit of work owns the data it touches —
+  names ownership as the one serialising mechanism for a read-modify-write, and Part J records that
+  there is no remote data path in this machine and must not be one. So the host **takes the line**
+  into its own cache and performs the operation there, the directory arbitrating; the act of taking
+  it is the snoop that tells the tile. The reservation lives in the cache that is the agent's presence
+  on the fabric, one line address per client port, broken by any snoop or eviction.
+- *What stands unrepaired.* The in-order host still cannot perform its own atomic: the repair reaches
+  a second defect in the stock cache, where an unlock is queued behind the coherence request waiting
+  for it. It is recorded with its measurements rather than worked around, and the out-of-order host is
+  the default host, so the machine's configuration is the fixed one.
+
+**L90 — AN ABANDONED SERIALISATION POINT WAS CLOSED BY A TIMER DERIVED FOR ANOTHER QUESTION.
+`[DEFECT, FIXED, 2026-09-23. Class R5.]`**
+
+- *What it was.* The limit defaulted to the snoop-deferral bound — queue depth × bank access latency,
+  thirty-two cycles — which is right for "the most work that can be queued against one line" and has
+  nothing to do with how long a pair takes. A pair routinely exceeds it, so the timer was failing
+  store-conditionals that were on their way to succeeding: six of 260 on the one program that performs
+  the pair.
+- *The fix.* A point has exactly three ends and the third needs no timer: a context leaves by
+  retiring, migrating or being killed, all three move the slot's generation token on, and a point
+  owned by a token that has moved is closed at the instant of departure, with everything waiting
+  behind it freed in the same cycle. The timer remains **off by default** as a labelled safety
+  configuration, and `memqLrscPointsTimedOut` is a zero gate in both suites.
+
+**L91 — THE PIPE-BOUND ISSUE RULE IS REFUSED ON EVIDENCE. `[DESIGN ALTERNATIVE REFUSED, 2026-09-23.
+Not a defect; the parameter survives.]`**
+
+- *What was asked.* Whether a context bound to one pipe, with cross-stage forwarding so that it may
+  issue on consecutive cycles, is worth its comparators, multiplexers and interlock.
+- *The measurement that refused it.* On the graph search at 16 MiB, eight windows: 649,287,536 issue
+  slots offered, 27,554,702 used, and 257,028,078 unused slots — 39.6 % — in cycles where some context
+  was blocked on nothing but its re-issue window. That is the first leg of the gate only. No
+  instruction issued beyond position M in its run, because **every load-free run is one instruction
+  long**, so the mechanism has no consecutive instruction of one context to issue; and 16.1 million of
+  the 27.6 million instructions are followed by a run that ended because the next instruction had not
+  arrived. The front end, not the issue rule, is what a context waits for on this workload.
+- *What is refused, and what is not.* `pipeBind = 1` is refused at construction rather than accepted
+  and ignored. The parameter stays, and the question is open for a workload with long arithmetic
+  between memory accesses — which this machine's hash table is, and which has not been sampled.
 
 ---
 

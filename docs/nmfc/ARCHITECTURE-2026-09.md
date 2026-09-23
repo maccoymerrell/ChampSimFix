@@ -779,8 +779,10 @@ complete is a **fault**, which parks the context and enters the path `RESUME` re
 
 The encoding is decoded independently in four places: the host attachment and the tile of the
 cycle-accurate model, and the host and the function core of the functional model that writes
-the cycle-accurate model's starting images. All four read their field values from one header,
-and the functional model's private copy of that header is compared against it at build time.
+the cycle-accurate model's starting images. All four read their field values from one header, **and all
+four now read which encodings exist from one table in that header**, `NMFC_F7_DEFINED`; the
+functional model's private copy is compared against it at build time over all 128 values,
+because a copied table is only honest if something compares the copies.
 
 What was checked for this document:
 
@@ -818,24 +820,43 @@ The words, which are what any future decoder must agree with:
 Those words use `x10` as the destination and `x11`, `x12` as the sources wherever the
 instruction has one; the register fields are not part of the instruction's identity.
 
-**All four decoders agree on all eighteen defined words.** Four disagreements were found, and
-none of them is reachable by an assembled program today:
+**All four decoders agree on all eighteen defined words.** Four disagreements were found
+beyond them. All four are now closed, and the first of them is what the one shared table is for.
 
-- **Reserved variants of the control group.** The functional host treats every variant of that
-  group other than 0 as `RESUME` and traps it; both cycle-accurate host models treat only
-  variant 1 as `RESUME` and every other variant as `KILL`. A future instruction placed at
-  variant 2 would be decoded two different ways.
-- **Reserved variants of the probe group.** The cycle-accurate hosts reject any probe variant
-  above 1; the functional host decodes bit 0 alone, so variants 2–15 read as `FORKQ` or
-  `JOINQ` rather than being rejected.
-- **High-half multiply.** The functional function core implements the three high-half
-  multiplies; the cycle-accurate tile rejects them as illegal. It also special-cases the one
-  signed division that overflows — the most negative value divided by −1 — which the
-  cycle-accurate tile does not.
-- **Operand flags on the out-of-order host.** That host's coprocessor instruction declares
-  `rs1` and `rs2` as sources and `rd` as a destination unconditionally, ignoring the `funct3`
-  flags, where every other decoder reads only the fields the flags name. It changes no result,
-  because every unused field is encoded `x0`, but on that host the flags are advisory.
+- **The reserved encodings, which are the space a later instruction is added in.** An
+  instruction is identified by `funct7`: three bits of group and four of variant, of which
+  thirty values name something and ninety-eight name nothing. Each decoder was spending part of
+  that space, each of them reasonably and each of them differently — the functional model read
+  "variant 0 is `KILL`, anything else is `RESUME`" where both timing hosts read "variant 1 is
+  `RESUME`, anything else is `KILL`", and the probe group's undefined variants decoded as a
+  second `FORKQ` or `JOINQ` on one model and were refused on the others. Fourteen words of the
+  control group were a privileged trap on one model and an unprivileged kill of whatever handle
+  the `rs1` field named on the other two. Nothing in the tree emitted those words, which is
+  exactly why it survived, and it matters because a reserved encoding that decodes as its
+  neighbour cannot be used later: a program assembled against the later meaning would run on an
+  older machine and silently compute something else. **There is now one table, and every
+  decoder refuses an undefined value before it looks at the group.** A unit test checks the
+  table against the instruction set's own list of thirty in both directions, with the three old
+  rules beside it as controls that each accept fourteen words naming nothing, and three directed
+  tests issue a reserved variant on purpose in the three groups that had a default, all three
+  meant to abort.
+- **High-half multiply, and the division that overflows.** The cycle-accurate tile rejected
+  `MULH`, `MULHSU` and `MULHU` as illegal while the functional function core implemented them —
+  a compiler emits them without being asked, for an overflow-checked multiply or a division
+  turned into a multiply by a reciprocal — and it computed the most negative integer divided by
+  −1 with the C++ operator, for which that pair is undefined and ends the process. Both are
+  fixed, and a directed test asserts twenty answers against arithmetic on the ratified
+  definition rather than against a recording of either model, running the two overflow pairs
+  first because they are the cases that used to end a simulation.
+- **Operand flags on the out-of-order host.** That host's coprocessor instruction declared
+  `rd`, `rs1` and `rs2` used unconditionally, ignoring the `funct3` flags that say which of them
+  the instruction reads, so an instruction reading neither source was renamed against whatever
+  producers happened to be writing the register numbers sitting in its unused fields, and waited
+  for them — a false dependence, invisible in every answer it gives and worth a different number
+  of cycles depending on surrounding code it does not read. The unused slots now name the
+  register that ignores writes, `x0`, rather than being removed, because the issue path reads
+  its input slots by index; no binary in the tree changes, since its assembler macros already
+  emit `x0` there.
 
 ### 1.5 The tracking unit, sized to the contexts
 
@@ -866,11 +887,99 @@ below the tracking unit routinely holds many entries while the engines hold very
 contexts, because most of those entries are invocations that have already finished and are
 waiting to be collected. Context parallelism is reported per engine, split by state.
 
+### 1.6 The fabric, the caches' miss-status files, and the host's predictors
+
+Three parts of the machine outside the tile core were rebuilt in the same week, each because
+what was there could not answer a question that was being asked of it. They are recorded in
+*Three corrections to the simulated machine: the interconnect, the caches' miss-status
+registers, and the load-store dependence predictor*
+(`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/fix3/MACHINE-FIX-3.md`), and every quantity
+below carries where it came from.
+
+**The fabric is a port per endpoint per direction.** It used to charge one serialisation
+budget per attached cache, which carried both directions at once, charged only the sending
+end, let writebacks and snoop responses cross for free, and gave the directory a latency but
+no throughput — so a destination every agent was sending to looked idle, and a large part of
+the traffic a machine of function cores makes was invisible. Now a packet is serialised onto
+the source endpoint's outbound link, crosses the distance, and is serialised off the
+destination's inbound link; both links are held for the serialisation and every endpoint's
+links are independent of every other's.
+
+| quantity | value | where it comes from |
+|---|---|---|
+| port width, one direction | 32 B per port cycle | a 256-bit flit: Arm's CMN-700 carries one flit per link per direction per cycle and is configurable at 256 bits in the server parts this machine is sized against; Intel's mesh links from Skylake-SP onward, and the ring before them, are 32 B per cycle per direction |
+| port clock | 2 GHz | within the published operating range of those parts (Skylake-SP's mesh runs at about 2.4 GHz and later generations lower it). **Assumed**: this machine has no interconnect clock of its own, and 2 GHz is deliberately below the fastest cited |
+| bandwidth per port per direction | 64 GB/s | 32 B × 2 GHz |
+| endpoints | 10 | two per tile for four tiles, plus the host's second-level cache and the operating system's attachment |
+| machine aggregate | 1280 GB/s | 10 × 2 × 64 GB/s, written into every run's own statistics file so a timing figure never has its interconnect width looked up elsewhere |
+| memory behind it | 76.8 GB/s | four DDR5-4800 channels at 19.2 GB/s, from the device file the memory controllers are configured from |
+| hop latency, tile to tile | 1 ns | a published mesh hop is 0.4–0.6 ns, rounded up to the shortest time this component can charge |
+| host to any tile | 4 ns | the host is not on a memory stack and pays a fixed toll to reach one. **Assumed** |
+| directory | one home node per slice, one transaction per 2 GHz cycle | Intel's caching/home agent and Arm's fully-coherent home node are both per-slice structures |
+
+The aggregate is 16.7 times the memory behind it, which is the relation an on-die interconnect
+has to its memory system and the thing the previous model did not have. Everything crossing is
+counted per port, per direction, and by kind — **control** (the machine's own dispatch:
+invocation, completion, migration, kill, fault, resume), **coherence** (protocol messages
+carrying no line) and **data** (line payload) — and the three are never added into one figure,
+which is what the old accounting made impossible. One approximation remains and is marked in
+the source: a writeback or a snoop response reserves its link but is *handled* when it
+arrives, because deferring a protocol response behind a busy link is how a directory protocol
+deadlocks, so what is charged for those two is their occupancy and the contention they cause
+rather than their own latency.
+
+**A miss-status file is per bank, and its size is derived from the contexts it serves.** Such
+a register holds one outstanding miss — the tag being fetched, the requests waiting on it, and
+how the fill will land — and all three are properties of one bank, so a banked cache has one
+file per bank and a full file stops only that bank. The tile's data cache had 32 registers in
+one pool against 128 contexts each entitled to one outstanding operation, and the last-level
+slice had the memory library's default of −1, which that library's own documentation describes
+as "a very large MSHR": an unbounded number of outstanding misses, which is not a structure
+anything is built as. The cap was real and was read before anything was changed: on the graph
+search at 32 MiB every tile's data cache had no register free for about 14 % of the widest
+traversal level's cycles, and that level is 51 % of the traversal.
+
+| cache | banks, and where the count comes from | registers per bank | total |
+|---|---|---|---|
+| tile data cache | 4 — one per pipe, because a tile of four pipes performs four data accesses per cycle and an array of that throughput is built as that many single-ported banks | ceil(128 / 4) × 1.5 = 48 | 192 |
+| tile instruction cache | 4 — one per pipe, four instruction fetches per cycle | 48 | 192 |
+| last-level slice | 32 — the DDR5 device behind it has 8 bank groups of 4 banks per rank, and the slice is banked to that count by the same address bits | ceil(4 × 128 / 32) × 1.5 = 24 | 768 |
+
+128 is the contexts a tile carries in this configuration; the 1.5 is the over-provision for
+the banks' unequal shares of a real access stream, and it is argued rather than chosen — this
+machine's own partition test measures a spread of 1.31 across a tile's banks, and 1.5 is the
+smallest round number above it. The slice is the exception to the per-bank arrangement,
+because its cache keeps one pooled file in a library outside this tree; it is given the *sum*
+of the files it would have had, which buys a bound derived from the contexts it serves and
+does not buy the per-bank independence the tile's caches now have. Each file is counted
+separately — waiting cycles, depth every cycle, deepest ever — so a cache with one hot bank is
+told apart from a cache short of registers everywhere.
+
+**The host's predictors, and one reporting rule.** The host's memory-dependence predictor is
+the two-bit counter this machine ran before this work. A path-history predictor is built and
+reachable by name, and is **not** the default: measured, it held fewer loads and violated far
+more, and the cause was in the wiring rather than the table — the path history advanced when a
+memory instruction entered the queue, so a load whose address resolves many cycles later was
+predicted and trained on a route through instructions it was never reached along. A load now
+takes a token for the history as it enters the queue and carries it in its own entry, and the
+directed test that drives the predictor in the queue's order separates the two paths through
+one load exactly where the live-history arrangement, instantiated beside it as the control,
+separates nothing. It becomes the default when it has been measured that way, which is one
+point, one program, eight windows, and has not been done; presenting an "after" for it before
+then would be presenting a unit test as a simulation.
+
+> **The reporting rule for the bimodal control.** A figure that quotes the bimodal branch
+> predictor as a control must print `execute_squash` beside `branch_mispredicts`. That control
+> has no execute-time repair, so its mispredict count alone understates what it costs: the
+> work thrown away when a wrong path is discovered later appears in the other counter, and a
+> comparison against the override predictor that prints only the first is comparing two
+> different quantities.
+
 ---
 
 ## 2. Inside one tile core
 
-The tile core becomes **two independent pipelines that meet in one place**. The centre of the core is the **context array**: every context with its 512-bit register file, program counter, instruction slot and data slot. The slots belong to the context, not to a pipe. Each cycle the scheduler picks ready contexts out of the array into the pipes, and a context is ready only when its instruction is in its slot and it has no memory operation outstanding, so the pipe takes its instruction *from the slot* and never from a cache; if a context is scheduled it is certain to execute. The pipes issue what fills the slots: instruction fetches, speculatively at decode from the program counter or the shared branch-target buffer and non-speculatively at writeback, and data requests at writeback. Every one of those requests passes the translation path first, and none counts as issued until it is translated: a request whose translation faults or names another tile is dropped outright, and the context faults or migrates and re-attempts. Translated instruction fetches go to the banked instruction cache, which fills the context's instruction slot; translated data requests go through the delivery window into the memory queue that owns their physical address, then the data-cache bank, the last-level slice and memory, and the returned data fills the context's data slot, which is what wakes it.
+The tile core is **two independent pipelines that meet in one place**. The centre of the core is the **context array**: every context with its 512-bit register file, program counter, instruction slot and data slot. The slots belong to the context, not to a pipe. Each cycle the scheduler picks ready contexts out of the array into the pipes, and a context is ready only when its instruction is in its slot and it has no memory operation outstanding, so the pipe takes its instruction *from the slot* and never from a cache; if a context is scheduled it is certain to execute. The pipes issue what fills the slots: instruction fetches, speculatively at decode from the program counter or the shared branch-target buffer and non-speculatively at writeback, and data requests at writeback. Every one of those requests passes the translation path first, and none counts as issued until it is translated: a request whose translation faults or names another tile is dropped outright, and the context faults or migrates and re-attempts. Translated instruction fetches go to the banked instruction cache, which fills the context's instruction slot; translated data requests go through the delivery window into the memory queue that owns their physical address, then the data-cache bank, the last-level slice and memory, and the returned data fills the context's data slot, which is what wakes it.
 
 ```
    CONTEXT  (512 bits, PC, two slots)
@@ -917,6 +1026,20 @@ translation hardware and leaves every memory queue free; a bank conflict occupie
 queue and leaves translation free. That is worth having only if it can be shown, so the
 counters are arranged so that a stall on one path appearing as a stall on the other is a
 detectable defect rather than an argument.
+
+**Everything in this section is built and running, and the section describes what exists.**
+It was designed first, in *The tile core: contexts, pipes, translation and memory queues*
+(`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/tilecore/TILE-CORE-DESIGN.md`), which states
+each structure, the counters it owes and the directed test that reaches it; it was then built
+in two steps, the second recorded in *The tile core's memory path: what it is, what replaced
+what, and what the counters say*
+(`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/tilecore2/TILE-CORE-BUILD-2.md`), which wires
+the path into the tile and deletes the mechanism it replaces — the table of words held above
+the data cache, with its cache pins, its snoop merges and its unbounded waiter list — in the
+same change, so that no interval exists in which the tree holds two mechanisms for one job.
+Three defect sweeps have run over it since. What each of them found is stated beside the
+mechanism it is about rather than collected at the end, and what is still designed and not
+built is now a short list, which §3 gives.
 
 ### 2.1 The two context slots
 
@@ -1024,9 +1147,30 @@ was, and against the offered slots. Beside it go a census of context-cycles by c
 not being ready — no instruction in hand, asleep on a load, waiting on a page-table walk,
 other — and a banded histogram of load-free run lengths with the cause each run ended.
 Those counters plus window-blocked cycles plus running occupancy **partition** a resident
-context's cycles, so a gap is a modelling error rather than a finding. Both alternatives
-stay in the model behind a parameter, so the comparison can be re-run; the loser is not
-deleted.
+context's cycles, so a gap is a modelling error rather than a finding.
+
+**The stage registers are built, the counters were taken, and the alternative is refused on
+that evidence rather than deferred.** The pipes are `N × M` stage registers with the three
+named stages, and the array is checkable: `pipeIssues × depth` equals `pipeStageOccupancy`
+plus `pipeDrainDeficit` exactly — 27,554,702 × 8 = 220,437,616 = 220,437,531 + 85 over eight
+measured windows of the graph search at 16 MiB — which is what says the array advances once
+per cycle. `pipeSameContextInFlight`, the counter that would fire if two instructions in the
+pipes came from one context, is gated to zero in both suites, and is zero over 273 million
+context-cycles of that workload.
+
+On the same run the first leg of the conjunction looks like a large opportunity and the
+second leg closes it. The tile offered 649,287,536 issue slots and used 27,554,702;
+257,028,078 of the unused ones — 39.6 % — fell in cycles where some context was blocked on
+nothing but its re-issue window. But `runInstrBeyondM` is **zero** and every load-free run is
+one instruction long, so a pipe that let a context issue on consecutive cycles would have no
+consecutive instruction of that context to issue: the gain the mechanism exists for is not
+present to be taken. What ends the runs is the instruction slot — 16.1 million of the 27.6
+million instructions are followed by a run that ended because the context's next instruction
+had not arrived — so on this workload the tile's front end, not its issue rule, is what a
+context waits for. `pipeBind = 1` is therefore **refused at construction** rather than
+accepted and quietly ignored, and the parameter stays so that the question can be re-read on
+a workload with long arithmetic between memory accesses, which is the one case the
+measurement does not cover.
 
 ### 2.3 The translation path
 
@@ -1050,7 +1194,24 @@ adequate. So the rate tracks the pipes, and the sizing arithmetic of §2.4 is re
 that rate. Whether a queue drains strictly in order — and therefore whether a miss blocks
 hits behind it — is stated per configuration and counted as head-blocked cycles.
 
-**Where a walk's own reads go is a design choice, and it is left open for measurement.** A walk's memory references can take one of two paths, and both are configurations of the model. Through the *data cache*: the reads pass the delivery window and a memory queue like any access, page-table lines compete with data for the cache, and to keep a full window from stalling the walk that would free it each memory queue reserves at least one entry for a walk, with a counter for cycles a walk could not be admitted. Directly to the *last-level slice*: every walk step pays the slice's latency, but translation traffic never pressures the data cache and the reservation is unnecessary. The trade is latency against data-cache congestion, and which wins depends on the translation buffer's hit rate and on the ratio of walk reads to data requests: if the buffer hits nearly always the choice is immaterial; if walks are frequent and the ratio approaches one, the data cache is severely pressured; in between, whether a page-table hit or a data hit is worth more decides it. The analysis is the counters on each path across the workloads: buffer hit rate, walk reads per thousand data requests, page-table line reuse in the data cache, walk latency on each path, and the data-cache misses the page-table lines cause.
+**Where a walk's own reads go is a design choice, both arms are built, and it is under open
+analysis rather than settled.** A walk's memory references can take one of two paths, and both are configurations of the model. Through the *data cache*: the reads pass the delivery window and a memory queue like any access, page-table lines compete with data for the cache, and to keep a full window from stalling the walk that would free it each memory queue reserves at least one entry for a walk, with a counter for cycles a walk could not be admitted. Directly to the *last-level slice*: every walk step pays the slice's latency, but translation traffic never pressures the data cache and the reservation is unnecessary. The trade is latency against data-cache congestion, and which wins depends on the translation buffer's hit rate and on the ratio of walk reads to data requests: if the buffer hits nearly always the choice is immaterial; if walks are frequent and the ratio approaches one, the data cache is severely pressured; in between, whether a page-table hit or a data hit is worth more decides it. The analysis is the counters on each path across the workloads: buffer hit rate, walk reads per thousand data requests, page-table line reuse in the data cache, walk latency on each path, and the data-cache misses the page-table lines cause.
+
+Three things about that analysis are settled and one is not. The model **refuses** a
+configuration that asks for the reservation where there is nothing to reserve — a non-zero
+`walkReserve` with the slice path is rejected at construction — and it refuses a translation
+completion rate other than the pipe count, so neither arm can be measured as a machine other
+than the one it says it is. A translation that misses leaves its queue and waits in a
+walk-pending array, so the hits behind it proceed; the one case where a miss does cost them
+is that array being full, and `xlatHeadBlockedCycles` counts exactly those cycles. What is
+**not** settled is which path is better: on the two sampled points taken so far the two arms
+are indistinguishable, and the first reading of that was worth nothing, because in the
+configuration the comparison is run in all four walk-source counters read zero while 1,007
+real walks were being performed — the walks were going somewhere none of the four bins named.
+A fifth bin, `walkReadsUnattributed`, and an accounting gate that requires every walk read to
+be binned now make that failure loud: the flat suite reports 195 of 195 walk reads attributed.
+The arm that would separate the two paths is a workload whose own data traffic fills the
+queues while a walk needs to issue, and neither point measured does that.
 
 ### 2.4 The cross-connection: one window, oldest-per-bank
 
@@ -1128,6 +1289,19 @@ is the check that oldest-per-bank starves nothing. Two of those separate "the co
 limited the machine" from "the banks did", which is the distinction that decides whether
 widening anything is worth doing.
 
+**The window is built, and that first counter had to be written a second time before it meant
+anything.** `deliveryLimitedCycles` was originally computed from a predicate asking whether an
+entry sitting *beyond* the window would have been delivered by a wider one. The window refuses
+an entry once its occupancy reaches its width, so nothing is ever beyond it, and the predicate
+was false on every cycle of every run ever made — from which an earlier record concluded that
+the cross-connection was never the constraint, a conclusion resting on a counter that could
+not fire. The structure built is one arbitration window whose capacity *is* its width; a
+completion that cannot enter waits in its translation queue instead. The counter now asks what
+this structure can answer: the window was full at the end of the cycle and the translation
+path was holding a completion whose latency had been paid. Nothing about the machine's timing
+changed, and the reading is now a measurement rather than a tautology. It is zero on the two
+sampled points taken, which says the connection did not limit them.
+
 ### 2.5 The memory queues: one per bank, and the only ordering point
 
 There are as many memory queues as data-cache banks, and queue `b` owns exactly the
@@ -1149,6 +1323,52 @@ waits and reads the array. Both are counted, and whether byte-merging logic is w
 building is decided by how large the partial count turns out to be.
 
 **A load-reserved / store-conditional pair is a serialisation point in the queue, and nothing else.** The load-reserved opens it and the store-conditional closes it; while it is open, every other entry to that address waits behind it in the same queue, so nothing intervenes and the store-conditional completes. There is no reservation unit and no reservation table: the queue's order *is* the reservation.
+
+That is the whole implementation, and three rules make it work; each of the three was written
+after a defect that stopped a program, and all three are now structure rather than policy.
+
+**A point has exactly three ends: its own store-conditional, the line being taken away, and
+the departure of the context that opened it.** The third needs no timer. A context leaves a
+tile by retiring, by migrating or by being killed, all three run through one release sequence
+that moves the slot's generation token on, and a point owned by a token that has moved is
+owned by nobody — so it is closed at the instant of departure, every entry waiting behind it
+proceeds in the same cycle, and the close is counted. The timer that used to do this defaulted
+to the snoop-deferral bound, queue depth times bank access latency, which is derived for a
+different question entirely and is shorter than a pair's own interval; it was closing pairs
+that were about to succeed, six of them in 260 on the one program that performs the pair. It
+remains as a labelled safety configuration, **off by default**, and
+`memqLrscPointsTimedOut` is a zero gate in both suites.
+
+**While a point is open, one unit of each stage on the path to its queue is held for the
+close.** Three stages lie between a context and the memory queue that owns its address — its
+translation queue, the delivery window, and the queue itself — and while a point is open every
+request to that address crossing any of them is a request the point will hold. A stage filled
+entirely with such requests is a stage the closing store-conditional cannot enter, and each of
+the three could be filled that way: the program that performs the pair completed at a queue
+depth of 16 and did not complete at 8, 4 or 2, nor at a window of one, and at the default
+depth twenty-eight contending invocations were enough. So one entry of the translation queue,
+one slot of the delivery window and one entry of the memory queue are reserved for the close
+while a point is open — the same reservation the walk path already has, and for the same
+reason — and a store-conditional may leave its translation queue out of turn, since a
+translation queue is indexed by the page and therefore holds every contender for one word in
+arrival order. Every part of it is off when no point is open, so a program that performs no
+pair sees each stage at its full configured size and is byte-identical. Nothing is drained and
+nothing is serialised: the order accesses to an address are performed in remains the memory
+queue's, assigned on admission there.
+
+**A load-reserved for another address may not take over an open point.** A queue holds one
+point at a time; a load-reserved arriving for a different address in the same queue used to
+take it, and two pairs on two words of one queue could then stop each other for ever with
+every step legal — and, worse than stopping, produce wrong answers. One stress seed opened
+10,668,525 points and closed 256. Such a load-reserved now waits, and the same seed closes
+256 of 256 in about a second.
+
+**What is reported rather than repaired: the pair has no forward-progress guarantee against a
+rate of contention.** It completes at 2 to 24 contenders on one word at the default
+configuration and does not at 28 or 32, and it completes at all of them if any one of the
+three stages is enlarged. A fairness bound at the point — a contender that has waited long
+enough taking precedence — is a design decision rather than a repair, and it is not taken
+here.
 
 **A read-modify-write atomic is one entry, performed at the bank by a small arithmetic unit beside it.** Such a unit is ordinary in real memory systems: RISC-V implementations execute their atomic operations with an arithmetic unit inside the data cache, graphics processors execute atomics in their last-level cache slices, the AMBA CHI interconnect defines far atomics performed at the home node, and PCI Express defines atomic operations completed at the target; the operation set is nine operations at two widths, so the unit is an adder, a comparator and a few logic gates. The entry reaches the head for its
 address; the bank reads the word, a small arithmetic unit beside the bank applies the
@@ -1183,6 +1403,37 @@ visible as a mechanism rather than a claim, and it is stated as a bounded deferr
 counter rather than as a property asserted to be preserved. The complementary case — a
 queued write whose line was taken between acquisition and its turn — re-acquires and is also
 counted, so the cost of yielding is visible wherever it is paid.
+
+**A host core and a function core updating one word.** The queue's order is an order over
+*this tile's* accesses, so everything above rests on the tile keeping the line. If another
+agent is given the line while a point is open over it, that agent may write bytes the queue
+will never see, and a store-conditional closing the point afterwards would report that nothing
+had touched the address — the one thing the pair promises it cannot do. Three rules close
+that, and together they are what lets the two kinds of core share a word. First, **a line the
+tile loses breaks every point over it**, in both places a line is yielded, and the
+store-conditional then fails; a failed store-conditional is a legal outcome and the program's
+retry loop absorbs it. Second, **the tile is told when it loses a line** in every
+configuration: where the tile's data cache is this tree's own it is *asked*, which is what
+makes the bounded deferral above possible, and where it is a stock coherent cache the
+invalidation is now forwarded to the tile, which is strictly less — there is nothing left to
+defer by the time the notification arrives, so such a tile yields at once and its pairs fail
+more often. That is a property of the configuration rather than of the queue, and it is the
+half correctness needs; without it the tile was never told at all. Third, **a host performs
+its own read-modify-write by taking the line**, in its own cache, with the directory
+arbitrating — the machine's one serialising mechanism is ownership of the address by the agent
+performing the operation, and a host core owns an address the way any conventional core does.
+Its reservation lives in the cache that is its presence on the fabric, one line address per
+client port, broken by any snoop or eviction of that line; a downgrade breaks it too, which is
+conservative and never incorrect, because a spurious failure is a legal outcome of the pair.
+The cross-agent directed test has the host's atomic additions and the tile's pairs competing
+on one word and on one line, and it is exact arithmetic that a single lost update destroys:
+the tile's 783 points, 512 closed by their own half and 274 broken by the host taking the
+line, no spurious success and no timed-out point.
+
+One half of this is not repaired and is recorded as it stands: the in-order host still cannot
+perform its own atomic, because the repair reaches a second defect in the stock cache, where
+an unlock is queued behind the coherence request that is waiting for it. The figure above is
+the out-of-order host, which is this machine's host.
 
 **When a queue is full, the machine slows down and nothing breaks.** The chain is: a queue
 with no free entry withholds credit for its bank; the delivery window keeps the entry,
@@ -1225,7 +1476,8 @@ a queue.
 
 ### 2.6 Why this is simpler than what it replaces
 
-The mechanism being replaced kept an atomic's word *above* the data cache, in the tile, so
+The mechanism this replaced — deleted from the tree in the change that landed the queues —
+kept an atomic's word *above* the data cache, in the tile, so
 it could be handed from context to context without a cache access. One entry per held word
 carried the owning context and its token, the live value and a valid bit, a count of
 hand-offs, the address and size, an owned flag, a writeback-in-flight flag, a re-dirtied
@@ -1361,29 +1613,40 @@ lets a load issue before an older store's address is known.
 
 ## 3. What the simulator models today, and what is designed but not modelled
 
-Everything in §1 is modelled and measured. Most of §2.1 is modelled; §2.2 through §2.5 are
-designed and not yet modelled, and the mechanism they replace is what the model
-contains in their place. The table states it plainly, one row per mechanism.
+Everything in §1 is modelled and measured. **The whole of §2 is now built**: the pipes, the
+translation path, the delivery window and the memory queues were the designed half of this
+document a week ago and are the machine today, and the mechanism they replaced — the table of
+words held above the data cache — has been deleted rather than left switchable. What remains
+designed and not modelled is four things: two sizing options inside the tile core, the memory
+controller's per-bank queues, and the two comparison machines. The table states it plainly,
+one row per mechanism, and a row that changed this week says what it changed from.
 
 | mechanism | in the model today | designed, not yet modelled |
 |---|---|---|
-| Host: out-of-order core, two-stage front end with override predictor, wrong-path modelling, two-level TLB and walker at the cache management units, data prefetchers, memory-dependence prediction | **yes**, each with its own counters | — |
+| Host: out-of-order core, two-stage front end with override predictor, wrong-path modelling, two-level TLB and walker at the cache management units, data prefetchers, memory-dependence prediction | **yes**, each with its own counters. The memory-dependence default is the two-bit counter; the path-history predictor is built, corrected and not the default | the one measurement that would make the path-history predictor the default: one point, one program, eight windows |
+| Fabric: a port per endpoint per direction, 32 B at 2 GHz, ten endpoints, traffic counted per port and per direction as control, coherence and data; the directory one home node per slice at one transaction per port cycle | **yes** (§1.6) | — |
+| Caches' miss-status files: one file per bank, sized from the contexts the cache serves | **yes** (§1.6), on both tile caches; the last-level slice holds the sum in one pool | the per-bank arrangement inside the slice, which lives in a library outside this tree |
 | Coherence: directory at the fabric, four tiles each with a last-level slice, memory controller and channel | **yes** | — |
 | 512-bit context; the lane map including both tilings and the reserved names | **yes**, verified lane by lane in both simulators | an operation that moves the whole 512 bits (`r1` as an operand); it is an instruction-set extension, not a naming change |
 | Instruction slot, shared branch-target buffer, one speculative fetch at decode, no decoupled fetch engine | **yes**, holding one instruction | the block form of the slot, and the sweep at 1, 4, 8, 16 that picks its size |
 | One outstanding memory access per context; the load slot | **yes** | the relaxed store rule as a switch, with its own measurement |
-| Pipes | as a **re-issue delay only**: ready contexts are picked per cycle and each issue sets a next-eligible cycle | `N × M` stage registers with named decode, address and writeback stages; the readiness and conjunction counters; the pipe-bound alternative with forwarding, whose build is gated on those counters |
-| Translation | **inline and synchronous**: the address is computed and translated in the same cycle as the access | virtually-indexed translation queues, a completion rate derived from the pipe count, head-blocked counting, reserved capacity for a walk |
-| Getting a translated request to its bank | nothing: a request goes straight to the cache interface | the delivery window, oldest-per-bank, with its counters and the split-window escalation |
-| Ordering, forwarding, atomicity | a **word-keyed table above the data cache**, with a pin set inside the cache, an upward notification path, a byte-masked merge on every external request, a hand-off bound, and an unbounded waiter list | physically-indexed memory queues, one per bank: sequence order, forwarding inside one queue, read-modify-write at the bank, coherence requests at the bank with a bounded deferral |
-| Backpressure anywhere in the data path | **none**: the model cannot run out of memory-path capacity, so it cannot show what happens when it does | credit backpressure end to end, a depth sweep that shows a curve, and the directed test that proves no deadlock |
-| Tile instruction and data caches, banked one bank per pipe, a bank reading one line per cycle, four counters each | **yes** | the per-bank arithmetic unit for read-modify-write, the bank index on the request interface, and credit return |
-| Last-level slice banked to the memory device's bank count, checked by a gate | **yes** | one low-complexity queue per bank at the memory controller; a single read and write buffer per channel is what exists |
+| Pipes | **yes** — `N × M` stage registers with named decode, address and writeback stages, the readiness and conjunction counters, and the two identities that say the array advances once per cycle | — |
+| The pipe-bound alternative: a context bound to one pipe, with forwarding | **refused on evidence** (§2.2) and refused at construction, not deferred: on the graph search every load-free run is one instruction long, so the mechanism has no consecutive instruction to issue. The parameter stays so the question can be re-read on a workload with long arithmetic between accesses | — |
+| Translation | **yes** — queues indexed by the virtual page, a completion rate derived from the pipe count and any other rate refused, a walk-pending array so a miss does not block the hits behind it, head-blocked cycles counted | — |
+| The walk's own reads: through the data cache against reserved capacity, or straight to the last-level slice | **yes, both arms**, each with the refusals that stop it being measured as the other machine. **Under open analysis**: indistinguishable on the two sampled points so far, because the reservation was never contended, and the first reading of that rested on four walk-source counters that read zero while 1,007 walks ran — now a fifth bin and an accounting gate | the workload that separates them: one whose data traffic fills the queues while a walk needs to issue |
+| Getting a translated request to its bank | **yes** — the delivery window, oldest-per-bank, one delivery per bank per cycle, with the limit counter rewritten so that it can fire at all | the split-window escalation, if measurement ever says the window is the constraint |
+| Ordering, forwarding, atomicity | **yes** — physically-indexed memory queues, one per bank: sequence order, forwarding from the newest older overlapping entry, read-modify-write at the bank, coherence requests at the bank with a bounded deferral. The word-keyed table above the data cache, its cache pins, its snoop merge and its unbounded waiter list are **deleted** | — |
+| The load-reserved / store-conditional point: three ends, a unit of each stage reserved for the close, no takeover by another address | **yes**, with a cross-agent directed test in which a host and a tile update one word | a fairness bound at the point, which is a design decision and is reported rather than repaired: the pair completes at 2–24 contenders and not at 28 |
+| Backpressure anywhere in the data path | **yes** — credit end to end, and the depth sweep shows a curve rather than a cliff: queue-full cycles 0, 1, 368, 6,417 as the queue goes 32, 8, 4, 2 with the answer unchanged | — |
+| Tile instruction and data caches, banked one bank per pipe, a bank reading one line per cycle, four counters each | **yes**, including the per-bank arithmetic unit that performs a read-modify-write and the bank index on the request interface | — |
+| Last-level slice banked to the memory device's bank count, checked by a gate | **yes** | one low-complexity queue per bank at the memory controller; a single read and write buffer per channel is what exists, and splitting them changes the memory timing every figure in §4 was taken under |
 | Tracking unit derived to cover every context; the control queue following it; the host counting cycles its unit is full | **yes** | — |
-| Duplicate pages: a kernel store or atomic refused and counted, zero-gated, with a directed test; the host's legal fan-out to every copy | **yes** | the request class for the privileged page-table rewrite inside the new queues, with its reserved capacity |
-| Migration on a foreign translation result | **yes** | the rule for a context that migrates with a store still in a queue, under the relaxed store switch only |
+| Duplicate pages: a kernel store or atomic refused and counted, zero-gated, with a directed test; the host's legal fan-out to every copy | **yes**, including the privileged page-table write as its own request class with its own reserved capacity, gated so that nothing else can reach the exemption | — |
+| Migration on a foreign translation result | **yes**, taken at the translation result, with the program counter carried back so the instruction re-issues | the rule for a context that migrates with a store still in a queue, under the relaxed store switch only |
 | Memory link: parallel pass-through and a serial CXL attachment, as configuration | **yes** | a workload that can saturate the serial link; the x32 variant |
-| Data prefetching into the load slot | no | deliberately undesigned; the slot is left free for it |
+| Data prefetching into the load slot | no | deliberately undesigned; the slot is left free for one |
+| A barrel multi-context core as a comparison arm: many contexts without the position and without the unit of work | no | **designed and reviewed**, not modelled — the arm that would say which of the three differences between host and engine produced a ratio |
+| A graphics processor as a comparison arm, running the same three problems on the same inputs | no | **designed and reviewed**, not modelled |
 
 Three further pieces are worth naming as absent on purpose rather than missing. There is no
 reorder buffer, renaming or speculative execution on an engine, and no structure that lets a
@@ -1393,6 +1656,17 @@ physical address is already known, issue nothing on a prediction and never repla
 ---
 
 ## 4. What the workloads measure
+
+**Every performance figure in this section predates the tile core, the fabric and the
+miss-status corrections.** The numbers below were taken on the machine as it stood before the
+memory path of §2 was built, before the interconnect became a port per endpoint per direction,
+and before the caches' miss-status files were made per-bank and sized from the contexts they
+serve. Each of those three changes moves timing, and two of them move it on every workload, so
+no figure here should be read as a measurement of the machine described in §1 and §2. They are
+kept because they are the machine's history and because the questions they answer — where the
+time goes, what limits the work — are unchanged by the corrections. Every one of them will be
+taken again, on the same programs and the same sampling plan, when the owner declares the
+machine complete. No new number appears here in the meantime.
 
 ### 4.1 How a performance number is taken
 
@@ -1694,6 +1968,14 @@ The majority of the work is not defining the architecture. It is using it, and f
 the bottlenecks emerge — in hardware or in software — and overcoming them. Five pieces follow,
 in the order their dependencies allow.
 
+**The first three of them are done.** The instrument was built and was what closed the pipe
+question; the pipe stages exist; and the memory path landed in one change with the mechanism
+it replaces deleted in the same change, as step 3 required. They are kept here as written
+because each says what the step was for and what it was allowed to cost, and §2 and §3 say
+what came of it. Steps 4 and 5 are the live ones, and §2's own open questions — the block
+instruction slot, the relaxed store rule, the walk path, the window against the bank count,
+and a fairness bound at the serialisation point — are the substance of step 4.
+
 **1. Instrument the pipes on the model that exists.** The readiness and conjunction counters
 of §2.2 need no new mechanism: they turn two existing counts that measure scheduler
 examinations into context-cycle censuses, and add the conjunction that decides the pipe
@@ -1770,3 +2052,15 @@ every answer digest is byte-identical between them.
 
 Sizes and counts in this document are configuration. Where a default is given it is the value
 the measurements were taken at, not a constraint on the design.
+
+The mechanisms described in §1.6 and §2 come from four records, and each states its own tests,
+its own counters and the price of every batch it ran:
+*The tile core: contexts, pipes, translation and memory queues*
+(`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/tilecore/TILE-CORE-DESIGN.md`), the design;
+*The tile core's memory path: what it is, what replaced what, and what the counters say*
+(`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/tilecore2/TILE-CORE-BUILD-2.md`), the build;
+*A host and a function core sharing one word, and a reservation that ends with its owner*
+(`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/complete1/FIX-R1-R2.md`), the coherence rules
+of §2.5; and *Three corrections to the simulated machine*
+(`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/fix3/MACHINE-FIX-3.md`), the fabric, the
+miss-status files and the host's dependence predictor.
