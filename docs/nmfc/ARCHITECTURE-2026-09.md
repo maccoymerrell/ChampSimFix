@@ -1725,22 +1725,47 @@ This was not true until this round. The slice had the right *count* of banks and
 the line index modulo 32, which is the device's **column** bits: the 32 slice banks between
 them covered half of one DRAM row. The count matched and the partition did not.
 
-**The controller keeps one queue per DRAM bank**, eight reads deep, 64 queues per channel, in
-arrival order; writes are posted in the channel's 32-entry write buffer, filed under their bank
-and drained in batches when the buffer passes its high mark or no read is waiting. Each bank
-offers its oldest entry whose next command is ready, the channel issues the oldest offer, and an
-entry whose row it opened is served before anything may close that row. A request whose bank
-queue (or the write buffer) is full waits in that bank's arrival queue — the last-level bank's own
-path to that DRAM bank — and one moves in per cycle as a slot frees, so the controller never
-refuses a request and a full bank stalls only its own traffic. The organisation is the
-per-bank pending-reference queues of Rixner et al. (ISCA 2000); the depth of eight is
-DRAMsim3's per-bank command queue (`cmd_queue_size = 8`, one queue per rank and bank). What
-it replaced is ramulator2's generic controller: one 32-entry read buffer and one 32-entry
-write buffer for the channel (ramulator2's defaults, which no named product publishes; the
-posted-write buffer keeps that 32 and its drain marks of 0.8 and 0.2 of it), behind which memHierarchy keeps a single in-order queue, so one
-full buffer stopped every bank. That controller is still selectable (`NMFC_BANK_QUEUES=0`,
-which also restores line-interleaved slice banks) so that a before and after are two settings
-of one build.
+**The controller keeps one queue per DRAM bank over one shared read queue.** Each of the
+channel's 64 banks keeps its reads in arrival order. Each bank offers its oldest entry whose
+next command is ready, the channel issues the oldest offer, and an entry whose row it opened is
+served before anything may close that row. The entries come from one read queue per channel, and
+any bank may fill it. Posted writes are held in a separate write queue, filed under their bank.
+
+**Sizing the queues.** The read queue is sized from what can send the channel reads:
+P = Q × d × T + H.
+
+- Q is the tile's memory queues (4).
+- d is their depth (`dataQueueDepth`, 16).
+- T is the tiles whose memory the channel holds (1).
+- H is the host L2's miss-status registers (64).
+
+That gives **128**, which is the larger of the two depths of Arm's CoreLink DMC-620
+out-of-order request queue (`DMC_QUEUE_DEPTH`, 64 or 128; TRM ARM 100568, section 1.5).
+`coherent_memory.py` derives P for each run. Any bank may hold all of P. The measured per-bank
+peaks are most of what a channel holds: 20–27 reads on the shuffled sum, 29–57 in the graph
+search's level 7, 108 in a one-bank storm. Dedicated queues that deep would be
+64 × 128 = 8,192 entries a channel. The structure is therefore FR-FCFS over one queue with a
+head per bank.
+
+**The write queue.** Reads and writes are held apart, as in the read and write pending queues
+of Intel's Xeon E5 memory controller (RPQ and WPQ; uncore manual 329468). The write queue has
+as many entries as the read queue. No product publishes that size; it was chosen by a sweep in
+which 96 and above reached parity. The bus turns to writes above 0.8 of the write queue, or when
+no read is waiting, and turns back below 0.2. **A drain empties the batch it began with**:
+while the bus is on writes and reads are waiting, a new write does not join the batch.
+
+**Where a request waits when the queue is full.** A read that finds the read queue full, or a
+write that finds the write queue full or a drain in progress, waits in its bank's arrival queue.
+That queue is the last-level bank's own path to its DRAM bank. One request moves in per cycle,
+so the controller never refuses a request and a full bank stalls only its own traffic.
+
+The organisation is the per-bank pending-reference queues of Rixner et al. (ISCA 2000). The
+controller it replaced is ramulator2's generic one: one 32-entry read buffer and one 32-entry
+write buffer per channel, ramulator2's defaults, which no named product publishes. Behind that
+buffer memHierarchy keeps a single in-order queue, so one full buffer stopped every bank. That
+controller is still selectable (`NMFC_BANK_QUEUES=0`, which also restores line-interleaved slice
+banks), so that a before and an after are two settings of one build. `NMFC_BANK_QUEUE_DEPTH=<d>`
+selects dedicated per-bank queues of d reads as a diagnostic.
 
 **What a bank conflict costs**: a precharge and an activate before the column command, about
 28 ns over a row hit (tRP + tRCD = 34 + 34 device cycles of 0.417 ns, the JEDEC DDR5-4800 timings
@@ -1754,8 +1779,8 @@ both roles. At 32 contexts per tile the old controller was never the limit eithe
 reads come from its own tile's contexts, one outstanding each, so it never held more than its
 32-entry buffer — and the victims ran at their solo time under both. At 128 contexts, with a
 96-invocation storm, the difference is the mechanism's: tile victims under a tile storm took
-29,154 cycles against 22,522 alone, where the single-queue controller took 267,704; the host
-reading the victims' lines under the storm took 20,394 cycles against 110,522. That needs the
+29,903 cycles against 21,943 alone, where the single-queue controller took 267,704; the host
+reading the victims' lines under the storm took 21,089 cycles against 110,522. That needs the
 tile's own memory queues deep enough for its contexts (four queues of 32): at their default of
 16 entries (`dataQueueDepth`, `src/nmfc/src/NMFCTile.h`) the storm's entries hold all 64 slots while they wait on the one bank, and the victims wait
 for a slot in the tile — 250,146 cycles — whatever the controller does. A host storm never
@@ -1763,19 +1788,44 @@ fills the channel: the host core has 20 first-level miss registers, the middle o
 range (Golden Cove's 12–16 fill buffers, Zen 4's 24 miss-address buffers), as sourced in
 `src/nmfc/test/coherent_memory.py`.
 
-**What it costs.** On the shuffled sum, striped, 32 MiB, measured on the same six sampled
-windows and the same whole wait span in both arms, the whole program moves by 0.99822×
-[0.99280, 1.00161] — within noise, because the program is mostly the host building its
-structure. The offloaded phase, measured whole, is **5.3 % slower**: 1,048,456 cycles against
-995,883. The slice alignment contributes nothing to that (1,054,721 without it, although its
-bank conflicts rise from 5,469 to 264,477); the controller does. Its counters say how: that
-phase's reads sit on about three banks at a time (queued reads span 3.1 banks at a mean depth
-of 23.7), so eight reads per bank caps what the scheduler can see at the busy banks, and 57,161
-of 122,813 reads waited in a bank's arrival queue, invisible to it; row hits fall 1.5 %, and the
-mean read latency rises from 659 to 709 device cycles. The depth of eight is the named limit.
-A first version that also counted writes against the eight entries turned the bus around once
-per write and was replaced by posted writes drained in batches, which is what the previous
-controller did.
+**Performance, against the single-queue controller.** All three measurements used the same
+images and one build, with `NMFC_BANK_QUEUES=0` as the before arm.
+
+- **The shuffled sum's offloaded phase** (striped, 32 MiB, 4 tiles, measured whole) took
+  **994,413 cycles against 995,883**.
+- **The same program as a whole,** measured on six paired sampled windows plus that phase, gives
+  before/after = **1.015**, with a 95 % Fieller interval of [0.980, 1.076].
+  - Five windows agree to within 0.05 %.
+  - The sixth is the host's cold-start construction: 19.2 M cycles against 22.4 M. It writes
+    heavily, and the deeper write queue cuts its write-mode time from 14.2 M to 3.3 M device
+    cycles.
+- **The graph search's 16 MiB level-7 window** took **1,584,221 cycles against 1,590,118**.
+  - One channel held up to 138 reads there, because other tiles' reads of that tile's memory
+    are not counted in T. As a result, 25 of its 11,762 reads (0.2 %) waited for the 128-entry
+    read queue.
+
+**The earlier version.** It had 8 reads per bank, after DRAMsim3's per-bank command queue, and a
+32-entry write buffer, and it made the offloaded phase 5.3 % slower (1,048,456 cycles). The
+counters show that the depth was not the cause. With the shared read queue and the same
+32-entry write buffer, the phase still took 1,047,249 cycles, although no read ever waited
+outside the scheduler. The cause was the write drains: the arrival queues refilled the small
+buffer during each drain, so each drain lasted longer while the reads waited. On the same phase:
+
+| write queue | batch rule | phase cycles |
+|---|---|---|
+| 32 | on | 1,019,772 |
+| 64 | off | 1,032,957 |
+| 64 | on | 1,003,768 |
+| 96 | on | 991,677 |
+| 128 | on | 994,413 |
+
+With the adopted queues, write-mode time falls from 3.2–3.7 M device cycles per channel to
+1.9 M, and the mean read latency falls from about 650 device cycles to about 380.
+
+**One variant was rejected.** A variant held the writes in the same 128 entries as the reads,
+as the DMC-620's single queue does. It was as fast on both workloads. But in the storm test the
+storm's writes filled the queue and held other banks' reads out, and the tile victims took
+3.8× their solo time, against 1.3× with separate queues.
 
 **One discrepancy is recorded and not changed.** `coherent_memory.py` computes `DRAM_ROW_BYTES`
 as columns × 4 bytes × 2, 8 KiB, where the controller maps one bank's row in one rank as 64
@@ -1858,7 +1908,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | The load-reserved / store-conditional point: three ends, a unit of each stage reserved for the close, no takeover by another address | **yes**, with a cross-agent directed test in which a host and a tile update one word. Each stage refuses a size below its floor of reserved units plus one — window 2, translation queue 2, memory queue walkReserve + 2 — and walk traffic keeps its memory-queue entry while a point is open; what this proves is deadlock-freedom only (§2.5) | a fairness bound at the point, which is a design decision and is reported rather than repaired: the pair completes at 2–24 contenders and not at 28; the stop of eight contenders on the full machine below 12 memory-queue entries, at the data-cache bank, not yet diagnosed |
 | Backpressure anywhere in the data path | **yes** — credit end to end, and the depth sweep shows a curve rather than a cliff: queue-full cycles 0, 1, 368, 6,417 as the queue goes 32, 8, 4, 2 with the answer unchanged | — |
 | Tile instruction and data caches, banked one bank per pipe, a bank reading one line per cycle, four counters each | **yes**, including the per-bank arithmetic unit that performs a read-modify-write and the bank index on the request interface | — |
-| Last-level slice banked by the memory device's bank bits; one queue per DRAM bank at the controller | **yes** — the slice bank is the device's bank-group and bank bits (it was its column bits until this round), and the controller keeps eight reads per bank with posted writes drained in batches, each bank's overflow waiting on its own path. Measured: victims of a one-bank storm within 1.3× of their solo time where the single queue slowed them 9×; the shuffled sum's offloaded phase 5.3 % slower, from the depth of eight (§2.8). The single-queue controller it replaces — one 32-entry read and one 32-entry write buffer per channel, ramulator2's defaults — stays selectable (`NMFC_BANK_QUEUES=0`) | the depth sized from the traffic a bank sees rather than taken from a reference configuration |
+| Last-level slice banked by the memory device's bank bits; one queue per DRAM bank at the controller | **yes** — the slice bank is the device's bank-group and bank bits (it was its column bits until this round). The controller keeps a queue per bank over one shared read queue per channel, sized P = memory queues × their depth × tiles per channel + the host L2's miss registers = 128, the DMC-620's larger queue depth. Posted writes are held in a separate write queue of P entries, drained in batches that empty the batch they began with. Measured against the single queue: victims of a one-bank storm at 1.3× their solo time, where the single queue slowed them 9×; the shuffled sum's offloaded phase at 994,413 cycles against 995,883; the graph search's level-7 window at 1,584,221 against 1,590,118 (§2.8). The single-queue controller it replaces (one 32-entry read and one 32-entry write buffer per channel, ramulator2's defaults) stays selectable (`NMFC_BANK_QUEUES=0`) | T counts only the channel's own tile, so remote tiles' reads can exceed P: this happened for 0.2 % of reads on one channel at level 7 |
 | Tracking unit derived to cover every context; the control queue following it; the host counting cycles its unit is full | **yes** | — |
 | Duplicate pages: a kernel store or atomic refused and counted, zero-gated, with a directed test; the host's legal fan-out to every copy | **yes**, including the privileged page-table write as its own request class with its own reserved capacity, gated so that nothing else can reach the exemption | — |
 | Migration on a foreign translation result | **yes**, taken at the translation result, with the program counter carried back so the instruction re-issues | the rule for a context that migrates with a store still in a queue, under the relaxed store switch only |
