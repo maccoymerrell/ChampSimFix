@@ -1263,6 +1263,49 @@ gives each tile 64 invocations with about 29 of them asleep on memory, so it nee
 as many, smaller ranges. Neither change is made. The drain, as the last ranges finish alone, is a
 further 15 % of the window.
 
+**The floating-point units and the divider.** Every pipe carries a pipelined floating-point
+unit for add, subtract, multiply, fused multiply-add, compare, convert and move, and the tile
+has **one iterative divider**, shared by every context and every pipe, for divide and square
+root. The costs are Arm Neoverse N2's (*Software Optimization Guide*, PJDOC-466751330-18256,
+issue 5.0, table 3-19), taking the worst case of each data-dependent range and holding the
+divider for the reciprocal of the table's lowest throughput, rounded up:
+
+| operation | latency (cycles) | issue | resource |
+|---|---|---|---|
+| FADD, FSUB, FMIN/FMAX, FSGNJ, compare, move | 2 | every cycle | the pipe's FP unit |
+| FMUL | 3 | every cycle | the pipe's FP unit |
+| FMADD, FMSUB, FNMADD, FNMSUB | 4 | every cycle | the pipe's FP unit |
+| FCVT, FCLASS | 3 | every cycle | the pipe's FP unit |
+| FDIV.S | 10 | one per 5 cycles | the tile's divider |
+| FDIV.D | 15 | one per 7 cycles | the tile's divider |
+| FSQRT.S | 9 | one per 2 cycles | the tile's divider |
+| FSQRT.D | 16 | one per 8 cycles | the tile's divider |
+
+The pipelined operations are all shorter than the 8-stage pipe, and a context cannot issue
+again until its instruction leaves the pipe, so they cost nothing beyond the pipe; on a pipe
+shallower than an operation's latency the context waits for the difference. A divide or square
+root takes the divider that frees first, starts when it does, holds it for its issue interval
+and is written back its latency after it starts. Until then its context **holds no issue slot**
+— it waits as it waits for a load — and every other context issues. So the divider accepts at
+most one operation every interval, and a tile whose contexts all divide runs at the divider's
+rate: on the directed test, 32 contexts doing 64 double-precision divides each took 14,555 tile
+cycles against the divider's 2,048 × 7 = 14,336, and 3,365 cycles when the divide was replaced by
+a fused multiply-add (4.3×). One context alone pays each divide's latency beyond the pipe, 64 ×
+(15 − 8) = 448 cycles exactly. Spread over four tiles, each tile's divider served its own quarter.
+The divider count is configuration (`fpDividers`); one per tile is the design, because an in-order
+multithreaded core shares one iterative divider among its threads, as N2 has one, on one pipe.
+Nothing but a tile's own contexts can reach its divider, so it has no cross-agent case. Integer
+divide is still charged as one pipe pass; that is a known gap, not a decision. The counters are
+`fpDivOps`, `fpDivQueued`, `fpDivQueueCycles`, `fpDivBusyCycles`, `fpLongOps` and the census
+bucket `ctxNotReadyFpUnit`, which the readiness partition includes.
+
+The host's floating point is Arm Neoverse V2's (*Software Optimization Guide*,
+PJDOC-466751330-593177, issue 3.0, table 3-11): add 2, multiply 3, fused multiply-add 4 cycles,
+pipelined on two units, and **two** dividers (V2 divides on two of its four vector pipes), each
+held as the tile's is: FDIV.S 10 cycles and held 3, FDIV.D 15 and 7, FSQRT.S 9 and 2, FSQRT.D 16
+and 8. The host used to run square root on its adders at 3 cycles and to accept a divide every
+cycle.
+
 ### 2.3 The translation path
 
 At the address stage a memory instruction's virtual address, address-space identifier,
@@ -1707,7 +1750,10 @@ the structure below it already uses, and the structure below keeps one queue per
 so traffic for one bank never waits behind traffic for another.
 
 The memory device modelled is DDR5-4800, two ranks of eight bank groups of four banks, on a
-32-bit subchannel. The controller's address mapper lays a tile's local address out as, from
+32-bit subchannel: four 16 Gb x8 devices per rank (JEDEC JESD79-5's 16 Gb x8 organisation —
+8 bank groups × 4 banks × 65,536 rows × 1,024 columns of 8 bits, a 1 KB page), so **16 GiB per
+tile and 64 GiB at four tiles**. The machine's memory size is derived from that file — each tile
+brings one channel of the device's capacity — and the address width with it. The controller's address mapper lays a tile's local address out as, from
 the bottom: six bits of burst, six bits of column (64 lines, 4 KiB — one row of one bank),
 one rank bit, three bank-group bits, two bank bits, then the row. Each tile's last-level slice
 has 32 banks and picks its bank from **the device's bank-group and bank bits** (local address
@@ -1863,6 +1909,18 @@ translation latency; translation-buffer size and banking; the store slot-release
 instruction-cache banks; bank access latency; last-level slice size, banking and latency;
 memory device and link.
 
+**Resources and their limits** — each with its capacity and where the number comes from:
+
+| resource | capacity | source |
+|---|---|---|
+| floating-point unit, per pipe | one operation per cycle, pipelined; add 2, multiply 3, fused multiply-add 4, convert 3 cycles | Arm Neoverse N2 SOG, table 3-19 |
+| divider, per tile (`fpDividers`) | one, shared by every context; FDIV.D 15 cycles held 7, FSQRT.D 16 held 8, FDIV.S 10 held 5, FSQRT.S 9 held 2 | N2 SOG, table 3-19, worst case of each range |
+| host floating point | two pipelined units (add 2, multiply 3, fused multiply-add 4) and two dividers held as the tile's | Arm Neoverse V2 SOG, table 3-11 |
+| memory, per tile | one DDR5-4800 channel: 2 ranks × 8 bank groups × 4 banks × 65,536 rows × 4 KiB = 16 GiB; 64 GiB at four tiles | the device file; JEDEC JESD79-5, 16 Gb x8 device |
+| physical address | 36 bits at 64 GiB (the smallest power of two covering the memory); the host core refuses any access outside it | derived from the memory size |
+| grain `G` | row 4 KiB × every bank of the channel (2 × 8 × 4 = 64) × tiles = 1 MiB at four tiles | canon E.3, from the device file |
+| page-table copy, per tile | as many of the tile's grains at the top of memory as a bound on the table's size needs (one grain up to about 500 MiB of mapped 4 KiB pages; 37 at 18 GiB) | derived from the declared regions |
+
 **Structure** — changing one is a different design. A context has exactly two slots. A
 context cannot be scheduled without its instruction in hand. Translation is virtually
 indexed and happens before anything enters the data path. Memory queues are physically
@@ -1909,6 +1967,8 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | Tile instruction and data caches, banked one bank per pipe, a bank reading one line per cycle, four counters each | **yes**, including the per-bank arithmetic unit that performs a read-modify-write and the bank index on the request interface | — |
 | Last-level slice banked by the memory device's bank bits; one queue per DRAM bank at the controller | **yes** — the slice bank is the device's bank-group and bank bits (it was its column bits until this round). The controller keeps a queue per bank over one shared read queue per channel, sized P = memory queues × their depth × tiles per channel + the host L2's miss registers = 128, the DMC-620's larger queue depth. Posted writes are held in a separate write queue of P entries, drained in batches that empty the batch they began with. Measured against the single queue: victims of a one-bank storm at 1.3× their solo time, where the single queue slowed them 9×; the shuffled sum's offloaded phase at 994,413 cycles against 995,883; the graph search's level-7 window at 1,584,221 against 1,590,118 (§2.8). The single-queue controller it replaces (one 32-entry read and one 32-entry write buffer per channel, ramulator2's defaults) stays selectable (`NMFC_BANK_QUEUES=0`) | T counts only the channel's own tile, so remote tiles' reads can exceed P: this happened for 0.2 % of reads on one channel at level 7 |
 | Tracking unit derived to cover every context; the control queue following it; the host counting cycles its unit is full | **yes** | — |
+| Floating-point costs: a pipelined unit per pipe, one iterative divider per tile, a divide's context waiting without an issue slot; the host's units and two dividers | **yes** (§2.2). Until this round every tile floating-point operation, divide and square root included, cost one pipe pass, and the host accepted a divide every cycle and ran square root on its adders. The integer workloads' tile statistics are byte-identical across the change | integer divide on the tile, still one pipe pass |
+| Memory size: one 16 GiB channel per tile, the address width derived from it, page-table copies that span as many of a tile's grains as they need, backing allocated only for pages touched | **yes** (§2.8). The machine had a flat 4 GiB; the host could not issue an address above 32 bits; a page-table copy was limited to one grain, which refused any program mapping more than about 500 MiB; and the loader wrote the zeros of every declared `.bss` page into the simulator's backing store. A test places, touches and reads back 4.5 GiB on each of four tiles; the simulator's resident memory is 1.24 GB for it and unchanged (165–177 MB) for the three workloads | the host's identity-mapped window (its stack and program headers below 2 GiB) lies inside the default physical arena, which starts at 256 MiB; a program that needs more than about 1.5 GiB of frames must start the arena above it, and nothing yet refuses the overlap |
 | Duplicate pages: a kernel store or atomic refused and counted, zero-gated, with a directed test; the host's legal fan-out to every copy | **yes**, including the privileged page-table write as its own request class with its own reserved capacity, gated so that nothing else can reach the exemption | — |
 | Migration on a foreign translation result | **yes**, taken at the translation result, with the program counter carried back so the instruction re-issues | the rule for a context that migrates with a store still in a queue, under the relaxed store switch only |
 | Memory link: parallel pass-through and a serial CXL attachment, as configuration | **yes** | a workload that can saturate the serial link; the x32 variant |
