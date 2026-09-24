@@ -157,10 +157,10 @@ carries it between tiles as the 64 bytes of register file and the program counte
 
 ### 1.4 The instruction set
 
-The extension adds **fourteen instructions** to an otherwise ordinary 64-bit RISC-V machine,
-and one further word that marks the entry point of a function. Eight of the fourteen execute
-on the host and start, probe, collect or cancel an invocation; three execute on a function
-core and end or extend one; two move 64 bits between a host general register and a host
+The extension adds **fifteen instructions** to an otherwise ordinary 64-bit RISC-V machine,
+and one further word that marks the entry point of a function. Eight of the fifteen execute
+on the host and start, probe, collect or cancel an invocation; four execute on a function
+core and end, extend or pause one (`WAIT` sleeps a context until a line it read changes); two move 64 bits between a host general register and a host
 context register; one, `RESUME`, is privileged and belongs to the fault path. Twelve of them
 form the user-level base set; `KILL` is user-level as well but was added after that set was
 closed, and `RESUME` is not user-level at all.
@@ -205,7 +205,7 @@ because no instruction in the set reads `rs2` without also reading `rs1`.
 
 Three bits of group are exactly enough for the six groups the set needs, and four bits of
 variant are exactly enough for the widest one, a context-lane move that carries a direction
-and a lane number. That gives 128 `funct7` values, of which **30 are taken and 98 are free**.
+and a lane number. That gives 128 `funct7` values, of which **31 are taken and 97 are free**.
 
 | group | `funct7` range | instructions | variants used | variants free |
 |---|---|---|---|---|
@@ -213,7 +213,7 @@ and a lane number. That gives 128 `funct7` values, of which **30 are taken and 9
 | `001` probe | 0x10–0x1f | `FORKQ` `JOINQ` | 0–1 | 14 |
 | `010` join | 0x20–0x2f | `JOIN` | 0 | 15 |
 | `011` end | 0x30–0x3f | `END`, `END.R` | 0–1 | 14 |
-| `100` continue | 0x40–0x4f | `CONT` `CONT.M` | 0–1 | 14 |
+| `100` continue | 0x40–0x4f | `CONT` `CONT.M` `WAIT` | 0–2 | 13 |
 | `101` context lane | 0x50–0x5f | `CXW` and `CXR`, eight lanes each | 0–15 | none |
 | `110` control | 0x60–0x6f | `KILL` `RESUME` | 0–1 | 14 |
 | `111` marker | 0x70–0x7f | the function-entry marker | 0 | 15 |
@@ -254,7 +254,7 @@ site, so it costs a field instead of an instruction.
 
 #### 1.4.3 The instructions
 
-The fourteen entries follow. Each gives the assembly syntax, the encoding with every field's
+The fifteen entries follow. Each gives the assembly syntax, the encoding with every field's
 value, which side of the machine executes it, what its operands carry, what it does, what it
 can raise, and anything that would otherwise be a surprise. In the encodings below, a field
 written as a name is supplied by the programmer and a field written in binary or hex is fixed
@@ -553,6 +553,66 @@ which is why the replacement is wholesale rather than a partial update.
 
 ---
 
+**`WAIT rA`** — sleep until the line named by `rA` is written or lost.
+
+*Encoding.* `funct7` = 0x42 (group `100`, variant `0010`) · `rs2` = `x0` · `rs1` = `rA` ·
+`funct3` = `010` (reads `rs1` only) · `rd` = `x0` · opcode = `0b0001011`. With `rA` = `x11` the
+word is `0x8405a00b`. Group `100` is refused by every host decoder, so `WAIT` is illegal on a
+host without a new rule. Variant `0011` stays reserved (kept for a possible form that delivers
+the written word).
+
+*Executed by* a function core, user-level.
+
+*Operands.* `rs1` holds a virtual address and must be a 64-bit name. Only the line it falls in
+matters. There is no expected value and no destination.
+
+*Operation.*
+
+```
+translate rs1 as a load's address is        # a fault drops it and the context re-attempts;
+                                            # another tile's line drops it and the context migrates
+if the load slot's arm is valid and names the same physical line:
+    the context sleeps (WAITING, no issue slot) until an invalidation of that line, or KILL
+else:
+    complete at once                        # a permitted wake-up
+pc <- pc + 4
+```
+
+*What arms the slot.* Every load and read-modify-write atomic writes the **arm** — its
+physical line and a valid bit — when its translation completes. A store, a load-reserved and a
+store-conditional clear it at their translation; so do a dropped translation and departure
+(retirement, migration, kill: the arm never travels). Any invalidation of the line clears it,
+whether the arming operation is still in flight or has returned, which is what closes the lost
+wake-up without an atomic step: a write performed after the arming read has cleared the arm
+before the `WAIT` looks at it.
+
+*Semantics.* `WAIT` issues no request: no memory-queue entry, no serialisation point, no
+delivery-window slot, no credit. Spurious wake-ups are part of the definition (an eviction of
+the line, a write to another word of it, a migration or a restore that empties the arm), so a
+program re-reads its word after every `WAIT`:
+
+```
+retry:  ld    d1, 0(d0)        # the read that decides "not yet" arms the slot
+        bne   d1, d2, work
+        wait  d0
+        j     retry
+```
+
+The only guarantee is that a context is never left asleep after a write to the line performed
+after the load that armed it.
+
+*Rules the loop follows.* The arming load or atomic is the last memory operation before the
+`WAIT` (a store in between clears the arm and costs one turn of the loop, never a hang); the
+condition lives in one line; `rA` names the arming line (the compare is on physical lines);
+a `WAIT` after an open load-reserved completes at once, so no context sleeps holding a
+serialisation point; and a waiter must never be what its writer needs — resident waiters per
+tile stay below the tile's contexts, as they must for a polling loop.
+
+*Notes.* It holds only its own context while it sleeps, exactly as a polling loop does, so it
+adds no hold-and-wait edge; it is not a blocking instruction in the sense the canon rejects.
+
+---
+
 **`CXW cD, lane, rS`** — write one 64-bit lane of a context register.
 
 *Encoding.* `funct7` = 0x50 + 2·lane (group `101`, variant = lane in bits 3:1, direction bit
@@ -714,6 +774,7 @@ The lane *n* runs 0–7.
 | `END.R` | 0x31 | `011` | `0001` | `000` | `x0` | `x0` | `x0` |
 | `CONT` | 0x40 | `100` | `0000` | `010` | `x0` | successor address | `x0` |
 | `CONT.M` | 0x41 | `100` | `0001` | `110` | `x0` | successor address | context address |
+| `WAIT` | 0x42 | `100` | `0010` | `010` | `x0` | address | `x0` |
 | `CXW` lane *n* | 0x50 + 2*n* | `101` | *n*`0` | `110` | `x0` | value | context number |
 | `CXR` lane *n* | 0x51 + 2*n* | `101` | *n*`1` | `011` | value | context number | `x0` |
 | `KILL` | 0x60 | `110` | `0000` | `010` | `x0` | handle | `x0` |
@@ -816,11 +877,15 @@ The words, which are what any future decoder must agree with:
 | `JOIN` | `0x40c5f50b` | `KILL` | `0xc005a00b` |
 | `END` | `0x6000000b` | `RESUME` | `0xc205a00b` |
 | `END.R` | `0x6200000b` | marker | `0xe000000b` |
+| `WAIT` | `0x8405a00b` | | |
 
 Those words use `x10` as the destination and `x11`, `x12` as the sources wherever the
 instruction has one; the register fields are not part of the instruction's identity.
 
-**All four decoders agree on all eighteen defined words.** Four disagreements were found
+**All four decoders agree on all eighteen defined words**, and on `WAIT`'s, added since: the
+continue group is now decoded on its whole variant by both function-core models (a decoder that
+told `CONT.M` from `CONT` by the M bit alone would have run 0x42 as `CONT`), both hosts refuse
+0x42 as a function-side instruction, and every decoder refuses 0x43. Four disagreements were found
 beyond them. All four are now closed, and the first of them is what the one shared table is for.
 
 - **The reserved encodings, which are the space a later instruction is added in.** An
@@ -1145,6 +1210,17 @@ the *translation result* rather than of the virtual address: a translation namin
 tile turns the access into a migration; a translation naming a duplicated page on a store
 or an atomic is refused and counted; a translation that misses leaves the slot occupied
 while the walk runs.
+
+**The load slot keeps an arm after its operation completes** — a physical line address and a
+valid bit, 44 bits per context and no data. A load or a read-modify-write atomic writes it when
+its translation completes; a store, a load-reserved or a store-conditional clears it at theirs;
+a dropped translation and departure clear it. Every invalidation broadcast from a data-cache
+bank is compared with every armed slot (one equality compare per context, gated by the valid
+bit), and a match clears the arm whether the operation is still in flight or has returned. This
+is what `WAIT` sleeps on (§1.4.3): a waiting context holds no issue slot and wakes when its
+arm is cleared. The comparison is linear in contexts and there is no structure that records
+who waits on what. Nothing answers a load from the arm; the zero-gated `slotAnsweredLoads`
+says so on every run.
 
 A data prefetcher could fill the load slot speculatively from previous addresses. It is
 deliberately undesigned, and the slot is left free for one.
@@ -1743,6 +1819,22 @@ a request waits, so the figure is the delay the banking costs rather than the nu
 unlucky pairs; banks busy, summed over the cycles in which any was, so its own count is the
 denominator; and accesses answered by a read another request had already paid for.
 
+**Every bank broadcasts `INV(line)`** — a line address and an invalid bit, no data — to the
+context array on four events: a coherence request that takes the line (the data cache tells the
+tile the snoop's kind, and a downgrade, which leaves a shared copy that still hears the next
+write, broadcasts nothing); a write performed at the bank (a store, a successful
+store-conditional, a read-modify-write's write half, which excludes its own context so its own
+arm stands); and **every eviction**, which the data cache now reports to the tile, because once
+the bank has let a line go it can no longer hear writes to it. A broadcast is queued on the
+owning bank and delivered one per bank per cycle on the bank's return port; the ones caused by
+an access ride that access's return, and only a snoop's takes a port cycle of its own
+(`invSnoopOnlyPortCycles`). The cache may ask the tile before a snooped line goes (the default)
+or tell it afterwards, as a stock coherent cache does; both are modelled and both are tested.
+**The one limit this creates** is the bank's capacity: more distinct waited lines than a set
+has ways (eight in a 16 KiB, 8-way, 4-bank cache) make each woken waiter's re-load evict
+another waiter's line, and the waiters poll at the miss rate — counted as `waitWakeEviction`
+and `waitEvictWakeChains`, never a deadlock.
+
 ### 2.8 Last-level banks are the memory's banks, and the controller keeps a queue per bank
 
 One rule, in two halves: a cache's banks should be the same partition of the address space
@@ -1972,6 +2064,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | Duplicate pages: a kernel store or atomic refused and counted, zero-gated, with a directed test; the host's legal fan-out to every copy | **yes**, including the privileged page-table write as its own request class with its own reserved capacity, gated so that nothing else can reach the exemption | — |
 | Migration on a foreign translation result | **yes**, taken at the translation result, with the program counter carried back so the instruction re-issues | the rule for a context that migrates with a store still in a queue, under the relaxed store switch only |
 | Memory link: parallel pass-through and a serial CXL attachment, as configuration | **yes** | a workload that can saturate the serial link; the x32 variant |
+| `WAIT`: the load slot's arm (a physical line and a valid bit written at the arming operation's translation), the instruction translated like a load and decided in the context array, the bank's invalidation broadcast on a line-taking snoop, a performed write and every eviction, one per bank per cycle; both ways a data cache can tell the tile it is losing a line (ask first, tell afterwards) | **yes** (§1.4.3, §2.1, §2.7), with the design's directed tests contended first — host, same-tile and migrating-in writers, one, two and four tiles, both notification modes — and five zero gates, one of which (`waitMissedWakeups`) stops a run at the first context left asleep after a write to its line. The workloads' tile statistics are byte-identical across the change. With a cache that tells afterwards, a tile's load-reserved/store-conditional pair whose window is longer than about five instructions livelocks against a host pair on the same word; that is the pair's missing fairness bound, which the row above reports, and not `WAIT`'s | the functional model's half: parking an invocation at its `WAIT` and waking it only on a store to its armed line, and an image format that records the armed address so a restore places the context on the line's tile. Forwarding the written word to a woken context is not built; its counter (`waitLocalWakeReloads`) is |
 | Data prefetching into the load slot | no | deliberately undesigned; the slot is left free for one |
 | A barrel multi-context core as a comparison arm: many contexts without the position and without the unit of work | no | **designed and reviewed**, not modelled — the arm that would say which of the three differences between host and engine produced a ratio |
 | A graphics processor as a comparison arm, running the same three problems on the same inputs | no | **designed and reviewed**, not modelled |
