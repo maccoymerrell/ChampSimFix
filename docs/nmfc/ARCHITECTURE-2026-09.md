@@ -2005,11 +2005,36 @@ set aside, since otherwise a start-up region measured whole is lost with the spa
 the dictionary at 677,205 inserts (U = 12,053), the two changes move the resident build's estimate
 from 0.985 to 0.991 of its uninterrupted 42,067,209 cycles, interval [40,996,235, 42,387,361], and
 leave the wave build at 1.001 of 38,751,307, interval [38,150,958, 39,463,258]; both intervals
-contain the whole run. The spans hold 64.1 % of the resident build's waiting cycles. The rest is at
-the program's end: the last span closes after the producer's remaining count of counted
-instructions while the final drain is still running, because the cycle model's polling loop runs
-more often than the producer's. A span that reaches the program's end should close at the
-program's exit; that is not built.
+contain the whole run. That left the resident build 0.9 % low, and the shortfall was at the
+program's end: its last span's width is the producer's count of what the program has left, 9,654
+counted instructions, but the host's final polling loop runs more turns in the cycle model than
+in the producer, so the span closed at that count after 256,086 cycles with the final drain still
+running.
+
+**A region that reaches the program's end closes at the program's exit.** Past the program's last
+counted instruction no count closes a region where the program ends, because the machine's count
+runs ahead of the producer's wherever the host polls. The image records the program's total on
+the region's axis; when a region's end is at or beyond it, the run is configured to close the
+region when the host core issues the program's exit system call (an `exit_group`, or the `exit` of
+the last running thread), and at no count. The core tells the host unit at that cycle; the unit
+takes the closing snapshot there, and the region's row records `closed_by` = `exit` and the
+invocations still outstanding. There is no teardown after such a region. A directed test
+(`src/nmfc/test/run_exit_close.sh`, in the coherent suite) runs a program that ends in a drain of
+four resident workers, polled partly outside the wait range: the region closed at the exit ends
+15 cycles before the run does and covers 18,545 counted instructions against its width of 5,956,
+145,542 cycles; the same region closed at its count covers 10,621 cycles and misses the drain.
+Re-validated on the dictionary at 677,205 inserts, with the builds and images the uninterrupted
+runs were made with, 20 regions each:
+
+| build | uninterrupted | estimate | ratio | 95 % interval | contains it |
+|---|---:|---:|---:|---|---|
+| resident | 42,067,209 | 42,125,747 | 1.0014 | [41,430,184, 42,821,310] | yes |
+| wave | 38,751,307 | 38,816,908 | 1.0017 | [38,160,758, 39,473,058] | yes |
+
+The resident build's last span now measures 690,035 cycles and 34,339 counted instructions, and
+the spans hold 102 % of its uninterrupted waiting cycles (1,054,252 against 1,029,301). The wave
+build's last span had drained inside its region before; it now also runs on to the exit, 9,800
+cycles more.
 
 **An image carries what the program last used, not only its architectural state (format 5).**
 An image restored with every cache, translation buffer and branch-target buffer empty took up to
