@@ -1412,15 +1412,41 @@ four, 26,519 tile cycles standalone, with 507 points opened and 384 closed by th
 store-conditional. At the configuration everything here is measured under, the rule costs exactly
 zero. At a memory-queue depth of 8 it is the difference between finishing and not: with the rule
 the test passes in 26,635 cycles, and without it no invocation ever returns and the run does not
-end. Depth 2 fails either way and nothing is claimed for it.
+end. Depth 2 fails either way and is now refused at construction (below).
 
-> **A defect the pairing found, and it is not yet corrected.** At a delivery window of width 1 the
-> reservation does harm rather than nothing. The refusal triggers when `occupancy + 1 ≥ width`,
-> which at a width of 1 is true of an *empty* window — so while any point is open the window's
-> capacity for ordinary traffic is zero rather than one less, and that arm fails where the
-> rule-off arm passes in 40,999 cycles. Nothing configured is affected, the window being 4 slots
-> wide and the queue 16 deep, but the reservation needs a floor of two units at each stage, and
-> that correction has not been made.
+**The rule has a floor, and the machine refuses to be configured below it.** A reservation is
+only a reservation when the stage keeps a unit for everything else. At a delivery window of
+width 1 the refusal `occupancy + 1 ≥ width` is true of an *empty* window, so while any point was
+open the window admitted nothing but the close: a closure rather than a reservation, and on the
+full machine the pair test stopped with the rule on and passed with it off. Giving the single slot
+back to ordinary traffic does not repair that, because the ordinary request that takes it can be
+one the point holds, with no entry waiting for it at its queue, and the close is then behind it
+with nowhere to go — the wedge the rule exists to prevent. A reserved unit has to be a unit of its
+own, as an escape channel in deadlock-free routing is a buffer of its own. So each stage's floor is
+its reserved units plus one: a window of **2** (one slot for the close, shared with the walk path's
+traffic, which a point never holds), a translation queue of **2** (one entry for a
+store-conditional), and a memory queue of **walkReserve + 2** — **3** with walks through the data
+cache, 2 with walks sent to the slice. A smaller stage is refused at construction with the limit
+named, and a one-pipe tile's window defaults to 2 rather than 1 (NMFC-Rev `3922ed7`). A memory queue of 2 with a walk
+reservation fails either way for the same reason: its one general entry is either the close's
+(nothing else enters) or anybody's (a held request can take it).
+
+**The walk path keeps its reservation while a point is open.** The memory queue's half of the rule
+used to refuse every request but the close once its general capacity was one short — walk reads
+included, although they are admitted against entries of their own and a point never holds one. At a
+depth of 3 on the full machine that refused the walk the point's own context needed before it could
+reach its close, and the two-contender test stopped with no increment made; exempting the walk
+path's traffic, as the window already did, lets it finish in 24,252 host cycles against 24,246 with
+the rule off. The same correction turns the eight-contender test at a queue depth of 8 on the full
+machine from a failure into a pass with the rule on (it still fails with the rule off).
+
+**Below 12 entries on the full machine, eight contenders still stop, with the rule or without it.**
+At memory-queue depths of 3 and 4, with walks through the data cache, neither arm completes; at 4
+with walks sent to the slice the rule-on arm completes and the rule-off arm does not. In the stopped
+rule-on arm the stages are not full — the memory queue holds one entry of three and the translation
+queues are empty — but four contexts wait at the data-cache bank for accesses that do not return,
+and every walk slot is occupied. That is a stop on the bank's side, not the reservation's, and it is
+not yet diagnosed.
 
 **A load-reserved for another address may not take over an open point.** A queue holds one
 point at a time; a load-reserved arriving for a different address in the same queue used to
