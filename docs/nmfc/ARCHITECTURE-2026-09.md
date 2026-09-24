@@ -1457,42 +1457,26 @@ zero. At a memory-queue depth of 8 it is the difference between finishing and no
 the test passes in 26,635 cycles, and without it no invocation ever returns and the run does not
 end. Depth 2 fails either way and is now refused at construction (below).
 
-**The rule has a floor, and the machine refuses to be configured below it.** A reservation is
-only a reservation when the stage keeps a unit for everything else. At a delivery window of
-width 1 the refusal `occupancy + 1 ≥ width` is true of an *empty* window, so while any point was
-open the window admitted nothing but the close: a closure rather than a reservation, and on the
-full machine the pair test stopped with the rule on and passed with it off. Giving the single slot
-back to ordinary traffic does not repair that, because the ordinary request that takes it can be
-one the point holds, with no entry waiting for it at its queue, and the close is then behind it
-with nowhere to go — the wedge the rule exists to prevent. A reserved unit has to be a unit of its
-own, as an escape channel in deadlock-free routing is a buffer of its own. So each stage's floor is
-its reserved units plus one: a window of **2** (one slot for the close, shared with the walk path's
-traffic, which a point never holds), a translation queue of **2** (one entry for a
-store-conditional), and a memory queue of **walkReserve + 2** — **3** with walks through the data
-cache, 2 with walks sent to the slice. A smaller stage is refused at construction with the limit
-named, and a one-pipe tile's window defaults to 2 rather than 1 (NMFC-Rev `3922ed7`). A memory queue of 2 with a walk
-reservation fails either way for the same reason: its one general entry is either the close's
-(nothing else enters) or anybody's (a held request can take it).
+**The reserved unit is a unit of its own: an escape slot at the window and the translation queue, and a floor at the memory queue.** A reservation is only a reservation when the stage keeps a unit for everything else and the entitled request can always reach its unit. The first version carved the close's unit out of each stage's configured size once a point opened, and that fails twice. At a window of one slot the refusal `occupancy + 1 ≥ width` is true of an *empty* window, so while any point was open the window admitted nothing but the close — a closure rather than a reservation. And at any size the unit is carved out too late: a point opens when its load-reserved reaches the bank, and by then the window and the translation queue can already be full of contenders for the same word, every one of which the point then holds. Eight contenders on a tile alone, at the default window of 4 and a memory-queue depth of 3 or 4, stopped exactly so: four contenders in the window, the close in its translation queue with nowhere to go. So at the window and the translation queue the close's unit is now an **escape unit beyond the configured size**, as an escape channel in deadlock-free routing is a buffer of its own rather than one taken from the shared pool (Duato, *IEEE TPDS* 4(12), 1993): ordinary traffic keeps the whole configured width or depth whether or not a point is open, and while one is open the close (and, at the window, the walk path's traffic, which a point never holds) may take one unit more. With no point open the unit does not exist, so a program that performs no pair runs on exactly the configured stage. The memory queue keeps its reservation inside its depth, because it does not have the hole: the load-reserved that opens its point holds one of its general entries and frees it on completion, and from then on the rule keeps that entry for the close. Its floor is therefore still its reserved units plus one, **walkReserve + 2** — 3 with walks through the data cache, 2 with walks sent to the slice — and a smaller queue is refused at construction with the limit named. The window's and the translation queue's floor is 1. A memory queue of 2 with a walk reservation fails either way: its one general entry is either the close's (nothing else enters) or anybody's (a held request can take it). The window's default stays max(pipes, 2), so a one-pipe tile's configuration does not change.
 
 **What the floor proves is deadlock-freedom, and only that.** At or above it the close always
 finds a memory-queue entry, because the only traffic that can take the reserved unit first is a
-walk, which no point holds and which completes; the window's last slot can be taken only by
+walk, which no point holds and which completes; the window's escape slot can be taken only by
 closes and walk traffic, both of which are always delivered, and a close holding an entry may pass
-an older request for the same bank that has none; and a store-conditional may leave its
-translation queue ahead of requests the point holds. Starvation is not excluded — walk traffic
-enters the window first every cycle — and one case is not proven: a store-conditional whose own
-point was already broken can occupy the translation queue's reserved entry, because that stage
-cannot yet tell a real close from any other store-conditional. No run has reached it. The machine
+an older request for the same bank that has none; the translation queue's escape entry can be
+taken only by a store-conditional from the context that owns an open point (the point records its
+owner's slot and generation), so one whose own point was already broken is ordinary traffic there
+and cannot hold the close's entry — it could before, and twenty-eight contenders on a tile alone
+reached it; and a store-conditional may leave its translation queue ahead of requests the point
+holds. Starvation is not excluded — walk traffic enters the window first every cycle. The machine
 as configured sits well above the floor: 16 entries per memory queue (`dataQueueDepth`), 8 per
 translation queue (`xlatQueueDepth`), both defaults in `src/nmfc/src/NMFCTile.h`, and a window of
-max(pipes, 2). Paired before and after on the eight-contender pair test (`tile_lrsc`, 8
-invocations × 16 increments, run whole, one binary per build with only `pointReserve` changed), every
-run that completed in both builds gives a byte-identical statistics file — 41,149 host cycles on
-the full machine and 26,519 tile cycles on a tile alone at windows of 2 and 4 — and the window of 1
-that stopped the full machine with the rule on is now refused. At the floor itself (window 2,
-translation queue 2, memory queue 3), two contexts on one word pass in 19,526 tile cycles with the
-rule on or off, eight contexts on a tile alone pass in 26,822 with it on and fail with it off, and
-eight contexts on the full machine fail either way, which is the stop described below.
+max(pipes, 2). On the eight-contender pair test (`tile_lrsc`, 8 invocations × 16 increments, run
+whole) at that configuration the escape units change nothing: 41,175 host cycles on the full
+machine, 41,833 on two tiles and 26,481 tile cycles on a tile alone in both builds. At the smallest
+stages now admitted (window 1, translation queue 1, memory queue 3) the test passes in 44,761 host
+cycles on the full machine and 26,796 tile cycles alone; at window 2 and translation queue 2, in
+47,433 and 26,792.
 
 **The walk path keeps its reservation while a point is open.** The memory queue's half of the rule
 used to refuse every request but the close once its general capacity was one short — walk reads
@@ -1503,13 +1487,24 @@ path's traffic, as the window already did, lets it finish in 24,252 host cycles 
 the rule off. The same correction turns the eight-contender test at a queue depth of 8 on the full
 machine from a failure into a pass with the rule on (it still fails with the rule off).
 
-**Below 12 entries on the full machine, eight contenders still stop, with the rule or without it.**
-At memory-queue depths of 3 and 4, with walks through the data cache, neither arm completes; at 4
-with walks sent to the slice the rule-on arm completes and the rule-off arm does not. In the stopped
-rule-on arm the stages are not full — the memory queue holds one entry of three and the translation
-queues are empty — but four contexts wait at the data-cache bank for accesses that do not return,
-and every walk slot is occupied. That is a stop on the bank's side, not the reservation's, and it is
-not yet diagnosed.
+**The close is not stranded behind the requests its point holds.** Eight contenders on the full machine, with walks through the data cache, stopped at a memory-queue depth of 3 with the rule on. The stopped state: the four walk slots (`walkSlots`, one per translation queue, four at four pipes) each held a request whose walk had finished — three contenders' load-reserveds and the point owner's store-conditional, which had missed the translation lookaside buffer like the others; the window held three contenders, all refused credit by the point, and its remaining slot was the close's. The finished walks are drained into the window each cycle, and the drain stopped at the first request the window refused. The first was a contender, refused because the free slot was the close's; the close, third in the array, was never offered the slot kept for it. The drain now passes over a request the window refuses and offers the next, as the translation queues' drain already did; each entry is a different context's operation, so nothing that has an order is reordered. The walk path's own queue into the window follows the same rule: a request refused for the close's slot no longer stops the walk reads behind it. The earlier reading that four contexts were waiting at the data-cache bank was an instrument defect: a walk read reaching the bank marked the context it walks for as waiting at the bank, although that context's operation was still in the walk-pending array. The census now moves a context only on its own operation.
+
+Before and after, on `tile_lrsc` (eight invocations × sixteen increments on one word, the host writing the same line in phase 5, run whole; host cycles on the full machine and on two tiles, tile cycles on a tile alone; window 4, translation queue 8, walks through the data cache; one binary per build with only `pointReserve` changed; a run not complete at 1 ms of simulated time, about seventy times the passing time, is a stop):
+
+| memory-queue depth | machine | before, rule on | before, rule off | after, rule on | after, rule off |
+|---|---|---|---|---|---|
+| 3 | full machine | **stop** | stop | **40,593** | stop |
+| 3 | tile alone | **stop** | stop | **26,788** | stop |
+| 3 | two tiles | **stop** | stop | **42,025** | stop |
+| 4 | full machine | 40,013 | stop | 40,959 | stop |
+| 4 | tile alone | **stop** | stop | **26,744** | stop |
+| 4 | two tiles | **stop** | stop | **41,500** | stop |
+| 8 | full machine | 40,983 | 40,983 | 40,983 | 40,983 |
+| 8 | tile alone | 26,597 | stop | 26,597 | stop |
+| 12 | full machine | 41,091 | 41,091 | 41,091 | 41,091 |
+| 12 | tile alone | 26,481 | 26,481 | 26,481 | 26,481 |
+
+With the rule off every stop is the wedge the rule exists to prevent: the window full of contenders the point holds, the close in its translation queue. Where both builds complete, the statistics files differ only in the corrected census counters and in the window-full count, which now includes the escape slot. At depth 4 on the full machine the rule-on run ends 946 host cycles (2.4 %) later. A build without the escape units reproduces the old 40,013 exactly, so the difference comes from the escape slot: it lets one more ordinary request into the window while a point is open, and that changes which contender wins the word next. At depth 3 the same change is 1,117 cycles faster than that build.
 
 **A load-reserved for another address may not take over an open point.** A queue holds one
 point at a time; a load-reserved arriving for a different address in the same queue used to
@@ -1518,11 +1513,15 @@ every step legal — and, worse than stopping, produce wrong answers. One stress
 10,668,525 points and closed 256. Such a load-reserved now waits, and the same seed closes
 256 of 256 in about a second.
 
-**What is reported rather than repaired: the pair has no forward-progress guarantee against a
-rate of contention.** It completes at 2 to 24 contenders on one word at the default
-configuration and does not at 28 or 32, and it completes at all of them if any one of the
-three stages is enlarged. A fairness bound at the point — a contender that has waited long
-enough taking precedence — is a design decision rather than a repair, and it is not taken
+**What is reported rather than repaired: the pair has no fairness bound against a rate of
+contention.** It used to stop at 28 and 32 contenders on one word at the default configuration,
+and that was not a fairness limit. On the full machine it was the walk-pending drain above: a build
+with only that repair passes 28. On a tile alone it was a store-conditional whose point had been
+broken holding the translation queue's reserved entry: a build with every repair except the owner
+test at translation still stops at 28. With both repairs, 28 contenders complete in 118,052 host
+cycles on the full machine and 50,862 tile cycles alone, and 32 in 132,010 and 55,762.
+Starvation-freedom remains unproven. A fairness bound at the point — a contender that has waited
+long enough taking precedence — is a design decision rather than a repair, and it is not taken
 here.
 
 **A read-modify-write atomic is one entry, performed at the bank by a small arithmetic unit beside it.** Such a unit is ordinary in real memory systems: RISC-V implementations execute their atomic operations with an arithmetic unit inside the data cache, graphics processors execute atomics in their last-level cache slices, the AMBA CHI interconnect defines far atomics performed at the home node, and PCI Express defines atomic operations completed at the target; the operation set is nine operations at two widths, so the unit is an adder, a comparator and a few logic gates. The entry reaches the head for its
@@ -1905,7 +1904,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | The walk's own reads: through the data cache against reserved capacity, or straight to the last-level slice | **yes, both arms**, each with the refusals that stop it being measured as the other machine. **Under open analysis**: indistinguishable on the two sampled points so far, because the reservation was never contended, and the first reading of that rested on four walk-source counters that read zero while 1,007 walks ran — now a fifth bin and an accounting gate | the workload that separates them: one whose data traffic fills the queues while a walk needs to issue |
 | Getting a translated request to its bank | **yes** — the delivery window, oldest-per-bank, one delivery per bank per cycle, with the limit counter rewritten so that it can fire at all | the split-window escalation, if measurement ever says the window is the constraint |
 | Ordering, forwarding, atomicity | **yes** — physically-indexed memory queues, one per bank: sequence order, forwarding from the newest older overlapping entry, read-modify-write at the bank, coherence requests at the bank with a bounded deferral. The word-keyed table above the data cache, its cache pins, its snoop merge and its unbounded waiter list are **deleted** | — |
-| The load-reserved / store-conditional point: three ends, a unit of each stage reserved for the close, no takeover by another address | **yes**, with a cross-agent directed test in which a host and a tile update one word. Each stage refuses a size below its floor of reserved units plus one — window 2, translation queue 2, memory queue walkReserve + 2 — and walk traffic keeps its memory-queue entry while a point is open; what this proves is deadlock-freedom only (§2.5) | a fairness bound at the point, which is a design decision and is reported rather than repaired: the pair completes at 2–24 contenders and not at 28; the stop of eight contenders on the full machine below 12 memory-queue entries, at the data-cache bank, not yet diagnosed |
+| The load-reserved / store-conditional point: three ends, a unit of each stage reserved for the close, no takeover by another address | **yes**, with a cross-agent directed test in which a host and a tile update one word, and eight contenders at the memory queue's floor on one tile, two tiles and a tile alone in the suites. The close's unit is an escape slot beyond the window's width and an escape entry beyond the translation queue's depth (floor 1), entitled at translation only to the point owner's store-conditional; the memory queue keeps it inside its depth (floor walkReserve + 2); walk traffic keeps its memory-queue entry while a point is open, and the walk-pending drain does not stop at a request the window refuses. What this proves is deadlock-freedom only; 28 and 32 contenders now complete at the default configuration (§2.5; NMFC-Rev `43d62d2`) | a fairness bound at the point, which is a design decision and is reported rather than repaired |
 | Backpressure anywhere in the data path | **yes** — credit end to end, and the depth sweep shows a curve rather than a cliff: queue-full cycles 0, 1, 368, 6,417 as the queue goes 32, 8, 4, 2 with the answer unchanged | — |
 | Tile instruction and data caches, banked one bank per pipe, a bank reading one line per cycle, four counters each | **yes**, including the per-bank arithmetic unit that performs a read-modify-write and the bank index on the request interface | — |
 | Last-level slice banked by the memory device's bank bits; one queue per DRAM bank at the controller | **yes** — the slice bank is the device's bank-group and bank bits (it was its column bits until this round). The controller keeps a queue per bank over one shared read queue per channel, sized P = memory queues × their depth × tiles per channel + the host L2's miss registers = 128, the DMC-620's larger queue depth. Posted writes are held in a separate write queue of P entries, drained in batches that empty the batch they began with. Measured against the single queue: victims of a one-bank storm at 1.3× their solo time, where the single queue slowed them 9×; the shuffled sum's offloaded phase at 994,413 cycles against 995,883; the graph search's level-7 window at 1,584,221 against 1,590,118 (§2.8). The single-queue controller it replaces (one 32-entry read and one 32-entry write buffer per channel, ramulator2's defaults) stays selectable (`NMFC_BANK_QUEUES=0`) | T counts only the channel's own tile, so remote tiles' reads can exceed P: this happened for 0.2 % of reads on one channel at level 7 |
