@@ -1637,26 +1637,77 @@ a request waits, so the figure is the delay the banking costs rather than the nu
 unlucky pairs; banks busy, summed over the cycles in which any was, so its own count is the
 denominator; and accesses answered by a read another request had already paid for.
 
-### 2.8 Last-level banks are the memory's banks
+### 2.8 Last-level banks are the memory's banks, and the controller keeps a queue per bank
 
 One rule, in two halves: a cache's banks should be the same partition of the address space
-the structure below it already uses, and a bank reads one line per cycle.
+the structure below it already uses, and the structure below keeps one queue per partition,
+so traffic for one bank never waits behind traffic for another.
 
-The memory device modelled is DDR5-4800 with eight bank groups of four banks — 32 banks per
-rank — and the address is decoded row, bank, rank, column, channel, so the rank bit sits
-*below* the bank bits and two banks differing only in rank are the same bank index at the
-same position of the address. Each tile's last-level slice is banked by that same count, so
-a bank of the cache and the bank of memory behind it are one partition: a request that has
-picked a cache bank has already picked its memory bank. The count is one named constant read
-from the device description, and a gate checks that it still equals the device's count rather
-than trusting two assignments to stay in step.
+The memory device modelled is DDR5-4800, two ranks of eight bank groups of four banks, on a
+32-bit subchannel. The controller's address mapper lays a tile's local address out as, from
+the bottom: six bits of burst, six bits of column (64 lines, 4 KiB — one row of one bank),
+one rank bit, three bank-group bits, two bank bits, then the row. Each tile's last-level slice
+has 32 banks and picks its bank from **the device's bank-group and bank bits** (local address
+bits 13–17): the line index shifted past one row's column lines and the rank bit, modulo 32.
+So a slice bank owns exactly two DRAM banks — the same bank in each rank — and a request that
+has picked a cache bank has picked its DRAM bank's queue. The shift is derived from the device
+file, and the cache refuses a shift and bank count that do not partition its sets; at the
+default 4 MiB, 16-way slice the bank bits are the top five set bits. Two configurations cannot be
+aligned and say so rather than pretend: a device with more banks than the slice has set bits for
+(sixteen bank groups — 64 banks per rank against 4,096 sets), and the serial memory link, whose
+expander interleaves lines over its own channels. In both the slice keeps line-interleaved banks.
 
-The second half is **not implemented**: the memory controller should keep one low-complexity
-queue per bank with no traffic crossing between them, and it keeps a single read buffer and a
-single write buffer per channel instead, scheduled first-ready over per-bank device state.
-Splitting them changes the memory timing every figure in §4 was taken under, and it is a
-change to a third-party device model rather than to this machine's own code, so it is named
-as the remaining piece rather than slipped in.
+This was not true until this round. The slice had the right *count* of banks and picked one as
+the line index modulo 32, which is the device's **column** bits: the 32 slice banks between
+them covered half of one DRAM row. The count matched and the partition did not.
+
+**The controller keeps one queue per DRAM bank**, eight reads deep, 64 queues per channel, in
+arrival order; writes are posted in the channel's 32-entry write buffer, filed under their bank
+and drained in batches when the buffer passes its high mark or no read is waiting. Each bank
+offers its oldest entry whose next command is ready, the channel issues the oldest offer, and an
+entry whose row it opened is served before anything may close that row. A request whose bank
+queue (or the write buffer) is full waits in that bank's arrival queue — the last-level bank's own
+path to that DRAM bank — and one moves in per cycle as a slot frees, so the controller never
+refuses a request and a full bank stalls only its own traffic. The organisation is the
+per-bank pending-reference queues of Rixner et al. (ISCA 2000); the depth of eight is
+DRAMsim3's per-bank command queue (`cmd_queue_size = 8`, one queue per rank and bank). What
+it replaced is ramulator2's generic controller: one 32-entry read buffer and one 32-entry
+write buffer for the channel, behind which memHierarchy keeps a single in-order queue, so one
+full buffer stopped every bank. That controller is still selectable (`NMFC_BANK_QUEUES=0`,
+which also restores line-interleaved slice banks) so that a before and after are two settings
+of one build.
+
+**What a bank conflict costs**: a precharge and an activate before the column command, about
+28 ns over a row hit, and back-to-back conflicts in one bank are limited by the row cycle, 46
+ns a line — about 1.4 GB/s from one bank against the subchannel's 19.2 GB/s.
+
+**What it does, measured.** A directed test on one tile makes it concrete: a storm of
+invocations each reading its own row of **one** DRAM bank, against victims reading the same
+number of lines each in its own row of the other banks, with the host and the tile each taking
+both roles. At 32 contexts per tile the old controller was never the limit either — a channel's
+reads come from its own tile's contexts, one outstanding each, so it never held more than its
+32-entry buffer — and the victims ran at their solo time under both. At 128 contexts, with a
+96-invocation storm, the difference is the mechanism's: tile victims under a tile storm took
+29,154 cycles against 22,522 alone, where the single-queue controller took 267,704; the host
+reading the victims' lines under the storm took 20,394 cycles against 110,522. That needs the
+tile's own memory queues deep enough for its contexts (four queues of 32): at their default of
+16 the storm's entries hold all 64 slots while they wait on the one bank, and the victims wait
+for a slot in the tile — 250,146 cycles — whatever the controller does. A host storm never
+fills the channel: the host core has 20 first-level miss registers.
+
+**What it costs.** On the shuffled sum, striped, 32 MiB, measured on the same six sampled
+windows and the same whole wait span in both arms, the whole program moves by 0.99822×
+[0.99280, 1.00161] — within noise, because the program is mostly the host building its
+structure. The offloaded phase, measured whole, is **5.3 % slower**: 1,048,456 cycles against
+995,883. The slice alignment contributes nothing to that (1,054,721 without it, although its
+bank conflicts rise from 5,469 to 264,477); the controller does. Its counters say how: that
+phase's reads sit on about three banks at a time (queued reads span 3.1 banks at a mean depth
+of 23.7), so eight reads per bank caps what the scheduler can see at the busy banks, and 57,161
+of 122,813 reads waited in a bank's arrival queue, invisible to it; row hits fall 1.5 %, and the
+mean read latency rises from 659 to 709 device cycles. The depth of eight is the named limit.
+A first version that also counted writes against the eight entries turned the bus around once
+per write and was replaced by posted writes drained in batches, which is what the previous
+controller did.
 
 ### 2.9 The memory link, and CXL as the alternative
 
@@ -1709,8 +1760,9 @@ Everything in §1 is modelled and measured. **The whole of §2 is now built**: t
 translation path, the delivery window and the memory queues were the designed half of this
 document a week ago and are the machine today, and the mechanism they replaced — the table of
 words held above the data cache — has been deleted rather than left switchable. What remains
-designed and not modelled is four things: two sizing options inside the tile core, the memory
-controller's per-bank queues, and the two comparison machines. The table states it plainly,
+designed and not modelled is three things: two sizing options inside the tile core and the
+two comparison machines. The memory controller's per-bank queues, and last-level banks that are
+the DRAM's banks rather than merely as many, were built this round (§2.8). The table states it plainly,
 one row per mechanism, and a row that changed this week says what it changed from.
 
 | mechanism | in the model today | designed, not yet modelled |
@@ -1731,7 +1783,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | The load-reserved / store-conditional point: three ends, a unit of each stage reserved for the close, no takeover by another address | **yes**, with a cross-agent directed test in which a host and a tile update one word | a fairness bound at the point, which is a design decision and is reported rather than repaired: the pair completes at 2–24 contenders and not at 28 |
 | Backpressure anywhere in the data path | **yes** — credit end to end, and the depth sweep shows a curve rather than a cliff: queue-full cycles 0, 1, 368, 6,417 as the queue goes 32, 8, 4, 2 with the answer unchanged | — |
 | Tile instruction and data caches, banked one bank per pipe, a bank reading one line per cycle, four counters each | **yes**, including the per-bank arithmetic unit that performs a read-modify-write and the bank index on the request interface | — |
-| Last-level slice banked to the memory device's bank count, checked by a gate | **yes** | one low-complexity queue per bank at the memory controller; a single read and write buffer per channel is what exists, and splitting them changes the memory timing every figure in §4 was taken under |
+| Last-level slice banked by the memory device's bank bits; one queue per DRAM bank at the controller | **yes** — the slice bank is the device's bank-group and bank bits (it was its column bits until this round), and the controller keeps eight reads per bank with posted writes drained in batches, each bank's overflow waiting on its own path. Measured: victims of a one-bank storm within 1.3× of their solo time where the single queue slowed them 9×; the shuffled sum's offloaded phase 5.3 % slower, from the depth of eight (§2.8). The single-queue controller stays selectable | the depth sized from the traffic a bank sees rather than taken from a reference configuration |
 | Tracking unit derived to cover every context; the control queue following it; the host counting cycles its unit is full | **yes** | — |
 | Duplicate pages: a kernel store or atomic refused and counted, zero-gated, with a directed test; the host's legal fan-out to every copy | **yes**, including the privileged page-table write as its own request class with its own reserved capacity, gated so that nothing else can reach the exemption | — |
 | Migration on a foreign translation result | **yes**, taken at the translation result, with the program counter carried back so the instruction re-issues | the rule for a context that migrates with a store still in a queue, under the relaxed store switch only |
