@@ -922,11 +922,12 @@ has to its memory system and the thing the previous model did not have. Everythi
 counted per port, per direction, and by kind — **control** (the machine's own dispatch:
 invocation, completion, migration, kill, fault, resume), **coherence** (protocol messages
 carrying no line) and **data** (line payload) — and the three are never added into one figure,
-which is what the old accounting made impossible. One approximation remains and is marked in
-the source: a writeback or a snoop response reserves its link but is *handled* when it
-arrives, because deferring a protocol response behind a busy link is how a directory protocol
-deadlocks, so what is charged for those two is their occupancy and the contention they cause
-rather than their own latency.
+which is what the old accounting made impossible. Writebacks and snoop responses were the one exception, and it was a defect: they booked their
+link but were acted on the moment they were sent, so a link offered more of them than it could
+carry delivered them all anyway while its booking ran ahead of the clock. They now cross their
+sender's link one packet at a time, in the order sent, and are acted on only when their last byte
+has arrived (NMFC-Rev `0f27940`). Nothing waits on anything but the clock, so the change cannot
+deadlock the protocol; §2.2 gives what it did to the busiest window measured.
 
 **What the counters say when one port is busy, and how to read a port's name.** A port's `in`
 direction is the endpoint *driving* the fabric, not traffic arriving at it; and in the machine
@@ -944,12 +945,11 @@ sender is the host's own second-level cache, answering 200,504 snoop-fetches aga
 of its own, and the requesters are the four tile data caches through the home nodes. The binding
 resource is **the port, not the directory**: the four home nodes, configured at two transactions
 per fabric cycle each (`directoryRate=1`, `directoryClock=2GHz`), run at 9 % with **zero** cycles
-of waiting. What the same counters do *not* support is worth stating with it. In the corrected arm
-the fabric is not the limit at all — busiest port 29 %, home nodes 4 %, no miss-status file full —
-while the tiles hold 18.8 of 128 contexts with 15.5 of them ready per cycle and issue into only
-29.9 % of pipe slots. Why that is remains unsettled: the counter that would name the resource
-postdates this window, and no simulation was run for this account, which reads per-port,
-per-direction, per-kind counters that were already in that window's statistics file.
+of waiting. The reading taken beside it on the corrected machine — busiest port 29 %, tiles issuing into
+29.9 % of pipe slots with 15.5 contexts ready — was an average over a window two thirds of whose
+tile-cycles held no context at all, and the busiest port read low because the backlog that
+emptied the tiles had been booked during the warm-up, outside the measured region. The cause was
+the writeback and snoop-response defect above, not a limit in the tile; §2.2 gives the account.
 
 **A miss-status file is per bank, and its size is derived from the contexts it serves.** Such
 a register holds one outstanding miss — the tag being fetched, the requests waiting on it, and
@@ -1220,6 +1220,49 @@ accepted and quietly ignored, and the parameter stays so that the question can b
 a workload with long arithmetic between memory accesses, which is the one case the
 measurement does not cover.
 
+**Why the pipes sat idle in the busiest window measured: the tiles were empty, and a fabric
+defect emptied them.** Level 7 of the graph search at 16 MiB, re-run on the current machine with
+the full census, took 2,851,003 host cycles (3 GHz). Of its 8.55 million idle issue slots, 7.67
+million fall in cycles when the tile holds no context at all: the tiles hold work in 49.5 % of
+their cycles, and when they do the four pipes use 88.3 % of their slots over the window and issue
+4.00 of 4 per cycle through the body of the level, with about 20 contexts able to issue and
+waiting for a pipe. The census was counting "ready" correctly; the earlier figures of 15.5 ready
+contexts per tile and 29.9 % of pipe slots were averages over cycles, two thirds of which held no
+context. The tiles were empty because the host retired no instruction for about 430 µs (1.3
+million host cycles): its 351-entry reorder buffer full, its L1 data cache holding 10 misses and
+its L2 14, and no packet anywhere in the fabric, the slices, memory or the tiles. Those misses
+were waiting to be let onto **the host L2's outbound fabric link**, 32 B per 2 GHz port cycle —
+64 B per 1 GHz fabric cycle, so a 72-byte line packet takes two cycles (`portWidth=32` and
+`portClock=2GHz` in `src/nmfc/test/coherent_memory.py`; the width is sourced in §1.6 from Arm
+CMN-700's 256-bit flit and Intel's mesh links, the clock is stated there as assumed). In level 6,
+which is this window's warm-up, the tiles' reads forwarded to the host L2 — 768,067 snoop fetches
+— asked for 141 % of that link, and because snoop responses were acted on as they were sent they
+were all delivered at that rate while the link's booking ran about 450,000 cycles ahead of the
+clock. The host's first ordinary request at the level-6/7 boundary did wait for its booking, so it
+paid the whole backlog — a largest single wait of 489,894 cycles, where no other port waited more
+than 70 — and no level-7 work was forked meanwhile. With writebacks and snoop responses crossing
+their link one packet at a time (§1.6, NMFC-Rev `0f27940`) the window takes 1,590,118 host cycles
+(−44 %) and the link's largest wait is 308 cycles. That is level 6 paying for its own traffic, not
+a speedup: levels 6 and 7 together from the same image take 2,393.2 µs against 2,286.5 (+4.7 %),
+and the whole program moves by 1.0067×, 95 % Fieller interval [0.986, 1.018], over the same 20
+sampled regions paired. The directed test is section 6 of `unit/fabric_ports.cc`: first the
+contended case, a host link offered twice its capacity in snoop data followed by its own request,
+with the old handling as the failing control; then tile against tile, host against tile and
+ordering on one link; 20 of 20 checks pass.
+
+**What limits that window now is the design, at two floors within 4 % of each other.** The host
+L2's outbound link is 100 % busy through the tile phase: the directory names the host L2 as the
+supplier of 215,463 lines the tiles read, and at two fabric cycles each they need 430,926. The
+pipes — 4 pipes of 8 stages per tile, the `NMFC_PIPES` and `NMFC_DEPTH` defaults in
+`src/nmfc/test/vanadis-nmfc.py` — need 415,001 cycles for 6,640,015 instructions at 16 per cycle,
+and are 95 % used. Lifting the link floor means supplying a clean line to a tile from its own
+last-level slice rather than forwarding it from the host L2, a change to the directory's
+forwarding policy that needs its own measurement across the workloads. Lifting the pipe floor
+with 8 pipes needs at least 8 × 8 = 64 contexts per tile with nothing to wait on, where this level
+gives each tile 64 invocations with about 29 of them asleep on memory, so it needs at least twice
+as many, smaller ranges. Neither change is made. The drain, as the last ranges finish alone, is a
+further 15 % of the window.
+
 ### 2.3 The translation path
 
 At the address stage a memory instruction's virtual address, address-space identifier,
@@ -1431,6 +1474,26 @@ named, and a one-pipe tile's window defaults to 2 rather than 1 (NMFC-Rev `3922e
 reservation fails either way for the same reason: its one general entry is either the close's
 (nothing else enters) or anybody's (a held request can take it).
 
+**What the floor proves is deadlock-freedom, and only that.** At or above it the close always
+finds a memory-queue entry, because the only traffic that can take the reserved unit first is a
+walk, which no point holds and which completes; the window's last slot can be taken only by
+closes and walk traffic, both of which are always delivered, and a close holding an entry may pass
+an older request for the same bank that has none; and a store-conditional may leave its
+translation queue ahead of requests the point holds. Starvation is not excluded — walk traffic
+enters the window first every cycle — and one case is not proven: a store-conditional whose own
+point was already broken can occupy the translation queue's reserved entry, because that stage
+cannot yet tell a real close from any other store-conditional. No run has reached it. The machine
+as configured sits well above the floor: 16 entries per memory queue (`dataQueueDepth`), 8 per
+translation queue (`xlatQueueDepth`), both defaults in `src/nmfc/src/NMFCTile.h`, and a window of
+max(pipes, 2). Paired before and after on the eight-contender pair test (`tile_lrsc`, 8
+invocations × 16 increments, run whole, one binary per build with only `pointReserve` changed), every
+run that completed in both builds gives a byte-identical statistics file — 41,149 host cycles on
+the full machine and 26,519 tile cycles on a tile alone at windows of 2 and 4 — and the window of 1
+that stopped the full machine with the rule on is now refused. At the floor itself (window 2,
+translation queue 2, memory queue 3), two contexts on one word pass in 19,526 tile cycles with the
+rule on or off, eight contexts on a tile alone pass in 26,822 with it on and fail with it off, and
+eight contexts on the full machine fail either way, which is the stop described below.
+
 **The walk path keeps its reservation while a point is open.** The memory queue's half of the rule
 used to refuse every request but the close once its general capacity was one short — walk reads
 included, although they are admitted against entries of their own and a point never holds one. At a
@@ -1533,8 +1596,9 @@ neither retrying nor dropping it; a full window stops accepting from the transla
 stalled translation path leaves the virtual address in the context's load slot and the
 context issues nothing, exactly as a context asleep on a load issues nothing; the context
 wakes when the request moves. No timeout, no retry counter, no capacity fault anywhere. A
-queue depth of two is a legitimate configuration that runs correctly and slowly, and a depth
-sweep shows a curve rather than a cliff — which is the property the replaced mechanism did
+queue at the smallest depth the reservation's floor admits is a legitimate configuration that
+runs correctly and slowly, and a depth sweep — taken before the floor existed, down to a depth
+of two — shows a curve rather than a cliff — which is the property the replaced mechanism did
 not have, and it is a test rather than a claim.
 
 **Request classes.** Every memory request in the tile goes through this one mechanism:
@@ -1672,14 +1736,16 @@ refuses a request and a full bank stalls only its own traffic. The organisation 
 per-bank pending-reference queues of Rixner et al. (ISCA 2000); the depth of eight is
 DRAMsim3's per-bank command queue (`cmd_queue_size = 8`, one queue per rank and bank). What
 it replaced is ramulator2's generic controller: one 32-entry read buffer and one 32-entry
-write buffer for the channel, behind which memHierarchy keeps a single in-order queue, so one
+write buffer for the channel (ramulator2's defaults, which no named product publishes; the
+posted-write buffer keeps that 32 and its drain marks of 0.8 and 0.2 of it), behind which memHierarchy keeps a single in-order queue, so one
 full buffer stopped every bank. That controller is still selectable (`NMFC_BANK_QUEUES=0`,
 which also restores line-interleaved slice banks) so that a before and after are two settings
 of one build.
 
 **What a bank conflict costs**: a precharge and an activate before the column command, about
-28 ns over a row hit, and back-to-back conflicts in one bank are limited by the row cycle, 46
-ns a line — about 1.4 GB/s from one bank against the subchannel's 19.2 GB/s.
+28 ns over a row hit (tRP + tRCD = 34 + 34 device cycles of 0.417 ns, the JEDEC DDR5-4800 timings
+in `src/nmfc/config/tile_ddr5.yaml`), and back-to-back conflicts in one bank are limited by the
+row cycle, tRC = 111 cycles, 46 ns a line — about 1.4 GB/s from one bank against the subchannel's 19.2 GB/s.
 
 **What it does, measured.** A directed test on one tile makes it concrete: a storm of
 invocations each reading its own row of **one** DRAM bank, against victims reading the same
@@ -1691,9 +1757,11 @@ reads come from its own tile's contexts, one outstanding each, so it never held 
 29,154 cycles against 22,522 alone, where the single-queue controller took 267,704; the host
 reading the victims' lines under the storm took 20,394 cycles against 110,522. That needs the
 tile's own memory queues deep enough for its contexts (four queues of 32): at their default of
-16 the storm's entries hold all 64 slots while they wait on the one bank, and the victims wait
+16 entries (`dataQueueDepth`, `src/nmfc/src/NMFCTile.h`) the storm's entries hold all 64 slots while they wait on the one bank, and the victims wait
 for a slot in the tile — 250,146 cycles — whatever the controller does. A host storm never
-fills the channel: the host core has 20 first-level miss registers.
+fills the channel: the host core has 20 first-level miss registers, the middle of the published
+range (Golden Cove's 12–16 fill buffers, Zen 4's 24 miss-address buffers), as sourced in
+`src/nmfc/test/coherent_memory.py`.
 
 **What it costs.** On the shuffled sum, striped, 32 MiB, measured on the same six sampled
 windows and the same whole wait span in both arms, the whole program moves by 0.99822×
@@ -1708,6 +1776,13 @@ mean read latency rises from 659 to 709 device cycles. The depth of eight is the
 A first version that also counted writes against the eight entries turned the bus around once
 per write and was replaced by posted writes drained in batches, which is what the previous
 controller did.
+
+**One discrepancy is recorded and not changed.** `coherent_memory.py` computes `DRAM_ROW_BYTES`
+as columns × 4 bytes × 2, 8 KiB, where the controller maps one bank's row in one rank as 64
+lines, 4 KiB, because a column address selects a column as wide as the data bus and not one
+beat. The grain G is derived from the 8 KiB figure, so a G-unit is four sweeps of the banks
+rather than two; it still spans every bank evenly, and correcting it moves every placement, so
+it is a separate change.
 
 ### 2.9 The memory link, and CXL as the alternative
 
@@ -1768,7 +1843,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | mechanism | in the model today | designed, not yet modelled |
 |---|---|---|
 | Host: out-of-order core, two-stage front end with override predictor, wrong-path modelling, two-level TLB and walker at the cache management units, data prefetchers, memory-dependence prediction | **yes**, each with its own counters. The memory-dependence default is now the path-history predictor, measured over eight paired windows at 1.3791× the two-bit counter [1.3154, 1.4457] and 1.0431× the store-address predictor [1.0019, 1.0866]; the other two remain selectable by name | — |
-| Fabric: a port per endpoint per direction, 32 B at 2 GHz, ten endpoints, traffic counted per port and per direction as control, coherence and data; the directory one home node per slice at one transaction per port cycle | **yes** (§1.6) | — |
+| Fabric: a port per endpoint per direction, 32 B at 2 GHz, ten endpoints, traffic counted per port and per direction as control, coherence and data; the directory one home node per slice at one transaction per port cycle | **yes** (§1.6). Writebacks and snoop responses now cross their link one packet at a time and are acted on when they arrive; acting on them when sent let the host L2's link (32 B at 2 GHz) be booked about 450,000 cycles ahead in the graph search's level 6 and emptied the tiles for 45 % of level 7 (§2.2) | a directory that supplies a clean line to a tile from the tile's own slice rather than forwarding it from the host L2, whose link now binds that level |
 | Caches' miss-status files: one file per bank, sized from the contexts the cache serves | **yes** (§1.6), on both tile caches; the last-level slice holds the sum in one pool | the per-bank arrangement inside the slice, which lives in a library outside this tree |
 | Coherence: directory at the fabric, four tiles each with a last-level slice, memory controller and channel | **yes** | — |
 | 512-bit context; the lane map including both tilings and the reserved names | **yes**, verified lane by lane in both simulators | an operation that moves the whole 512 bits (`r1` as an operand); it is an instruction-set extension, not a naming change |
@@ -1780,10 +1855,10 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | The walk's own reads: through the data cache against reserved capacity, or straight to the last-level slice | **yes, both arms**, each with the refusals that stop it being measured as the other machine. **Under open analysis**: indistinguishable on the two sampled points so far, because the reservation was never contended, and the first reading of that rested on four walk-source counters that read zero while 1,007 walks ran — now a fifth bin and an accounting gate | the workload that separates them: one whose data traffic fills the queues while a walk needs to issue |
 | Getting a translated request to its bank | **yes** — the delivery window, oldest-per-bank, one delivery per bank per cycle, with the limit counter rewritten so that it can fire at all | the split-window escalation, if measurement ever says the window is the constraint |
 | Ordering, forwarding, atomicity | **yes** — physically-indexed memory queues, one per bank: sequence order, forwarding from the newest older overlapping entry, read-modify-write at the bank, coherence requests at the bank with a bounded deferral. The word-keyed table above the data cache, its cache pins, its snoop merge and its unbounded waiter list are **deleted** | — |
-| The load-reserved / store-conditional point: three ends, a unit of each stage reserved for the close, no takeover by another address | **yes**, with a cross-agent directed test in which a host and a tile update one word | a fairness bound at the point, which is a design decision and is reported rather than repaired: the pair completes at 2–24 contenders and not at 28 |
+| The load-reserved / store-conditional point: three ends, a unit of each stage reserved for the close, no takeover by another address | **yes**, with a cross-agent directed test in which a host and a tile update one word. Each stage refuses a size below its floor of reserved units plus one — window 2, translation queue 2, memory queue walkReserve + 2 — and walk traffic keeps its memory-queue entry while a point is open; what this proves is deadlock-freedom only (§2.5) | a fairness bound at the point, which is a design decision and is reported rather than repaired: the pair completes at 2–24 contenders and not at 28; the stop of eight contenders on the full machine below 12 memory-queue entries, at the data-cache bank, not yet diagnosed |
 | Backpressure anywhere in the data path | **yes** — credit end to end, and the depth sweep shows a curve rather than a cliff: queue-full cycles 0, 1, 368, 6,417 as the queue goes 32, 8, 4, 2 with the answer unchanged | — |
 | Tile instruction and data caches, banked one bank per pipe, a bank reading one line per cycle, four counters each | **yes**, including the per-bank arithmetic unit that performs a read-modify-write and the bank index on the request interface | — |
-| Last-level slice banked by the memory device's bank bits; one queue per DRAM bank at the controller | **yes** — the slice bank is the device's bank-group and bank bits (it was its column bits until this round), and the controller keeps eight reads per bank with posted writes drained in batches, each bank's overflow waiting on its own path. Measured: victims of a one-bank storm within 1.3× of their solo time where the single queue slowed them 9×; the shuffled sum's offloaded phase 5.3 % slower, from the depth of eight (§2.8). The single-queue controller stays selectable | the depth sized from the traffic a bank sees rather than taken from a reference configuration |
+| Last-level slice banked by the memory device's bank bits; one queue per DRAM bank at the controller | **yes** — the slice bank is the device's bank-group and bank bits (it was its column bits until this round), and the controller keeps eight reads per bank with posted writes drained in batches, each bank's overflow waiting on its own path. Measured: victims of a one-bank storm within 1.3× of their solo time where the single queue slowed them 9×; the shuffled sum's offloaded phase 5.3 % slower, from the depth of eight (§2.8). The single-queue controller it replaces — one 32-entry read and one 32-entry write buffer per channel, ramulator2's defaults — stays selectable (`NMFC_BANK_QUEUES=0`) | the depth sized from the traffic a bank sees rather than taken from a reference configuration |
 | Tracking unit derived to cover every context; the control queue following it; the host counting cycles its unit is full | **yes** | — |
 | Duplicate pages: a kernel store or atomic refused and counted, zero-gated, with a directed test; the host's legal fan-out to every copy | **yes**, including the privileged page-table write as its own request class with its own reserved capacity, gated so that nothing else can reach the exemption | — |
 | Migration on a foreign translation result | **yes**, taken at the translation result, with the program counter carried back so the instruction re-issues | the rule for a context that migrates with a store still in a queue, under the relaxed store switch only |
@@ -1864,6 +1939,56 @@ counted instructions, so one interval of a twenty-image set is 9,393 of them and
 the tracking unit is 6,912, which is why the design that reaches the truth there uses six
 regions rather than twenty. And a warm-up measured at one phase does not transfer to
 another.
+
+**Waits the regions would miss are measured whole.** A wait retires no counted instruction, so it
+has no width on the axis the regions are placed on and a region contains one only by chance. The
+functional producer lists every wait episode with the instruction at which it entered the wait,
+and episodes are grouped by that instruction, one group per wait routine. A routine entered n
+times in a program of N counted instructions, sampled with regions U wide, is *rare* when
+n × U / N < 1 — fewer than one of its entries is expected in a region — and then each of its
+entries opens a span of 16,384 counted instructions, overlapping spans merged, and every span is
+measured whole from the newest image at least a warm-up before it. The estimate is the spans'
+cycles plus the rest of the axis at the regions' rate (`tools/sampling/waits.py`; `run_sampled.sh`
+passes it its U). The rule replaced a fixed limit of 64 entries, which asked neither how long the
+program is nor how wide the regions are. A region that wholly contains a span is kept, with the
+span's measured counts taken out of every column; only a region that overlaps a span in part is
+set aside, since otherwise a start-up region measured whole is lost with the span inside it. On
+the dictionary at 677,205 inserts (U = 12,053), the two changes move the resident build's estimate
+from 0.985 to 0.991 of its uninterrupted 42,067,209 cycles, interval [40,996,235, 42,387,361], and
+leave the wave build at 1.001 of 38,751,307, interval [38,150,958, 39,463,258]; both intervals
+contain the whole run. The spans hold 64.1 % of the resident build's waiting cycles. The rest is at
+the program's end: the last span closes after the producer's remaining count of counted
+instructions while the final drain is still running, because the cycle model's polling loop runs
+more often than the producer's. A span that reaches the program's end should close at the
+program's exit; that is not built.
+
+**An image carries what the program last used, not only its architectural state (format 5).**
+An image restored with every cache, translation buffer and branch-target buffer empty took up to
+1.65 times the uninterrupted run's cycles over the same instructions, on a program whose last
+phase reads every line once: lines held Modified in the 16 MiB last level (four 4 MiB slices) were
+in DRAM, and no warm-up inside such a phase can refill them. A format-5 image therefore carries a
+recency record in a form independent of any cache's geometry (`tools/sampling/IMAGE.md` §6b and
+§7a): four lists in order of last use — every agent's 64-byte lines, the host's own lines, the
+host's data pages and its taken branches — with each line's dirty horizon, the deepest position
+it reached in its list after its last write, and for the host's lines a read horizon counted from
+the last read. Replayed oldest first into any least-recently-used cache, a list leaves each set
+holding what the uninterrupted run held, and a line is dirty in a cache of C lines exactly when
+the larger of its horizon and its position is below C; this is the memory timestamp record of
+Barr, Falsafi and Hoe (ISCA 2005), captured at the image instead of run between regions as
+SMARTS's functional warming is (Wunderlich et al., ISCA 2003). Before the clock starts the restore
+installs data pages in the host's 2,048-entry second-level TLB; host lines in its 2 MiB 16-way L2
+(32,768 lines) as Modified, shared or exclusive by their horizons, with the directory recording
+each copy and the L2's record of which first-level cache holds a line set from the read horizon;
+every agent's lines in the slice that owns them (262,144 lines in all); the page table's leaf
+lines; and the taken branches in the fetch branch-target buffer. The record is capped at 524,288
+lines (twice the 16 MiB last level), 131,072 host lines, 16,384 pages and 16,384 branches; the
+producer runs 2.1 to 2.5 times slower and images grow 10 to 35 %. Restored from each of 19
+images, the dictionary now takes 0.997 to 1.026 times the uninterrupted cycles, and every sampled
+estimate's interval contains its whole run at both sizes. What no image can carry — the core's
+predictors and queues, the memory-dependence predictor, the prefetchers' training and the DRAM
+row buffers — is warmed for a length measured per program: the smallest distance from the restore
+beyond which every band of pooled excess is within 1 % (`tools/sampling/warmup_rule.py`, recorded
+in `warmups.json`). `NMFC_WARM=0` gives the cold restore.
 
 ### 4.2 The graph search
 

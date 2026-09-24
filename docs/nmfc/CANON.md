@@ -3327,6 +3327,30 @@ equal to the device's per-rank bank count so a cache bank and its DRAM bank are 
 partition (`test/coherent_memory.py:249-265`). **Take every bank-conflict number from SST
 and say so.** Ledger **L5**, RULED R3.
 
+**[CORRECTED 2026-09-24 — the SST build matched the count and not the partition, and is now
+aligned.]** Until this date the SST slice picked its bank as `line index mod 32`, which under the
+device's mapping (from the bottom: 6 bits burst, 6 bits column — one 4 KiB row of one bank — 1
+rank bit, 3 bank-group bits, 2 bank bits, then the row) is the DRAM's **column** bits: 32 slice
+banks covering half of one DRAM row. The slice bank is now the device's bank-group and bank bits,
+local address bits 13–17, with the shift derived from the device file, so each slice bank owns the
+same bank in both ranks. Two configurations cannot be aligned and say so rather than round: a
+device with more banks than the slice has set bits for (16 bank groups, 64 banks per rank, against
+4,096 sets) and the serial link, whose expander interleaves lines over its own channels. **The
+controller now keeps one queue per DRAM bank** (`PerBankDDR`, ramulator2 `d7a50d1`/`9b48046`):
+eight reads per bank, 64 queues per channel — the organisation of Rixner et al.'s per-bank
+pending-reference queues (ISCA 2000), the depth DRAMsim3's `cmd_queue_size = 8` — with writes
+posted in the channel's 32-entry buffer and drained in batches, and a full bank holding further
+requests in its own arrival queue so only that bank stalls. It replaces ramulator2's generic
+controller, one 32-entry read and one 32-entry write buffer per channel (ramulator2 defaults, no
+named product), behind memHierarchy's single unbounded in-order queue, where one full buffer
+stopped every bank; `NMFC_BANK_QUEUES=0` restores it and line-interleaved slice banks. On a
+one-tile directed test at 128 contexts, victims of a one-bank storm take 1.3× their solo time
+where the single queue made them 9×; on the shuffled sum at 32 MiB the whole program is at parity
+(0.99822× [0.99280, 1.00161]) and the offloaded phase is 5.3 % slower, from the depth of eight, not
+from the alignment. Recorded and not changed: `DRAM_ROW_BYTES` in `coherent_memory.py` is 8 KiB,
+twice the 4 KiB row the controller maps, and the grain G is derived from it. Full record:
+`docs/nmfc/ARCHITECTURE-2026-09.md` §2.8.
+
 **How many banks: a DERIVATION, not a constant.** DESIGN §16 D:1359-1361 prices one point:
 "Concurrency should come from banking rather than from a monolithic structure: **8 banks of
 today's 64 entries reaches the point where the memory controller binds**, without a
@@ -7720,6 +7744,43 @@ into its own cache and the directory arbitrates — ownership, which is Part K's
 mechanism, not a remote read-modify-write engine, which Part J forbids — and a line the tile
 loses breaks every point over it, so the store-conditional fails and the retry loop absorbs it.
 
+**The reservation has a floor, and a stage below it is refused at construction** (NMFC-Rev
+`3922ed7`). A reserved unit must be a unit of its own, as an escape channel is a buffer of its own
+in deadlock-free routing (Duato 1993): at a stage of one slot, the slot can be taken by a request
+the point holds, which has no entry waiting for it downstream, and the close is then behind it.
+So every stage is at least its reserved units plus one — a delivery window of 2, a translation
+queue of 2, a memory queue of walkReserve + 2 (3 with walks through the data cache, 2 with walks
+sent to the slice) — the refusal names the stage, its size and the floor, and the window's default
+width is max(pipes, 2). With the rule off nothing is reserved and there is no floor. The memory
+queue's point check exempts walk traffic, as the window already did, so the walk path keeps its
+reserved entry while a point is open; without that exemption a walk the point's own context needed
+was refused and two contenders on one word stopped. The machine as configured sits well above the
+floor (16 entries per memory queue, 8 per translation queue). **What the floor proves is
+deadlock-freedom only**: starvation is not excluded, because walk traffic enters the window first
+every cycle; a store-conditional whose own point was already broken can occupy the translation
+queue's reserved entry, a case not yet proven; and eight contenders on the full machine still stop
+below 12 memory-queue entries, with the stages not full and four contexts waiting at the
+data-cache bank — a stop on the bank's side, not yet diagnosed. Paired before and after on the
+eight-contender test, every run that completed in both builds gives a byte-identical statistics
+file.
+
+**The idle pipes in the busiest window were an empty tile, and a fabric defect emptied it.** On
+the graph search's level 7 at 16 MiB, 7.67 million of 8.55 million idle issue slots fell in cycles
+when the tile held no context; with work, the four pipes issued 4.00 per cycle through the body
+of the level. The host had retired nothing for 430 µs, its misses waiting on the host L2's
+outbound fabric link — 32 B per 2 GHz port cycle (`portWidth`, `portClock` in
+`src/nmfc/test/coherent_memory.py`) — whose booking ran about 450,000 cycles ahead of the clock,
+because snoop responses and writebacks booked the link but were acted on when sent, and level 6's
+768,067 snoop fetches asked for 141 % of it. They now cross the link one packet at a time and are
+acted on at arrival (NMFC-Rev `0f27940`, directed test in `unit/fabric_ports.cc` §6, contended case
+first). The window falls from 2,851,003 to 1,590,118 host cycles, which is level 6 paying for its
+own traffic: levels 6 and 7 together are 4.7 % slower, and the whole program 1.0067× [0.986, 1.018]
+over 20 paired sampled regions. The window's limits now are that link, 100 % busy carrying 215,463
+lines the directory has the host L2 supply (430,926 fabric cycles), and the pipes, 4 of 8 stages
+per tile needing 415,001 cycles for 6,640,015 instructions. Supplying a clean line to a tile from its
+own slice rather than from the host L2 would lift the first; it changes which copy supplies a
+tile, not the designated-forwarder state R56 keeps, and it is unmeasured and not made.
+
 **What was deleted in the same change, so that no interval holds two mechanisms for one job:**
 the held-word table and its line index, the waiter list, the hand-off bound and its parameter,
 the `PARKED` context state, the in-flight atomic fields on every context, the cache pins and
@@ -7737,8 +7798,9 @@ page-table write arising from a kernel store. `memqLrscSpuriousSuccess` and
 
 **What is open and named as open:** which path a walk's own reads take (both arms built, under
 analysis); the block instruction slot; the relaxed store-release rule; a fairness bound at the
-serialisation point under a rate of contention; and, at the memory controller, one
-low-complexity queue per bank, which is not built. The full record is
+serialisation point under a rate of contention; and, at the memory controller, the depth of the
+per-bank queues, which are now built (D.2) at a depth of eight taken from DRAMsim3 rather than
+sized from the traffic a bank sees. The full record is
 `docs/nmfc/ARCHITECTURE-2026-09.md` §2 and §3.
 
 ---
@@ -13099,6 +13161,17 @@ in the host core's profile** — for a statistic.)
   the loader configuration beats `LD_LIBRARY_PATH`, so a stale memory-model shared library
   silently supplies the DRAM model and **whichever copy the loader finds first *is* the
   memory model the results came from.**
+- **The sampler's three rules added 2026-09-24** (`tools/sampling/`, NMFC-Rev `f29e34b` and the
+  format-5 producer). *Rare waits:* a wait routine entered n times in a program of N counted
+  instructions, with regions U wide, is rare when n × U / N < 1, and each of its entries opens a
+  span measured whole; this replaced a fixed limit of 64 entries. *Containing regions:* a region
+  that wholly contains a span is kept with the span's counts subtracted; only a partial overlap is
+  set aside. *Image format 5:* an image carries a recency record — lines, host lines, data pages
+  and taken branches in order of last use, with dirty and read horizons — which the restore
+  replays into every cache, TLB and branch-target buffer before the clock starts (the memory
+  timestamp record of Barr, Falsafi and Hoe, ISCA 2005); what no image carries is warmed for a
+  length measured per program (`warmups.json`). Full record: `docs/nmfc/ARCHITECTURE-2026-09.md`
+  §4.1.
 - **Replay headless to separate "slow channel" from "starved channel".** *User #167,
   2026-08-29T08:19:49Z:* "Can you not just **take a trace of accesses to the dram from the
   sim itself and run it through ramulator2 headless**? It would probably be a faster way
