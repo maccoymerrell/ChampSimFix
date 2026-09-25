@@ -1417,17 +1417,52 @@ a fused multiply-add (4.3×). One context alone pays each divide's latency beyon
 (15 − 8) = 448 cycles exactly. Spread over four tiles, each tile's divider served its own quarter.
 The divider count is configuration (`fpDividers`); one per tile is the design, because an in-order
 multithreaded core shares one iterative divider among its threads, as N2 has one, on one pipe.
-Nothing but a tile's own contexts can reach its divider, so it has no cross-agent case. Integer
-divide is still charged as one pipe pass; that is a known gap, not a decision. The counters are
+Nothing but a tile's own contexts can reach its divider, so it has no cross-agent case. The counters are
 `fpDivOps`, `fpDivQueued`, `fpDivQueueCycles`, `fpDivBusyCycles`, `fpLongOps` and the census
 bucket `ctxNotReadyFpUnit`, which the readiness partition includes.
+
+**The integer multiplier and the integer divider.** Every pipe carries a pipelined integer
+multiplier, and the tile has **one iterative integer divider**, shared by every context and
+every pipe, for divide and remainder. It is a separate unit from the floating-point divider:
+N2 divides integers on its M0 pipe and floating point on V0, so neither delays the other. The
+costs are N2's (the same guide, table 3-7), the worst case of each data-dependent range. An
+integer divide "blocks any subsequent divide operations until complete" (the table's note 1),
+so the divider is held for the whole latency, which is also the reciprocal of the table's lowest
+throughput. RISC-V's remainder is the same iterative operation as its divide and costs the same:
+
+| operation | latency (cycles) | issue | resource |
+|---|---|---|---|
+| MUL, MULW | 2 | every cycle | the pipe's multiplier |
+| MULH, MULHU, MULHSU | 3 | every cycle | the pipe's multiplier |
+| DIVW, DIVUW, REMW, REMUW | 12 (N2: 5 to 12) | one per 12 cycles | the tile's integer divider |
+| DIV, DIVU, REM, REMU | 20 (N2: 5 to 20) | one per 20 cycles | the tile's integer divider |
+
+The multiplies are shorter than the pipe and cost nothing beyond it, as the pipelined
+floating-point operations do. A divide or remainder waits for its divider and its result
+exactly as a floating-point divide does, holding no issue slot. On the directed test, 32
+contexts doing 64 64-bit divides each on one tile took 41,142 tile cycles against the divider's
+2,048 × 20 = 40,960, and 3,866 cycles with the divide replaced by a multiply — the same as with an
+add (3,874) — so the multiply is covered by the pipe and the divide is pinned to the divider
+(10.6×). The 32-bit form took 24,773 against 2,048 × 12 = 24,576, and the remainder the same as
+the divide. One context alone pays each divide's latency beyond the pipe, 64 × (20 − 8) = 768
+cycles exactly. A loop that uses both dividers in every iteration took 41,157 cycles, under the
+40,960 + 14,336 one shared unit would need, and spread over four tiles each tile's integer
+divider served its own quarter. Before this, an integer divide cost one pipe pass and the
+contended test ran in 3,872 cycles. The divider count is configuration (`intDividers`); nothing
+but a tile's own contexts reaches it. The counters are `intDivOps`, `intDivQueued`,
+`intDivQueueCycles`, `intDivBusyCycles`, `intMulOps`, `intMulLongOps` and the census bucket
+`ctxNotReadyIntDiv`, which the readiness partition includes.
 
 The host's floating point is Arm Neoverse V2's (*Software Optimization Guide*,
 PJDOC-466751330-593177, issue 3.0, table 3-11): add 2, multiply 3, fused multiply-add 4 cycles,
 pipelined on two units, and **two** dividers (V2 divides on two of its four vector pipes), each
 held as the tile's is: FDIV.S 10 cycles and held 3, FDIV.D 15 and 7, FSQRT.S 9 and 2, FSQRT.D 16
 and 8. The host used to run square root on its adders at 3 cycles and to accept a divide every
-cycle.
+cycle. Its one integer divider (V2's M0 pipe; the guide's table 3-4 gives the same numbers as
+N2's) takes 12 cycles for the 32-bit form and 20 for the 64-bit form and is held for each; it
+used to take 12 for either and accept a divide every cycle. Its multiply unit is unchanged (3
+cycles, pipelined). Measured over 4,096 independent 64-bit divides it now spends 20.4 cycles on
+each, against 2.0 before.
 
 ### 2.3 The translation path
 
@@ -1469,6 +1504,21 @@ A fifth bin, `walkReadsUnattributed`, and an accounting gate that requires every
 be binned now make that failure loud: the flat suite reports 195 of 195 walk reads attributed.
 The arm that would separate the two paths is a workload whose own data traffic fills the
 queues while a walk needs to issue, and neither point measured does that.
+
+**Open: the walker maps every page with 4 KiB leaves.** The design has three page sizes — 4 KiB
+host pages, `G`-sized grain pages (one tile) and `N × G` striped pages (one grain per tile) — with
+the size in the page-table entry, and the rejected list forbids mapping every page type at 4 KiB,
+because it multiplies translation work and makes contiguity of consecutive small pages the
+operating system's problem. The model's page table still writes a 4 KiB leaf for every page of a
+grain or striped region, so a copy of the table holds 37.9 MB at 18 GiB mapped, every translation
+buffer entry covers 4 KiB, and a walk of a grain page reads a full three-level path. What it
+needs: the table writes a grain or striped page as one leaf at the level whose span matches the
+page (a leaf entry above the last level, as Sv39's megapages do, with `G` and `N × G` rounded to
+spans the format can express or the format's level spans derived from `G`); the walker ends a
+walk at the first leaf it reads and returns the page size with the translation; the translation
+buffers hold an entry per page of its own size (one structure per size, or a size field matched
+under a mask); and a remapped grain rewrites one leaf rather than `G` / 4 KiB. The data paths do
+not change: frames are already placed in whole grains and whole groups.
 
 ### 2.4 The cross-connection: one window, oldest-per-bank
 
@@ -2083,8 +2133,12 @@ memory device and link.
 | floating-point unit, per pipe | one operation per cycle, pipelined; add 2, multiply 3, fused multiply-add 4, convert 3 cycles | Arm Neoverse N2 SOG, table 3-19 |
 | divider, per tile (`fpDividers`) | one, shared by every context; FDIV.D 15 cycles held 7, FSQRT.D 16 held 8, FDIV.S 10 held 5, FSQRT.S 9 held 2 | N2 SOG, table 3-19, worst case of each range |
 | host floating point | two pipelined units (add 2, multiply 3, fused multiply-add 4) and two dividers held as the tile's | Arm Neoverse V2 SOG, table 3-11 |
+| integer multiplier, per pipe | one operation per cycle, pipelined; MUL 2, MULH 3 cycles | Arm Neoverse N2 SOG, table 3-7 |
+| integer divider, per tile (`intDividers`) | one, shared by every context, separate from the floating-point divider; 32-bit divide or remainder 12 cycles, 64-bit 20, held for the whole latency | N2 SOG, table 3-7, worst case of each range, note 1 |
+| host integer divider | one; 12 cycles (32-bit) and 20 (64-bit), held for each | Arm Neoverse V2 SOG, table 3-4 |
 | memory, per tile | one DDR5-4800 channel: 2 ranks × 8 bank groups × 4 banks × 65,536 rows × 4 KiB = 16 GiB; 64 GiB at four tiles | the device file; JEDEC JESD79-5, 16 Gb x8 device |
 | physical address | 36 bits at 64 GiB (the smallest power of two covering the memory); the host core refuses any access outside it | derived from the memory size |
+| physical arena of frames | from 0x80000000 to the top of memory (62 GiB at 64 GiB); a configuration whose arena overlaps the host's identity-mapped window [0x60000000, 0x80000000) is refused | the host operating system's stack top 0x7ffffff0 and program headers at 0x60000000 |
 | grain `G` | row 4 KiB × every bank of the channel (2 × 8 × 4 = 64) × tiles = 1 MiB at four tiles | canon E.3, from the device file |
 | page-table copy, per tile | as many of the tile's grains at the top of memory as a bound on the table's size needs (one grain up to about 500 MiB of mapped 4 KiB pages; 37 at 18 GiB) | derived from the declared regions |
 | armed lines, per context | one: the condition a `WAIT` sleeps on must live in one line | one arm per load slot (§2.1) |
@@ -2141,8 +2195,9 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | Tile instruction and data caches, banked one bank per pipe, a bank reading one line per cycle, four counters each | **yes**, including the per-bank arithmetic unit that performs a read-modify-write and the bank index on the request interface | — |
 | Last-level slice banked by the memory device's bank bits; one queue per DRAM bank at the controller | **yes** — the slice bank is the device's bank-group and bank bits (it was its column bits until this round). The controller keeps a queue per bank over one shared read queue per channel, sized P = memory queues × their depth × tiles per channel + the host L2's miss registers = 128, the DMC-620's larger queue depth. Posted writes are held in a separate write queue of P entries, drained in batches that empty the batch they began with. Measured against the single queue: victims of a one-bank storm at 1.3× their solo time, where the single queue slowed them 9×; the shuffled sum's offloaded phase at 994,413 cycles against 995,883; the graph search's level-7 window at 1,584,221 against 1,590,118 (§2.8). The single-queue controller it replaces (one 32-entry read and one 32-entry write buffer per channel, ramulator2's defaults) stays selectable (`NMFC_BANK_QUEUES=0`) | T counts only the channel's own tile, so remote tiles' reads can exceed P: this happened for 0.2 % of reads on one channel at level 7 |
 | Tracking unit derived to cover every context; the control queue following it; the host counting cycles its unit is full | **yes** | — |
-| Floating-point costs: a pipelined unit per pipe, one iterative divider per tile, a divide's context waiting without an issue slot; the host's units and two dividers | **yes** (§2.2). Until this round every tile floating-point operation, divide and square root included, cost one pipe pass, and the host accepted a divide every cycle and ran square root on its adders. The integer workloads' tile statistics are byte-identical across the change | integer divide on the tile, still one pipe pass |
-| Memory size: one 16 GiB channel per tile, the address width derived from it, page-table copies that span as many of a tile's grains as they need, backing allocated only for pages touched | **yes** (§2.8). The machine had a flat 4 GiB; the host could not issue an address above 32 bits; a page-table copy was limited to one grain, which refused any program mapping more than about 500 MiB; and the loader wrote the zeros of every declared `.bss` page into the simulator's backing store. A test places, touches and reads back 4.5 GiB on each of four tiles; the simulator's resident memory is 1.24 GB for it and unchanged (165–177 MB) for the three workloads | the host's identity-mapped window (its stack and program headers below 2 GiB) lies inside the default physical arena, which starts at 256 MiB; a program that needs more than about 1.5 GiB of frames must start the arena above it, and nothing yet refuses the overlap |
+| Floating-point costs: a pipelined unit per pipe, one iterative divider per tile, a divide's context waiting without an issue slot; the host's units and two dividers | **yes** (§2.2). Until this round every tile floating-point operation, divide and square root included, cost one pipe pass, and the host accepted a divide every cycle and ran square root on its adders. The integer workloads' tile statistics are byte-identical across the change | — |
+| Integer costs: a pipelined multiplier per pipe, one iterative integer divider per tile separate from the floating-point divider, the host's one integer divider held per width | **yes** (§2.2). An integer divide or remainder cost one pipe pass on the tile, and the host's divider accepted one every cycle. None of the three workloads divides on a tile; every divide they execute is the host's, in printing results in decimal and, for the graph search, in its generator's modulo, and these move their end-to-end time by 0.3 % (graph search), 0.4 % (shuffled sum) and 1.1 % (hash table). Their tile statistics are byte-identical with the host's old divider | — |
+| Memory size: one 16 GiB channel per tile, the address width derived from it, page-table copies that span as many of a tile's grains as they need, backing allocated only for pages touched | **yes** (§2.8). The machine had a flat 4 GiB; the host could not issue an address above 32 bits; a page-table copy was limited to one grain, which refused any program mapping more than about 500 MiB; and the loader wrote the zeros of every declared `.bss` page into the simulator's backing store. A test places, touches and reads back 4.5 GiB on each of four tiles; the simulator's resident memory is 1.24 GB for it and unchanged (165–177 MB) for the three workloads. The arena of frames started at 256 MiB, inside reach of the host's identity-mapped window (its program headers at 0x60000000 and stack below 0x80000000): a test placing 2 GiB of frames found all 510 of the host's pattern words in the window overwritten by tile stores. The arena now starts at 0x80000000, the same test reads every word back, and an overlapping arena is refused at configuration | the walker maps every page with 4 KiB leaves, grain and striped pages included (open, §2.3) |
 | Duplicate pages: a kernel store or atomic refused and counted, zero-gated, with a directed test; the host's legal fan-out to every copy | **yes**, including the privileged page-table write as its own request class with its own reserved capacity, gated so that nothing else can reach the exemption | — |
 | Migration on a foreign translation result | **yes**, taken at the translation result, with the program counter carried back so the instruction re-issues | the rule for a context that migrates with a store still in a queue, under the relaxed store switch only |
 | Memory link: parallel pass-through and a serial CXL attachment, as configuration | **yes** | a workload that can saturate the serial link; the x32 variant |
