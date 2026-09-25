@@ -2462,6 +2462,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | Memory link: parallel pass-through and a serial CXL attachment, as configuration | **yes** | a workload that can saturate the serial link; the x32 variant |
 | `WAIT`: the load slot's arm (a physical line and a valid bit written at the arming operation's translation), the instruction translated like a load and decided in the context array, the bank's invalidation broadcast on a line-taking snoop, a performed write and every eviction, one per bank per cycle; both ways a data cache can tell the tile it is losing a line (ask first, tell afterwards) | **yes** (§1.4.3, §2.1, §2.7), with the design's directed tests contended first — host, same-tile and migrating-in writers, one, two and four tiles, both notification modes — and five zero gates, one of which (`waitMissedWakeups`) stops a run at the first context left asleep after a write to its line. The workloads' tile statistics are byte-identical across the change. With a cache that tells afterwards, a tile's load-reserved/store-conditional pair whose window is longer than about five instructions livelocks against a host pair on the same word; that is the pair's missing fairness bound, which the row above reports, and not `WAIT`'s. The functional model's half is built too: the producer arms on every load and read-modify-write atomic, parks an invocation at a `WAIT` whose arm matches, wakes it only on a store or atomic performed to its armed line, and writes an image holding such a worker as format version 6, which records the armed line; the cycle model places a restored waiter on the tile owning that line, so its re-load does not migrate. **Measured** (§4.7): resident dictionary workers on `WAIT` at 128 contexts per engine are correct at the smallest size against the functional run at 32 and 128 contexts, with every zero gate at zero, and the tile instructions they issue while waiting fall from 1,118,398 to 1,024 over the sampled regions | forwarding the written word to a woken context. Its counter (`waitLocalWakeReloads`) is built; the dictionary cannot measure it, because every wake there is the host's write and none is a write on the same tile |
 | Sampling on the total: images and regions placed on the counted host instructions plus the function cores' executed instructions; each tile's count of instructions executed (issued, less those dropped to be re-issued after a migration or fault); a region closed on the total and the run ended with it | **yes** (§4.1), with the function-core count equal to the producer's exactly and a consumer gate from the entry point and from images | images that hold the invocations in flight part-done, which long invocations forked together need (§4.1) |
+| The compiled programs' host work per invocation: each run a descriptor written by the plan in fork order, so staging is three loads and three lane writes; a take reading only the result lane the program consumes; cuts and bottom-up descriptors computed once per set of bounds; the log lines a build option, off in measured builds | **yes** (§4.1, §4.7), with directed tests of the waiting section's extent, one refusal counted per refused fork, and a full tracking unit, on the graph search and the dictionary | a cheaper cut search for skewed degree distributions (interpolation was tried and lost); descriptors for the dictionary's consumers, which do not pay while each construct runs once |
 | Data prefetching into the load slot | no | deliberately undesigned; the slot is left free for one |
 | A barrel multi-context core as a comparison arm: many contexts without the position and without the unit of work | no | **designed and reviewed**, not modelled — the arm that would say which of the three differences between host and engine produced a ratio |
 | A graphics processor as a comparison arm, running the same three problems on the same inputs | no | **designed and reviewed**, not modelled |
@@ -2689,6 +2690,14 @@ defect above. Both arms were also run uninterrupted, as validation runs of the s
 lanes 35,469,623 cycles, answer stream 36,578,222, a ratio of 0.9697** — the folded path is 3.0 %
 faster, as it was at 152,917 insertions (0.9814), and both sampled intervals contain their runs.
 The compiler's rule stands.
+
+**A measured build prints nothing the program did not ask for.** The compiled programs used to
+print a line for every run-time choice, a summary per phase and the ring's counters, and those
+characters were host instructions charged to the program: 17 to 23 per invocation on the graph
+search. They are now a build option, on in a checking build and off in a measured one, and with
+them off the emitted code also drops the bookkeeping kept only to be printed (per-owner trip
+counts, retry totals). A number taken from a measured build therefore counts only the program's
+own host work and the library's staging, taking and planning.
 
 ### 4.2 The graph search
 
@@ -2989,6 +2998,30 @@ of batching them into waves with a barrier at each end; and a cheaper per-invoca
 the host. None of the three is a change to the tile core, which is why §5 treats utilisation
 and the tile's internals as separate pieces of work.
 
+
+**The host's work per invocation in the compiled programs.** Counted host instructions (those
+outside the waiting section) from the functional simulator, per invocation, before and after the
+library's host path was reworked:
+
+| program | invocations | staging | taking | planning per phase | planning once per program | log lines | total |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| graph search, 65,536 vertices, before | 1,018 | 25.5 | 25.6 | 37.7 | 39.5 | 19.9 | 148.2 |
+| graph search, 65,536 vertices, after | 1,018 | 14.0 | 12.0 | 15.8 | 34.3 | 0 | 76.1 |
+| dictionary, 8,192 insertions, before | 1,792 | 32.9 | 34.5 | 5.2 | — | 2.4 | 75.0 |
+| dictionary, 8,192 insertions, after | 1,792 | 32.9 | 31.0 | 3.7 | — | 0 | 67.5 |
+
+The hand-written graph search takes a result in 15 counted instructions and stages its lanes
+inside its waiting section (about 24 per fork, uncounted), but rewrites its duplicated tables
+every level: 403,456 counted instructions at this size, 788 per invocation, which the compiled
+program does not pay. The hand-written dictionary does its hashing and queueing on the host: 1,021
+counted instructions per invocation, 128 per operation. The compiled graph search's remaining cost
+is mostly its one-time weighted cuts (22.6 per invocation). Uninterrupted cycle-accurate runs
+give the same answers before and after: the graph search at 4,096 vertices runs 2.3 % faster
+(4,391,035 to 4,289,344 host cycles); the dictionary at 152,917 insertions 0.3 % faster
+(7,835,957 to 7,811,670); the dictionary at 8,192 insertions 0.8 % slower (828,456 to 834,933),
+where a build that only adds the log lines back lands at 831,715, so at that size the end moves
+with any change in the host's timing rather than with its amount of work.
+
 ---
 
 ## 5. What comes next
@@ -3112,3 +3145,10 @@ from *The sampling axis counts every instruction executed*
 there are uninterrupted runs made to validate the sampler, three of them longer than the
 900-second limit and run under its one-hour allowance for that purpose; the pair's two
 uninterrupted runs are also validation runs, and they, not the three-region estimate, decide it.
+The host-work-per-invocation table of §4.7 and the measured-build paragraph of §4.1 come from
+*The library runtime's host work per invocation*
+(`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/complete5/RUNTIME.md`). The per-invocation
+counts are functional runs, split by function from the basic-block vector; the cycle counts are
+single uninterrupted runs at the smallest sizes (and at 152,917 insertions for the dictionary),
+run whole as correctness gates because the sampler cannot yet restore the compiled dictionary's
+long invocations.
