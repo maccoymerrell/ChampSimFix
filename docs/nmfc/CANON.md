@@ -7761,6 +7761,17 @@ off entirely when no point is open; and a load-reserved for another address in t
 into its own cache and the directory arbitrates — ownership, which is Part K's one serialising
 mechanism, not a remote read-modify-write engine, which Part J forbids — and a line the tile
 loses breaks every point over it, so the store-conditional fails and the retry loop absorbs it.
+**The owner's pair is served before another agent's request for its line** (ledger L93): a
+request for the line of an open point whose load-reserved has been answered, and which was open
+when the request arrived, waits for the pair's window (`lrscHoldCycles`, derived from the
+constrained LR/SC loop's 14 instructions between the halves, the pipe depth or the context
+array's turn, the translation latency and the delivery; Rocket's `lrscCycles` is the same
+mechanism); a store-conditional at the data cache holds it for that one access; a point opened
+after the request arrived does not hold it, so the other agent is served before the next pair;
+the load-reserved takes the line for ownership and the store-conditional is a conditional write
+at the data cache, so its check holds until its write is performed; and a data cache that tells
+the tile afterwards holds an answered load-reserved's line itself for the same window. Each wait
+is bounded by a named quantity; nothing times out or gives up.
 
 **The reservation has a floor, and a stage below it is refused at construction** (NMFC-Rev
 `3922ed7`). A reserved unit must be a unit of its own, as an escape channel is a buffer of its own
@@ -7811,12 +7822,13 @@ goes down, because a load the old mechanism answered above the cache is now a ba
 **Zero gates.** Six counters are gated to zero across every program either suite runs:
 misroute, untranslated admit, a context's own two overlapping accesses admitted out of program
 order, an answer no queue entry owns, a delivery into a queue with no credit, and a privileged
-page-table write arising from a kernel store. `memqLrscSpuriousSuccess` and
-`memqLrscPointsTimedOut` join them.
+page-table write arising from a kernel store. `memqLrscSpuriousSuccess`,
+`memqLrscPointsTimedOut` and `memqLrscScLandedAfterBreak` join them.
 
 **What is open and named as open:** which path a walk's own reads take (both arms built, under
-analysis); the block instruction slot; the relaxed store-release rule; a fairness bound at the
-serialisation point under a rate of contention; and, at the memory controller, the depth of the
+analysis); the block instruction slot; the relaxed store-release rule; a hold at the HOST's
+cache for the host's own reservation (the tile's pair is served first, L93, but a host pair
+against a tile claiming the same word without end has no bound yet); and, at the memory controller, the depth of the
 per-bank queues, which are now built (D.2) at a depth of eight taken from DRAMsim3 rather than
 sized from the traffic a bank sees. The full record is
 `docs/nmfc/ARCHITECTURE-2026-09.md` §2 and §3.
@@ -16471,7 +16483,41 @@ Not a defect; the parameter survives.]`**
   floor stages and with a cache that tells afterwards. The other is a store-conditional whose write
   landed after its point was broken (`memqLrscScLandedAfterBreak`), which let one claim succeed
   twice. Both come from the tile's snoop deferral being sized to a queue's writes rather than to
-  one pair. They are ARCHITECTURE-2026-09 §2.5's open forward-progress item.
+  one pair. Both are repaired by L93.
+
+**L93 — A HOST WRITING A LINE WITHOUT PAUSE KEPT A TILE'S PAIR ON IT FROM EVER SUCCEEDING.
+`[DEFECT, FIXED, 2026-09-25. Class R5.]`**
+
+- *What it was.* The tile deferred a coherence request only while one of its writes was queued
+  against the line, for queue depth × bank access latency cycles; an open point is not a write,
+  so the other agent's request broke it before its store-conditional existed (49,751 of 50,253
+  breaks in the directed test), and while the tile deferred, its data cache held the tile's own
+  write to that line back, so the deferral could not help. A store-conditional past its check
+  could land after the line had left and come back, which claimed one slot twice. A host's pair
+  and a tile's took the word from each other for ever with a cache that tells afterwards (T12).
+- *The fix.* The owner's pair is served first: an answered point holds a request that arrived
+  while it was open, for the pair's window derived from the machine's parameters
+  (`lrscHoldCycles`: (14 + 1) × max(depth, ceil(contexts / pipes)) + `xlatLatency` + 2; 127
+  cycles at 32 contexts, 487 at 128); a store-conditional at the data cache holds it for one
+  access; a point opened after the request arrived does not hold it; the load-reserved fetches
+  for ownership and the store-conditional is a conditional write; the data cache serves the
+  tile's hits while asking it; a cache that tells afterwards holds the line itself. Sources: the
+  RISC-V constrained LR/SC forward-progress guarantee, Rocket's `lrscCycles`, an Arm exclusive
+  monitor's held line, x86's locked read-modify-write, SST memHierarchy's `llsc_block_cycles`.
+- *Found beside it, in the host core.* A load-reserved sent to memory on a path the core then
+  squashed left a reservation that validated the correct path's store-conditional after a
+  snoop had broken the real one; the host now sends load-reserveds only at the head of its
+  reorder buffer, as BOOM does. Its load/store queue also restarted its age count after a full
+  clear while retired stores remained; it no longer does.
+- *Evidence.* `tile_lrsc_writer` (the host storing to the line without pause; one claimer, 32,
+  tile against tile, the host reading the word) passes at 1, 2 and 4 tiles, both notification
+  modes, the default stages and the floor, the most attempts one increment needed measured at
+  1 to 11; `tile_lrsc_away_race` passes in all 12 configurations; T12 with a cache that tells
+  afterwards is gated; the compiled graph search with the host read-modify-writing the claimed
+  line on every probe, uncapped, completes (it did not in 900 s before).
+  `memqLrscScLandedAfterBreak` is a zero gate. The dictionary at load point 0 gives the same
+  answer, and the host's latency to a tile-held line moves from 3.46 to 3.19 fabric cycles on
+  average at 32 contexts.
 ---
 
 

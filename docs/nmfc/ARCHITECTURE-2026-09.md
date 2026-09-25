@@ -2048,64 +2048,189 @@ every step legal — and, worse than stopping, produce wrong answers. One stress
 10,668,525 points and closed 256. Such a load-reserved now waits, and the same seed closes
 256 of 256 in about a second.
 
-**What is reported rather than repaired: the pair has no fairness bound against a rate of
-contention.** It used to stop at 28 and 32 contenders on one word at the default configuration,
-and that was not a fairness limit. On the full machine it was the walk-pending drain above: a build
-with only that repair passes 28. On a tile alone it was a store-conditional whose point had been
-broken holding the translation queue's reserved entry: a build with every repair except the owner
-test at translation still stops at 28. With both repairs, 28 contenders complete in 118,052 host
-cycles on the full machine and 50,862 tile cycles alone, and 32 in 132,010 and 55,762.
-Starvation-freedom remains unproven. A fairness bound at the point — a contender that has waited
-long enough taking precedence — is a design decision rather than a repair, and it is not taken
-here. The gap is also visible between a host and a tile when the tile's data cache is a stock
-cache that tells the tile after it has given a line away: the host's pair and the tile's take the
-word from each other and neither closes. That case was reported at two tiles and passed at one
-and four; since translation stopped walking (§2.3) the tile's pairs retranslate in a cycle rather
-than waiting on walks, the two sides fall into step at one tile too (64,478 points broken by the
-host's snoops against 15 closed in 3 ms of simulated time, where the earlier build closed 40 of 44
-and finished in 12.5 µs), and the one-tile case is now reported beside the two-tile one rather
-than gated. With the tile's own data cache, which is asked before a line is taken, all three tile
-counts pass.
+**The pair among many contenders of one tile.** It used to stop at 28 and 32 contenders on one
+word at the default configuration, and that was not a fairness limit. On the full machine it was
+the walk-pending drain above: a build with only that repair passes 28. On a tile alone it was a
+store-conditional whose point had been broken holding the translation queue's reserved entry: a
+build with every repair except the owner test at translation still stops at 28. With both
+repairs, 28 contenders complete in 118,052 host cycles on the full machine and 50,862 tile cycles
+alone, and 32 in 132,010 and 55,762. Among one tile's contexts the queue's order decides who
+goes next; the contended tests below measure the attempts that takes (at most two for 32
+contenders with no other agent) rather than bound them with a counter.
 
-**Two host-against-tile results that the abandoned-pair test exposed.** Neither comes from the
-next-operation rule. Both are the forward-progress question between a host and a tile, which is
-still open.
+**The owner's pair is served before another agent's request for its line.** A pair completes
+against another agent that keeps writing its line only if the line stays with the pair for the
+pair's own window once the load-reserved has been answered, and the pair's store-conditional is
+performed before the other agent's next request. Without that, a host writing a line without
+pause kept a tile's claim on it from ever succeeding, and a host's pair and a tile's could take
+the word from each other for ever. Real cores give their reservation exactly this. RISC-V
+guarantees eventual success only to a constrained LR/SC loop: at most 16 instructions, only
+base-ISA integer instructions between the halves, and no loads, stores, backward branches,
+`FENCE` or `SYSTEM` instructions (unprivileged ISA, "Eventual Success of Store-Conditional
+Instructions"). Implementations meet that guarantee by holding the reserved line against
+incoming probes for a bounded number of cycles: Rocket's L1 data cache holds it for
+`lrscCycles` = 80 cycles, sized for "14 mispredicted branches + slop". An Arm core's exclusive
+monitor is backed by the same bounded hold on the line. x86 holds the line for the whole of a
+locked read-modify-write.
 
-- *A livelock.* At the floor stages, or with a cache that tells afterwards, `tile_lrsc_away_race`
-  stops in a host-against-tile phase at every tile count. In phase 4 alone at a memory-queue depth
-  of 3, in 1 ms of simulated time, 25,775 of the tile's points are broken by the host taking the
-  line, the host's store-conditionals fail 32,210 times, and each side succeeds twice. The tile
-  defers a snoop for `snoopDeferLimit`, which is derived as `dataQueueDepth` × `bankAccessLatency`:
-  32 cycles at the default configuration and 6 at a depth of 3. That is shorter than one pair's
-  interval, so the tile yields the line before its store-conditional can arrive. The host's
-  reservation lives in its L1 and is broken by the tile's next read. Neither side holds the line
-  for the length of its own pair. Run alone at the floor, the phases pass at most points and stop
-  at a few:
-  - phase 4 stops at two tiles with a cache that asks first;
-  - phase 5 stops at every tile count with a cache that tells afterwards.
+*What the machine did, read from counters.* An instrumented build of the previous machine, with
+no change of behaviour, ran the contended tests. The worst was a function core incrementing a
+word by a constrained pair while the host stored to another word of the same line with no pause
+between stores (`tile_lrsc_writer`, below; one tile, a cache that asks first):
 
-  The existing `tile_lrsc_race` stops the same way with a cache that tells afterwards, before this
-  change and after it.
-- *A store-conditional that succeeded after its point was broken.* Phase 6 alone, at one tile, the
-  floor stages and a cache that asks first, reproducibly claims one slot twice: 65 wins for 64
-  slots. The sequence is:
-  1. The tile's store-conditional passes its check and its write is sent to the data cache.
-  2. The host's request for the line is deferred past `snoopDeferLimit` and yielded, which breaks
-     the point.
-  3. The host's own store-conditional succeeds.
-  4. The tile's write then lands, and the tile's store-conditional reports success.
+- In 2 ms of simulated time, 50,762 points opened. 526 closed by their own store-conditional and
+  50,253 were broken by the host's request for the line, and the run did not complete.
+- The host's request won against the open point before the pair's store-conditional existed.
+  49,751 of the breaks came before the store-conditional reached the queue: the tile deferred a
+  request only while one of its writes was queued against the line, and an open point is not a
+  write.
+- The pair's window was about 30 cycles. The load-reserved's answer reached its context 14
+  cycles after the point opened, and the store-conditional reached the queue 16 cycles after
+  that (`memqLrscLrAnswerCycles`, `memqLrscPairWindowCycles`).
+- The tile's deferral was `snoopDeferLimit`, queue depth × bank access latency: 32 cycles at the
+  default, 6 at a queue of 3. It expired every time it applied (502 of 502).
+- It could not have done otherwise. While the tile deferred, the data cache held back the tile's
+  own requests for that line, the write the deferral was waiting for among them
+  (`snoopWindowWriteDeferrals`, 10,603). A deferral that holds the owner's write back until it
+  gives the line up cannot help the owner.
+- The host's request completed 3.3 cycles (at the 2 GHz fabric) after it reached the tile's
+  cache (`hostSnoopTileCycles`).
 
-  The new counter `memqLrscScLandedAfterBreak` counts these. It reads 1 on that run. In passing
-  suite runs it reads 10 and 19 on `tile_lrsc_race` at one and four tiles, and 50 and 37 on
-  `tile_lrsc_away_race`, where the host operations involved did not overwrite the tile's word. `memqLrscSpuriousSuccess` cannot see the case, because the intervening write was the
-  host's and was not performed from a queue entry. A store-conditional's check has to hold until
-  its write is performed: either the line is held writable across the close, or a close whose
-  point breaks in flight fails.
+The same shape stopped the host's `amoadd` against the tile's pair at two tiles and the floor
+stages: 53,840 of 53,842 points broken before their store-conditional arrived, and 6 of 60,563
+host store-conditionals succeeding. It also stopped `WAIT`'s test T12 with a cache that tells
+afterwards: 42,973 of 42,988 points broken, and 1 of 64,459 host store-conditionals succeeding.
+In the claim array at the floor, a store-conditional passed its check at the bank, the deferral
+expired, the host's pair took the line and succeeded, and the tile's write then re-acquired the
+line and landed. One slot was claimed twice (`memqLrscScLandedAfterBreak` 1).
 
-Both need the same mechanism. The tile needs a deferral sized to one context's pair rather than to
-a queue's writes, and the point's owner needs the next turn when the line returns. Real systems
-provide this: RISC-V's constrained LR/SC forward-progress guarantee, ARM's exclusive monitor with
-a held snoop, and x86's locked read-modify-write. It is not built here.
+*What is built.* Six rules, each at the place the behaviour belongs:
+
+1. **An answered point holds a request for its line for the pair's window.** The window is
+   derived from the tile's parameters (`lrscHoldCycles`, `src/nmfc/src/NMFCTile.cc`), term by
+   term:
+   - (14 + 1) × *issue interval*: the owner's instructions after the answer, the
+     store-conditional included. 14 is the constrained loop's instructions between the halves,
+     Rocket's figure. The issue interval is the pipe depth (one issue per context per `depth`
+     cycles), or ceil(contexts / pipes) cycles when the context array oversubscribes the pipes,
+     because the ready queue is first-in first-out.
+   - `xlatLatency`: the store-conditional's translation. It may leave its translation queue out
+     of turn and take that queue's escape entry.
+   - 2: one cycle through the delivery window, on its escape slot, and one to its memory
+     queue's head, where the point holds everything else to the word behind it.
+
+   This gives 127 cycles at the default 32 contexts per tile (depth 8, four pipes, translation
+   5) and 487 at 128. The longest window measured in any test is 84 cycles, in the compiled graph
+   search at 128 contexts. The hold never outlasts the point: it ends at the store-conditional,
+   at the owner's next memory operation, at its departure, or at the bound.
+2. **The close is served first.** A point whose store-conditional has gone to the data cache
+   holds the request until the write is answered. That is one cache access, because the write is
+   a hit (rule 4).
+3. **The other agent is served before the next pair.** A point opened after the request
+   arrived does not hold it, as Rocket's reservation backs off after its hold. So a stream of
+   pairs cannot keep the other agent waiting: it waits at most for the pairs already open when
+   it arrived. A point whose load-reserved has not been answered does not hold it either,
+   because that read may itself be waiting at the directory behind this very request.
+4. **The load-reserved takes the line for ownership, and the store-conditional is a conditional
+   write at the data cache.** The load-reserved, and a read-modify-write's read half, fetch the
+   line in a state the cache may write, as the host's load-reserved already did. The
+   store-conditional is performed only if the line is still in the cache, writable, when the
+   write reaches it. Otherwise nothing is written and the pair fails (`condWritesFailed`, and
+   `memqLrscScFailedAtCache` when it closes a point). The pair's check therefore holds until its
+   write is performed, and `memqLrscScLandedAfterBreak` is now a zero gate.
+5. **The data cache serves the tile's hits while asking the tile about the same line.** A
+   function core keeps no copy of any line, and the answer to the request is built from the line
+   after the tile has answered, so nothing is left above the cache. A miss is still held back,
+   because it would need the fabric for the line the directory is waiting on
+   (`snoopWindowClientHits`).
+6. **A data cache that tells the tile afterwards holds the line itself.** Such a cache cannot
+   ask, so it holds a line it has just answered a load-reserved from, for the window the
+   load-reserved carries plus its own access latency and one cycle (`lrscHoldDeferrals`,
+   `lrscHoldCycles`). The store-conditional's write, an eviction of the line or the end of the
+   window ends the hold. The request that waited is then handled as if it had just arrived, and
+   no new hold starts on a line while a request is waiting for it. SST's own stock L1 has the
+   same mechanism (`llsc_block_cycles`, "Number of cycles to prevent competing access to an
+   LL/LR line. Encourages forward progress").
+
+None of the six is a timeout, a retry counter or a capacity fault. Each wait is bounded in cycles
+by a named quantity, and nothing gives up (NMFC-Rev `eb3eb02`; the test and the suite gates
+`2ac2f9f`).
+
+*A defect in the host core the contended tests exposed.* With the tile's side repaired, one host
+increment was lost in the host-against-tile phase at two tiles. The trace showed the order in
+which the host's requests reached its cache: a load-reserved, then a store-conditional sent
+before that load-reserved had been answered. Instrumenting the out-of-order core's load/store
+queue showed why. The load-reserved had been sent to memory on a path the core then squashed.
+The reservation it opened at the cache survived the squash, and the correct path's
+store-conditional, arriving after it, was validated by a reservation its own load-reserved never
+made. The tile's snoop had broken the real one in between. The core now sends a load-reserved,
+or a locked load, to memory only when it is at the head of the reorder buffer, as stores already
+are, and as BOOM performs its atomics and load-reserveds non-speculatively. Across three tile
+counts the instrumented trace then shows no store-conditional sent while a load-reserved was
+unanswered (0 of 340, 341 and 224, against 5 of 245 before at two tiles).
+
+The same instrumentation found that the queue restarted its age count after a full pipeline
+clear while retired stores were still in the store queue: 170 such clears in one run of the race
+test and 225 in the dictionary at its smallest size. A load issued after the clear then looked
+older than a retired store it follows, and neither waited for nor forwarded from it. The count
+no longer restarts. Both changes are in `lsq/vbasiclsq.h` of the element tree (`875e7b274`).
+
+The host's own reservation has no hold. Its pairs complete in every test because the tile's
+pairs are bounded. A host that had to make progress against a tile claiming the same word
+without end would need the same hold at the host's cache, which is Rocket's `lrscCycles` itself.
+That is not built.
+
+*Before and after.* Every run is an uninterrupted correctness run. "Before" is the machine at the
+previous head, with the instrumentation above and no change of behaviour. The graph-search row
+uses the core before its fix; the test program rows use either core, because their host issues no
+pair. "Floor" is a memory queue of 3, a delivery window of 1 and a translation queue of 1.
+"Asks" and "tells" are the two ways the tile's data cache reports a line it is losing: asking
+first, or telling afterwards. "Stop" means no completion by the wall-clock deadline or within
+2 ms of simulated time.
+
+The continuous-writer test is `tile_lrsc_writer` (`src/nmfc/test/tile_lrsc_writer.c`, kernel in
+`nmfc_writer.S`). It has four phases:
+
+- phase 1: one claimer, making 16 increments of a word by a constrained pair, while the host
+  stores to another word of the same line without pause until it returns;
+- phase 2: 32 claimers on the same word, against the same writer;
+- phase 3: the 32 claimers with the host idle (tile against tile);
+- phase 4: one claimer while the host reads the claimed word and stores to its neighbour on
+  every pass.
+
+Each phase is exact arithmetic on both words and reports the most attempts any one increment
+needed.
+
+| Program | Configuration | Before | After |
+|---|---|---|---|
+| `tile_lrsc_writer` | 1 tile, default, asks | **stop** in phase 2 (50,253 points broken, 526 closed in 2 ms) | pass; most attempts per increment 1 / 8 / 2 / 1 by phase |
+| `tile_lrsc_writer` | 1 tile, default, tells | pass; most attempts 6 / **45** / 2 / 6 | pass; 1 / 9 / 2 / 1 |
+| `tile_lrsc_writer` | 1, 2 and 4 tiles × asks, tells × default, floor (12), and 128 contexts | 4 of 12 pass, needing 25 to 45 attempts for one increment in phase 2; **8 stop** (400 s) | **13/13 pass**; phases 1 and 4 need 1 attempt, phase 3 needs 2, phase 2 needs 5 to 11 |
+| `tile_lrsc_away_race` phases 1–6 | 1, 2, 4 tiles × asks, tells × default, floor | passes only at the default stages with asks | **12/12 pass** |
+| the same, phase 4 alone (host `amoadd`) | 2 tiles, floor, asks | **stop** (53,840 of 53,842 points broken; 6 of 60,563 host store-conditionals succeed) | pass |
+| the same, phase 6 alone (host claims) | 1 tile, floor, asks | **fail**: a slot claimed twice (`memqLrscScLandedAfterBreak` 1) | pass, 0 |
+| T12 (`WAIT` between the halves; the host adding) | 1 tile, tells | **stop** (42,973 of 42,988 points broken; 1 of 64,459 host store-conditionals succeeds) | pass; now gated at 1, 2 and 4 tiles |
+| `tile_lrsc_race` | 1 tile, tells | stop (recorded as a known gap) | pass |
+| the compiled graph search, the host read-modify-writing the claimed line on every probe with no cap | 4,096 vertices, 4 tiles, 128 contexts | **stop** (no completion in 900 s) | pass: 10,655 host read-modify-writes all kept; 533 points, 513 closed by their own store-conditional, 20 by the next operation, none broken |
+| `memqLrscScLandedAfterBreak`, `memqLrscSpuriousSuccess`, `memqLrscPointsTimedOut` | every run above | 1 / 0 / 0 | **0 / 0 / 0** (all three zero gates) |
+
+*The cost.* The host's latency to a line a tile holds is measured from the directory's request to
+the tile's cache to the transaction's completion (`hostSnoopTileCycles`, cycles of the 2 GHz
+fabric). The resident dictionary at load point 0 (8,192 insertions, four tiles, run whole) gives
+the same answer before and after (answer digest `0x155f0b7b`):
+
+| Dictionary, load point 0 | Before: mean / max | After: mean / max | Host work cycles, before → after |
+|---|---|---|---|
+| 32 contexts per tile | 3.46 / 36 (1,183 requests) | 3.19 / 38 (1,187) | 620,053 → 619,768 |
+| 128 contexts per tile | 3.67 / 37 (1,409 requests) | 3.43 / 35 (1,395) | 691,766 → 692,466 |
+
+The dictionary performs no pair on the tiles, so the hold never applies to it: 5 and 1 requests
+waited for a pair. The small fall in the mean comes from rule 5, the tile's own hits being served
+while it is asked. Where the tile does claim, the host pays up to one pair per write, as intended:
+in the continuous-writer test at one tile, 30.7 cycles on average and at most 38, against 3.3
+before, while the claims that previously never completed now complete. The host's rule costs
+host atomics their speculation. The race test takes 121.9 µs instead of 116.3 µs (+4.8 %), and
+the graph search with the hammering host 863.0 µs instead of 861.6 µs (+0.2 %).
 
 **A read-modify-write atomic is one entry, performed at the bank by a small arithmetic unit beside it.** Such a unit is ordinary in real memory systems: RISC-V implementations execute their atomic operations with an arithmetic unit inside the data cache, graphics processors execute atomics in their last-level cache slices, the AMBA CHI interconnect defines far atomics performed at the home node, and PCI Express defines atomic operations completed at the target; the operation set is nine operations at two widths, so the unit is an adder, a comparator and a few logic gates. The entry reaches the head for its
 address; the bank reads the word, a small arithmetic unit beside the bank applies the
@@ -2132,9 +2257,13 @@ waits on a resource above it. The mechanism this replaces failed that test in tw
 once — an unbounded waiter list, and pins that made a cache fill depend on a client
 voluntarily surrendering a line.
 
-There is one case where a coherence request waits, and it is bounded by construction: while
-a bank is mid-read-modify-write on the line. The deferral is at most one bank occupancy,
-because the operation never spans a miss, and it is counted along with the cycles deferred.
+A coherence request waits in three cases, each bounded by construction. While a bank is
+mid-read-modify-write on the line: at most one bank occupancy, because the operation never spans
+a miss (its read takes the line for ownership, so its write is a hit). While the owner's pair is
+open over the line: at most the pair's window after its load-reserved was answered, and one cache
+access for its store-conditional (above). And while this tile's writes queued against the line
+drain: at most `snoopDeferLimit` cycles from the request's arrival. Each is counted along with the
+cycles deferred.
 This is the one place where the tile's strict-priority position in the coherence protocol is
 visible as a mechanism rather than a claim, and it is stated as a bounded deferral with a
 counter rather than as a property asserted to be preserved. The complementary case — a
@@ -2153,9 +2282,10 @@ retry loop absorbs it. Second, **the tile is told when it loses a line** in ever
 configuration: where the tile's data cache is this tree's own it is *asked*, which is what
 makes the bounded deferral above possible, and where it is a stock coherent cache the
 invalidation is now forwarded to the tile, which is strictly less — there is nothing left to
-defer by the time the notification arrives, so such a tile yields at once and its pairs fail
-more often. That is a property of the configuration rather than of the queue, and it is the
-half correctness needs; without it the tile was never told at all. Third, **a host performs
+defer by the time the notification arrives, so such a cache holds the line of a load-reserved it
+has just answered itself, for the pair's window, as a stock core's L1 holds its reserved line
+(rule 6 above). The notification is the half correctness needs; without it the tile was never
+told at all. Third, **a host performs
 its own read-modify-write by taking the line**, in its own cache, with the directory
 arbitrating — the machine's one serialising mechanism is ownership of the address by the agent
 performing the operation, and a host core owns an address the way any conventional core does.
@@ -2547,7 +2677,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 
 | mechanism | in the model today | designed, not yet modelled |
 |---|---|---|
-| Host: out-of-order core, two-stage front end with override predictor, wrong-path modelling, two-level TLB and walker at the cache management units, data prefetchers, memory-dependence prediction | **yes**, each with its own counters. The memory-dependence default is now the path-history predictor, measured over eight paired windows at 1.3791× the two-bit counter [1.3154, 1.4457] and 1.0431× the store-address predictor [1.0019, 1.0866]; the other two remain selectable by name | — |
+| Host: out-of-order core, two-stage front end with override predictor, wrong-path modelling, two-level TLB and walker at the cache management units, data prefetchers, memory-dependence prediction | **yes**, each with its own counters. The memory-dependence default is now the path-history predictor, measured over eight paired windows at 1.3791× the two-bit counter [1.3154, 1.4457] and 1.0431× the store-address predictor [1.0019, 1.0866]; the other two remain selectable by name. A load-reserved (or a locked load) goes to memory only at the head of the reorder buffer, as BOOM performs its atomics: sent speculatively, one on a squashed path left a reservation that validated the correct path's store-conditional and lost an update against a tile (§2.5); host atomics lose their speculation (the host-against-tile race test 4.8 % longer). The load/store queue's age count no longer restarts after a full clear while retired stores remain | — |
 | Fabric: a port per endpoint per direction, 32 B at 2 GHz, ten endpoints, traffic counted per port and per direction as control, coherence and data; the directory one home node per slice at one transaction per port cycle | **yes** (§1.6). Writebacks and snoop responses now cross their link one packet at a time and are acted on when they arrive; acting on them when sent let the host L2's link (32 B at 2 GHz) be booked about 450,000 cycles ahead in the graph search's level 6 and emptied the tiles for 45 % of level 7 (§2.2) | a directory that supplies a clean line to a tile from the tile's own slice rather than forwarding it from the host L2, whose link now binds that level |
 | Caches' miss-status files: one file per bank, sized from the contexts the cache serves | **yes** (§1.6), on both tile caches; the last-level slice holds the sum in one pool | the per-bank arrangement inside the slice, which lives in a library outside this tree |
 | Coherence: directory at the fabric, four tiles each with a last-level slice, memory controller and channel | **yes** | — |
@@ -2560,7 +2690,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | The walk's own reads: through the data cache against reserved capacity, or straight to the last-level slice | **yes, both arms**, each with the refusals that stop it being measured as the other machine. **Under open analysis**: indistinguishable on the two sampled points so far, because the reservation was never contended, and the first reading of that rested on four walk-source counters that read zero while 1,007 walks ran — now a fifth bin and an accounting gate | the workload that separates them: one whose data traffic fills the queues while a walk needs to issue |
 | Getting a translated request to its bank | **yes** — the delivery window, oldest-per-bank, one delivery per bank per cycle, with the limit counter rewritten so that it can fire at all | the split-window escalation, if measurement ever says the window is the constraint |
 | Ordering, forwarding, atomicity | **yes** — physically-indexed memory queues, one per bank: sequence order, forwarding from the newest older overlapping entry, read-modify-write at the bank, coherence requests at the bank with a bounded deferral. The word-keyed table above the data cache, its cache pins, its snoop merge and its unbounded waiter list are **deleted** | — |
-| The load-reserved / store-conditional point: four ends (its own store-conditional, the line taken away, the owner's next memory operation that is not that store-conditional, departure), a unit of each stage reserved for the close, no takeover by another address | **yes**. A pair abandoned after a failed compare ends at the owner's next memory operation, as a RISC-V reservation lapses; the contended test (`tile_lrsc_away`: a compare-and-swap loop that branches away, a claim array, the host on the line) passes at 1, 2 and 4 tiles, at the default stages and the floor, under both notification modes, and the compiled graph search now emits the plain compare-and-branch. Also a cross-agent directed test in which a host and a tile update one word, and eight contenders at the memory queue's floor on one tile, two tiles and a tile alone in the suites. The close's unit is an escape slot beyond the window's width and an escape entry beyond the translation queue's depth (floor 1), entitled at translation only to the point owner's store-conditional; the memory queue keeps it inside its depth (floor walkReserve + 2); walk traffic keeps its memory-queue entry while a point is open, and the walk-pending drain does not stop at a request the window refuses. What this proves is deadlock-freedom only; 28 and 32 contenders now complete at the default configuration (§2.5; NMFC-Rev `43d62d2`) | a fairness bound at the point, which is a design decision and is reported rather than repaired; host-against-tile forward progress (a livelock at the floor stages and with a cache that tells afterwards) and a store-conditional whose write lands after its point was broken (`memqLrscScLandedAfterBreak`), both needing a deferral sized to one pair (§2.5) |
+| The load-reserved / store-conditional point: four ends (its own store-conditional, the line taken away, the owner's next memory operation that is not that store-conditional, departure), a unit of each stage reserved for the close, no takeover by another address | **yes**. A pair abandoned after a failed compare ends at the owner's next memory operation, as a RISC-V reservation lapses; the contended test (`tile_lrsc_away`: a compare-and-swap loop that branches away, a claim array, the host on the line) passes at 1, 2 and 4 tiles, at the default stages and the floor, under both notification modes, and the compiled graph search now emits the plain compare-and-branch. Also a cross-agent directed test in which a host and a tile update one word, and eight contenders at the memory queue's floor on one tile, two tiles and a tile alone in the suites. The close's unit is an escape slot beyond the window's width and an escape entry beyond the translation queue's depth (floor 1), entitled at translation only to the point owner's store-conditional; the memory queue keeps it inside its depth (floor walkReserve + 2); walk traffic keeps its memory-queue entry while a point is open, and the walk-pending drain does not stop at a request the window refuses. 28 and 32 contenders complete at the default configuration (§2.5; NMFC-Rev `43d62d2`). **The owner's pair is served before another agent's request for its line**: an answered point holds the request for the pair's window (`lrscHoldCycles`, derived: 127 cycles at 32 contexts, 487 at 128), its store-conditional at the data cache for one access, and a point opened after the request arrived not at all; the load-reserved fetches for ownership, the store-conditional is a conditional write at the data cache, the data cache serves the tile's hits while asking it, and a cache that tells afterwards holds the line itself. A host writing the line without pause (`tile_lrsc_writer`) no longer stops a tile's claim: at 1, 2 and 4 tiles, both notification modes, default and floor, the most attempts one increment needs is measured at 1 to 11; `tile_lrsc_away_race` passes in all 12 configurations and T12 with a cache that tells afterwards is gated; `memqLrscScLandedAfterBreak` is a zero gate | the host's own reservation has no hold: a host pair against a tile claiming the same word without end has no bound (§2.5) |
 | Backpressure anywhere in the data path | **yes** — credit end to end, and the depth sweep shows a curve rather than a cliff: queue-full cycles 0, 1, 368, 6,417 as the queue goes 32, 8, 4, 2 with the answer unchanged | — |
 | Tile instruction and data caches, banked one bank per pipe, a bank reading one line per cycle, four counters each | **yes**, including the per-bank arithmetic unit that performs a read-modify-write and the bank index on the request interface | — |
 | Last-level slice banked by the memory device's bank bits; one queue per DRAM bank at the controller | **yes** — the slice bank is the device's bank-group and bank bits (it was its column bits until this round). The controller keeps a queue per bank over one shared read queue per channel, sized P = memory queues × their depth × tiles per channel + the host L2's miss registers = 128, the DMC-620's larger queue depth. Posted writes are held in a separate write queue of P entries, drained in batches that empty the batch they began with. Measured against the single queue: victims of a one-bank storm at 1.3× their solo time, where the single queue slowed them 9×; the shuffled sum's offloaded phase at 994,413 cycles against 995,883; the graph search's level-7 window at 1,584,221 against 1,590,118 (§2.8). The single-queue controller it replaces (one 32-entry read and one 32-entry write buffer per channel, ramulator2's defaults) stays selectable (`NMFC_BANK_QUEUES=0`) | T counts only the channel's own tile, so remote tiles' reads can exceed P: this happened for 0.2 % of reads on one channel at level 7 |
@@ -3271,3 +3401,10 @@ directed correctness run, uninterrupted, with its statistics file under
 `/mnt/md0/nmfc-work/complete6/lrsc/runs`; the compiled graph search at 65,536 vertices is one
 uninterrupted run made to compare its answers and migration rate with the build that wrote the
 value back, not a performance number.
+The forward-progress rules of §2.5 (the owner's pair served first), their diagnosis, test table
+and cost rows, and the two host-core changes come from *A pair against a continuous writer*
+(`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/complete6/PROGRESS.md`). Every figure there is
+a directed correctness run, uninterrupted or stopped at 2 ms of simulated time, with its
+statistics file under `/mnt/md0/nmfc-work/complete6/fp/runs`; the dictionary rows are two
+uninterrupted runs per build at load point 0, read for their counters and answers, not a sampled
+performance number.
