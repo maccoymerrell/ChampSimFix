@@ -2594,6 +2594,17 @@ beat. The grain G is derived from the 8 KiB figure, so a G-unit is four sweeps o
 rather than two; it still spans every bank evenly, and correcting it moves every placement, so
 it is a separate change.
 
+**The slice's size is one declaration.** Its size (4 MiB by default) and its ways (16) are
+stated once, in `src/nmfc/test/nmfc_sizes.py`; `NMFC_SLICE_SIZE` overrides the size. The
+machine builder sizes every slice from it, and the compiler reads the same numbers for its
+placement rule (§3), so a configuration with larger or smaller slices moves the machine and
+the compiled programs together. With the variable unset, the configuration is identical to
+the one before the change. The bank alignment above needs the device's bank bits inside the
+set index. An 8 MiB slice has 8,192 sets and aligns (shift 7), as the 4 MiB slice does. A
+2 MiB slice has 2,048 sets, fewer than 32 banks shifted past a row and the rank bit, so it
+keeps line-interleaved banks (shift 0), as the rule already states for a slice too small to
+align. Its access latency is a separate setting (`NMFC_SLICE_NS`, 8 ns).
+
 ### 2.9 The memory link, and CXL as the alternative
 
 The link between a tile's memory controller and its memory device is **configuration, not
@@ -2621,7 +2632,8 @@ pipe depth; instructions in the instruction slot; branch-target-buffer entries; 
 banks and therefore memory queues; memory-queue depth; window width; reserved entries for a
 walk and for a privileged page-table write; translation queues, their depth and the
 translation latency; translation-buffer size and banking; the store slot-release rule;
-instruction-cache banks; bank access latency; last-level slice size, banking and latency;
+instruction-cache banks; bank access latency; last-level slice size (one declaration, which the
+compiler's placement rule also reads), banking and latency;
 memory device and link.
 
 **Resources and their limits** — each with its capacity and where the number comes from:
@@ -2705,6 +2717,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | `WAIT`: the load slot's arm (a physical line and a valid bit written at the arming operation's translation), the instruction translated like a load and decided in the context array, the bank's invalidation broadcast on a line-taking snoop, a performed write and every eviction, one per bank per cycle; both ways a data cache can tell the tile it is losing a line (ask first, tell afterwards) | **yes** (§1.4.3, §2.1, §2.7), with the design's directed tests contended first — host, same-tile and migrating-in writers, one, two and four tiles, both notification modes — and five zero gates, one of which (`waitMissedWakeups`) stops a run at the first context left asleep after a write to its line. The workloads' tile statistics are byte-identical across the change. With a cache that tells afterwards, a tile's load-reserved/store-conditional pair whose window is longer than about five instructions livelocks against a host pair on the same word; that is the pair's missing fairness bound, which the row above reports, and not `WAIT`'s. The functional model's half is built too: the producer arms on every load and read-modify-write atomic, parks an invocation at a `WAIT` whose arm matches, wakes it only on a store or atomic performed to its armed line, and writes an image holding such a worker as format version 6, which records the armed line; the cycle model places a restored waiter on the tile owning that line, so its re-load does not migrate. **Measured** (§4.7): resident dictionary workers on `WAIT` at 128 contexts per engine are correct at the smallest size against the functional run at 32 and 128 contexts, with every zero gate at zero, and the tile instructions they issue while waiting fall from 1,118,398 to 1,024 over the sampled regions | forwarding the written word to a woken context. Its counter (`waitLocalWakeReloads`) is built; the dictionary cannot measure it, because every wake there is the host's write and none is a write on the same tile |
 | Sampling on the total: images and regions placed on the counted host instructions plus the function cores' executed instructions; each tile's count of instructions executed (issued, less those dropped to be re-issued after a migration or fault); a region closed on the total and the run ended with it | **yes** (§4.1), with the function-core count equal to the producer's exactly and a consumer gate from the entry point and from images | images that hold the invocations in flight part-done, which long invocations forked together need (§4.1) |
 | The compiled programs' host work per invocation: each run a descriptor written by the plan in fork order, so staging is three loads and three lane writes; a take reading only the result lane the program consumes; cuts and bottom-up descriptors computed once per set of bounds; the log lines a build option, off in measured builds | **yes** (§4.1, §4.7), with directed tests of the waiting section's extent, one refusal counted per refused fork, and a full tracking unit, on the graph search and the dictionary | a cheaper cut search for skewed degree distributions (interpolation was tried and lost); descriptors for the dictionary's consumers, which do not pay while each construct runs once |
+| The compiler's placement of a read-only array its constructs reach (rule R7): replicated on duplicate pages, one copy per tile, or owned with own-and-pull | **yes**, as a capacity rule read from the configured slice: replicate when one copy and what the replicated phase keeps resident beside it (the kernel's text and the reduction targets) fit a slice plus one of its ways, `copy + other <= slice + slice / ways`. The margin is calibrated by the two measured sides of the crossover: a copy of exactly one 4 MiB slice won (owned / replicated 2.51 [2.18, 2.84]) and a copy of two slices lost (38.2 % slower). It replaces a table that replicated only an array of exactly the one measured size, 4 MiB. The same source compiled against 2, 4 and 8 MiB slices chooses as the rule says, and the compilation record names the numbers compared; at 4 MiB slices both named builds of the measured pair are unchanged | a paired measurement inside the unmeasured interval, between one slice plus a way and two slices, which today stays owned |
 | Data prefetching into the load slot | no | deliberately undesigned; the slot is left free for one |
 | A barrel multi-context core as a comparison arm: many contexts without the position and without the unit of work | no | **designed and reviewed**, not modelled — the arm that would say which of the three differences between host and engine produced a ratio |
 | A graphics processor as a comparison arm, running the same three problems on the same inputs | no | **designed and reviewed**, not modelled |
