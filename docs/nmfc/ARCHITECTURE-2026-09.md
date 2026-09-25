@@ -2461,6 +2461,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | Migration on a foreign translation result | **yes**, taken at the translation result, with the program counter carried back so the instruction re-issues | the rule for a context that migrates with a store still in a queue, under the relaxed store switch only |
 | Memory link: parallel pass-through and a serial CXL attachment, as configuration | **yes** | a workload that can saturate the serial link; the x32 variant |
 | `WAIT`: the load slot's arm (a physical line and a valid bit written at the arming operation's translation), the instruction translated like a load and decided in the context array, the bank's invalidation broadcast on a line-taking snoop, a performed write and every eviction, one per bank per cycle; both ways a data cache can tell the tile it is losing a line (ask first, tell afterwards) | **yes** (§1.4.3, §2.1, §2.7), with the design's directed tests contended first — host, same-tile and migrating-in writers, one, two and four tiles, both notification modes — and five zero gates, one of which (`waitMissedWakeups`) stops a run at the first context left asleep after a write to its line. The workloads' tile statistics are byte-identical across the change. With a cache that tells afterwards, a tile's load-reserved/store-conditional pair whose window is longer than about five instructions livelocks against a host pair on the same word; that is the pair's missing fairness bound, which the row above reports, and not `WAIT`'s. The functional model's half is built too: the producer arms on every load and read-modify-write atomic, parks an invocation at a `WAIT` whose arm matches, wakes it only on a store or atomic performed to its armed line, and writes an image holding such a worker as format version 6, which records the armed line; the cycle model places a restored waiter on the tile owning that line, so its re-load does not migrate. **Measured** (§4.7): resident dictionary workers on `WAIT` at 128 contexts per engine are correct at the smallest size against the functional run at 32 and 128 contexts, with every zero gate at zero, and the tile instructions they issue while waiting fall from 1,118,398 to 1,024 over the sampled regions | forwarding the written word to a woken context. Its counter (`waitLocalWakeReloads`) is built; the dictionary cannot measure it, because every wake there is the host's write and none is a write on the same tile |
+| Sampling on the total: images and regions placed on the counted host instructions plus the function cores' executed instructions; each tile's count of instructions executed (issued, less those dropped to be re-issued after a migration or fault); a region closed on the total and the run ended with it | **yes** (§4.1), with the function-core count equal to the producer's exactly and a consumer gate from the entry point and from images | images that hold the invocations in flight part-done, which long invocations forked together need (§4.1) |
 | Data prefetching into the load slot | no | deliberately undesigned; the slot is left free for one |
 | A barrel multi-context core as a comparison arm: many contexts without the position and without the unit of work | no | **designed and reviewed**, not modelled — the arm that would say which of the three differences between host and engine produced a ratio |
 | A graphics processor as a comparison arm, running the same three problems on the same inputs | no | **designed and reviewed**, not modelled |
@@ -2628,6 +2629,66 @@ arm does not survive a restore) is local; restored without the line, the same im
 workers made three migrations. Because the loop around a `WAIT` runs once per wake, real or
 spurious, its instructions are counted apart as every wait loop's are, and a `WAIT` outside
 the kernel wait section stops the producer.
+
+**The axis counts the function cores' instructions too: the total.** The counted-instruction
+axis counts the host's instructions only, and a program whose host forks and collects while
+its function cores do the work has almost nothing on it: the compiled dictionary at 677,205
+insertions retires 137,384 counted instructions while its function cores execute 184,255,498,
+so its axis had no positions where its time goes, its warm-up was 48 % of the axis, and it
+could not be sampled at all. The default axis is now the **total**: the counted host
+instructions plus the function cores' instructions executed outside the kernel wait section
+(a resident worker's poll of its queue, the one function-core loop whose length is the
+machine's). The functional producer places images on it (`--interval-total`); because it runs
+each invocation to its end inside its `FORK`, an image is taken after the host instruction that
+carried the total to a multiple, never inside an invocation, and records where it really is.
+In the cycle model each tile counts an instruction when it issues and takes it back when the
+instruction is dropped to be issued again after a migration or a fault, so the count is of
+instructions executed; the host unit's window adds the tiles' count to the core's, closes the
+region when the total reaches its end on whichever side executes, and ends the run there, so
+the tiles stop with the region instead of draining its invocations. The function-core count is
+the producer's exactly wherever each invocation's work is fixed by the program: 1,552,308 in
+both simulators over a whole program of the offloaded graph search, 3,683,846 over the compiled
+dictionary at 8,192 insertions (16,771 instructions issued twice after a migration were taken
+back) and 184,255,498 at 677,205. The hand-written hash table is not such a program — its
+lookups walk chains in the order concurrent inserts landed — and differs by at most 4.8 in
+100,000, less than its host's own counted instructions do. On the total there is no second
+stratum for sparse waits, because a wait is time in which invocations execute and so has width.
+The counted axis stays selectable. Re-validated on this build (`tools/sampling/PROGRESS-AXIS.md`
+§8.8), with each program's uninterrupted run:
+
+| program | N (total) | W | U | regions | estimate ÷ whole run | interval contains it |
+|---|---:|---:|---:|---:|---:|---|
+| dictionary, 8,192 inserts, wave | 6,430,328 | 262,144 | 16,368 | 60 | 0.9965 | yes |
+| dictionary, 8,192 inserts, resident | 6,467,723 | 262,144 | 16,363 | 60 | 1.0267 | yes |
+| dictionary, 677,205 inserts, wave | 214,601,898 | 4,194,304 | 4,193,632 | 20 | 1.0285 | yes |
+| dictionary, 677,205 inserts, resident | 219,768,822 | 3,145,728 | 8,387,200 | 20 | 0.9879 | yes |
+| compiled reduction, 4 MiB, replicated | 6,217,337 | 262,144 | 130,656 | 20 | 1.1235 | no |
+| compiled dictionary, 677,205 insertions, folded | 184,392,882 | 1,048,576 | 524,258 | 20 | 1.1066 | no |
+
+The replicated reduction's estimate was 0.23 of its run on the counted axis, which had 53,881
+positions for a program whose time is on its function cores. What is left in the last two rows
+is not the axis. An image of the eager producer holds every forked invocation complete, so a run
+restored from it has in flight only the invocations not yet forked, where the uninterrupted run
+has many part-done. Short invocations refill within a few rows and the difference is gone; long
+invocations forked together do not, and restored from the compiled dictionary's last four
+images, deep in its lookup phase, the folded build runs 1.04, 1.15, 1.48 and 2.9 times the
+uninterrupted cycles and never converges. No warm-up removes that. What would is an image that
+holds the invocations in flight part-done, each with its context and program counter, restored
+as a migrated context is; the cycle model already restores a mid-invocation context (a worker
+parked at a `WAIT`), and the missing piece is a producer that leaves invocations part-done and
+a rule for how far each has got, which is a design question.
+
+**The answer path at 677,205 insertions.** The compiled dictionary with 128 contexts per engine,
+its answers folded into result lanes against the same source compiled to write an answer
+stream, was sampled on the total with the fewest regions whose calibrated design reaches a 3 %
+standard error: three per arm, the first interval measured whole. Result lanes ÷ answer stream
+(time) came out 1.098, Fieller interval [0.902, 1.373]. The two arms' first two regions have the
+same rate to 0.1 %, and the whole difference is the third region, restored from image 17 in the
+lookup phase, which runs 11 % slow on the folded build and 25 % fast on the stream build — the
+defect above. Both arms were also run uninterrupted, as validation runs of the sampler: **result
+lanes 35,469,623 cycles, answer stream 36,578,222, a ratio of 0.9697** — the folded path is 3.0 %
+faster, as it was at 152,917 insertions (0.9814), and both sampled intervals contain their runs.
+The compiler's rule stands.
 
 ### 4.2 The graph search
 
@@ -3045,3 +3106,9 @@ and the `FORK.M` row of §2.1, come from *One leaf per grain*
 and the hash table's are uninterrupted runs of a few minutes, read for their counters and for how
 the start latency divides, each arm the same binary with one library changed; the graph search's
 figure is its level-7 sampled window; the suite rows are the coherent suite's own runs.
+The total axis of §4.1, its validation table and the answer-path pair at 677,205 insertions come
+from *The sampling axis counts every instruction executed*
+(`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/complete5/AXIS.md`). The whole-run cycle counts
+there are uninterrupted runs made to validate the sampler, three of them longer than the
+900-second limit and run under its one-hour allowance for that purpose; the pair's two
+uninterrupted runs are also validation runs, and they, not the three-region estimate, decide it.
