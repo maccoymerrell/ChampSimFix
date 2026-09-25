@@ -945,6 +945,95 @@ beyond them. All four are now closed, and the first of them is what the one shar
   its input slots by index; no binary in the tree changes, since its assembler macros already
   emit `x0` there.
 
+#### 1.4.7 The host's cache-block clean: one standard instruction the machine relies on
+
+The host is an ordinary 64-bit RISC-V core, and one standard instruction outside the base set
+matters to this machine: **`cbo.clean`** from the RISC-V cache-block management extension
+(Zicbom). Arm's `DC CVAC` and x86's `CLWB` do the same thing. It is not part of the extension
+above and takes none of its encodings.
+
+| instruction | encoding | operands | what the model does |
+|---|---|---|---|
+| `cbo.clean (rs1)` | I-type, opcode MISC-MEM `0b0001111` (0x0f), `funct3` = `010`, `imm[11:0]` = 0x001, `rd` = `x0`; `0x0015200f` with `rs1` = `x10` | `rs1`: any address in the 64-byte block | writes the block back to the last-level slice it belongs to, if the host holds it dirty, and leaves the host's copy in place, clean and shared |
+
+**Why the machine needs it.** A `FORK.M` invocation starts by reading a 64-byte context block
+that the host wrote. Without a clean, that line sits modified in the host's second-level cache
+until a tile reads it, and the read is a coherence recall: the directory snoops the host,
+the host sends the line across its own link, and ownership moves to the tile. With a clean
+issued after the block is written, the slice under the block holds the current bytes, the
+directory records the host as a sharer with no forwarder named, and the tile's read is
+answered by the slice.
+
+**What each part of the model does with it.**
+
+- *The host core.* The decoder turns it into a store with no data. It takes a store-queue slot
+  when it is renamed, leaves the queue from the head of the reorder buffer on a store port, and
+  is sent as a flush that keeps the line. It holds a store-buffer entry until the first-level
+  data cache acknowledges it, so a store fence waits for it. It is not an access: the queue
+  never forwards from it, never holds a load behind it, and never charges a younger load an
+  ordering violation because of it. `cbo.inval`, `cbo.flush` and `cbo.zero` are decode faults.
+- *Translation.* The host's memory-management unit translates it like a store.
+- *The first-level data cache* is write-through and holds nothing dirty. It keeps its copy and
+  passes the clean down, behind any store to the same line that is still in flight, and it
+  takes a miss-status register for it as a store does, so later stores to the line wait
+  behind it.
+- *The second-level cache*, the host's agent on the fabric, performs it. A line held M or O is
+  sent to the directory in a `Clean` message carrying the line, and the local copy becomes S.
+  A line held clean (S, F or E) or not held is left alone, as Zicbom specifies. Either way the
+  request is answered at once, like a posted store.
+- *The directory* treats a `Clean` as a writeback that does not evict: the line is written to
+  its slice, and a transaction on the line still waiting for data takes the bytes. The sender
+  becomes a sharer, the owner is cleared, the line is recorded clean and shared, and no
+  forwarder is named, so the next reader is answered by the slice.
+
+**The existing paths it maps onto.** On the host's side it is the transition the `FetchXfer`
+snoop already makes of a host line (M or O to S, the data leaving with its dirty flag), started
+by the holder rather than by a reader. On the directory's side it is the `PutM` writeback path,
+including its rule for a writeback that crosses a snoop. That rule has one addition. The host
+can clean a line and then answer a snoop of it from the copy it kept, so the same bytes reach
+the transaction twice from the same cache. That is counted as `cleansCrossed`, not as two
+suppliers.
+
+**What it costs.** In the host's memory unit it takes:
+
+- a store-queue slot from rename to commit;
+- a store port at commit;
+- a store-buffer entry for one first-level-to-second-level round trip;
+- a miss-status register in the first-level cache for the same time;
+- one tag access in the second-level cache.
+
+For a dirty line it also puts 72 bytes (an 8-byte header and the line) on the second-level
+cache's outbound fabric link, and makes one slice write. It makes no memory write.
+
+**Ordering.** A clean changes no value anywhere, so a program is correct with or without it,
+and it needs no fence for correctness. The runtime issues one per prepared context block
+after writing it, and the single release before the forks orders it with everything else.
+
+**The functional model** runs the extension too. A clean of a line the host holds dirty
+updates the recency record that an image carries: the line is marked clean and shared for the
+host, and most recently used and dirty in the last level. A restored image therefore
+installs it in the state the cycle model's clean leaves it in.
+
+**Tests and counters.** The directed test `host_clean.c` runs three contended cases:
+
+- a clean crossing a tile's `FORK.M` read of the same block;
+- several tiles forking from cleaned blocks on one page;
+- a line the host keeps writing and cleaning while invocations add to it and read it back.
+
+It passes at 1, 2 and 4 tiles, and again with the cleans compiled out. The counters are:
+
+| component | counters |
+|---|---|
+| core | `cleans_executed`, in the load/store queue, whose statistics the standard configuration does not enable; the first-level cache's `cleansPassedDown` counts the same cleans |
+| first-level data cache | `cleansPassedDown` |
+| second-level cache | `cleans`, `cleansWrittenBack` |
+| directory | `cleansArrived`, `cleansApplied`, `cleansCrossed`, `cleansStale` |
+
+`cleansStale` counts a clean that arrives after its line has changed hands. It is zero by
+construction, because the sender's link delivers the clean before any snoop answer the sender
+gives after it, and it is in the suite's zero-gate register. With the cleans in place, no
+read of a cleaned block recalls a line from the host.
+
 ### 1.5 The tracking unit, sized to the contexts
 
 An entry in the tracking unit is held from `FORK` to `JOIN`. Entries are therefore the
@@ -1271,6 +1360,55 @@ write starts, and which stops the run.
 
 A data prefetcher could fill the load slot speculatively from previous addresses. It is
 deliberately undesigned, and the slot is left free for one.
+
+**How an invocation's context arrives, and what `FORK.M` costs a tile.** A `FORK.R` arrival
+brings its 512 bits with it and asks only for its first instruction. A `FORK.M` arrival has a
+context slot and no register file until the tile has read its 64-byte block. That read is
+translated like any load. It then joins the tile's queue of *physically addressed* requests:
+page-walk reads, page-table writes and context transfers, which carry a physical address
+already and so skip the translation queues. That queue is served in order, and only into a
+free slot of the delivery window. The tile counts the three parts of a `FORK.M` start:
+translation (`forkMCtxTranslate`), the read (`forkMCtxRead`, of which `forkMCtxPathWait` is
+the wait for a window slot) and the instruction fetch after it (`forkMCtxToIssue`).
+
+On the compiled reduction the read is almost all queueing. The workload's scattered reaches miss
+the translation buffer often, and the walker maps every page with 4 KiB leaves (§2.3), so the
+queue of physically addressed requests is full of walk reads for most of the run. A context
+read waits behind them.
+
+| point | form | fork to first issue | translation | read (of which: wait for a window slot) | to first issue | block reads recalled from the host |
+|---|---|---:|---:|---:|---:|---:|
+| directed test, 4 tiles, 1,920 forks, an idle machine | `FORK.M`, block not cleaned | 32.7 | 5.5 | 19.1 | 8.1 | 1,920 |
+| same | `FORK.M`, block cleaned | 34.6 | 5.1 | 21.4 | 8.1 | 0 |
+| reduction, 4 MiB, uninterrupted run | `FORK.R` | 10.5 | — | — | — | 1,144 |
+| same | `FORK.M`, not cleaned | 1,183.4 | 0.2 | 1,173.3 (1,085.1) | 9.9 | 6,202 |
+| same | `FORK.M`, cleaned | 1,060.0 | 0.2 | 1,050.5 (957.2) | 9.3 | 1,164 |
+| reduction, 16 MiB, sampled regions | `FORK.R` | 8.8 | — | — | — | 516 |
+| same | `FORK.M`, not cleaned | 703.5 | — | 1,007.0 | — | 5,561 |
+| same | `FORK.M`, cleaned | 739.0 | — | 962.3 | — | 490 |
+
+Notes on the table:
+
+- All figures are mean cycles per fork.
+- The last column is `nmfcPaysSnoop` over the same span. On the reduction, `FORK.R` has
+  about 1,150 recalls of its own at 4 MiB, none of them a block read. The cleaned `FORK.M`
+  build is at the same level.
+- At 16 MiB, the read column comes from the 11 of 32 regions measured after that counter was
+  added.
+
+The `cbo.clean` of §1.4.7 removes every recall and leaves the start latency where it was. On an
+idle machine the read is the order of a last-level hit either way. On the reduction a context
+read waits about 1,000 cycles for a window slot, and a cleaned block saves at most about 120 of
+them. The program's time moves by 1.0043, Fieller interval [0.9536, 1.0577] (uncleaned ÷
+cleaned, 16 MiB, 32 regions per arm).
+
+Two changes to the machine would shorten the wait. Neither is made; each is a change to the
+machine that needs its own review and measurement:
+
+- grain-sized leaves for grain pages (§2.3, open), which would remove most of the walk reads;
+- an entitlement for context transfers to a delivery-window slot, in the way the walk and the
+  close of an atomic pair are already entitled, so that an arriving invocation does not queue
+  behind walks.
 
 ### 2.2 The pipes and the issue rule
 
@@ -2145,6 +2283,8 @@ memory device and link.
 | invalidation broadcasts, per bank | one per cycle; a busy port delays delivery (`invPortWaitCycles`) | the bank's return port (§2.7) |
 | waited lines held without eviction wakes | eight per set (16 KiB, 8 ways, 4 banks); beyond it the waiters' re-loads evict each other and they poll at the miss rate (`waitEvictWakeChains`) | the tile data-cache configuration |
 | contexts a writer can use on a tile full of waiters | the tile's contexts minus its waiters; a waiter must never be what its writer needs | the tile's context count |
+| a `FORK.M` context read's place in the tile | one entry in the in-order queue of physically addressed requests (page-walk reads, page-table writes, context transfers), then one delivery-window slot and one line-class memory-queue entry; no entitlement ahead of walk reads | this model (§2.1) |
+| the host's cache-block clean (`cbo.clean`) | one 64-byte line per instruction; a store-queue slot, a store port and a store-buffer entry until the first-level cache answers; for a dirty line, 72 B on the host L2's outbound link and one slice write | RISC-V Zicbom; this model (§1.4.7) |
 
 **Structure** — changing one is a different design. A context has exactly two slots. A
 context cannot be scheduled without its instruction in hand. Translation is virtually
@@ -2199,6 +2339,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | Integer costs: a pipelined multiplier per pipe, one iterative integer divider per tile separate from the floating-point divider, the host's one integer divider held per width | **yes** (§2.2). An integer divide or remainder cost one pipe pass on the tile, and the host's divider accepted one every cycle. None of the three workloads divides on a tile; every divide they execute is the host's, in printing results in decimal and, for the graph search, in its generator's modulo, and these move their end-to-end time by 0.3 % (graph search), 0.4 % (shuffled sum) and 1.1 % (hash table). Their tile statistics are byte-identical with the host's old divider | — |
 | Memory size: one 16 GiB channel per tile, the address width derived from it, page-table copies that span as many of a tile's grains as they need, backing allocated only for pages touched | **yes** (§2.8). The machine had a flat 4 GiB; the host could not issue an address above 32 bits; a page-table copy was limited to one grain, which refused any program mapping more than about 500 MiB; and the loader wrote the zeros of every declared `.bss` page into the simulator's backing store. A test places, touches and reads back 4.5 GiB on each of four tiles; the simulator's resident memory is 1.24 GB for it and unchanged (165–177 MB) for the three workloads. The arena of frames started at 256 MiB, inside reach of the host's identity-mapped window (its program headers at 0x60000000 and stack below 0x80000000): a test placing 2 GiB of frames found all 510 of the host's pattern words in the window overwritten by tile stores. The arena now starts at 0x80000000, the same test reads every word back, and an overlapping arena is refused at configuration | the walker maps every page with 4 KiB leaves, grain and striped pages included (open, §2.3) |
 | Duplicate pages: a kernel store or atomic refused and counted, zero-gated, with a directed test; the host's legal fan-out to every copy | **yes**, including the privileged page-table write as its own request class with its own reserved capacity, gated so that nothing else can reach the exemption | — |
+| The host's cache-block clean (`cbo.clean`, RISC-V Zicbom): a dirty line written back to its slice and kept clean and shared, the directory naming no forwarder | **yes** (§1.4.7), with a directed test of three contended cases, a control with the cleans compiled out, and `cleansStale` in the zero-gate register. The runtime cleans every prepared `FORK.M` block. This removes every recall of a block from the host and does not shorten the start: the context read's wait for a delivery-window slot behind walk reads remains (§2.1) | `cbo.flush`, `cbo.inval` and `cbo.zero`, which decode as faults |
 | Migration on a foreign translation result | **yes**, taken at the translation result, with the program counter carried back so the instruction re-issues | the rule for a context that migrates with a store still in a queue, under the relaxed store switch only |
 | Memory link: parallel pass-through and a serial CXL attachment, as configuration | **yes** | a workload that can saturate the serial link; the x32 variant |
 | `WAIT`: the load slot's arm (a physical line and a valid bit written at the arming operation's translation), the instruction translated like a load and decided in the context array, the bank's invalidation broadcast on a line-taking snoop, a performed write and every eviction, one per bank per cycle; both ways a data cache can tell the tile it is losing a line (ask first, tell afterwards) | **yes** (§1.4.3, §2.1, §2.7), with the design's directed tests contended first — host, same-tile and migrating-in writers, one, two and four tiles, both notification modes — and five zero gates, one of which (`waitMissedWakeups`) stops a run at the first context left asleep after a write to its line. The workloads' tile statistics are byte-identical across the change. With a cache that tells afterwards, a tile's load-reserved/store-conditional pair whose window is longer than about five instructions livelocks against a host pair on the same word; that is the pair's missing fairness bound, which the row above reports, and not `WAIT`'s. The functional model's half is built too: the producer arms on every load and read-modify-write atomic, parks an invocation at a `WAIT` whose arm matches, wakes it only on a store or atomic performed to its armed line, and writes an image holding such a worker as format version 6, which records the armed line; the cycle model places a restored waiter on the tile owning that line, so its re-load does not migrate. **Measured** (§4.7): resident dictionary workers on `WAIT` at 128 contexts per engine are correct at the smallest size against the functional run at 32 and 128 contexts, with every zero gate at zero, and the tile instructions they issue while waiting fall from 1,118,398 to 1,024 over the sampled regions | forwarding the written word to a woken context. Its counter (`waitLocalWakeReloads`) is built; the dictionary cannot measure it, because every wake there is the host's write and none is a write on the same tile |
@@ -2773,4 +2914,9 @@ its own counters and the price of every batch it ran:
 (`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/complete1/FIX-R1-R2.md`), the coherence rules
 of §2.5; and *Three corrections to the simulated machine*
 (`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/fix3/MACHINE-FIX-3.md`), the fabric, the
-miss-status files and the host's dependence predictor.
+miss-status files and the host's dependence predictor. The host's cache-block clean (§1.4.7)
+and the `FORK.M` start-latency table of §2.1 come from *The host's cache-block clean, and what
+a FORK.M start costs* (`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/libbuild/CLEAN.md`).
+The 4 MiB rows of that table are uninterrupted runs, one of them the warm-up measurement's own,
+repeated with the split counters added; they are read for the division of the start latency
+and not quoted as program times.
