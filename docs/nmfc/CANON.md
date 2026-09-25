@@ -7749,8 +7749,12 @@ waiting for a resource. The depth sweep shows a curve and not a cliff: queue-ful
 **A load-reserved / store-conditional pair is the queue and nothing else** — the load-reserved
 opens a serialisation point for its address, the store-conditional closes it, and there is no
 reservation unit. Three rules, each written after a defect, complete it: a point has exactly
-three ends (its own store-conditional, the line being taken away, the departure of the context
-that opened it) and no timer; while a point is open, one entry of the translation queue, one
+four ends (its own store-conditional, the line being taken away, **the owning context's next
+memory operation that is not the store-conditional to its address**, and the departure of the
+context that opened it) and no timer -- so the machine's rule matches the ISA's, in which a
+reservation is a passive monitor, branching away after a load-reserved is legal and blocks nobody,
+and an intervening memory operation may invalidate the reservation (RISC-V unprivileged ISA, LR/SC;
+ledger L92); while a point is open, one entry of the translation queue, one
 slot of the delivery window and one entry of the memory queue are **reserved for the close**,
 off entirely when no point is open; and a load-reserved for another address in the same queue
 **waits** rather than taking the point over. A host core updating the same word takes the line
@@ -16441,6 +16445,33 @@ Not a defect; the parameter survives.]`**
   and ignored. The parameter stays, and the question is open for a workload with long arithmetic
   between memory accesses — which this machine's hash table is, and which has not been sampled.
 
+
+**L92 — A LEGAL PROGRAM THAT ABANDONED A LOAD-RESERVED STOPPED EVERY OTHER ACCESS TO THE WORD.
+`[DEFECT, FIXED, 2026-09-25. Class R5.]`**
+
+- *What it was.* A point closed only at its own store-conditional, at the line being taken away, or
+  at its owner's departure. A compare-and-swap whose compare fails branches away with no
+  store-conditional, which RISC-V permits, and the point then held every other access to the word,
+  and the owner's own next access to it, until the owner left the tile. The compiled graph search's
+  claim stopped the machine with every phase on the tiles, and the compiler wrote the value back
+  with a store-conditional on the failure path to close the point. That was a workaround in the
+  program for a defect in the machine.
+- *The fix.* The owning context's next memory operation that is not the store-conditional to the
+  point's address closes the point (`memqLrscPointsClosedByNextOp`), as a RISC-V reservation
+  lapses when the pair is abandoned. The case left is a context that never touches memory again
+  and never leaves; it computes only on its own bits, so its hold is bounded by its own
+  instructions or the invocation never returns on any machine, and a KILL ends it.
+- *Evidence.* `tile_lrsc_away` (a compare-and-swap loop that branches away, a claim array, the host
+  on the line) stopped in its first phase before and passes after, at 1, 2 and 4 tiles, the default
+  stages and the floor, both notification modes. The compiled graph search emits the plain
+  compare-and-branch again. It completes with every phase on the tiles, and at 65,536 vertices
+  its answer and its top-down migration rate (0.0172 per instruction) are unchanged. Programs that
+  close every pair give byte-identical statistics files.
+- *What it exposed, and did not cause.* Two host-against-tile results. One is a livelock at the
+  floor stages and with a cache that tells afterwards. The other is a store-conditional whose write
+  landed after its point was broken (`memqLrscScLandedAfterBreak`), which let one claim succeed
+  twice. Both come from the tile's snoop deferral being sized to a queue's writes rather than to
+  one pair. They are ARCHITECTURE-2026-09 §2.5's open forward-progress item.
 ---
 
 
