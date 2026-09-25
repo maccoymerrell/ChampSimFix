@@ -167,7 +167,10 @@ closed, and `RESUME` is not user-level at all.
 
 Every host instruction is a **try**. It reports in a general register whether it succeeded,
 and none of them blocks. A program that wants to wait writes the loop itself, which is why
-each try has a probe beside it that asks the same question without moving anything.
+each try has a probe beside it that asks the same question without moving anything. On a
+function core the same loop can sleep instead of polling: `WAIT` sleeps the context on the
+line its last read named, so a loop whose answer has not changed issues nothing until the line
+is written. It is still a loop the program writes, and the instruction still completes.
 
 #### 1.4.1 Where the extension sits in the encoding space
 
@@ -608,8 +611,16 @@ a `WAIT` after an open load-reserved completes at once, so no context sleeps hol
 serialisation point; and a waiter must never be what its writer needs — resident waiters per
 tile stay below the tile's contexts, as they must for a polling loop.
 
+*Exceptions.* None of its own. A translation fault parks the context and `RESUME` re-attempts
+the `WAIT`; a line another tile owns migrates the context (register file and program counter)
+and the `WAIT` re-issues there, where it finds the arm empty and completes at once.
+
 *Notes.* It holds only its own context while it sleeps, exactly as a polling loop does, so it
 adds no hold-and-wait edge; it is not a blocking instruction in the sense the canon rejects.
+The functional model gives it the same meaning without time: every load and read-modify-write
+atomic records its line as the invocation's arm, a `WAIT` whose line matches parks the
+invocation at the `WAIT`, and only a store or atomic performed to that line wakes it. The
+cycle model's counters and zero gates are in §2.1; its measured cost on a workload is in §4.7.
 
 ---
 
@@ -836,6 +847,13 @@ to an atomic that writes; a load-reserved, which only reads, is left alone. A st
 **host** to the same page is legal and reaches every copy. And a translation the tile cannot
 complete is a **fault**, which parks the context and enters the path `RESUME` returns from.
 
+One extension instruction also lives in the memory path. **`WAIT` is the function core's one
+sleeping instruction**, and it is defined by what the loads before it did: every load, integer
+or floating point, and every read-modify-write atomic leaves its physical line in the load
+slot as the **arm**; a store, a load-reserved and a store-conditional clear it. `WAIT`
+translates its operand like a load and sleeps only if the arm still names that line. Nothing
+else in the subset reads the arm, and no load is ever answered from it.
+
 #### 1.4.6 How these encodings were checked, and where the decoders disagree
 
 The encoding is decoded independently in four places: the host attachment and the tile of the
@@ -843,7 +861,11 @@ cycle-accurate model, and the host and the function core of the functional model
 the cycle-accurate model's starting images. All four read their field values from one header, **and all
 four now read which encodings exist from one table in that header**, `NMFC_F7_DEFINED`; the
 functional model's private copy is compared against it at build time over all 128 values,
-because a copied table is only honest if something compares the copies.
+because a copied table is only honest if something compares the copies. With `WAIT` the table
+accepts the continue group's variants 0 to 2, so **31** `funct7` values are defined and 0x43 is
+reserved; `check_isa.sh` compares the two copies over all 128 values, and the unit test
+`isa_f7` checks that 0x42 is defined, that 0x43 is not, and that `NMFC_WAIT_INSN(x11)`
+assembles to `0x8405a00b` (C code spells it `NMFC_WAIT_LINE(addr)`).
 
 What was checked for this document:
 
@@ -1222,6 +1244,31 @@ arm is cleared. The comparison is linear in contexts and there is no structure t
 who waits on what. Nothing answers a load from the arm; the zero-gated `slotAnsweredLoads`
 says so on every run.
 
+**A `WAIT` uses the load slot as a load does, then leaves it.** It fills the slot and passes
+through the translation queues; a fault parks the context, and a line owned by another tile
+migrates it. Once translated it never enters the delivery window or a memory queue: the
+decision is one step in the context array. If the arm is valid and names the translated line,
+the context enters **`WAITING`**, a state the scheduler never picks; otherwise it completes at
+once and the cause is counted. A context in `WAITING` leaves it when a broadcast clears its
+arm, or through the one release sequence when it is killed. A context arriving by migration or
+by restore from an image starts with an empty arm.
+
+**Counters.** Issued, translated, migrated and slept (`waitIssued`, `waitTranslated`,
+`waitMigrations`, `waitSlept`); context-cycles asleep (`waitCycles`, a bucket of the census
+partition, §2.2); wakes by cause — a remote write, a local write, an eviction, an arm already
+invalid or on another line at issue, a migration, a restore, a kill; arms cleared while their
+operation was in flight (`waitArmClearedInFlight`); contexts woken per broadcast
+(`waitWakeFanout`, bins 1, 2–7, 8 or more); broadcasts by kind and the port cycles they cost
+(§2.7); eviction-wake chains (`waitEvictWakeChains`); re-loads after a local-write wake and
+their sleep cycles (`waitLocalWakeReloads`, the forwarding counter); downgrades of a line with
+sleepers (`snoopDowngradesOnSleepers`, `snoopDowngradeSleepers`). **Five zero gates**, in both
+suites: a `WAIT` admitted to a memory queue (`waitQueueAdmits`); a context asleep before its
+`WAIT` translated (`waitSleptUntranslated`); a context asleep with a serialisation point open
+(`waitSleptWithOpenPoint`); a load answered from the arm (`slotAnsweredLoads`); and a context
+still asleep 2,000 cycles after a write to its line was performed (`waitMissedWakeups`), which
+the simulator checks at every write performed at a bank and at the directory whenever a host
+write starts, and which stops the run.
+
 A data prefetcher could fill the load slot speculatively from previous addresses. It is
 deliberately undesigned, and the slot is left free for one.
 
@@ -1269,7 +1316,7 @@ discriminator is a conjunction rather than a histogram: count unused issue slots
 where at least one context was window-blocked, against unused slots in cycles where none
 was, and against the offered slots. Beside it go a census of context-cycles by cause of
 not being ready — no instruction in hand, asleep on a load, waiting on a page-table walk,
-other — and a banded histogram of load-free run lengths with the cause each run ended.
+asleep at a `WAIT` (added with that instruction), other — and a banded histogram of load-free run lengths with the cause each run ended.
 Those counters plus window-blocked cycles plus running occupancy **partition** a resident
 context's cycles, so a gap is a modelling error rather than a finding.
 
@@ -1748,6 +1795,17 @@ hits, bank lock cycles, coherence requests to the bank and those deferred, queue
 had to re-acquire, per-queue occupancy and full cycles, and context-cycles spent waiting for
 a queue.
 
+**`WAIT` takes nothing from the memory queues, and a write performed in one is heard by the
+waiters.** A `WAIT` is never admitted (`waitQueueAdmits` is a zero gate). Every write the bank
+performs — a store, a successful store-conditional, the write half of a read-modify-write
+(whose own context is excluded, so its own arm stands), a context write, a page-table write —
+queues an invalidation broadcast of its line (§2.7). What `WAIT` does concentrate is the
+re-read: one write can wake every context asleep on a line, and all of their re-loads go to
+the one queue that owns it, where the issue condition performs them one bank access each. On
+the dictionary with 128 resident workers per tile, each publication woke all 128, and the
+sampled spans that hold the publications counted 1,422,148 ordering stalls over 124 such
+broadcasts, about 90 stall-cycles per re-load (§4.7).
+
 ### 2.6 Why this is simpler than what it replaces
 
 The mechanism this replaced — deleted from the tree in the change that landed the queues —
@@ -1828,8 +1886,25 @@ arm stands); and **every eviction**, which the data cache now reports to the til
 the bank has let a line go it can no longer hear writes to it. A broadcast is queued on the
 owning bank and delivered one per bank per cycle on the bank's return port; the ones caused by
 an access ride that access's return, and only a snoop's takes a port cycle of its own
-(`invSnoopOnlyPortCycles`). The cache may ask the tile before a snooped line goes (the default)
-or tell it afterwards, as a stock coherent cache does; both are modelled and both are tested.
+(`invSnoopOnlyPortCycles`). The model is conservative here: it keeps a separate queue per bank
+and delivers every broadcast from it, so one caused by an access waits behind a snoop's as a
+snoop's would, and the wait is counted (`invPortWaitCycles`: zero in every directed test,
+34,569 cycles over the dictionary's measured regions). The cache may ask the tile before a
+snooped line goes (the default) or tell it afterwards, as a stock coherent cache does; both are
+modelled and both are tested.
+
+**Evictions and the snoop's kind are new reports from the cache.** Every message the data
+cache sends the tile about a snoop now carries one bit of kind — the line is taken, or it is
+downgraded and a shared copy stays — and the cache reports every eviction as a notice that
+needs no answer, naming the line whose fill took the way. Before this, the tile heard only a
+snooped line's address and nothing of evictions. The two optimisation points these reports
+open are built at their defaults and counted, not decided: **every eviction wakes** (on the
+dictionary, 1 eviction wake of 3,073 wakes over a whole run and none over the sampled regions
+and spans, because every tile's waiters sit on one line that is re-read on every wake; the
+directed set-overflow test gives 7,108–7,268 eviction wakes and 6,675–6,856 chains), and **a
+downgrade wakes nobody** (the dictionary's regions and spans saw 2,149 downgrades, none of a
+line with a sleeper; a directed test in which the host reads the line ten times and writes it
+once wakes each sleeper once).
 **The one limit this creates** is the bank's capacity: more distinct waited lines than a set
 has ways (eight in a 16 KiB, 8-way, 4-bank cache) make each woken waiter's re-load evict
 another waiter's line, and the waiters poll at the miss rate — counted as `waitWakeEviction`
@@ -2012,13 +2087,20 @@ memory device and link.
 | physical address | 36 bits at 64 GiB (the smallest power of two covering the memory); the host core refuses any access outside it | derived from the memory size |
 | grain `G` | row 4 KiB × every bank of the channel (2 × 8 × 4 = 64) × tiles = 1 MiB at four tiles | canon E.3, from the device file |
 | page-table copy, per tile | as many of the tile's grains at the top of memory as a bound on the table's size needs (one grain up to about 500 MiB of mapped 4 KiB pages; 37 at 18 GiB) | derived from the declared regions |
+| armed lines, per context | one: the condition a `WAIT` sleeps on must live in one line | one arm per load slot (§2.1) |
+| invalidation broadcasts, per bank | one per cycle; a busy port delays delivery (`invPortWaitCycles`) | the bank's return port (§2.7) |
+| waited lines held without eviction wakes | eight per set (16 KiB, 8 ways, 4 banks); beyond it the waiters' re-loads evict each other and they poll at the miss rate (`waitEvictWakeChains`) | the tile data-cache configuration |
+| contexts a writer can use on a tile full of waiters | the tile's contexts minus its waiters; a waiter must never be what its writer needs | the tile's context count |
 
 **Structure** — changing one is a different design. A context has exactly two slots. A
 context cannot be scheduled without its instruction in hand. Translation is virtually
 indexed and happens before anything enters the data path. Memory queues are physically
 indexed and each owns a disjoint fraction of the tile's physical addresses. A memory queue
 serves its entries in order and is the only ordering point. An atomic is a read-modify-write
-at the bank. Nothing holds memory state above the data cache. A coherence request acts on
+at the bank. Nothing holds memory state above the data cache. The load slot keeps an arm — a
+physical line address and a valid bit, written at translation — after its operation
+completes; it never holds data; a bank broadcasts an invalidation of a line to every context,
+and nothing records who waits on what. A coherence request acts on
 the bank, never on a queue. Delivery is at most one request per queue per cycle,
 oldest-first per destination. Backpressure is credit, and a blocked context waits in its own
 slot. The branch-target buffer is shared and issues exactly one speculative fetch, which
@@ -2064,7 +2146,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | Duplicate pages: a kernel store or atomic refused and counted, zero-gated, with a directed test; the host's legal fan-out to every copy | **yes**, including the privileged page-table write as its own request class with its own reserved capacity, gated so that nothing else can reach the exemption | — |
 | Migration on a foreign translation result | **yes**, taken at the translation result, with the program counter carried back so the instruction re-issues | the rule for a context that migrates with a store still in a queue, under the relaxed store switch only |
 | Memory link: parallel pass-through and a serial CXL attachment, as configuration | **yes** | a workload that can saturate the serial link; the x32 variant |
-| `WAIT`: the load slot's arm (a physical line and a valid bit written at the arming operation's translation), the instruction translated like a load and decided in the context array, the bank's invalidation broadcast on a line-taking snoop, a performed write and every eviction, one per bank per cycle; both ways a data cache can tell the tile it is losing a line (ask first, tell afterwards) | **yes** (§1.4.3, §2.1, §2.7), with the design's directed tests contended first — host, same-tile and migrating-in writers, one, two and four tiles, both notification modes — and five zero gates, one of which (`waitMissedWakeups`) stops a run at the first context left asleep after a write to its line. The workloads' tile statistics are byte-identical across the change. With a cache that tells afterwards, a tile's load-reserved/store-conditional pair whose window is longer than about five instructions livelocks against a host pair on the same word; that is the pair's missing fairness bound, which the row above reports, and not `WAIT`'s. The functional model's half is built too: the producer arms on every load and read-modify-write atomic, parks an invocation at a `WAIT` whose arm matches, wakes it only on a store or atomic performed to its armed line, and writes an image holding such a worker as format version 6, which records the armed line; the cycle model places a restored waiter on the tile owning that line, so its re-load does not migrate | forwarding the written word to a woken context; its counter (`waitLocalWakeReloads`) is |
+| `WAIT`: the load slot's arm (a physical line and a valid bit written at the arming operation's translation), the instruction translated like a load and decided in the context array, the bank's invalidation broadcast on a line-taking snoop, a performed write and every eviction, one per bank per cycle; both ways a data cache can tell the tile it is losing a line (ask first, tell afterwards) | **yes** (§1.4.3, §2.1, §2.7), with the design's directed tests contended first — host, same-tile and migrating-in writers, one, two and four tiles, both notification modes — and five zero gates, one of which (`waitMissedWakeups`) stops a run at the first context left asleep after a write to its line. The workloads' tile statistics are byte-identical across the change. With a cache that tells afterwards, a tile's load-reserved/store-conditional pair whose window is longer than about five instructions livelocks against a host pair on the same word; that is the pair's missing fairness bound, which the row above reports, and not `WAIT`'s. The functional model's half is built too: the producer arms on every load and read-modify-write atomic, parks an invocation at a `WAIT` whose arm matches, wakes it only on a store or atomic performed to its armed line, and writes an image holding such a worker as format version 6, which records the armed line; the cycle model places a restored waiter on the tile owning that line, so its re-load does not migrate. **Measured** (§4.7): resident dictionary workers on `WAIT` at 128 contexts per engine are correct at the smallest size against the functional run at 32 and 128 contexts, with every zero gate at zero, and the tile instructions they issue while waiting fall from 1,118,398 to 1,024 over the sampled regions | forwarding the written word to a woken context. Its counter (`waitLocalWakeReloads`) is built; the dictionary cannot measure it, because every wake there is the host's write and none is a write on the same tile |
 | Data prefetching into the load slot | no | deliberately undesigned; the slot is left free for one |
 | A barrel multi-context core as a comparison arm: many contexts without the position and without the unit of work | no | **designed and reviewed**, not modelled — the arm that would say which of the three differences between host and engine produced a ratio |
 | A graphics processor as a comparison arm, running the same three problems on the same inputs | no | **designed and reviewed**, not modelled |
@@ -2216,6 +2298,21 @@ predictors and queues, the memory-dependence predictor, the prefetchers' trainin
 row buffers — is warmed for a length measured per program: the smallest distance from the restore
 beyond which every band of pooled excess is within 1 % (`tools/sampling/warmup_rule.py`, recorded
 in `warmups.json`). `NMFC_WARM=0` gives the cold restore.
+
+**An image can hold a worker asleep at a `WAIT` (format 6).** The functional producer parks an
+invocation at a `WAIT` whose arm matches and wakes it only when a store or atomic is performed
+to the armed line, so an image may be taken while workers sleep. Format 6 is format 5 with
+96-byte tracking-unit records: the 88 bytes of format 5 followed by the armed line's virtual
+address, non-zero exactly when the entry is parked at a `WAIT` and not yet woken; an image in
+which nothing waits is still written as format 5, byte for byte. The image checker requires of
+every such record that the word at its program counter is a `WAIT`, inside the kernel wait
+range, naming a register whose line is the armed one, in readable memory, on an outstanding
+entry. The cycle model restores such a worker **on the tile that owns its armed line**, whatever
+the placement policy (`placedAtArm`), so the worker's re-read after its `WAIT` completes (the
+arm does not survive a restore) is local; restored without the line, the same image's four
+workers made three migrations. Because the loop around a `WAIT` runs once per wake, real or
+spurious, its instructions are counted apart as every wait loop's are, and a `WAIT` outside
+the kernel wait section stops the producer.
 
 ### 4.2 The graph search
 
@@ -2447,6 +2544,66 @@ capacity to run it — and that rate has two components worth separating: the pe
 cost on the host of writing a context, starting it, testing for completion and reading the
 result back, and the rule by which a start instruction may issue at all.
 
+**Long-lived workers on `WAIT`, measured against waves.** The dictionary (the line-resident
+bucket table, separated phases, 677,205 inserts, four tiles, out-of-order host) was run in two
+dispatch shapes with 128 workers per tile: **waves**, a fork per chunk and a join, and
+**resident workers**, forked once, each sleeping at a `WAIT` on the table's tail word between
+chunks. The worker's loop stores its progress (which clears its arm), loads the tail (which
+arms it), works if the tail moved, and otherwise `WAIT`s on the tail and reloads it. Both arms
+take the same input and give the same answer; each is estimated on its own counted-instruction
+axis from its own images (20 regions of 12,053 counted instructions, warm-up 100,000, all 32
+sparse waits measured whole), and the ratio's interval is Fieller's. The pair cost 104 runs,
+about 10 minutes of wall time.
+
+| arm | counted instructions | IPC | estimated cycles | 95 % interval |
+|---|---:|---:|---:|---|
+| waves | 123,589,977 | 3.2916 | 39,644,118 | [38,987,022, 40,301,214] |
+| resident on `WAIT` | 123,517,869 | 3.0064 | 42,142,808 | [41,407,350, 42,878,267] |
+| **waves ÷ resident** | | | **0.9407** | **[0.9191, 0.9629]** |
+
+The sampler's second estimator, absolute totals from the same regions, gives 0.9129
+[0.8910, 0.9354], the same direction. Resident workers are about 6 % slower. The same
+workload's resident workers that polled instead, measured the same way at 32 contexts per
+engine, were 6.4 % slower (0.936). `WAIT` removed the polling almost entirely and the loss
+stayed, so the polling was not the loss:
+
+| counter, sampled regions / spans | polling resident (32 contexts) | resident on `WAIT` (128) | waves (128) |
+|---|---:|---:|---:|
+| tile instructions issued in the wait section | 1,118,398 / 72,931 | 1,024 / 66,048 | 0 / 0 |
+| memory-queue ordering stalls | 5,894,762 / 822,158 | 101,833 / 1,422,148 | 127,649 / 32,962 |
+| host memory-wait cycles | 175,489 / 1,615,960 | 181,099 / 1,125,326 | 64,801 / 13,947 |
+| host cycles in the spans | 852,212 | 1,237,142 | 2,256,590 |
+
+The host's memory wait sits almost wholly in the opening region in both arms (181,060 and
+64,774 cycles); in the other 19 regions it is 0 or 13 cycles. Those 19 regions are the host
+filling the next chunk while the tiles are nearly idle (0.85–0.92 instructions issued per tile
+per cycle in both arms), and they take about 9 % more cycles in the resident arm, 75,719
+against 69,080, for the same counted instructions. The polling build's regions have the same
+cycle counts region by region whether or not its workers were polling in them. The host
+counters that differ in those regions are the first-level cache's miss-status occupancy
+(1.37×), cycles held by a full reorder buffer (1.19×) and fetch-queue flushes (1.43×); they
+locate the difference on the host's fill path and do not yet name its cause. Where the
+resident shape wins is in the waits: 1.24 M host cycles in its sparse waits against the waves'
+2.26 M, memory-bound (reading 512 progress words) where the waves' are join-bound.
+
+| live contexts per tile, regions / spans | resident on `WAIT` | waves |
+|---|---|---|
+| live, of 128 | 124.3 / 119.3 | 29.2 / 50.6 |
+| executing | 0.85 / 3.60 | 0.92 / 1.69 |
+| runnable, not issuing | 24.7 / 100.9 | 26.5 / 46.7 |
+| asleep on a load | 1.42 / 9.47 | 1.65 / 2.00 |
+| asleep at a `WAIT` | 97.2 / 4.8 | 0 / 0 |
+| fetching, walking, other | 0.12 / 0.52 | 0.12 / 0.19 |
+
+Each publication woke all 128 workers of a tile (124 broadcasts, 15,872 wakes, over the spans),
+and their re-reads of the one tail line account for the spans' 1.42 M ordering stalls: the
+fan-out limit §2.5 names, the one place where `WAIT` gathers traffic that polling spread out.
+The ratio is a measurement of this workload, not a verdict on dispatch shape: which shape a
+task uses is chosen per task from its own measured pair. At the smallest size (8,192 inserts,
+four tiles) the resident build's answer digest equals the functional run's at 32 and 128
+contexts, the table verifies, and missed wake-ups, sleeps before translation and sleeps with a point open are
+all zero; both runs are in the coherent suite.
+
 The general statement of the problem, then: **one host core keeps far fewer contexts alive
 than the machine has places for.** The architecture is defined; what is not yet known is how
 to keep it full. Three directions follow from the counters rather than from argument — longer
@@ -2512,7 +2669,9 @@ single-digit live contexts of 512 over whole programs while the host is idle wit
 waiting for 94 % of ticks. That is not a tile-core problem and it will not be fixed by anything
 in §2. The work is: report live contexts per engine by state and the host's per-invocation cost
 split into its parts, never from tracking-unit occupancy; price long-lived invocations that stay
-resident across phases against the fork-wave-per-phase shape the programs use now; examine the
+resident across phases against the fork-wave-per-phase shape on each workload, as the
+dictionary's pair now has (§4.7: resident workers on `WAIT` 6 % slower, the difference on the
+host's fill path, cause not yet named); examine the
 rule by which a start instruction may issue, which currently halves the rate at which the host
 can feed the engines; and carry the graph search's remaining algorithmic cost — the
 whole-graph scan between levels that is 10 % of the traversal — by giving a level a compacted
