@@ -1366,8 +1366,9 @@ brings its 512 bits with it and asks only for its first instruction. A `FORK.M` 
 context slot and no register file until the tile has read its 64-byte block. That read is
 translated like any load. It then joins the tile's queue of *physically addressed* requests:
 page-walk reads, page-table writes and context transfers, which carry a physical address
-already and so skip the translation queues. That queue is served in order, and only into a
-free slot of the delivery window. The tile counts the three parts of a `FORK.M` start:
+already and so skip the translation queues. That queue is served in order into the delivery
+window, where it has a slot of its own beside the shared width (§2.4). The tile counts the three
+parts of a `FORK.M` start:
 translation (`forkMCtxTranslate`), the read (`forkMCtxRead`, of which `forkMCtxPathWait` is
 the wait for a window slot) and the instruction fetch after it (`forkMCtxToIssue`).
 
@@ -1378,7 +1379,8 @@ were taken while the translation buffer still missed often and that queue was fu
 the reading then was that the walks were what the context read waited behind. Removing the walks
 (§2.3: one leaf per grain and a fully associative buffer, 443,955 tile walks to 98 on this run)
 showed otherwise — the wait grew to 6,380 cycles, because the contexts that had been parked on
-walks issue loads instead and the translation path takes every slot the window frees.
+walks issue loads instead and the translation path takes every slot the window frees. The window
+now gives that queue a slot of its own (§2.4), and the wait is one cycle.
 
 | point | form | fork to first issue | translation | read (of which: wait for a window slot) | to first issue | block reads recalled from the host |
 |---|---|---:|---:|---:|---:|---:|
@@ -1388,6 +1390,7 @@ walks issue loads instead and the translation path takes every slot the window f
 | same | `FORK.M`, not cleaned | 1,183.4 | 0.2 | 1,173.3 (1,085.1) | 9.9 | 6,202 |
 | same | `FORK.M`, cleaned | 1,060.0 | 0.2 | 1,050.5 (957.2) | 9.3 | 1,164 |
 | same, one leaf per grain (§2.3) | `FORK.M`, cleaned | 6,487.6 | 0.2 | 6,478.0 (6,380.2) | 9.4 | — |
+| same, the window's physically addressed slot (§2.4) | `FORK.M`, cleaned | **107.9** | 0.2 | 98.8 (**1.0**) | 8.9 | — |
 | reduction, 16 MiB, sampled regions | `FORK.R` | 8.8 | — | — | — | 516 |
 | same | `FORK.M`, not cleaned | 703.5 | — | 1,007.0 | — | 5,561 |
 | same | `FORK.M`, cleaned | 739.0 | — | 962.3 | — | 490 |
@@ -1407,14 +1410,14 @@ read waits about 1,000 cycles for a window slot, and a cleaned block saves at mo
 them. The program's time moves by 1.0043, Fieller interval [0.9536, 1.0577] (uncleaned ÷
 cleaned, 16 MiB, 32 regions per arm).
 
-Two changes to the machine were named to shorten the wait. The first is made: grain-sized
+Two changes to the machine were named to shorten the wait, and both are made. Grain-sized
 leaves (§2.3) removed almost every walk read and made the program 0.2 % faster, and made this
-start six times slower, which is what shows the second is the one that matters:
-
-- an entitlement for context transfers to a delivery-window slot, in the way the walk and the
-  close of an atomic pair are already entitled, so that an arriving invocation is not starved by
-  the translation path's fixed priority. Not made; it is a change to the window's arbitration
-  with its own review and measurement.
+start six times slower, which showed the second was the one that mattered: a slot of the delivery
+window that only the physically addressed class (walk reads, page-table writes, context transfers)
+may take, beside the shared width the translated class keeps whole (§2.4). With it the start is
+107.9 cycles, of which the wait for a window slot is 1.0, and the program runs 2.3 % faster
+(1.12421 to 1.09808 ms, answer unchanged). What remains is the read itself, about 98 cycles on a
+loaded tile against about 19 on an idle one, spent in the memory queue, the bank and the slice.
 
 ### 2.2 The pipes and the issue rule
 
@@ -1764,8 +1767,8 @@ be parked on them issue loads instead, the translation path fills every slot the
 the context read — the only request left in the physically addressed queue — waits longer. That
 is a fixed priority starving one class, and the change that ends it is the other one named in §2.1:
 an entitlement for a context transfer to a window slot, as the walk path and the close of an
-atomic pair are already entitled. It is not made here; it is a change to the window's arbitration
-with its own review. Until it is made, `FORK.R` stays the compiler's default, now by a wider margin.
+atomic pair are already entitled. It is made in §2.4: the physically addressed class has a window
+slot of its own, and the start is 107.9 cycles.
 
 ### 2.4 The cross-connection: one window, oldest-per-bank
 
@@ -1855,6 +1858,84 @@ this structure can answer: the window was full at the end of the cycle and the t
 path was holding a completion whose latency had been paid. Nothing about the machine's timing
 changed, and the reading is now a measurement rather than a tautology. It is zero on the two
 sampled points taken, which says the connection did not limit them.
+
+**Two classes fill the window, and the second has a slot of its own.** Requests reach the window
+from two places. Every context's load, store and atomic comes from the translation path. Page-walk
+reads, the page-table rewrite after a remap, and the 512-bit context read of an arriving `FORK.M` or
+`CONT.M` invocation already carry a physical address, so they come from the tile's in-order queue
+of physically addressed requests. Until this change the tile refilled the window from the
+translation path first and from that queue only with what was left. That is a fixed priority, and
+under a window that the running contexts keep full, the lower class waits as long as the higher one
+has traffic.
+
+The counters that show it, on the compiled reduction at 4 MiB (four tiles, 128 contexts, run whole,
+`FORK.M` with cleaned blocks), with the fixed priority:
+
+| quantity | value | counter |
+|---|---:|---|
+| cycles a context read spent waiting for a window slot, summed over its 5,120 reads | 32,661,510 (6,379 per read) | `ctxReadPathCycles` |
+| of which at the head of that queue, the window having no slot it could take | 2,652,063 | `ctxReadWaitWindow` |
+| the window's contents on those cycles: translated entries / physically addressed entries | 3.98 / 0.015 per cycle | `ctxReadWaitWinXlat`, `ctxReadWaitWinPhys` |
+| of which behind another context read at the head of the queue / behind a walk read | 29,710,567 / 298,880 | `ctxReadWaitBehindCtx`, `ctxReadWaitBehindWalk` |
+| slots the translation path filled while a physically addressed request waited before and after the refill | 865,312 | `xcXlatFillsWhilePhysWaited` |
+
+So the window was full of translated requests when a context read reached the head of its queue
+(3.98 of 4 slots), the read waited there about 518 cycles, and the reads that arrived meanwhile
+queued behind it. Walk reads were not what the reads waited behind.
+
+Two remedies were considered. A round-robin between the classes gives each the first pick on
+alternate cycles. It bounds the wait while slots are being freed, but when the window is full of
+entries waiting for memory-queue credit neither class can enter, and the physically addressed class
+still has no unit it can always reach. The arbitration built is the one link layers use to keep one
+traffic class from starving another: **a dedicated credit per class beside a shared pool.** Intel
+QuickPath keeps buffers per message class in its VN0 virtual network beside the shared VNA pool
+("An Introduction to the Intel QuickPath Interconnect", Intel, 2009), and PCI Express keeps
+separate flow-control credits for posted, non-posted and completion traffic in every virtual channel
+(PCI Express Base Specification 3.0, "Virtual Channel (VC) Mechanism" and "Ordering and Receive
+Buffer Flow Control"). Here:
+
+- The physically addressed class has `xcPhysSlots` slots beyond the configured width (default 1),
+  which only it may take. It uses them first and then competes for the width behind the translated
+  class.
+- The translated class keeps the whole configured width and cannot take the class's slots, so a
+  program that issues no physically addressed request sees exactly the window it had.
+- Delivery is unchanged: oldest entry per bank, one per bank per cycle, credit from the queue. A
+  context read in its slot still yields its bank to an older load for the same bank.
+- `xcPhysSlots=0` is the fixed-priority window as it was. The statistics files of runs at 0 are the
+  earlier machine's, cycle for cycle, apart from the new counters.
+- The slot is counted in the reservation floor (§2.5).
+
+Before and after, in cycles of the 1 GHz tile:
+
+| point | measure | fixed priority | the class's own slot |
+|---|---|---:|---:|
+| compiled reduction, `FORK.M` (cleaned), 4 MiB, 4 tiles, 128 contexts, run whole | fork to first issue, mean | 6,487.6 | **107.9** |
+| same | of which the wait for a window slot | 6,380.2 | **1.0** |
+| same | simulated time | 1.12421 ms | 1.09808 ms (−2.3 %) |
+| same | window full, cycles | 3,219,912 | 3,044,438 |
+| compiled reduction, `FORK.R`, 4 MiB | simulated time, statistics | 1.4555 ms | identical apart from the new counters |
+| graph search, 16 MiB, level-7 window (image 6) | host cycles | 7,266,440 | 7,266,440; one cycle less of a full window per tile, nothing else |
+| chained hash table, smallest point, 4 tiles | simulated time, statistics | 482.619 µs | identical apart from the new counters |
+
+Every answer is unchanged. The contended directed test, `tile_ctxread`, runs 96 invocations
+streaming loads on one tile while rounds of 16 invocations are started from 64-byte blocks. The
+variants and their results (mean fork to first issue, maximum in brackets):
+
+| variant | fixed priority | the class's own slot |
+|---|---:|---:|
+| host starts with `FORK.M` against the load storm | 195.3 (1,613) | 126.1 (274) |
+| half started by the host, half by the tile's own `CONT.M` | 209.4 (2,821) | 114.1 (232) |
+| all started by `CONT.M` on the tile (tile against tile): the read's wait in the queue | 65.8 per read | 1.2 per read |
+| host `FORK.M` with a one-entry translation buffer (walk reads against context reads) | 24,292 (134,197) | 158.0 (381) |
+| the same, at the smallest stages (window 1, translation queue 1, memory queue 3) | 485.3 (1,374) | 31.8 (55) |
+| no load storm (the control) | 22.4 (100) | 22.4 (100) |
+
+The load storm's own progress is unchanged: the program's simulated time moves by at most 0.02 %,
+except where the walk reads themselves had been starved. With the one-entry translation buffer the
+fixed priority also held back the walk path: up to 64,551 walk reads were waiting in the physically
+addressed queue at once, the program took 880.2 µs, and with the class's slot it takes 680.1 µs
+with at most 61 walk reads waiting. That the walk path can queue so many reads is itself not
+bounded by anything in the machine, and is noted in §3 as open.
 
 ### 2.5 The memory queues: one per bank, and the only ordering point
 
@@ -1992,7 +2073,7 @@ zero. At a memory-queue depth of 8 it is the difference between finishing and no
 the test passes in 26,635 cycles, and without it no invocation ever returns and the run does not
 end. Depth 2 fails either way and is now refused at construction (below).
 
-**The reserved unit is a unit of its own: an escape slot at the window and the translation queue, and a floor at the memory queue.** A reservation is only a reservation when the stage keeps a unit for everything else and the entitled request can always reach its unit. The first version carved the close's unit out of each stage's configured size once a point opened, and that fails twice. At a window of one slot the refusal `occupancy + 1 ≥ width` is true of an *empty* window, so while any point was open the window admitted nothing but the close — a closure rather than a reservation. And at any size the unit is carved out too late: a point opens when its load-reserved reaches the bank, and by then the window and the translation queue can already be full of contenders for the same word, every one of which the point then holds. Eight contenders on a tile alone, at the default window of 4 and a memory-queue depth of 3 or 4, stopped exactly so: four contenders in the window, the close in its translation queue with nowhere to go. So at the window and the translation queue the close's unit is now an **escape unit beyond the configured size**, as an escape channel in deadlock-free routing is a buffer of its own rather than one taken from the shared pool (Duato, *IEEE TPDS* 4(12), 1993): ordinary traffic keeps the whole configured width or depth whether or not a point is open, and while one is open the close (and, at the window, the walk path's traffic, which a point never holds) may take one unit more. With no point open the unit does not exist, so a program that performs no pair runs on exactly the configured stage. The memory queue keeps its reservation inside its depth, because it does not have the hole: the load-reserved that opens its point holds one of its general entries and frees it on completion, and from then on the rule keeps that entry for the close. Its floor is therefore still its reserved units plus one, **walkReserve + 2** — 3 with walks through the data cache, 2 with walks sent to the slice — and a smaller queue is refused at construction with the limit named. The window's and the translation queue's floor is 1. A memory queue of 2 with a walk reservation fails either way: its one general entry is either the close's (nothing else enters) or anybody's (a held request can take it). The window's default stays max(pipes, 2), so a one-pipe tile's configuration does not change.
+**The reserved unit is a unit of its own: an escape slot at the window and the translation queue, and a floor at the memory queue.** A reservation is only a reservation when the stage keeps a unit for everything else and the entitled request can always reach its unit. The first version carved the close's unit out of each stage's configured size once a point opened, and that fails twice. At a window of one slot the refusal `occupancy + 1 ≥ width` is true of an *empty* window, so while any point was open the window admitted nothing but the close — a closure rather than a reservation. And at any size the unit is carved out too late: a point opens when its load-reserved reaches the bank, and by then the window and the translation queue can already be full of contenders for the same word, every one of which the point then holds. Eight contenders on a tile alone, at the default window of 4 and a memory-queue depth of 3 or 4, stopped exactly so: four contenders in the window, the close in its translation queue with nowhere to go. So at the window and the translation queue the close's unit is now an **escape unit beyond the configured size**, as an escape channel in deadlock-free routing is a buffer of its own rather than one taken from the shared pool (Duato, *IEEE TPDS* 4(12), 1993): ordinary traffic keeps the whole configured width or depth whether or not a point is open, and while one is open the close (and, at the window, the walk path's traffic, which a point never holds) may take one unit more. With no point open the unit does not exist, so a program that performs no pair runs on exactly the configured stage. The memory queue keeps its reservation inside its depth, because it does not have the hole: the load-reserved that opens its point holds one of its general entries and frees it on completion, and from then on the rule keeps that entry for the close. Its floor is therefore still its reserved units plus one, **walkReserve + 2** — 3 with walks through the data cache, 2 with walks sent to the slice — and a smaller queue is refused at construction with the limit named. The window's and the translation queue's floor is 1. The window's slot for the physically addressed class (§2.4) is counted beside it and does not change it: it is beyond the width like the escape slot, and only that class may take it, so at a width of 1 with a point open the window holds one ordinary entry, the close and one walk read or context transfer, and no class can take another's unit. A memory queue of 2 with a walk reservation fails either way: its one general entry is either the close's (nothing else enters) or anybody's (a held request can take it). The window's default stays max(pipes, 2), so a one-pipe tile's configuration does not change.
 
 **What the floor proves is deadlock-freedom, and only that.** At or above it the close always
 finds a memory-queue entry, because the only traffic that can take the reserved unit first is a
@@ -2003,7 +2084,8 @@ taken only by a store-conditional from the context that owns an open point (the 
 owner's slot and generation), so one whose own point was already broken is ordinary traffic there
 and cannot hold the close's entry — it could before, and twenty-eight contenders on a tile alone
 reached it; and a store-conditional may leave its translation queue ahead of requests the point
-holds. Starvation is not excluded — walk traffic enters the window first every cycle. The machine
+holds. Starvation is not excluded by the floor. Between the window's two classes it is excluded by
+the physically addressed class's own slot (§2.4); among one class's requests it is not. The machine
 as configured sits well above the floor: 16 entries per memory queue (`dataQueueDepth`), 8 per
 translation queue (`xlatQueueDepth`), both defaults in `src/nmfc/src/NMFCTile.h`, and a window of
 max(pipes, 2). On the eight-contender pair test (`tile_lrsc`, 8 invocations × 16 increments, run
@@ -2655,7 +2737,8 @@ memory device and link.
 | invalidation broadcasts, per bank | one per cycle; a busy port delays delivery (`invPortWaitCycles`) | the bank's return port (§2.7) |
 | waited lines held without eviction wakes | eight per set (16 KiB, 8 ways, 4 banks); beyond it the waiters' re-loads evict each other and they poll at the miss rate (`waitEvictWakeChains`) | the tile data-cache configuration |
 | contexts a writer can use on a tile full of waiters | the tile's contexts minus its waiters; a waiter must never be what its writer needs | the tile's context count |
-| a `FORK.M` context read's place in the tile | one entry in the in-order queue of physically addressed requests (page-walk reads, page-table writes, context transfers), then one delivery-window slot and one line-class memory-queue entry; no entitlement ahead of walk reads | this model (§2.1) |
+| a `FORK.M` context read's place in the tile | one entry in the in-order queue of physically addressed requests (page-walk reads, page-table writes, context transfers), then one delivery-window slot and one line-class memory-queue entry | this model (§2.1) |
+| delivery-window slots of the physically addressed class (`xcPhysSlots`) | one beyond the configured width, which only walk reads, page-table writes and context transfers may take; that class also competes for the width behind translated requests | a dedicated credit per class beside a shared pool: Intel QuickPath VN0 / VNA (Intel, 2009); PCI Express per-virtual-channel flow-control credits (Base Specification 3.0) (§2.4) |
 | the host's cache-block clean (`cbo.clean`) | one 64-byte line per instruction; a store-queue slot, a store port and a store-buffer entry until the first-level cache answers; for a dirty line, 72 B on the host L2's outbound link and one slice write | RISC-V Zicbom; this model (§1.4.7) |
 
 **Structure** — changing one is a different design. A context has exactly two slots. A
@@ -2698,9 +2781,9 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | One outstanding memory access per context; the load slot | **yes** | the relaxed store rule as a switch, with its own measurement |
 | Pipes | **yes** — `N × M` stage registers with named decode, address and writeback stages, the readiness and conjunction counters, and the two identities that say the array advances once per cycle | — |
 | The pipe-bound alternative: a context bound to one pipe, with forwarding | **refused on evidence** (§2.2) and refused at construction, not deferred: on the graph search every load-free run is one instruction long, so the mechanism has no consecutive instruction to issue. The parameter stays so the question can be re-read on a workload with long arithmetic between accesses | — |
-| Translation | **yes** — queues indexed by the virtual page, a completion rate derived from the pipe count and any other rate refused, a walk-pending array so a miss does not block the hits behind it, head-blocked cycles counted. **New this round (§2.3):** one leaf per grain — a table whose level 1 spans exactly `G`, grain and duplicate pages one leaf, a striped page one leaf per grain, host pages and grains a region boundary cuts 4 KiB; walks that end at the first leaf and return its size; translation buffers holding both sizes in one array with a size tag per entry, after Neoverse V2 (the tile's 64 entries now fully associative, where they were direct-mapped under a hash of a key computed from the region list); a remap one eight-byte write per copy. Tile walks on the compiled reduction at 4 MiB fell from 443,955 to 98, and on the graph search's level 7 from 1,973,566 to 28; the programs ran 0.2 % to 3.3 % faster with every answer unchanged; `xlatTlbStaleHits` and the two leaf-size mismatch counters are zero gates | an `N × G` leaf for a striped page none of whose grains has moved; the duplicate region holding code aligned to a grain, so that code is one leaf (the linker places it at 0x10000); an entitlement for a context transfer to a window slot, which the `FORK.M` start now waits for (§2.1) |
+| Translation | **yes** — queues indexed by the virtual page, a completion rate derived from the pipe count and any other rate refused, a walk-pending array so a miss does not block the hits behind it, head-blocked cycles counted. **New this round (§2.3):** one leaf per grain — a table whose level 1 spans exactly `G`, grain and duplicate pages one leaf, a striped page one leaf per grain, host pages and grains a region boundary cuts 4 KiB; walks that end at the first leaf and return its size; translation buffers holding both sizes in one array with a size tag per entry, after Neoverse V2 (the tile's 64 entries now fully associative, where they were direct-mapped under a hash of a key computed from the region list); a remap one eight-byte write per copy. Tile walks on the compiled reduction at 4 MiB fell from 443,955 to 98, and on the graph search's level 7 from 1,973,566 to 28; the programs ran 0.2 % to 3.3 % faster with every answer unchanged; `xlatTlbStaleHits` and the two leaf-size mismatch counters are zero gates | an `N × G` leaf for a striped page none of whose grains has moved; the duplicate region holding code aligned to a grain, so that code is one leaf (the linker places it at 0x10000) |
 | The walk's own reads: through the data cache against reserved capacity, or straight to the last-level slice | **yes, both arms**, each with the refusals that stop it being measured as the other machine. **Under open analysis**: indistinguishable on the two sampled points so far, because the reservation was never contended, and the first reading of that rested on four walk-source counters that read zero while 1,007 walks ran — now a fifth bin and an accounting gate | the workload that separates them: one whose data traffic fills the queues while a walk needs to issue |
-| Getting a translated request to its bank | **yes** — the delivery window, oldest-per-bank, one delivery per bank per cycle, with the limit counter rewritten so that it can fire at all | the split-window escalation, if measurement ever says the window is the constraint |
+| Getting a translated request to its bank | **yes** — the delivery window, oldest-per-bank, one delivery per bank per cycle, with the limit counter rewritten so that it can fire at all. **New this round (§2.4):** the window's two classes — translated requests, and the physically addressed ones (walk reads, page-table writes, context transfers) — are no longer filled in a fixed priority; the second has a slot of its own beyond the width (`xcPhysSlots`, a dedicated credit per class beside a shared pool, after Intel QuickPath's VN0/VNA and PCI Express's per-channel credits), counted in the reservation floor. The `FORK.M` start on the compiled reduction at 4 MiB fell from 6,487.6 to 107.9 cycles (its wait for a slot from 6,380.2 to 1.0) and the program ran 2.3 % faster; the graph search's level-7 window, the hash table and the `FORK.R` reduction are unchanged; answers unchanged. Contended test `tile_ctxread` (host `FORK.M`, tile `CONT.M`, both, walk reads, the smallest stages, a control) in the coherent suite, gated against the fixed-priority window on the same run | the split-window escalation, if measurement ever says the window is the constraint; a bound on the walk reads the walk path can have waiting (with a one-entry translation buffer and the fixed priority, 64,551 were queued at once) |
 | Ordering, forwarding, atomicity | **yes** — physically-indexed memory queues, one per bank: sequence order, forwarding from the newest older overlapping entry, read-modify-write at the bank, coherence requests at the bank with a bounded deferral. The word-keyed table above the data cache, its cache pins, its snoop merge and its unbounded waiter list are **deleted** | — |
 | The load-reserved / store-conditional point: four ends (its own store-conditional, the line taken away, the owner's next memory operation that is not that store-conditional, departure), a unit of each stage reserved for the close, no takeover by another address | **yes**. A pair abandoned after a failed compare ends at the owner's next memory operation, as a RISC-V reservation lapses; the contended test (`tile_lrsc_away`: a compare-and-swap loop that branches away, a claim array, the host on the line) passes at 1, 2 and 4 tiles, at the default stages and the floor, under both notification modes, and the compiled graph search now emits the plain compare-and-branch. Also a cross-agent directed test in which a host and a tile update one word, and eight contenders at the memory queue's floor on one tile, two tiles and a tile alone in the suites. The close's unit is an escape slot beyond the window's width and an escape entry beyond the translation queue's depth (floor 1), entitled at translation only to the point owner's store-conditional; the memory queue keeps it inside its depth (floor walkReserve + 2); walk traffic keeps its memory-queue entry while a point is open, and the walk-pending drain does not stop at a request the window refuses. 28 and 32 contenders complete at the default configuration (§2.5; NMFC-Rev `43d62d2`). **The owner's pair is served before another agent's request for its line**: an answered point holds the request for the pair's window (`lrscHoldCycles`, derived: 127 cycles at 32 contexts, 487 at 128), its store-conditional at the data cache for one access, and a point opened after the request arrived not at all; the load-reserved fetches for ownership, the store-conditional is a conditional write at the data cache, the data cache serves the tile's hits while asking it, and a cache that tells afterwards holds the line itself. A host writing the line without pause (`tile_lrsc_writer`) no longer stops a tile's claim: at 1, 2 and 4 tiles, both notification modes, default and floor, the most attempts one increment needs is measured at 1 to 11; `tile_lrsc_away_race` passes in all 12 configurations and T12 with a cache that tells afterwards is gated; `memqLrscScLandedAfterBreak` is a zero gate | the host's own reservation has no hold: a host pair against a tile claiming the same word without end has no bound (§2.5) |
 | Backpressure anywhere in the data path | **yes** — credit end to end, and the depth sweep shows a curve rather than a cliff: queue-full cycles 0, 1, 368, 6,417 as the queue goes 32, 8, 4, 2 with the answer unchanged | — |
@@ -2711,7 +2794,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | Integer costs: a pipelined multiplier per pipe, one iterative integer divider per tile separate from the floating-point divider, the host's one integer divider held per width | **yes** (§2.2). An integer divide or remainder cost one pipe pass on the tile, and the host's divider accepted one every cycle. None of the three workloads divides on a tile; every divide they execute is the host's, in printing results in decimal and, for the graph search, in its generator's modulo, and these move their end-to-end time by 0.3 % (graph search), 0.4 % (shuffled sum) and 1.1 % (hash table). Their tile statistics are byte-identical with the host's old divider | — |
 | Memory size: one 16 GiB channel per tile, the address width derived from it, page-table copies that span as many of a tile's grains as they need, backing allocated only for pages touched | **yes** (§2.8). The machine had a flat 4 GiB; the host could not issue an address above 32 bits; a page-table copy was limited to one grain, which refused any program mapping more than about 500 MiB; and the loader wrote the zeros of every declared `.bss` page into the simulator's backing store. A test places, touches and reads back 4.5 GiB on each of four tiles; the simulator's resident memory is 1.24 GB for it and unchanged (165–177 MB) for the three workloads. The arena of frames started at 256 MiB, inside reach of the host's identity-mapped window (its program headers at 0x60000000 and stack below 0x80000000): a test placing 2 GiB of frames found all 510 of the host's pattern words in the window overwritten by tile stores. The arena now starts at 0x80000000, the same test reads every word back, and an overlapping arena is refused at configuration | — (the walker's 4 KiB-only leaves are replaced by one leaf per grain, §2.3; a copy of the table at 18 GiB mapped is about 150 KB where it was 37.9 MB) |
 | Duplicate pages: a kernel store or atomic refused and counted, zero-gated, with a directed test; the host's legal fan-out to every copy | **yes**, including the privileged page-table write as its own request class with its own reserved capacity, gated so that nothing else can reach the exemption | — |
-| The host's cache-block clean (`cbo.clean`, RISC-V Zicbom): a dirty line written back to its slice and kept clean and shared, the directory naming no forwarder | **yes** (§1.4.7), with a directed test of three contended cases, a control with the cleans compiled out, and `cleansStale` in the zero-gate register. The runtime cleans every prepared `FORK.M` block. This removes every recall of a block from the host and does not shorten the start: the context read's wait for a delivery-window slot behind walk reads remains (§2.1) | `cbo.flush`, `cbo.inval` and `cbo.zero`, which decode as faults |
+| The host's cache-block clean (`cbo.clean`, RISC-V Zicbom): a dirty line written back to its slice and kept clean and shared, the directory naming no forwarder | **yes** (§1.4.7), with a directed test of three contended cases, a control with the cleans compiled out, and `cleansStale` in the zero-gate register. The runtime cleans every prepared `FORK.M` block. This removes every recall of a block from the host and did not shorten the start; the window's slot for the physically addressed class did (§2.1, §2.4) | `cbo.flush`, `cbo.inval` and `cbo.zero`, which decode as faults |
 | Migration on a foreign translation result | **yes**, taken at the translation result, with the program counter carried back so the instruction re-issues | the rule for a context that migrates with a store still in a queue, under the relaxed store switch only |
 | Memory link: parallel pass-through and a serial CXL attachment, as configuration | **yes** | a workload that can saturate the serial link; the x32 variant |
 | `WAIT`: the load slot's arm (a physical line and a valid bit written at the arming operation's translation), the instruction translated like a load and decided in the context array, the bank's invalidation broadcast on a line-taking snoop, a performed write and every eviction, one per bank per cycle; both ways a data cache can tell the tile it is losing a line (ask first, tell afterwards) | **yes** (§1.4.3, §2.1, §2.7), with the design's directed tests contended first — host, same-tile and migrating-in writers, one, two and four tiles, both notification modes — and five zero gates, one of which (`waitMissedWakeups`) stops a run at the first context left asleep after a write to its line. The workloads' tile statistics are byte-identical across the change. With a cache that tells afterwards, a tile's load-reserved/store-conditional pair whose window is longer than about five instructions livelocks against a host pair on the same word; that is the pair's missing fairness bound, which the row above reports, and not `WAIT`'s. The functional model's half is built too: the producer arms on every load and read-modify-write atomic, parks an invocation at a `WAIT` whose arm matches, wakes it only on a store or atomic performed to its armed line, and writes an image holding such a worker as format version 6, which records the armed line; the cycle model places a restored waiter on the tile owning that line, so its re-load does not migrate. **Measured** (§4.7): resident dictionary workers on `WAIT` at 128 contexts per engine are correct at the smallest size against the functional run at 32 and 128 contexts, with every zero gate at zero, and the tile instructions they issue while waiting fall from 1,118,398 to 1,024 over the sampled regions | forwarding the written word to a woken context. Its counter (`waitLocalWakeReloads`) is built; the dictionary cannot measure it, because every wake there is the host's write and none is a write on the same tile |
@@ -3421,3 +3504,9 @@ a directed correctness run, uninterrupted or stopped at 2 ms of simulated time, 
 statistics file under `/mnt/md0/nmfc-work/complete6/fp/runs`; the dictionary rows are two
 uninterrupted runs per build at load point 0, read for their counters and answers, not a sampled
 performance number.
+The delivery window's two classes of §2.4, their diagnosis, the before-and-after tables and the
+new `FORK.M` row of §2.1 come from *One slot of its own for the physically addressed class*
+(`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/complete6/WINDOW.md`). Every figure there is an
+uninterrupted run read for its counters and answers, with its statistics file under
+`/mnt/md0/nmfc-work/complete6/window`; the reduction's rows are uninterrupted correctness runs at
+4 MiB and the level-7 row is one sampled window run whole, not a sampled performance estimate.
