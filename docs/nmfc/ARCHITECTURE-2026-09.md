@@ -1371,10 +1371,14 @@ free slot of the delivery window. The tile counts the three parts of a `FORK.M` 
 translation (`forkMCtxTranslate`), the read (`forkMCtxRead`, of which `forkMCtxPathWait` is
 the wait for a window slot) and the instruction fetch after it (`forkMCtxToIssue`).
 
-On the compiled reduction the read is almost all queueing. The workload's scattered reaches miss
-the translation buffer often, and the walker maps every page with 4 KiB leaves (§2.3), so the
-queue of physically addressed requests is full of walk reads for most of the run. A context
-read waits behind them.
+On the compiled reduction the read is almost all queueing: each cycle the delivery window is
+refilled first from the translation path and only then from the queue of physically addressed
+requests, and the window is full in about 72 % of tile cycles. The table's `FORK.M` rows below
+were taken while the translation buffer still missed often and that queue was full of walk reads;
+the reading then was that the walks were what the context read waited behind. Removing the walks
+(§2.3: one leaf per grain and a fully associative buffer, 443,955 tile walks to 98 on this run)
+showed otherwise — the wait grew to 6,380 cycles, because the contexts that had been parked on
+walks issue loads instead and the translation path takes every slot the window frees.
 
 | point | form | fork to first issue | translation | read (of which: wait for a window slot) | to first issue | block reads recalled from the host |
 |---|---|---:|---:|---:|---:|---:|
@@ -1383,6 +1387,7 @@ read waits behind them.
 | reduction, 4 MiB, uninterrupted run | `FORK.R` | 10.5 | — | — | — | 1,144 |
 | same | `FORK.M`, not cleaned | 1,183.4 | 0.2 | 1,173.3 (1,085.1) | 9.9 | 6,202 |
 | same | `FORK.M`, cleaned | 1,060.0 | 0.2 | 1,050.5 (957.2) | 9.3 | 1,164 |
+| same, one leaf per grain (§2.3) | `FORK.M`, cleaned | 6,487.6 | 0.2 | 6,478.0 (6,380.2) | 9.4 | — |
 | reduction, 16 MiB, sampled regions | `FORK.R` | 8.8 | — | — | — | 516 |
 | same | `FORK.M`, not cleaned | 703.5 | — | 1,007.0 | — | 5,561 |
 | same | `FORK.M`, cleaned | 739.0 | — | 962.3 | — | 490 |
@@ -1402,13 +1407,14 @@ read waits about 1,000 cycles for a window slot, and a cleaned block saves at mo
 them. The program's time moves by 1.0043, Fieller interval [0.9536, 1.0577] (uncleaned ÷
 cleaned, 16 MiB, 32 regions per arm).
 
-Two changes to the machine would shorten the wait. Neither is made; each is a change to the
-machine that needs its own review and measurement:
+Two changes to the machine were named to shorten the wait. The first is made: grain-sized
+leaves (§2.3) removed almost every walk read and made the program 0.2 % faster, and made this
+start six times slower, which is what shows the second is the one that matters:
 
-- grain-sized leaves for grain pages (§2.3, open), which would remove most of the walk reads;
 - an entitlement for context transfers to a delivery-window slot, in the way the walk and the
-  close of an atomic pair are already entitled, so that an arriving invocation does not queue
-  behind walks.
+  close of an atomic pair are already entitled, so that an arriving invocation is not starved by
+  the translation path's fixed priority. Not made; it is a change to the window's arbitration
+  with its own review and measurement.
 
 ### 2.2 The pipes and the issue rule
 
@@ -1607,9 +1613,9 @@ each, against 2.0 before.
 At the address stage a memory instruction's virtual address, address-space identifier,
 width, operation and owning context enter a **translation queue**. Queues are indexed by
 virtual address, because that is what a context presents. They are drained into the tile's
-shared, address-space-tagged translation buffer, which is banked; a hit produces a physical
-frame, the page type and the owning tile after a fixed latency, and about five cycles ahead
-of the tag check is accepted. A miss starts a page-table walk; the page table is on
+shared, address-space-tagged translation buffer, which holds 4 KiB and `G` entries side by
+side (below); a hit produces a physical frame, the page type and the owning tile after a fixed
+latency, and about five cycles ahead of the tag check is accepted. A miss starts a page-table walk; the page table is on
 duplicated pages, so a walk never leaves home, and the request waits in its translation
 queue rather than occupying anything on the data side.
 
@@ -1643,20 +1649,123 @@ be binned now make that failure loud: the flat suite reports 195 of 195 walk rea
 The arm that would separate the two paths is a workload whose own data traffic fills the
 queues while a walk needs to issue, and neither point measured does that.
 
-**Open: the walker maps every page with 4 KiB leaves.** The design has three page sizes — 4 KiB
-host pages, `G`-sized grain pages (one tile) and `N × G` striped pages (one grain per tile) — with
-the size in the page-table entry, and the rejected list forbids mapping every page type at 4 KiB,
-because it multiplies translation work and makes contiguity of consecutive small pages the
-operating system's problem. The model's page table still writes a 4 KiB leaf for every page of a
-grain or striped region, so a copy of the table holds 37.9 MB at 18 GiB mapped, every translation
-buffer entry covers 4 KiB, and a walk of a grain page reads a full three-level path. What it
-needs: the table writes a grain or striped page as one leaf at the level whose span matches the
-page (a leaf entry above the last level, as Sv39's megapages do, with `G` and `N × G` rounded to
-spans the format can express or the format's level spans derived from `G`); the walker ends a
-walk at the first leaf it reads and returns the page size with the translation; the translation
-buffers hold an entry per page of its own size (one structure per size, or a size field matched
-under a mask); and a remapped grain rewrites one leaf rather than `G` / 4 KiB. The data paths do
-not change: frames are already placed in whole grains and whole groups.
+**One leaf per grain.** The machine has three page sizes — 4 KiB host pages, `G`-sized grain
+pages (one tile) and `N × G` striped pages (one grain per tile) — with the size in the page-table
+entry, and mapping every page type at 4 KiB is rejected: it multiplies translation work and makes
+the contiguity of consecutive small pages the operating system's problem. Until this round the
+model's table nevertheless wrote a 4 KiB leaf for every page of every type (37.9 MB for one copy at
+18 GiB mapped). It now writes the sizes the design has.
+
+- *The table's geometry is derived from `G`.* A radix table can end a walk early only at a level
+  whose span is the page's size, as an Sv39 megapage is a leaf one level up. With nine index bits
+  at every level those spans are 4 KiB, 2 MiB, 1 GiB…, and `G` is none of them (1 MiB on the
+  DDR5 configuration, 256 KiB on HBM3). So level 0 gets `log2(G / 4 KiB)` index bits — 8 at
+  `G` = 1 MiB — and every level above it keeps nine: level 1 spans exactly `G`, level 2 `512 G`.
+  The entry format is RISC-V's, unchanged, and a level narrower than the others is not new (x86
+  PAE's top level has four entries). A grain that is not a power of two has no level spanning it
+  and keeps 4 KiB leaves; the table and every walker derive the geometry from the same `G`
+  (`PageTableDesc::deriveFromGrain`, `src/nmfc/src/NMFCPageWalk.h`).
+- *Which pages get one leaf.* A grain page is one leaf per grain. A duplicate page is one leaf in
+  each tile's copy, naming that tile's replica. Undeclared memory, which is grain-partitioned at
+  its own address, is one leaf per grain. A **striped page is `N` leaves, one per grain**, not one
+  `N × G` leaf: the placement policy moves one grain of a striped page at a time, after which the
+  page's grains are no longer one contiguous extent, and an `N × G` entry could not say so without
+  being split — which is what an operating system does to a huge page when part of it migrates. The
+  unit a striped page is translated in is the unit it is remapped in. A host page is a 4 KiB leaf,
+  and so is every page of a grain that a region boundary cuts, because a leaf maps a naturally
+  aligned block: a `G` leaf needs a region base on a grain boundary and no second region in the
+  grain. A region that does not fill its last grain is still one leaf there when nothing else is
+  declared in the grain, and the tail resolves through the region as the leaf maps it
+  (`PageTable::leafShift`, `inLastLeaf`). The linker places code at 0x10000, which is not a grain
+  boundary, so the duplicate region holding code and constants keeps 4 KiB leaves; aligning it is
+  a layout change and is not made here.
+- *The walk ends at the first leaf it reads* and returns the level, which is the page size. On
+  both walkers (each tile's, and the host's at its cache management units) a leaf read at level 1
+  ends the walk; `walkLeafSizeMismatch` (tiles) and `walk_leaf_size_mismatch` (host) count a walk
+  that ended at a different size from the one the table maps the page with, and both are zero
+  gates.
+- *A remap rewrites one leaf.* A moved grain of a striped page is one entry in each copy, so the
+  tile's privileged page-table write is one eight-byte write where it was 256
+  (`ptRewrites` = `remapsApplied` in the directed test below).
+
+**The translation buffers hold both sizes in one array, each entry tagged with its own.** Real
+MMUs do this one of two ways: split arrays per size, as x86's first-level data TLBs are, or one
+array whose entries carry a page-size field that masks the compare. The tile and the host follow
+the second, after Arm's Neoverse V2, whose first-level data TLB is one fully associative 48-entry
+array caching 4 KB, 16 KB, 64 KB, 2 MB and 512 MB mappings side by side, and whose 2,048-entry
+8-way second level holds every block size up to 1 GB (Arm Neoverse V2 Core Technical Reference
+Manual, 102375 issue 03, §6.1, Table 6-1). One array rather than one per size because a split
+fixes the ratio of small to large entries at design time, and here the ratio moves with the
+program: a tile translates `G` pages for data and 4 KiB pages for the code at 0x10000 and for
+host data. A lookup does not know the page's size, so it compares under each size the table has.
+
+- *The tile's buffer* keeps its configured 64 entries (`tlbEntries`) and becomes fully
+  associative with least-recently-used replacement (`MixedSizeTLB`). It was direct-mapped under a
+  hash of a key the page table computed from the region list — the size of the page was known
+  before the lookup, which no hardware can know, and each entry was keyed at a grain although the
+  walk that filled it had read a 4 KiB leaf. Every hit is now checked against the table
+  (`xlatTlbStaleHits`, a zero gate), and a remap's shootdown removes every entry overlapping the
+  moved grain and drops any walker output latch that holds its old frame.
+- *The host's* two levels keep their sizes (48 entries fully associative, 2,048 entries 8-way) and
+  tag each entry with its size; in the set-associative second level each size indexes the sets with
+  its own page number, and both probes of a lookup are one lookup charged once. The host MMUs now
+  shoot down a moved grain's entries (`tlb_shootdowns`); before, they kept them, which cost no
+  correctness because the host's frames come from the table, but made a moved grain free to
+  translate.
+
+**Tested contended first.** The unit test `unit/leaves.cc` (in `run_nmfc.sh`) puts a host 4 KiB
+page and a grain page in one set of the set-associative array and one fully associative array,
+walks every tile's copy page by page against the table (frame and size), and moves one grain of a
+striped page and checks that exactly one eight-byte entry of each copy changed. The coherent suite
+runs the machine's cases with a one-entry tile buffer, so that a walk is almost always in flight:
+a tile walking a grain's leaf while the grain is remapped under it with the host writing the grain
+throughout (`tile_nuca_move`, two and four tiles: 79 and 78 walks raced a remap, no leaf mismatch,
+the answer exact), and four tiles walking the leaves of one striped page at once beside host pages
+(`tile_pages`, four tiles: every tile ended walks at `G` leaves, and both sizes were hit on the
+tiles and on the host). `xlatTlbStaleHits`, `walkLeafSizeMismatch` and `walk_leaf_size_mismatch`
+are in the suite's zero-gate register.
+
+**What it changes, measured.** Each arm ran the same binary and image with one library changed.
+
+| point | measure | before | after |
+|---|---|---:|---:|
+| compiled reduction, `FORK.M`, 4 MiB, uninterrupted | tile walk reads per 1,000 tile instructions | 37.8 | 0.010 |
+| same | tile walks / translation-buffer hits | 443,955 / 12,961,877 | 98 / 13,442,503 |
+| same | host walks | 16,483 | 42 |
+| same | fork to first issue (of which: wait for a window slot), cycles | 1,060.0 (957.2) | 6,487.6 (6,380.2) |
+| same | simulated time | 1.12636 ms | 1.12421 ms |
+| compiled reduction, `FORK.R`, 4 MiB, uninterrupted | simulated time | 1.10359 ms | 1.06702 ms (−3.3 %) |
+| graph search, 16 MiB, level-7 window | host cycles | 1,584,221 | 1,576,599 (−0.48 %) |
+| same | tile walk reads per 1,000 tile instructions | 75.1 | 0.002 |
+| chained hash table, smallest point, whole run | simulated time | 453.0 µs | 445.5 µs (−1.7 %) |
+| same | tile walks | 145,306 | 20 |
+| shuffled sum, suite size, 4 tiles | host cycles | 478,999 | 451,308 (−5.8 %) |
+| same | tile walks | 112,575 | 14 |
+| graph search, suite size, 4 tiles | host cycles | 1,642,444 | 1,641,573 |
+| same | host walks | 95 | 6 |
+
+Every answer is unchanged. Nearly all of the walks removed are not 4 KiB leaves being walked
+where a grain leaf would do: the old buffer already held one entry per grain. They were conflict
+misses of a direct-mapped array. The reduction's table is 40 grain pages, and every tile
+translates all of them because a tile translates before it migrates; in the after arm the fully
+associative 64 entries never evicted anything (`xlatTlbEvictions` = 0), so everything the old
+array walked for beyond a first touch was a collision in its hash.
+The grain leaves are what make that array honest (an entry covers a grain because the walk read
+a grain leaf), make the table small and make a remap one write.
+
+**What got slower, and why.** The `FORK.M` start went from about 1,060 cycles to about 6,490,
+while the program ran 0.2 % faster. The start is almost all the context read's wait for a slot in
+the delivery window, and the counters say the walk reads were never what filled it: the window is
+full in 72 % of all tile cycles in both arms (`xcWindowFullCycles` 3,243,450 and 3,219,912 of
+about 4.5 million), and each cycle it is refilled
+first from the translation path and only then from the queue of physically addressed requests
+(walk reads, page-table writes, context transfers). With the walks gone, the contexts that used to
+be parked on them issue loads instead, the translation path fills every slot the window frees, and
+the context read — the only request left in the physically addressed queue — waits longer. That
+is a fixed priority starving one class, and the change that ends it is the other one named in §2.1:
+an entitlement for a context transfer to a window slot, as the walk path and the close of an
+atomic pair are already entitled. It is not made here; it is a change to the window's arbitration
+with its own review. Until it is made, `FORK.R` stays the compiler's default, now by a wider margin.
 
 ### 2.4 The cross-connection: one window, oldest-per-bank
 
@@ -1876,7 +1985,15 @@ test at translation still stops at 28. With both repairs, 28 contenders complete
 cycles on the full machine and 50,862 tile cycles alone, and 32 in 132,010 and 55,762.
 Starvation-freedom remains unproven. A fairness bound at the point — a contender that has waited
 long enough taking precedence — is a design decision rather than a repair, and it is not taken
-here.
+here. The gap is also visible between a host and a tile when the tile's data cache is a stock
+cache that tells the tile after it has given a line away: the host's pair and the tile's take the
+word from each other and neither closes. That case was reported at two tiles and passed at one
+and four; since translation stopped walking (§2.3) the tile's pairs retranslate in a cycle rather
+than waiting on walks, the two sides fall into step at one tile too (64,478 points broken by the
+host's snoops against 15 closed in 3 ms of simulated time, where the earlier build closed 40 of 44
+and finished in 12.5 µs), and the one-tile case is now reported beside the two-tile one rather
+than gated. With the tile's own data cache, which is asked before a line is taken, all three tile
+counts pass.
 
 **A read-modify-write atomic is one entry, performed at the bank by a small arithmetic unit beside it.** Such a unit is ordinary in real memory systems: RISC-V implementations execute their atomic operations with an arithmetic unit inside the data cache, graphics processors execute atomics in their last-level cache slices, the AMBA CHI interconnect defines far atomics performed at the home node, and PCI Express defines atomic operations completed at the target; the operation set is nine operations at two widths, so the unit is an adder, a comparator and a few logic gates. The entry reaches the head for its
 address; the bank reads the word, a small arithmetic unit beside the bank applies the
@@ -1956,7 +2073,8 @@ not have, and it is a test rather than a claim.
 
 **Request classes.** Every memory request in the tile goes through this one mechanism:
 program loads, stores and atomics; the page-table reads a walk makes; the privileged
-page-table writes that follow a remap; and the line-sized transfers an invocation's arrival
+page-table writes that follow a remap — one eight-byte entry per copy for a moved grain,
+since a grain is one leaf (§2.3); and the line-sized transfers an invocation's arrival
 and departure make. The privileged page-table write is named explicitly as its own class
 precisely because it is the one legal write from inside a tile to a duplicated page: it is
 exempt from the refusal of §1.2, it can never arise from a kernel store, and like a walk it
@@ -2326,7 +2444,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | One outstanding memory access per context; the load slot | **yes** | the relaxed store rule as a switch, with its own measurement |
 | Pipes | **yes** — `N × M` stage registers with named decode, address and writeback stages, the readiness and conjunction counters, and the two identities that say the array advances once per cycle | — |
 | The pipe-bound alternative: a context bound to one pipe, with forwarding | **refused on evidence** (§2.2) and refused at construction, not deferred: on the graph search every load-free run is one instruction long, so the mechanism has no consecutive instruction to issue. The parameter stays so the question can be re-read on a workload with long arithmetic between accesses | — |
-| Translation | **yes** — queues indexed by the virtual page, a completion rate derived from the pipe count and any other rate refused, a walk-pending array so a miss does not block the hits behind it, head-blocked cycles counted | — |
+| Translation | **yes** — queues indexed by the virtual page, a completion rate derived from the pipe count and any other rate refused, a walk-pending array so a miss does not block the hits behind it, head-blocked cycles counted. **New this round (§2.3):** one leaf per grain — a table whose level 1 spans exactly `G`, grain and duplicate pages one leaf, a striped page one leaf per grain, host pages and grains a region boundary cuts 4 KiB; walks that end at the first leaf and return its size; translation buffers holding both sizes in one array with a size tag per entry, after Neoverse V2 (the tile's 64 entries now fully associative, where they were direct-mapped under a hash of a key computed from the region list); a remap one eight-byte write per copy. Tile walks on the compiled reduction at 4 MiB fell from 443,955 to 98, and on the graph search's level 7 from 1,973,566 to 28; the programs ran 0.2 % to 3.3 % faster with every answer unchanged; `xlatTlbStaleHits` and the two leaf-size mismatch counters are zero gates | an `N × G` leaf for a striped page none of whose grains has moved; the duplicate region holding code aligned to a grain, so that code is one leaf (the linker places it at 0x10000); an entitlement for a context transfer to a window slot, which the `FORK.M` start now waits for (§2.1) |
 | The walk's own reads: through the data cache against reserved capacity, or straight to the last-level slice | **yes, both arms**, each with the refusals that stop it being measured as the other machine. **Under open analysis**: indistinguishable on the two sampled points so far, because the reservation was never contended, and the first reading of that rested on four walk-source counters that read zero while 1,007 walks ran — now a fifth bin and an accounting gate | the workload that separates them: one whose data traffic fills the queues while a walk needs to issue |
 | Getting a translated request to its bank | **yes** — the delivery window, oldest-per-bank, one delivery per bank per cycle, with the limit counter rewritten so that it can fire at all | the split-window escalation, if measurement ever says the window is the constraint |
 | Ordering, forwarding, atomicity | **yes** — physically-indexed memory queues, one per bank: sequence order, forwarding from the newest older overlapping entry, read-modify-write at the bank, coherence requests at the bank with a bounded deferral. The word-keyed table above the data cache, its cache pins, its snoop merge and its unbounded waiter list are **deleted** | — |
@@ -2337,7 +2455,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | Tracking unit derived to cover every context; the control queue following it; the host counting cycles its unit is full | **yes** | — |
 | Floating-point costs: a pipelined unit per pipe, one iterative divider per tile, a divide's context waiting without an issue slot; the host's units and two dividers | **yes** (§2.2). Until this round every tile floating-point operation, divide and square root included, cost one pipe pass, and the host accepted a divide every cycle and ran square root on its adders. The integer workloads' tile statistics are byte-identical across the change | — |
 | Integer costs: a pipelined multiplier per pipe, one iterative integer divider per tile separate from the floating-point divider, the host's one integer divider held per width | **yes** (§2.2). An integer divide or remainder cost one pipe pass on the tile, and the host's divider accepted one every cycle. None of the three workloads divides on a tile; every divide they execute is the host's, in printing results in decimal and, for the graph search, in its generator's modulo, and these move their end-to-end time by 0.3 % (graph search), 0.4 % (shuffled sum) and 1.1 % (hash table). Their tile statistics are byte-identical with the host's old divider | — |
-| Memory size: one 16 GiB channel per tile, the address width derived from it, page-table copies that span as many of a tile's grains as they need, backing allocated only for pages touched | **yes** (§2.8). The machine had a flat 4 GiB; the host could not issue an address above 32 bits; a page-table copy was limited to one grain, which refused any program mapping more than about 500 MiB; and the loader wrote the zeros of every declared `.bss` page into the simulator's backing store. A test places, touches and reads back 4.5 GiB on each of four tiles; the simulator's resident memory is 1.24 GB for it and unchanged (165–177 MB) for the three workloads. The arena of frames started at 256 MiB, inside reach of the host's identity-mapped window (its program headers at 0x60000000 and stack below 0x80000000): a test placing 2 GiB of frames found all 510 of the host's pattern words in the window overwritten by tile stores. The arena now starts at 0x80000000, the same test reads every word back, and an overlapping arena is refused at configuration | the walker maps every page with 4 KiB leaves, grain and striped pages included (open, §2.3) |
+| Memory size: one 16 GiB channel per tile, the address width derived from it, page-table copies that span as many of a tile's grains as they need, backing allocated only for pages touched | **yes** (§2.8). The machine had a flat 4 GiB; the host could not issue an address above 32 bits; a page-table copy was limited to one grain, which refused any program mapping more than about 500 MiB; and the loader wrote the zeros of every declared `.bss` page into the simulator's backing store. A test places, touches and reads back 4.5 GiB on each of four tiles; the simulator's resident memory is 1.24 GB for it and unchanged (165–177 MB) for the three workloads. The arena of frames started at 256 MiB, inside reach of the host's identity-mapped window (its program headers at 0x60000000 and stack below 0x80000000): a test placing 2 GiB of frames found all 510 of the host's pattern words in the window overwritten by tile stores. The arena now starts at 0x80000000, the same test reads every word back, and an overlapping arena is refused at configuration | — (the walker's 4 KiB-only leaves are replaced by one leaf per grain, §2.3; a copy of the table at 18 GiB mapped is about 150 KB where it was 37.9 MB) |
 | Duplicate pages: a kernel store or atomic refused and counted, zero-gated, with a directed test; the host's legal fan-out to every copy | **yes**, including the privileged page-table write as its own request class with its own reserved capacity, gated so that nothing else can reach the exemption | — |
 | The host's cache-block clean (`cbo.clean`, RISC-V Zicbom): a dirty line written back to its slice and kept clean and shared, the directory naming no forwarder | **yes** (§1.4.7), with a directed test of three contended cases, a control with the cleans compiled out, and `cleansStale` in the zero-gate register. The runtime cleans every prepared `FORK.M` block. This removes every recall of a block from the host and does not shorten the start: the context read's wait for a delivery-window slot behind walk reads remains (§2.1) | `cbo.flush`, `cbo.inval` and `cbo.zero`, which decode as faults |
 | Migration on a foreign translation result | **yes**, taken at the translation result, with the program counter carried back so the instruction re-issues | the rule for a context that migrates with a store still in a queue, under the relaxed store switch only |
@@ -2481,11 +2599,12 @@ holding what the uninterrupted run held, and a line is dirty in a cache of C lin
 the larger of its horizon and its position is below C; this is the memory timestamp record of
 Barr, Falsafi and Hoe (ISCA 2005), captured at the image instead of run between regions as
 SMARTS's functional warming is (Wunderlich et al., ISCA 2003). Before the clock starts the restore
-installs data pages in the host's 2,048-entry second-level TLB; host lines in its 2 MiB 16-way L2
+installs data pages in the host's 2,048-entry second-level TLB, each at the size of the leaf
+that maps it (a `G` entry for a grain-partitioned page, §2.3); host lines in its 2 MiB 16-way L2
 (32,768 lines) as Modified, shared or exclusive by their horizons, with the directory recording
 each copy and the L2's record of which first-level cache holds a line set from the read horizon;
 every agent's lines in the slice that owns them (262,144 lines in all); the page table's leaf
-lines; and the taken branches in the fetch branch-target buffer. The record is capped at 524,288
+lines, which for a grain page is the one line holding its grain's entry; and the taken branches in the fetch branch-target buffer. The record is capped at 524,288
 lines (twice the 16 MiB last level), 131,072 host lines, 16,384 pages and 16,384 branches; the
 producer runs 2.1 to 2.5 times slower and images grow 10 to 35 %. Restored from each of 19
 images, the dictionary now takes 0.997 to 1.026 times the uninterrupted cycles, and every sampled
@@ -2920,3 +3039,9 @@ a FORK.M start costs* (`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/libbuild/
 The 4 MiB rows of that table are uninterrupted runs, one of them the warm-up measurement's own,
 repeated with the split counters added; they are read for the division of the start latency
 and not quoted as program times.
+One leaf per grain and the two-size translation buffers (§2.3), with the before/after table there
+and the `FORK.M` row of §2.1, come from *One leaf per grain*
+(`/home/maccoy-merrell/.claude/jobs/0906c103/tmp/complete5/LEAVES.md`). Its 4 MiB reduction rows
+and the hash table's are uninterrupted runs of a few minutes, read for their counters and for how
+the start latency divides, each arm the same binary with one library changed; the graph search's
+figure is its level-7 sampled window; the suite rows are the coherent suite's own runs.

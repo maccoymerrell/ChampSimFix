@@ -4768,6 +4768,15 @@ controller and G = 256 KiB on HBM3. NEITHER G NOR N times G is a legal terminato
 geometry this document configures. Clause 3's own parenthetical - "G is not 2 MiB or any other
 fixed size" - concedes the premise while the surrounding prose keeps the conclusion. The table's
 LEVEL GEOMETRY is therefore a design item, not a lookup.
+[CLOSED - BUILT 2026-09-25, NMFC-Rev; architecture §2.3 "One leaf per grain". The geometry is
+DERIVED FROM G: level 0 has log2(G / 4 KiB) index bits and every level above it nine, so level 1
+spans exactly G (1 MiB at the DDR5 configuration) and a grain-partitioned page is ONE leaf there,
+RISC-V entry format unchanged. A GRAIN page is one leaf per grain; a DUPLICATE page one leaf per
+tile's copy, naming that tile's replica; a STRIPED page N leaves, one per grain, because a remap
+moves one grain of it (an N x G leaf is not built: it would have to be split on the first move);
+a HOST page, and any grain a region boundary cuts, 4 KiB leaves. Walks end at the first leaf and
+return its size; a remap rewrites one entry per copy. Mapping every page at 4 KiB (R15) is no
+longer what the model does.]
 (2) THE REPLICATE BIT IS NOT A STANDARD FIELD. It separates DUPLICATE from GRAIN, which share
 the G virtual size class, and no stock format has it (clause 3, F.5b consequence 2).
 (3) THE WALK'S OUTPUT DEPENDS ON WHICH TILE IS WALKING. For a DUPLICATE page the frame field
@@ -5142,7 +5151,7 @@ shared*"):
 
 | tier | what | on migration |
 |---|---|---|
-| the tile's shared TLB | ONE per tile, ASID-tagged, shared by every context on it: **three** arrays probed in parallel — `4 KiB`, `G` and `N·G` (**F.5b**, user ruling 2026-09-03; this row said "two arrays … small (4 KiB) and huge (G)" before the ruling added the `N·G` size) | stays with the tile |
+| the tile's shared TLB | ONE per tile, ASID-tagged, shared by every context on it: **three** arrays probed in parallel — `4 KiB`, `G` and `N·G` (**F.5b**, user ruling 2026-09-03; this row said "two arrays … small (4 KiB) and huge (G)" before the ruling added the `N·G` size). `[AS BUILT 2026-09-25 - architecture §2.3: ONE fully associative array whose entries carry their page size, probed under each size, after Arm Neoverse V2's first-level data TLB (TRM 102375 issue 03, §6.1 Table 6-1: 48 entries, fully associative, 4 KB to 512 MB mappings side by side) - the other real organisation, chosen because a split fixes the small-to-large ratio at design time. Two sizes are held, 4 KiB and G: a striped page is translated a grain at a time because it is remapped a grain at a time, so no N·G entry exists to hold. The host's two TLB levels are tagged the same way.]` | stays with the tile |
 | the walk | into the local copy of the one page table | stays with the tile |
 
 **THERE IS NO THIRD TIER ABOVE THE TLB, AND BUILDING ONE IS REJECTED — user ruling
@@ -13344,7 +13353,7 @@ Marked `[REBUILT]` where the record shows it was rejected and then built again a
 | R12 | **A PTE-carried bit for the mapping mode** | A dirty line evicted from L2 has no TLB entry behind it, so the bit would have to be stashed in cache-block metadata to survive a writeback. An address bit is already stored, carried and evicted with the line | DESIGN §5.3 D:635 |
 | R13 | **Converting a pool of allocations between modes** | "There is no such thing as converting a pool." A freed unit's contents are garbage; a live change is an ordinary page migration — standard NUMA/THP machinery | #12 (2026-08-27T06:59); DESIGN §5.3 D:641 |
 | R14 | **A `carry_translations` knob** | Every carried entry is provably invalid after migration. "Building a switch for a provably-useless option is clutter" | #9 (2026-08-27T06:33); DESIGN §7.1 D:933 |
-| R15 | **Mapping every page type at 4 KiB** | "Mapping everything to 4 KiB will break, or at the very least incur significant translation overheads + require the OS to make sure and reserve physical frames to ensure multiple 4 KiB virt allocations land next to each other" | #295 (2026-09-02T13:33) |
+| R15 | **Mapping every page type at 4 KiB** | "Mapping everything to 4 KiB will break, or at the very least incur significant translation overheads + require the OS to make sure and reserve physical frames to ensure multiple 4 KiB virt allocations land next to each other" `[The model did exactly this until 2026-09-25 and no longer does: one leaf per grain, F.5a; architecture §2.3.]` | #295 (2026-09-02T13:33) |
 | R16 | **Making everything huge** (dropping 4 KiB pages) | Real systems still need 4 KiB pages; a machine that quietly made everything huge would **flatter itself** | #10 (2026-08-27T06:41); DESIGN §5.4 |
 | R17 | **A big TLB as the answer at graph scale** | 1024 entries at 2 MiB reaches 2 GiB — about 2% of a 100 GiB graph. Huge pages **move the constant, not the asymptote** | DESIGN §5.4 D:659, §6 D:897 |
 | R18 | **Asking whether a frame exists, to decide huge-vs-small** | A frame does not exist on first touch, so the answer is "no" for every page the first time — which walks it small, caches a dead entry, and walks it huge on every access after: **two walks per grain, permanently.** Ask the placement **hint** | `inc/nmfc/nmfc_vmem.h:102-112` |
