@@ -2257,10 +2257,84 @@ test and 225 in the dictionary at its smallest size. A load issued after the cle
 older than a retired store it follows, and neither waited for nor forwarded from it. The count
 no longer restarts. Both changes are in `lsq/vbasiclsq.h` of the element tree (`875e7b274`).
 
-The host's own reservation has no hold. Its pairs complete in every test because the tile's
-pairs are bounded. A host that had to make progress against a tile claiming the same word
-without end would need the same hold at the host's cache, which is Rocket's `lrscCycles` itself.
-That is not built.
+*The host's own pair.* The host's reservation lives in its second-level cache, the cache the
+directory knows, and a function core's request for the line breaks it. A tile that claims the
+same word without end sends that request without end. Before, 32 tile pairs claiming a word the
+host was also claiming kept the host's pair from ever completing: in 2 ms of simulated time,
+31,146 host store-conditionals failed and none succeeded (one tile, a cache that asks first;
+52,637 to 54,804 failed with a cache that tells afterwards, at one, two and four tiles). At the
+smallest stages the host did complete, after up to 170 attempts for one increment.
+
+The host's cache now gives the host's pair the tile's rules, symmetrically:
+
+1. **An answered load-reserved holds a request for its line for the host's pair window**
+   (`llscHoldCycles` on the host's L2). The window is derived in `vanadis-nmfc.py` from the
+   core's own parameters, in host cycles:
+   - (14 + 1) × 10: the constrained loop's 14 instructions between the halves and the
+     store-conditional, each at worst behind a mispredicted branch, as in Rocket's
+     `lrscCycles` ("14 mispredicted branches + slop"). A redirect is 10 cycles: the L1I's
+     access (4) plus the three cycles of links and interface the core already allows above
+     its L1D (`l1d_hit_cycles` 8 less the L1D's 5), then decode, issue and the branch unit,
+     one cycle each.
+   - + 24: the store-conditional's path through the write-through L1D (`l1d_hit_cycles`, 8)
+     and its L2 access (16).
+   - + 3: the load-reserved's answer back to the core.
+
+   That is 177 host cycles, 59 ns at 3 GHz. The longest pair window measured in any test is
+   26 cycles (`llscPairWindowCycles`), and the longest a request waited is 26.
+2. **The hold never outlasts the pair.** It ends at the store-conditional, whether it
+   succeeds or fails, at a load-reserved to another line from the same port, when the line
+   leaves the cache, or at the bound.
+3. **The other agent is served before the next pair.** No hold starts on a line a request is
+   already waiting for, and a load-reserved not yet answered holds nothing.
+
+None of the three is a timeout, a retry counter or a capacity fault; the wait is bounded by
+the named window (NMFC-Rev `834b77e`: `NMFCCache` and the configuration).
+
+The contended test is `tile_lrsc_hostclaim` (`src/nmfc/test/tile_lrsc_hostclaim.c`, kernel
+`nmfc_claimloop.S`). The host makes 64 increments of a word by a constrained pair, starting
+once the tiles are taking the line; the tiles keep taking it until the host has finished and
+set a stop word. Each phase is exact arithmetic on both sides:
+
+- phase 1: one tile pair claiming the same word;
+- phase 2: 32 tile pairs claiming it;
+- phase 3: one tile `amoadd.d` on it;
+- phase 4: one tile storing to the other word of the same line;
+- phase 5: 32 tile pairs against each other with the host waiting (tile against tile).
+
+The figures are the most attempts one host increment needed, and in phase 5 the most one
+tile increment needed. "Stop" means no completion within 2 ms of simulated time.
+
+| Phase | Before, default stages (1, 2, 4 tiles × asks, tells) | Before, smallest stages | After, all 12 configurations |
+|---|---|---|---|
+| 1: one tile pair | 2 | 2 | **1** |
+| 2: 32 tile pairs | **stop** (0 host successes in 31,146 to 54,804 attempts) | 22 to 170 | **1** (tiles up to 6) |
+| 3: tile atomic | 2 | 2 | **1** |
+| 4: tile writer | 3 | 3 | **1** |
+| 5: tile against tile | tiles 2 | tiles 2 | tiles 2 (unchanged) |
+| landed-after-break / spurious success / timed-out points | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+
+*A defect in the tile the hold exposed.* With the host's pair held, `tile_lrsc_race` lost 4 of
+192 additions in its phase 6 (the tile's `amoadd.d` against the host's). A trace of the word
+showed the tile's read-modify-write split: its read half was answered, the tile's deferral of
+the host's request ran out (`snoopDeferLimit`, 32 cycles, while a stream of the tile's own
+atomics kept the line), the line went to the host, and the write half re-acquired the line and
+wrote a sum computed from the word before the host's addition. The hold only changed the timing
+that reached it. The write half of a read-modify-write is now a conditional write at the data
+cache, as a store-conditional's is: performed only if the line is still there, writable, and
+otherwise not at all, in which case the read-modify-write is performed again from its read half
+on the line as the other agent left it (`memqRmwRedoneAtCache`; the entry keeps its operand for
+this). In the race test it redoes 1 read-modify-write at one tile with a cache that asks first
+and 29 to 33 with one that tells afterwards, and every phase is exact at one, two and four
+tiles.
+
+*The cost.* The resident dictionary at load point 0 (8,192 insertions, four tiles, run whole)
+performs no host pair, so the hold never starts on it: the same answer (`0x155f0b7b`), the
+same host work cycles (619,768 at 32 contexts per tile, 692,466 at 128) and the same host
+latency to a tile-held line (3.19 and 3.43 fabric cycles mean) before and after. Where the host
+does claim, the tiles wait up to one host pair per request: in phase 4 the tile made 19
+increments of its word while the host made its 64, against 27 to 32 before, and the host's 64
+took 5.02 µs instead of 5.86 to 6.36.
 
 *Before and after.* Every run is an uninterrupted correctness run. "Before" is the machine at the
 previous head, with the instrumentation above and no change of behaviour. The graph-search row
@@ -2785,7 +2859,7 @@ one row per mechanism, and a row that changed this week says what it changed fro
 | The walk's own reads: through the data cache against reserved capacity, or straight to the last-level slice | **yes, both arms**, each with the refusals that stop it being measured as the other machine. **Under open analysis**: indistinguishable on the two sampled points so far, because the reservation was never contended, and the first reading of that rested on four walk-source counters that read zero while 1,007 walks ran — now a fifth bin and an accounting gate | the workload that separates them: one whose data traffic fills the queues while a walk needs to issue |
 | Getting a translated request to its bank | **yes** — the delivery window, oldest-per-bank, one delivery per bank per cycle, with the limit counter rewritten so that it can fire at all. **New this round (§2.4):** the window's two classes — translated requests, and the physically addressed ones (walk reads, page-table writes, context transfers) — are no longer filled in a fixed priority; the second has a slot of its own beyond the width (`xcPhysSlots`, a dedicated credit per class beside a shared pool, after Intel QuickPath's VN0/VNA and PCI Express's per-channel credits), counted in the reservation floor. The `FORK.M` start on the compiled reduction at 4 MiB fell from 6,487.6 to 107.9 cycles (its wait for a slot from 6,380.2 to 1.0) and the program ran 2.3 % faster; the graph search's level-7 window, the hash table and the `FORK.R` reduction are unchanged; answers unchanged. Contended test `tile_ctxread` (host `FORK.M`, tile `CONT.M`, both, walk reads, the smallest stages, a control) in the coherent suite, gated against the fixed-priority window on the same run | the split-window escalation, if measurement ever says the window is the constraint; a bound on the walk reads the walk path can have waiting (with a one-entry translation buffer and the fixed priority, 64,551 were queued at once) |
 | Ordering, forwarding, atomicity | **yes** — physically-indexed memory queues, one per bank: sequence order, forwarding from the newest older overlapping entry, read-modify-write at the bank, coherence requests at the bank with a bounded deferral. The word-keyed table above the data cache, its cache pins, its snoop merge and its unbounded waiter list are **deleted** | — |
-| The load-reserved / store-conditional point: four ends (its own store-conditional, the line taken away, the owner's next memory operation that is not that store-conditional, departure), a unit of each stage reserved for the close, no takeover by another address | **yes**. A pair abandoned after a failed compare ends at the owner's next memory operation, as a RISC-V reservation lapses; the contended test (`tile_lrsc_away`: a compare-and-swap loop that branches away, a claim array, the host on the line) passes at 1, 2 and 4 tiles, at the default stages and the floor, under both notification modes, and the compiled graph search now emits the plain compare-and-branch. Also a cross-agent directed test in which a host and a tile update one word, and eight contenders at the memory queue's floor on one tile, two tiles and a tile alone in the suites. The close's unit is an escape slot beyond the window's width and an escape entry beyond the translation queue's depth (floor 1), entitled at translation only to the point owner's store-conditional; the memory queue keeps it inside its depth (floor walkReserve + 2); walk traffic keeps its memory-queue entry while a point is open, and the walk-pending drain does not stop at a request the window refuses. 28 and 32 contenders complete at the default configuration (§2.5; NMFC-Rev `43d62d2`). **The owner's pair is served before another agent's request for its line**: an answered point holds the request for the pair's window (`lrscHoldCycles`, derived: 127 cycles at 32 contexts, 487 at 128), its store-conditional at the data cache for one access, and a point opened after the request arrived not at all; the load-reserved fetches for ownership, the store-conditional is a conditional write at the data cache, the data cache serves the tile's hits while asking it, and a cache that tells afterwards holds the line itself. A host writing the line without pause (`tile_lrsc_writer`) no longer stops a tile's claim: at 1, 2 and 4 tiles, both notification modes, default and floor, the most attempts one increment needs is measured at 1 to 11; `tile_lrsc_away_race` passes in all 12 configurations and T12 with a cache that tells afterwards is gated; `memqLrscScLandedAfterBreak` is a zero gate | the host's own reservation has no hold: a host pair against a tile claiming the same word without end has no bound (§2.5) |
+| The load-reserved / store-conditional point: four ends (its own store-conditional, the line taken away, the owner's next memory operation that is not that store-conditional, departure), a unit of each stage reserved for the close, no takeover by another address | **yes**. A pair abandoned after a failed compare ends at the owner's next memory operation, as a RISC-V reservation lapses; the contended test (`tile_lrsc_away`: a compare-and-swap loop that branches away, a claim array, the host on the line) passes at 1, 2 and 4 tiles, at the default stages and the floor, under both notification modes, and the compiled graph search now emits the plain compare-and-branch. Also a cross-agent directed test in which a host and a tile update one word, and eight contenders at the memory queue's floor on one tile, two tiles and a tile alone in the suites. The close's unit is an escape slot beyond the window's width and an escape entry beyond the translation queue's depth (floor 1), entitled at translation only to the point owner's store-conditional; the memory queue keeps it inside its depth (floor walkReserve + 2); walk traffic keeps its memory-queue entry while a point is open, and the walk-pending drain does not stop at a request the window refuses. 28 and 32 contenders complete at the default configuration (§2.5; NMFC-Rev `43d62d2`). **The owner's pair is served before another agent's request for its line**: an answered point holds the request for the pair's window (`lrscHoldCycles`, derived: 127 cycles at 32 contexts, 487 at 128), its store-conditional at the data cache for one access, and a point opened after the request arrived not at all; the load-reserved fetches for ownership, the store-conditional is a conditional write at the data cache, the data cache serves the tile's hits while asking it, and a cache that tells afterwards holds the line itself. A host writing the line without pause (`tile_lrsc_writer`) no longer stops a tile's claim: at 1, 2 and 4 tiles, both notification modes, default and floor, the most attempts one increment needs is measured at 1 to 11; `tile_lrsc_away_race` passes in all 12 configurations and T12 with a cache that tells afterwards is gated; `memqLrscScLandedAfterBreak` is a zero gate. **The host's own pair has the symmetric hold**: its L2 holds a line it answered the host's load-reserved from for the host's pair window (`llscHoldCycles`, derived from the core: 177 host cycles; longest measured 26), so 32 tile pairs claiming the host's word no longer stop the host's claim (`tile_lrsc_hostclaim`: 1 attempt per host increment in all 12 configurations, against no completion before) | a tile's claims against each other have no fairness bound among one tile's contexts (32 claimers need at most 2 attempts) |
 | Backpressure anywhere in the data path | **yes** — credit end to end, and the depth sweep shows a curve rather than a cliff: queue-full cycles 0, 1, 368, 6,417 as the queue goes 32, 8, 4, 2 with the answer unchanged | — |
 | Tile instruction and data caches, banked one bank per pipe, a bank reading one line per cycle, four counters each | **yes**, including the per-bank arithmetic unit that performs a read-modify-write and the bank index on the request interface | — |
 | Last-level slice banked by the memory device's bank bits; one queue per DRAM bank at the controller | **yes** — the slice bank is the device's bank-group and bank bits (it was its column bits until this round). The controller keeps a queue per bank over one shared read queue per channel, sized P = memory queues × their depth × tiles per channel + the host L2's miss registers = 128, the DMC-620's larger queue depth. Posted writes are held in a separate write queue of P entries, drained in batches that empty the batch they began with. Measured against the single queue: victims of a one-bank storm at 1.3× their solo time, where the single queue slowed them 9×; the shuffled sum's offloaded phase at 994,413 cycles against 995,883; the graph search's level-7 window at 1,584,221 against 1,590,118 (§2.8). The single-queue controller it replaces (one 32-entry read and one 32-entry write buffer per channel, ramulator2's defaults) stays selectable (`NMFC_BANK_QUEUES=0`) | T counts only the channel's own tile, so remote tiles' reads can exceed P: this happened for 0.2 % of reads on one channel at level 7 |
@@ -2995,18 +3069,20 @@ stratum for sparse waits, because a wait is time in which invocations execute an
 The counted axis stays selectable. Re-validated on this build (`tools/sampling/PROGRESS-AXIS.md`
 §8.8), with each program's uninterrupted run:
 
-| program | N (total) | W | U | regions | estimate ÷ whole run | 95 % interval | contains it |
-|---|---:|---:|---:|---:|---:|---|---|
-| dictionary, 8,192 inserts, wave | 6,438,896 | 262,144 | 16,365 | 60 | 0.9888 | [0.9502, 1.0274] | yes |
-| dictionary, 8,192 inserts, resident | 6,476,441 | 262,144 | 16,367 | 60 | 1.0410 | [0.9690, 1.1130] | yes |
-| dictionary, 677,205 inserts, wave | 214,717,506 | 4,194,304 | 4,193,632 | 20 | 1.0297 | [0.9849, 1.0746] | yes |
-| dictionary, 677,205 inserts, resident | 219,837,546 | 3,145,728 | 8,387,200 | 20 | 0.9886 | [0.9671, 1.0101] | yes |
-| compiled reduction, 4 MiB, replicated | 6,217,353 | 262,144 | 130,656 | 20 | 0.9723 | [0.9401, 1.0044] | yes |
-| compiled dictionary, 677,205 insertions, folded | 184,392,914 | 1,048,576 | 524,260 | 20 | 0.9806 | [0.9784, 0.9827] | no |
+| program | N (total) | W | U | regions | measured in full | estimate ÷ whole run | 95 % interval | contains it |
+|---|---:|---:|---:|---:|---|---:|---|---|
+| dictionary, 8,192 inserts, wave | 6,438,896 | 262,144 | 16,365 | 21 | 65 %: opening, 6 falls, closing | 1.0045 | [0.9848, 1.0241] | yes |
+| dictionary, 8,192 inserts, resident | 6,476,441 | 262,144 | 16,367 | 36 | 40 %: opening, fall and closing | 1.0147 | [0.9810, 1.0483] | yes |
+| dictionary, 677,205 inserts, wave | 214,717,506 | 4,194,304 | 4,193,632 | 18 | 10 %: opening, closing | 1.0353 | [0.9905, 1.0800] | yes |
+| dictionary, 677,205 inserts, resident | 219,837,546 | 3,145,728 | 8,387,200 | 18 | 10 %: opening, fall and closing | 0.9896 | [0.9716, 1.0077] | yes |
+| compiled reduction, 4 MiB, replicated | 6,217,353 | 262,144 | 130,656 | 18 | 10 %: opening, fall and closing | 0.9949 | [0.9906, 0.9993] | **no** |
+| compiled dictionary, 677,205 insertions, folded | 184,392,914 | 1,048,576 | 524,260 | 17 | 15 %: opening, fall, fall and closing | **1.0013** | [0.9994, 1.0033] | **yes** |
 
-Every row is taken on images that hold invocations part-done (below) and against an
-uninterrupted run on the same build. The same six points on the older images read 0.9965,
-1.0267, 1.0285, 0.9879, 1.1235 and 1.1066, the last two outside their intervals.
+Every row is taken on images that hold invocations part-done (below), with the stretches
+measured in full (below), and against an uninterrupted run on the same build. With the
+regions alone the same six read 0.9888, 1.0410, 1.0297, 0.9886, 0.9723 and 0.9806, the last
+outside its interval; on the older, eager images they read 0.9965, 1.0267, 1.0285, 0.9879,
+1.1235 and 1.1066.
 
 **An image holds the invocations in flight part-done (format 7).** An image of the older,
 eager producer held every forked invocation complete, because the producer ran each one to
@@ -3076,9 +3152,10 @@ images and 1.31 times now.
 - **In the cycle model:** both images restore at 1, 2 and 4 tiles to the whole run's answer,
   with the placement counts equal to what each image holds and a census of zero.
 
-**Why the folded dictionary still misses.** It is now 1.9 % low, with a narrow interval.
-Its regions measure its steady rate correctly: 0.1877 cycles per instruction, the
-uninterrupted run's median. What they miss is where the machine runs out of work:
+**Where the machine runs out of work, the program is measured in full.** With regions alone the
+folded dictionary read 1.9 % low with a narrow interval. Its regions measured its steady rate
+correctly (0.1877 cycles per instruction, the uninterrupted run's median); what they missed
+was where the machine runs out of work:
 
 | stretch | share of the run |
 |---|---:|
@@ -3088,31 +3165,66 @@ uninterrupted run's median. What they miss is where the machine runs out of work
 | the host's last 105,681 instructions after the last function instruction, which take 341,209 cycles | 0.91 % |
 | **total** | **1.97 %** |
 
-Each stretch is a few rows wide, and a region drawn at random in its interval lands on one
-about one time in twelve.
+Each is a few rows wide, and a region drawn at random in its interval lands on one about one
+time in twelve. The sampler now measures such stretches whole (`tools/sampling/stretches.py`):
 
-The fix belongs to the sampler's plan, not to the image, and is not made here:
+- **The opening**, from the entry image to the next image. It was already measured whole; it
+  is now counted as a stretch rather than averaged in with the regions.
+- **The closing**, from the last image to the program's exit: the final drain and the host's
+  last instructions.
+- **The falls.** The functional producer records every time the tracking unit emptied — the
+  last live invocation retired, leaving none — with where the run of retirements that emptied
+  it began and where the next `FORK` refilled it (`falls.csv`). Each fall's stretch runs from
+  the image at or before the first retirement to the image at or after the refill. Falls are
+  measured in full only when the regions are expected to hold fewer than one of them between
+  them (n falls, K regions of width U, N instructions: n × K × U < N). Where more are expected,
+  the regions sample them like anything else: the wave dictionary at 677,205 insertions has
+  32 falls and 12.5 expected, and measuring each in full would come close to running the
+  whole program.
 
-- measure the program's closing whole, from the last image to its exit, as the opening is
-  already measured whole from the entry image;
-- measure whole the stretches where the live invocations fall, which the interleaved
-  producer now records, since its host waits exactly there.
+**Where a stretch's run starts.** A part-done image holds every live invocation at the
+progress the producer's equal turns brought it to, where on the machine they have drifted
+apart over their lives. Restored close to where they end, they end together: from the folded
+dictionary's last image its last 9.2 million instructions took 1.196 times the uninterrupted
+cycles, all of it in the drain. So a stretch runs from the newest image, at least W before it,
+in which none of the invocations mid-flight at the stretch's start is mid-flight — before
+they were forked, or with each asleep at its wait — and the machine paces them itself. From
+the image before its last wave was forked, the same closing stretch took 1.0037 times the
+uninterrupted cycles. The entry image always qualifies. When the recorded uninterrupted wall
+time says that run would exceed the simulator's per-process limit, the stretch starts from
+the newest image W before it and is marked as starting part-done; no validated point needed
+that (NMFC-Rev `44f6540`).
+
+**What the rule measures.** On the folded dictionary: the opening, the interval holding the
+change from insertion to lookup (run from the image before that wave began), and the closing
+(run from the image before the last wave was forked), 15 % of the program; the other 85 % is
+17 regions. The estimate is 1.0013 of the uninterrupted run and its interval contains it.
+
+**What it does not fix.** The replicated reduction now reads 0.9949 with an interval that ends
+0.07 % short of its run. Its stretches match the uninterrupted run to 0.13 %. The remaining
+0.5 % is in the program's first ten intervals, where the uninterrupted machine is still
+warming (0.198 cycles per instruction falling to 0.182) while restored regions start at the
+settled rate, because the warm restore installs every replicated line in every tile's slice
+although, on the machine, a tile has not yet read most of them. That is a property of the warm
+restore, not of the stretches, and is recorded with the point.
 
 **The answer path at 677,205 insertions.** The compiled dictionary with 128 contexts per
 engine, answers folded into result lanes, was compared against the same source compiled to
-write an answer stream. The pair was re-taken on the part-done images, with the design the
-calibration chose: 20 regions per arm, W = 1,048,576.
+write an answer stream. The pair was re-taken on the part-done images with the stretches measured in full, with the
+design the calibration chose: W = 1,048,576 and U = 4,194,064, 17 regions on the lanes arm and
+16 on the stream arm beside their three stretches each.
 
 | | sampled | uninterrupted |
 |---|---|---|
-| result lanes ÷ answer stream (time) | **0.9430**, Fieller interval [0.9200, 0.9673] | **0.9697** earlier, **0.9702** on this build (35,473,462 cycles against 36,564,531) |
+| result lanes, cycles | 35,568,071 [35,483,229, 35,652,912] (1.0027 of the run) | 35,473,462 |
+| answer stream, cycles | 36,622,733 [36,410,868, 36,834,599] (1.0016 of the run) | 36,564,531 |
+| result lanes ÷ answer stream (time) | **0.9712**, Fieller interval [0.9653, 0.9772] | **0.9702** |
 
-- **The direction agrees.** On the older images the sampled pair read 1.098
-  [0.902, 1.373], the wrong side of one. It now agrees with the uninterrupted runs that the
-  folded path is faster, as it was at 152,917 insertions (0.9814). The compiler's rule stands.
-- **The interval misses.** The uninterrupted ratio lies 0.3 % above the interval's upper end.
-  The shortfall is the lanes arm's: it is the folded dictionary, 1.8 % low for the reason
-  above. The stream arm's estimate is 1.0107 of its run and its interval contains it.
+- **The interval contains the uninterrupted ratio.** With regions alone the pair read 0.9430
+  [0.9200, 0.9673], 0.3 % short, the lanes arm's miss; on the older, eager images, 1.098
+  [0.902, 1.373].
+- **The direction agrees** with the uninterrupted runs, as at 152,917 insertions (0.9814):
+  the folded path is faster, and the compiler's rule stands.
 
 **A measured build prints nothing the program did not ask for.** The compiled programs used to
 print a line for every run-time choice, a summary per phase and the ring's counters, and those
