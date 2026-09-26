@@ -2289,7 +2289,7 @@ The host's cache now gives the host's pair the tile's rules, symmetrically:
    already waiting for, and a load-reserved not yet answered holds nothing.
 
 None of the three is a timeout, a retry counter or a capacity fault; the wait is bounded by
-the named window (NMFC-Rev `834b77e`: `NMFCCache` and the configuration).
+the named window (NMFC-Rev `94f97b5`: `NMFCCache` and the configuration).
 
 The contended test is `tile_lrsc_hostclaim` (`src/nmfc/test/tile_lrsc_hostclaim.c`, kernel
 `nmfc_claimloop.S`). The host makes 64 increments of a word by a constrained pair, starting
@@ -3193,7 +3193,7 @@ the image before its last wave was forked, the same closing stretch took 1.0037 
 uninterrupted cycles. The entry image always qualifies. When the recorded uninterrupted wall
 time says that run would exceed the simulator's per-process limit, the stretch starts from
 the newest image W before it and is marked as starting part-done; no validated point needed
-that (NMFC-Rev `44f6540`).
+that (NMFC-Rev `7ef81bf`).
 
 **What the rule measures.** On the folded dictionary: the opening, the interval holding the
 change from insertion to lookup (run from the image before that wave began), and the closing
