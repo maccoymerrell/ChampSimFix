@@ -7770,8 +7770,17 @@ mechanism); a store-conditional at the data cache holds it for that one access; 
 after the request arrived does not hold it, so the other agent is served before the next pair;
 the load-reserved takes the line for ownership and the store-conditional is a conditional write
 at the data cache, so its check holds until its write is performed; and a data cache that tells
-the tile afterwards holds an answered load-reserved's line itself for the same window. Each wait
-is bounded by a named quantity; nothing times out or gives up.
+the tile afterwards holds an answered load-reserved's line itself for the same window. **The
+host's own pair has the same hold** (ledger L94): its L2, where the host's reservation lives,
+holds another agent's request for a line it has just answered a host load-reserved from, for
+`llscHoldCycles` — (14 + 1) × 10 host cycles for a branch redirect behind each instruction of
+the constrained loop and its store-conditional, plus 24 for the store-conditional's path through
+the L1D and L2, plus 3 for the answer, 177 host cycles in all, derived in the configuration from
+the core's own parameters — ending at the store-conditional, a load-reserved to another line,
+the line leaving the cache, or the bound; no hold starts on a line a request is already waiting
+for. A tile read-modify-write's write half is a conditional write at the data cache, performed
+again from its read half if the line has gone between them. Each wait is bounded by a named
+quantity; nothing times out or gives up.
 
 **The reservation has a floor, and a stage below it is refused at construction** (NMFC-Rev
 `3922ed7`). A reserved unit must be a unit of its own, as an escape channel is a buffer of its own
@@ -13202,6 +13211,25 @@ in the host core's profile** — for a statistic.)
   timestamp record of Barr, Falsafi and Hoe, ISCA 2005); what no image carries is warmed for a
   length measured per program (`warmups.json`). Full record: `docs/nmfc/ARCHITECTURE-2026-09.md`
   §4.1.
+- **The sampler's closing rule, added 2026-09-26** (`tools/sampling/stretches.py`, NMFC-Rev
+  `7ef81bf`). Three kinds of stretch are measured whole, one run each, and the regions are
+  placed clear of them: *the opening*, from the entry image to the next image; *the closing*,
+  from the last image to the program's exit; and *the falls*, each stretch around a point where
+  the tracking unit emptied, measured whole only when fewer than one fall is expected among the
+  regions (n falls, K regions of width U, N instructions: n × K × U < N). Every boundary is an
+  image's coordinate or the program's end, so the rule has no constant of its own. *Where a
+  stretch's run starts:* from the newest image at least W before it in which none of the
+  stretch's mid-flight invocations is mid-flight, because a part-done image holds every live
+  invocation at the same progress and, restored close to the drain, they finish together (from
+  the compiled dictionary's last image the closing took 1.196 times the uninterrupted cycles;
+  from the image before its last wave was forked, 1.0037). The images alone cannot find the
+  falls — both images around that dictionary's change from insertion to lookup hold 256 live
+  invocations though the count reaches zero between them — so the producer records
+  `live_at_capture`, `live_min`, `empties` and `falls.csv`; the images are unchanged. Validation:
+  five of six points contain their uninterrupted runs, the compiled dictionary at 1.0013
+  [0.9994, 1.0033]; the replicated reduction reads 0.9949 [0.9906, 0.9993], 0.07 % short, a
+  property of the warm restore (it installs every replicated line in every slice), recorded with
+  the point. Full record: `docs/nmfc/ARCHITECTURE-2026-09.md` §4.1.
 - **Replay headless to separate "slow channel" from "starved channel".** *User #167,
   2026-08-29T08:19:49Z:* "Can you not just **take a trace of accesses to the dram from the
   sim itself and run it through ramulator2 headless**? It would probably be a faster way
@@ -16518,6 +16546,38 @@ Not a defect; the parameter survives.]`**
   `memqLrscScLandedAfterBreak` is a zero gate. The dictionary at load point 0 gives the same
   answer, and the host's latency to a tile-held line moves from 3.46 to 3.19 fabric cycles on
   average at 32 contexts.
+
+**L94 — THE HOST'S OWN PAIR HAD NO HOLD, AND 32 TILE PAIRS KEPT IT FROM EVER COMPLETING.
+`[DEFECT, FIXED, 2026-09-26. Class R5.]`**
+
+- *What it was.* L93 gave the tile's pair a bounded hold against other agents' requests; the
+  host's reservation, which lives in its L2, had none. With 32 tile pairs claiming the word the
+  host was also claiming, the host never completed an increment: 0 successes against 31,146 to
+  54,804 failures before the 2 ms stop, at the default stages (22 to 170 attempts at the floor).
+- *The fix.* The host's L2 holds another agent's request for a line it has just answered a host
+  load-reserved from, for `llscHoldCycles`, derived in `vanadis-nmfc.py` from the core's own
+  parameters after Rocket's `lrscCycles` ("14 mispredicted branches + slop") and the RISC-V
+  constrained-loop guarantee: (14 + 1) × 10 for a branch redirect each (L1I 4, links 3, decode,
+  issue and branch unit 1 each), + 24 for the store-conditional through the write-through L1D (8)
+  and the L2 (16), + 3 for the answer: **177 host cycles**; the longest pair measured is 26. The
+  hold ends at the store-conditional, a load-reserved to another line from the same port, the
+  line leaving the cache, or the bound; no hold starts on a line a request is already waiting
+  for, and an unanswered load-reserved holds nothing (NMFC-Rev `94f97b5`).
+- *What it exposed, and did not cause.* A tile read-modify-write could be split: its read half
+  answered, the tile's 32-cycle deferral of the host's request ran out, the host took the line,
+  and the write half re-acquired it and wrote a sum computed from a stale value — 4 of 192
+  additions lost in `tile_lrsc_race` phase 6. The write half is now a conditional write at the
+  data cache, as a store-conditional's is; if the line has gone nothing is written and the
+  read-modify-write is performed again from its read half (`memqRmwRedoneAtCache`).
+- *Evidence.* `tile_lrsc_hostclaim`, at 1, 2 and 4 tiles, both notification modes, the default
+  stages and the floor (12 configurations): the most attempts one host increment needed is 1
+  against one tile pair, against 32 tile pairs, against a tile `amoadd.d` and against a tile
+  storing to the line (before: 2, stop, 2 and 3); tile against tile with the host waiting, 2
+  before and after; the three zero gates 0. The coherent suite gates `llscHoldsStarted` and
+  `lrscHoldDeferrals`. The dictionary at load point 0 is unchanged to the cycle (619,768 work
+  cycles at 32 contexts, 692,466 at 128; answer `0x155f0b7b`): it performs no host pair. Where
+  the host does claim, the tile makes 19 increments while the host makes its 64, against 27 to
+  32 before.
 ---
 
 
