@@ -1562,8 +1562,9 @@ rate: on the directed test, 32 contexts doing 64 double-precision divides each t
 cycles against the divider's 2,048 × 7 = 14,336, and 3,365 cycles when the divide was replaced by
 a fused multiply-add (4.3×). One context alone pays each divide's latency beyond the pipe, 64 ×
 (15 − 8) = 448 cycles exactly. Spread over four tiles, each tile's divider served its own quarter.
-The divider count is configuration (`fpDividers`); one per tile is the design, because an in-order
-multithreaded core shares one iterative divider among its threads, as N2 has one, on one pipe.
+The divider count is configuration (`fpDividers`); one per four pipes is the design, because an in-order
+multithreaded core shares one iterative divider among its threads, as N2 has one, on one pipe, and
+a tile of more pipes keeps that ratio rather than let the divider shrink per pipe (§3.1).
 Nothing but a tile's own contexts can reach its divider, so it has no cross-agent case. The counters are
 `fpDivOps`, `fpDivQueued`, `fpDivQueueCycles`, `fpDivBusyCycles`, `fpLongOps` and the census
 bucket `ctxNotReadyFpUnit`, which the readiness partition includes.
@@ -2788,7 +2789,8 @@ pipe depth; instructions in the instruction slot; branch-target-buffer entries; 
 banks and therefore memory queues; memory-queue depth; window width; reserved entries for a
 walk and for a privileged page-table write; translation queues, their depth and the
 translation latency; translation-buffer size and banking; the store slot-release rule;
-instruction-cache banks; bank access latency; last-level slice size (one declaration, which the
+instruction-cache banks; bank access latency; the tile data and instruction caches' size, ways
+and access latency (§3.1, where every quantity derived from these is listed); last-level slice size (one declaration, which the
 compiler's placement rule also reads), banking and latency;
 memory device and link.
 
@@ -2797,10 +2799,10 @@ memory device and link.
 | resource | capacity | source |
 |---|---|---|
 | floating-point unit, per pipe | one operation per cycle, pipelined; add 2, multiply 3, fused multiply-add 4, convert 3 cycles | Arm Neoverse N2 SOG, table 3-19 |
-| divider, per tile (`fpDividers`) | one, shared by every context; FDIV.D 15 cycles held 7, FSQRT.D 16 held 8, FDIV.S 10 held 5, FSQRT.S 9 held 2 | N2 SOG, table 3-19, worst case of each range |
+| divider, per tile (`fpDividers`) | one per four pipes (one at the default four, two at eight, four at sixteen), shared by every context; FDIV.D 15 cycles held 7, FSQRT.D 16 held 8, FDIV.S 10 held 5, FSQRT.S 9 held 2 | N2 SOG, table 3-19, worst case of each range; the count is ceil(pipes / 4), the measured tile's ratio (`nmfc_sizes.dividers`) |
 | host floating point | two pipelined units (add 2, multiply 3, fused multiply-add 4) and two dividers held as the tile's | Arm Neoverse V2 SOG, table 3-11 |
 | integer multiplier, per pipe | one operation per cycle, pipelined; MUL 2, MULH 3 cycles | Arm Neoverse N2 SOG, table 3-7 |
-| integer divider, per tile (`intDividers`) | one, shared by every context, separate from the floating-point divider; 32-bit divide or remainder 12 cycles, 64-bit 20, held for the whole latency | N2 SOG, table 3-7, worst case of each range, note 1 |
+| integer divider, per tile (`intDividers`) | one per four pipes, as the floating-point divider, shared by every context, separate from the floating-point divider; 32-bit divide or remainder 12 cycles, 64-bit 20, held for the whole latency | N2 SOG, table 3-7, worst case of each range, note 1; count as the floating-point divider's |
 | host integer divider | one; 12 cycles (32-bit) and 20 (64-bit), held for each | Arm Neoverse V2 SOG, table 3-4 |
 | memory, per tile | one DDR5-4800 channel: 2 ranks × 8 bank groups × 4 banks × 65,536 rows × 4 KiB = 16 GiB; 64 GiB at four tiles | the device file; JEDEC JESD79-5, 16 Gb x8 device |
 | physical address | 36 bits at 64 GiB (the smallest power of two covering the memory); the host core refuses any access outside it | derived from the memory size |
@@ -2809,7 +2811,7 @@ memory device and link.
 | page-table copy, per tile | as many of the tile's grains at the top of memory as a bound on the table's size needs (one grain up to about 500 MiB of mapped 4 KiB pages; 37 at 18 GiB) | derived from the declared regions |
 | armed lines, per context | one: the condition a `WAIT` sleeps on must live in one line | one arm per load slot (§2.1) |
 | invalidation broadcasts, per bank | one per cycle; a busy port delays delivery (`invPortWaitCycles`) | the bank's return port (§2.7) |
-| waited lines held without eviction wakes | eight per set (16 KiB, 8 ways, 4 banks); beyond it the waiters' re-loads evict each other and they poll at the miss rate (`waitEvictWakeChains`) | the tile data-cache configuration |
+| waited lines held without eviction wakes | one per way of each set: eight per set at the default 16 KiB, 8 ways, 4 banks, and at the 64 KiB and 128 KiB design points, which keep 8 ways; beyond it the waiters' re-loads evict each other and they poll at the miss rate (`waitEvictWakeChains`) | the tile data-cache configuration |
 | contexts a writer can use on a tile full of waiters | the tile's contexts minus its waiters; a waiter must never be what its writer needs | the tile's context count |
 | a `FORK.M` context read's place in the tile | one entry in the in-order queue of physically addressed requests (page-walk reads, page-table writes, context transfers), then one delivery-window slot and one line-class memory-queue entry | this model (§2.1) |
 | delivery-window slots of the physically addressed class (`xcPhysSlots`) | one beyond the configured width, which only walk reads, page-table writes and context transfers may take; that class also competes for the width behind translated requests | a dedicated credit per class beside a shared pool: Intel QuickPath VN0 / VNA (Intel, 2009); PCI Express per-virtual-channel flow-control credits (Base Specification 3.0) (§2.4) |
@@ -2883,6 +2885,64 @@ Three further pieces are worth naming as absent on purpose rather than missing. 
 reorder buffer, renaming or speculative execution on an engine, and no structure that lets a
 load issue before an older store's address is resolved — the queues hold only requests whose
 physical address is already known, issue nothing on a prediction and never replay. There is no per-context branch predictor: the target buffer is one shared structure indexed by program counter that any context consults for its own next instruction; contexts do not share an instruction stream. And there is no data prefetcher.
+
+### 3.1 The configured machine
+
+The tile's size is configuration, declared once in `src/nmfc/test/nmfc_sizes.py` and read by
+every configuration script that builds a tile: pipes per tile (`NMFC_PIPES`), stages per pipe
+(`NMFC_DEPTH`), contexts per engine (`NMFC_CONTEXTS`), and the size, ways and access latency of
+the tile's data and instruction caches (`NMFC_FC_DSIZE`, `NMFC_FC_DWAYS`, `NMFC_FC_DLAT` and the
+`I` forms). Everything that depends on them is derived, and `nmfc_sizes.py machine` prints each
+derived quantity with its formula. Two design points for floating-point work are named, not made
+the default: 8 pipes with 192 contexts and a 64 KiB data cache, the design point, and 16 pipes
+with 256 contexts and 128 KiB, the one to study, both with a 16 KiB instruction cache
+(`nmfc_sizes.py preset fp8`, `preset fp16`). The default is the machine every result in §4 was
+measured on.
+
+| four tiles | default | 8-pipe design point | 16-pipe study point | derived from |
+|---|---|---|---|---|
+| pipes × stages | 4 × 8 | 8 × 8 | 16 × 8 | configuration |
+| contexts per engine (floor pipes × stages) | 32 (32) | 192 (64) | 256 (128) | configuration |
+| data cache | 16 KiB, 8 ways, 32 sets, 2 cycles | 64 KiB, 8 ways, 128 sets, 2 cycles | 128 KiB, 8 ways, 256 sets, 2 cycles | configuration |
+| instruction cache | 32 KiB, 8 ways, 2 cycles | 16 KiB, 8 ways, 2 cycles | 16 KiB, 8 ways, 2 cycles | configuration |
+| banks per cache, and memory queues | 4 | 8 | 16 | one per pipe |
+| miss-status registers per bank (per cache) | 12 (48) | 36 (288) | 24 (384) | ⌈⌈contexts ÷ banks⌉ × 1.5⌉ (§1.6) |
+| memory-queue entries, 16 per queue | 64 | 128 | 256 | queues × `dataQueueDepth` |
+| tracking unit and control queue | 256 | 768 | 1,024 | max(tiles × contexts, 256) (§1.5) |
+| delivery window, plus reserved slots | 4 + 1 + 1 | 8 + 1 + 1 | 16 + 1 + 1 | max(pipes, 2); one physically addressed slot; one escape slot for a close (§2.4) |
+| translation queues × depth; completions per cycle | 4 × 8; 4 | 8 × 8; 8 | 16 × 8; 16 | queues and rate = pipes (§2.3) |
+| open-point reservation floors | window 1, translation 1, memory queue 3 | same | same | walkReserve + 2 (§2.5) |
+| floating-point and integer dividers | 1 and 1 | 2 and 2 | 4 and 4 | ⌈pipes ÷ 4⌉, the measured tile's ratio |
+| `lrscHoldCycles` | 127 | 367 | 247 | (14 + 1) × max(⌈contexts ÷ pipes⌉, stages) + 5 + 2 (§2.5) |
+| producer interleaving, tile per host instruction at peak | 0.889 | 1.778 | 3.556 | tiles × pipes × 1 GHz ÷ (6 × 3 GHz) (§4.1) |
+| controller read pool per channel | 128 | 192 | 320 | memory-queue entries + the host L2's 64 miss registers (§2.8) |
+| waited lines held per set without eviction wakes | 8 | 8 | 8 | the data cache's ways |
+
+The dividers were one per tile whatever the pipe count; they now keep the measured tile's ratio
+of one of each kind per four pipes, so that a wider tile does not have less divider per pipe. The
+data cache's 2-cycle access is kept at 64 KiB and 128 KiB as an assumption: Neoverse N2 and V2
+answer a load from their 64 KiB first-level caches in 4 cycles, and `NMFC_FC_DLAT` sets it. At
+both design points the memory queues hold fewer entries than the tile has contexts (128 against
+192 at 8 pipes, 256 against 256 at 16); a context that finds its queue full waits in its own slot
+for credit (§2.4), and the depth is configuration.
+
+**Verified at each point, correctness only.** Both suites pass at all three. At the default
+every statistics file of both suites is byte-identical to the build before the change. The
+directed tests whose contended case depended on the default tile now follow the configuration:
+the `WAIT` tests about one data-cache set and one bank take their strides from the configured
+cache; the striped-placement window forks four smallest tiles' worth of invocations, so a
+converging tile is oversubscribed at every pipe count (its migration queue peaked at 98 and 145
+invocations at 8 pipes, 194 and 289 at 16, against tiles of 64 and 128); the divider gates bound
+the contended kernel by the configured dividers (7,485 tile cycles against 14,336 ÷ 2 at 8 pipes);
+the context-read slot is also judged at a one-slot window, because the storm of 96 loaders never
+contends a window eight or sixteen slots wide (at one slot the read waited 418 cycles in total
+with the class's own slot against 4,693,988 without, at 8 pipes). Every contended load-reserved /
+store-conditional test and every `WAIT` test keeps its outcome. The integer workloads give the
+same answers at both design points as at the default, and the library's directed tests
+(`run_nmfcc.sh --sst`, 126 checks) pass at the 8-pipe point. The simulator is no slower and
+barely larger at either point: the graph search at four tiles takes 83 s and 87 s of wall time
+against 106 s, and its resident memory is 178 MiB and 180 MiB against 176 MiB (NMFC-Rev `162e0b4`,
+`0230211`, `a3903bd`).
 
 ---
 
