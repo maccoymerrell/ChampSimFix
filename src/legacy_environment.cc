@@ -64,50 +64,32 @@ int64_t parse_size_value(const json& val)
   return std::stoll(s);
 }
 
-// Helper: parse prefetch_activate string like "LOAD,PREFETCH" into access_type vector
+// Helper: parse prefetch_activate like "LOAD,PREFETCH" (or a JSON array) into access_types; any access_type name is accepted
 std::vector<access_type> parse_pref_activate(const json& j)
 {
-  std::vector<access_type> result;
-  std::string s;
-  if (j.is_string()) {
-    s = j.get<std::string>();
-  } else if (j.is_array()) {
-    for (auto& elem : j) {
-      s += elem.get<std::string>() + ",";
-    }
-  }
-  std::string token;
-  for (char c : s) {
-    if (c == ',') {
-      if (!token.empty()) {
-        if (token == "LOAD")
-          result.push_back(access_type::LOAD);
-        else if (token == "RFO")
-          result.push_back(access_type::RFO);
-        else if (token == "PREFETCH")
-          result.push_back(access_type::PREFETCH);
-        else if (token == "WRITE")
-          result.push_back(access_type::WRITE);
-        else if (token == "TRANSLATION")
-          result.push_back(access_type::TRANSLATION);
+  std::vector<std::string> tokens;
+  auto split = [&tokens](const std::string& s) {
+    std::string token;
+    for (char c : s + ",") {
+      if (c == ',') {
+        if (!token.empty())
+          tokens.push_back(token);
         token.clear();
+      } else if (c != ' ') {
+        token += c;
       }
-    } else if (c != ' ') {
-      token += c;
     }
-  }
-  if (!token.empty()) {
-    if (token == "LOAD")
-      result.push_back(access_type::LOAD);
-    else if (token == "RFO")
-      result.push_back(access_type::RFO);
-    else if (token == "PREFETCH")
-      result.push_back(access_type::PREFETCH);
-    else if (token == "WRITE")
-      result.push_back(access_type::WRITE);
-    else if (token == "TRANSLATION")
-      result.push_back(access_type::TRANSLATION);
-  }
+  };
+  if (j.is_string())
+    split(j.get<std::string>());
+  else if (j.is_array())
+    for (auto& elem : j)
+      split(elem.get<std::string>());
+
+  std::vector<access_type> result;
+  for (const auto& t : tokens)
+    if (auto at = access_type_from_string(t); at != access_type::NUM_TYPES)
+      result.push_back(at);
   return result;
 }
 

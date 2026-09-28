@@ -1,4 +1,5 @@
 #include <catch.hpp>
+#include <fmt/core.h>
 
 #include "cache_stats.h"
 #include "modules.h"
@@ -13,6 +14,35 @@ std::vector<std::string> plaintext(const cache_stats& stats)
   champsim::modules::cache_module::format_stats(stats, report);
   return report.text();
 }
+
+std::string row(int cpu, std::string_view type, int access, int hit, int miss, int merge)
+{
+  return fmt::format("cpu{}->test_cache {:<20s} ACCESS: {:10d} HIT: {:10d} MISS: {:10d} MISS_MERGE: {:10d}", cpu, type, access, hit, miss, merge);
+}
+
+// Row order after TOTAL: the five generic rows, then the instruction/data specializations.
+constexpr std::array<std::string_view, 9> row_names{"LOAD",        "RFO",       "PREFETCH",         "WRITE",        "TRANSLATION",
+                                                    "INSTRUCTION_LOAD", "DATA_LOAD", "INSTRUCTION_PREFETCH", "DATA_PREFETCH"};
+
+// One cpu's block: the totals line, every type row at zero, the prefetch line, the AMAT line.
+std::vector<std::string> zero_block(int cpu, std::string total, std::string pf_line, std::string amat_line)
+{
+  std::vector<std::string> block{std::move(total)};
+  for (auto name : row_names)
+    block.push_back(row(cpu, name, 0, 0, 0, 0));
+  block.push_back(std::move(pf_line));
+  block.push_back(std::move(amat_line));
+  return block;
+}
+
+std::string pf_line(int cpu, int requested, int issued, int useful, int useless)
+{
+  return fmt::format("cpu{}->test_cache PREFETCH REQUESTED: {:10} ISSUED: {:10} USEFUL: {:10} USELESS: {:10}", cpu, requested, issued, useful, useless);
+}
+
+// A recorded type and the rows (1-based after TOTAL) it must appear in: a specific type shows in its
+// own row and its generic row; a generic type only in its own row.
+using type_rows = std::pair<access_type, std::vector<std::size_t>>;
 } // namespace
 
 TEST_CASE("An empty cache stat block prints nothing")
@@ -27,56 +57,51 @@ TEST_CASE("An empty cache stat block prints nothing")
 
 TEST_CASE("Hits increment the hit and access counts")
 {
-  auto num_hits = 255;
-  auto [line_index, hit_type, expected_line] = GENERATE(
-      as<std::tuple<std::size_t, access_type, std::string>>{},
-      std::tuple{1, access_type::LOAD, "cpu0->test_cache LOAD         ACCESS:        255 HIT:        255 MISS:          0 MISS_MERGE:          0"},
-      std::tuple{2, access_type::RFO, "cpu0->test_cache RFO          ACCESS:        255 HIT:        255 MISS:          0 MISS_MERGE:          0"},
-      std::tuple{3, access_type::PREFETCH, "cpu0->test_cache PREFETCH     ACCESS:        255 HIT:        255 MISS:          0 MISS_MERGE:          0"},
-      std::tuple{4, access_type::WRITE, "cpu0->test_cache WRITE        ACCESS:        255 HIT:        255 MISS:          0 MISS_MERGE:          0"},
-      std::tuple{5, access_type::TRANSLATION, "cpu0->test_cache TRANSLATION  ACCESS:        255 HIT:        255 MISS:          0 MISS_MERGE:          0"});
+  auto [hit_type, rows_hit] =
+      GENERATE(as<type_rows>{}, type_rows{access_type::LOAD, {1}}, type_rows{access_type::RFO, {2}}, type_rows{access_type::PREFETCH, {3}},
+               type_rows{access_type::WRITE, {4}}, type_rows{access_type::TRANSLATION, {5}}, type_rows{access_type::INSTRUCTION_LOAD, {1, 6}},
+               type_rows{access_type::DATA_LOAD, {1, 7}}, type_rows{access_type::INSTRUCTION_PREFETCH, {3, 8}}, type_rows{access_type::DATA_PREFETCH, {3, 9}});
 
   cache_stats given{};
   given.name = "test_cache";
-  given.hits.set({hit_type, 0}, num_hits);
+  given.hits.set({hit_type, 0}, 255);
 
-  std::vector<std::string> expected{"cpu0->test_cache TOTAL        ACCESS:        255 HIT:        255 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache LOAD         ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache RFO          ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache PREFETCH     ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache WRITE        ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache TRANSLATION  ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache PREFETCH REQUESTED:          0 ISSUED:          0 USEFUL:          0 USELESS:          0",
-                                    "cpu0->test_cache AVERAGE MISS LATENCY: - cycles"};
-  expected.at(line_index) = expected_line;
+  auto expected = zero_block(0, row(0, "TOTAL", 255, 255, 0, 0), pf_line(0, 0, 0, 0, 0), "cpu0->test_cache AVERAGE MISS LATENCY: - cycles");
+  for (auto i : rows_hit)
+    expected.at(i) = row(0, row_names.at(i - 1), 255, 255, 0, 0);
 
   REQUIRE_THAT(plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
 TEST_CASE("Misses increment the miss and access counts")
 {
-  auto num_misses = 255;
-  auto [line_index, miss_type, expected_line] = GENERATE(
-      as<std::tuple<std::size_t, access_type, std::string>>{},
-      std::tuple{1, access_type::LOAD, "cpu0->test_cache LOAD         ACCESS:        255 HIT:          0 MISS:        255 MISS_MERGE:          0"},
-      std::tuple{2, access_type::RFO, "cpu0->test_cache RFO          ACCESS:        255 HIT:          0 MISS:        255 MISS_MERGE:          0"},
-      std::tuple{3, access_type::PREFETCH, "cpu0->test_cache PREFETCH     ACCESS:        255 HIT:          0 MISS:        255 MISS_MERGE:          0"},
-      std::tuple{4, access_type::WRITE, "cpu0->test_cache WRITE        ACCESS:        255 HIT:          0 MISS:        255 MISS_MERGE:          0"},
-      std::tuple{5, access_type::TRANSLATION, "cpu0->test_cache TRANSLATION  ACCESS:        255 HIT:          0 MISS:        255 MISS_MERGE:          0"});
+  auto [miss_type, rows_hit] =
+      GENERATE(as<type_rows>{}, type_rows{access_type::LOAD, {1}}, type_rows{access_type::RFO, {2}}, type_rows{access_type::PREFETCH, {3}},
+               type_rows{access_type::WRITE, {4}}, type_rows{access_type::TRANSLATION, {5}}, type_rows{access_type::INSTRUCTION_LOAD, {1, 6}},
+               type_rows{access_type::DATA_LOAD, {1, 7}}, type_rows{access_type::INSTRUCTION_PREFETCH, {3, 8}}, type_rows{access_type::DATA_PREFETCH, {3, 9}});
 
   cache_stats given{};
   given.name = "test_cache";
-  given.misses.set({miss_type, 0}, num_misses);
+  given.misses.set({miss_type, 0}, 255);
 
-  std::vector<std::string> expected{"cpu0->test_cache TOTAL        ACCESS:        255 HIT:          0 MISS:        255 MISS_MERGE:          0",
-                                    "cpu0->test_cache LOAD         ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache RFO          ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache PREFETCH     ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache WRITE        ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache TRANSLATION  ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache PREFETCH REQUESTED:          0 ISSUED:          0 USEFUL:          0 USELESS:          0",
-                                    "cpu0->test_cache AVERAGE MISS LATENCY: - cycles"};
-  expected.at(line_index) = expected_line;
+  auto expected = zero_block(0, row(0, "TOTAL", 255, 0, 255, 0), pf_line(0, 0, 0, 0, 0), "cpu0->test_cache AVERAGE MISS LATENCY: - cycles");
+  for (auto i : rows_hit)
+    expected.at(i) = row(0, row_names.at(i - 1), 255, 0, 255, 0);
+
+  REQUIRE_THAT(plaintext(given), Catch::Matchers::RangeEquals(expected));
+}
+
+TEST_CASE("A generic row sums its specializations, which keep their own rows")
+{
+  cache_stats given{};
+  given.name = "test_cache";
+  given.hits.set({access_type::INSTRUCTION_LOAD, 0}, 3);
+  given.hits.set({access_type::DATA_LOAD, 0}, 5);
+
+  auto expected = zero_block(0, row(0, "TOTAL", 8, 8, 0, 0), pf_line(0, 0, 0, 0, 0), "cpu0->test_cache AVERAGE MISS LATENCY: - cycles");
+  expected.at(1) = row(0, "LOAD", 8, 8, 0, 0);
+  expected.at(6) = row(0, "INSTRUCTION_LOAD", 3, 3, 0, 0);
+  expected.at(7) = row(0, "DATA_LOAD", 5, 5, 0, 0);
 
   REQUIRE_THAT(plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
@@ -86,13 +111,9 @@ TEST_CASE("Returning misses increment the AMAT")
   auto num_miss_returned = 128;
   auto num_miss_merged = 127;
   auto miss_return_latency = GENERATE(1, 2, 6);
-  auto [line_index, miss_type, expected_line] = GENERATE(
-      as<std::tuple<std::size_t, access_type, std::string>>{},
-      std::tuple{1, access_type::LOAD, "cpu0->test_cache LOAD         ACCESS:        255 HIT:          0 MISS:        255 MISS_MERGE:        127"},
-      std::tuple{2, access_type::RFO, "cpu0->test_cache RFO          ACCESS:        255 HIT:          0 MISS:        255 MISS_MERGE:        127"},
-      // std::tuple{3, access_type::PREFETCH, "test_cache PREFETCH     ACCESS:        255 HIT:          0 MISS:        255 MISS_MERGE:        127"},
-      std::tuple{4, access_type::WRITE, "cpu0->test_cache WRITE        ACCESS:        255 HIT:          0 MISS:        255 MISS_MERGE:        127"},
-      std::tuple{5, access_type::TRANSLATION, "cpu0->test_cache TRANSLATION  ACCESS:        255 HIT:          0 MISS:        255 MISS_MERGE:        127"});
+  auto [miss_type, rows_hit] = GENERATE(as<type_rows>{}, type_rows{access_type::LOAD, {1}}, type_rows{access_type::RFO, {2}},
+                                        type_rows{access_type::WRITE, {4}}, type_rows{access_type::TRANSLATION, {5}},
+                                        type_rows{access_type::INSTRUCTION_LOAD, {1, 6}}, type_rows{access_type::DATA_LOAD, {1, 7}});
 
   cache_stats given{};
   given.name = "test_cache";
@@ -101,93 +122,28 @@ TEST_CASE("Returning misses increment the AMAT")
   given.misses.set({miss_type, 0}, num_miss_merged + num_miss_returned);
   given.total_miss_latency_cycles = miss_return_latency * num_miss_returned;
 
-  std::vector<std::string> expected{
-      "cpu0->test_cache TOTAL        ACCESS:        255 HIT:          0 MISS:        255 MISS_MERGE:        127",
-      "cpu0->test_cache LOAD         ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-      "cpu0->test_cache RFO          ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-      "cpu0->test_cache PREFETCH     ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-      "cpu0->test_cache WRITE        ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-      "cpu0->test_cache TRANSLATION  ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-      "cpu0->test_cache PREFETCH REQUESTED:          0 ISSUED:          0 USEFUL:          0 USELESS:          0",
-  };
-  expected.push_back("cpu0->test_cache AVERAGE MISS LATENCY: " + std::to_string(miss_return_latency) + " cycles");
-  expected.at(line_index) = expected_line;
+  auto expected = zero_block(0, row(0, "TOTAL", 255, 0, 255, 127), pf_line(0, 0, 0, 0, 0),
+                             "cpu0->test_cache AVERAGE MISS LATENCY: " + std::to_string(miss_return_latency) + " cycles");
+  for (auto i : rows_hit)
+    expected.at(i) = row(0, row_names.at(i - 1), 255, 0, 255, 127);
 
   REQUIRE_THAT(plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
 
-TEST_CASE("Prefetch requests increase the count")
+TEST_CASE("Prefetch counters are reported, and prefetch fills are not demands")
 {
+  auto [requested, issued, useful, useless] = GENERATE(std::tuple{1, 0, 0, 0}, std::tuple{0, 1, 0, 0}, std::tuple{0, 0, 1, 0}, std::tuple{0, 0, 0, 1});
+  auto fill_type = GENERATE(access_type::PREFETCH, access_type::INSTRUCTION_PREFETCH, access_type::DATA_PREFETCH);
+
   cache_stats given{};
   given.name = "test_cache";
-  given.pf_requested = 1;
-  given.fill.set({access_type::PREFETCH, 0}, 1);
+  given.pf_requested = static_cast<uint64_t>(requested);
+  given.pf_issued = static_cast<uint64_t>(issued);
+  given.pf_useful = static_cast<uint64_t>(useful);
+  given.pf_useless = static_cast<uint64_t>(useless);
+  given.fill.set({fill_type, 0}, 1);
 
-  std::vector<std::string> expected{"cpu0->test_cache TOTAL        ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache LOAD         ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache RFO          ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache PREFETCH     ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache WRITE        ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache TRANSLATION  ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache PREFETCH REQUESTED:          1 ISSUED:          0 USEFUL:          0 USELESS:          0",
-                                    "cpu0->test_cache AVERAGE MISS LATENCY: - cycles"};
-
-  REQUIRE_THAT(plaintext(given), Catch::Matchers::RangeEquals(expected));
-}
-
-TEST_CASE("Prefetch issues increase the count")
-{
-  cache_stats given{};
-  given.name = "test_cache";
-  given.pf_issued = 1;
-  given.fill.set({access_type::PREFETCH, 0}, 1);
-
-  std::vector<std::string> expected{"cpu0->test_cache TOTAL        ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache LOAD         ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache RFO          ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache PREFETCH     ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache WRITE        ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache TRANSLATION  ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache PREFETCH REQUESTED:          0 ISSUED:          1 USEFUL:          0 USELESS:          0",
-                                    "cpu0->test_cache AVERAGE MISS LATENCY: - cycles"};
-
-  REQUIRE_THAT(plaintext(given), Catch::Matchers::RangeEquals(expected));
-}
-
-TEST_CASE("Prefetch useful increases the count")
-{
-  cache_stats given{};
-  given.name = "test_cache";
-  given.pf_useful = 1;
-  given.fill.set({access_type::PREFETCH, 0}, 1);
-
-  std::vector<std::string> expected{"cpu0->test_cache TOTAL        ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache LOAD         ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache RFO          ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache PREFETCH     ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache WRITE        ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache TRANSLATION  ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache PREFETCH REQUESTED:          0 ISSUED:          0 USEFUL:          1 USELESS:          0",
-                                    "cpu0->test_cache AVERAGE MISS LATENCY: - cycles"};
-
-  REQUIRE_THAT(plaintext(given), Catch::Matchers::RangeEquals(expected));
-}
-
-TEST_CASE("Prefetch useless increases the count")
-{
-  cache_stats given{};
-  given.name = "test_cache";
-  given.pf_useless = 1;
-  given.fill.set({access_type::PREFETCH, 0}, 1);
-
-  std::vector<std::string> expected{"cpu0->test_cache TOTAL        ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache LOAD         ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache RFO          ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache PREFETCH     ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache WRITE        ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache TRANSLATION  ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache PREFETCH REQUESTED:          0 ISSUED:          0 USEFUL:          0 USELESS:          1",
-                                    "cpu0->test_cache AVERAGE MISS LATENCY: - cycles"};
+  auto expected = zero_block(0, row(0, "TOTAL", 0, 0, 0, 0), pf_line(0, requested, issued, useful, useless), "cpu0->test_cache AVERAGE MISS LATENCY: - cycles");
 
   REQUIRE_THAT(plaintext(given), Catch::Matchers::RangeEquals(expected));
 }
@@ -196,44 +152,19 @@ TEST_CASE("Multicore stats are tracked separately")
 {
   cache_stats given{};
   given.name = "test_cache";
-  auto constexpr cpu0_total_access = 7;
-  auto constexpr cpu1_total_access = 11;
 
-  auto [line_index_cpu0, hit_type_cpu0, expected_line_cpu0] = GENERATE(
-      as<std::tuple<std::size_t, access_type, std::string>>{},
-      std::tuple{1, access_type::LOAD, "cpu0->test_cache LOAD         ACCESS:          7 HIT:          7 MISS:          0 MISS_MERGE:          0"},
-      std::tuple{2, access_type::RFO, "cpu0->test_cache RFO          ACCESS:          7 HIT:          7 MISS:          0 MISS_MERGE:          0"},
-      std::tuple{3, access_type::PREFETCH, "cpu0->test_cache PREFETCH     ACCESS:          7 HIT:          7 MISS:          0 MISS_MERGE:          0"},
-      std::tuple{4, access_type::WRITE, "cpu0->test_cache WRITE        ACCESS:          7 HIT:          7 MISS:          0 MISS_MERGE:          0"},
-      std::tuple{5, access_type::TRANSLATION, "cpu0->test_cache TRANSLATION  ACCESS:          7 HIT:          7 MISS:          0 MISS_MERGE:          0"});
-  auto [line_index_cpu1, hit_type_cpu1, expected_line_cpu1] = GENERATE(
-      as<std::tuple<std::size_t, access_type, std::string>>{},
-      std::tuple{9, access_type::LOAD, "cpu1->test_cache LOAD         ACCESS:         11 HIT:         11 MISS:          0 MISS_MERGE:          0"},
-      std::tuple{10, access_type::RFO, "cpu1->test_cache RFO          ACCESS:         11 HIT:         11 MISS:          0 MISS_MERGE:          0"},
-      std::tuple{11, access_type::PREFETCH, "cpu1->test_cache PREFETCH     ACCESS:         11 HIT:         11 MISS:          0 MISS_MERGE:          0"},
-      std::tuple{12, access_type::WRITE, "cpu1->test_cache WRITE        ACCESS:         11 HIT:         11 MISS:          0 MISS_MERGE:          0"},
-      std::tuple{13, access_type::TRANSLATION, "cpu1->test_cache TRANSLATION  ACCESS:         11 HIT:         11 MISS:          0 MISS_MERGE:          0"});
-  given.hits.set({hit_type_cpu0, 0}, cpu0_total_access);
-  given.hits.set({hit_type_cpu1, 1}, cpu1_total_access);
+  auto [type_cpu0, row_cpu0] = GENERATE(as<std::pair<access_type, std::size_t>>{}, std::pair{access_type::LOAD, 1}, std::pair{access_type::RFO, 2},
+                                        std::pair{access_type::PREFETCH, 3}, std::pair{access_type::WRITE, 4}, std::pair{access_type::TRANSLATION, 5});
+  auto [type_cpu1, row_cpu1] = GENERATE(as<std::pair<access_type, std::size_t>>{}, std::pair{access_type::LOAD, 1}, std::pair{access_type::RFO, 2},
+                                        std::pair{access_type::PREFETCH, 3}, std::pair{access_type::WRITE, 4}, std::pair{access_type::TRANSLATION, 5});
+  given.hits.set({type_cpu0, 0}, 7);
+  given.hits.set({type_cpu1, 1}, 11);
 
-  std::vector<std::string> expected{"cpu0->test_cache TOTAL        ACCESS:          7 HIT:          7 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache LOAD         ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache RFO          ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache PREFETCH     ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache WRITE        ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache TRANSLATION  ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu0->test_cache PREFETCH REQUESTED:          0 ISSUED:          0 USEFUL:          0 USELESS:          0",
-                                    "cpu0->test_cache AVERAGE MISS LATENCY: - cycles",
-                                    "cpu1->test_cache TOTAL        ACCESS:         11 HIT:         11 MISS:          0 MISS_MERGE:          0",
-                                    "cpu1->test_cache LOAD         ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu1->test_cache RFO          ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu1->test_cache PREFETCH     ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu1->test_cache WRITE        ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu1->test_cache TRANSLATION  ACCESS:          0 HIT:          0 MISS:          0 MISS_MERGE:          0",
-                                    "cpu1->test_cache PREFETCH REQUESTED:          0 ISSUED:          0 USEFUL:          0 USELESS:          0",
-                                    "cpu1->test_cache AVERAGE MISS LATENCY: - cycles"};
-  expected.at(line_index_cpu0) = expected_line_cpu0;
-  expected.at(line_index_cpu1) = expected_line_cpu1;
+  auto expected = zero_block(0, row(0, "TOTAL", 7, 7, 0, 0), pf_line(0, 0, 0, 0, 0), "cpu0->test_cache AVERAGE MISS LATENCY: - cycles");
+  expected.at(row_cpu0) = row(0, row_names.at(row_cpu0 - 1), 7, 7, 0, 0);
+  auto cpu1 = zero_block(1, row(1, "TOTAL", 11, 11, 0, 0), pf_line(1, 0, 0, 0, 0), "cpu1->test_cache AVERAGE MISS LATENCY: - cycles");
+  cpu1.at(row_cpu1) = row(1, row_names.at(row_cpu1 - 1), 11, 11, 0, 0);
+  expected.insert(std::end(expected), std::begin(cpu1), std::end(cpu1));
 
   REQUIRE_THAT(plaintext(given), Catch::Matchers::RangeEquals(expected));
 }

@@ -38,7 +38,7 @@ public:
   void allocate(key_type key)
   {
     auto [key_iter, value_iter] = get_iter(key);
-    if (key_iter == std::end(keys) || *key_iter != key) {
+    if (key_iter == std::end(keys) || key < *key_iter) {
       keys.insert(key_iter, key);
       values.insert(value_iter, value_type{});
     }
@@ -55,7 +55,7 @@ public:
   {
     // Single search: allocate-if-missing and bump through one lookup
     auto [key_iter, value_iter] = get_iter(key);
-    if (key_iter == std::end(keys) || *key_iter != key) {
+    if (key_iter == std::end(keys) || key < *key_iter) {
       keys.insert(key_iter, key);
       value_iter = values.insert(value_iter, value_type{});
     }
@@ -65,7 +65,7 @@ public:
   void set(key_type key, value_type val)
   {
     auto [key_iter, value_iter] = get_iter(key);
-    if (key_iter == std::end(keys) || *key_iter != key) {
+    if (key_iter == std::end(keys) || key < *key_iter) {
       keys.insert(key_iter, key);
       value_iter = values.insert(value_iter, value_type{});
     }
@@ -81,7 +81,7 @@ public:
   auto value_or(key_type key, value_type val) const
   {
     auto [key_iter, value_iter] = get_iter(key);
-    if (key_iter == std::end(keys) || *key_iter != key) {
+    if (key_iter == std::end(keys) || key < *key_iter) {
       return val;
     }
     return *value_iter;

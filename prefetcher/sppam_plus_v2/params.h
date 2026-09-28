@@ -658,20 +658,17 @@ struct params {
   double   gate_thrash_min = 0.55;         // region_thrash_ema threshold above which the gate engages
 
   // --- Branch-graph L2 instruction prefetcher (see iprefetch_predictor.h) ---
-  // Models the L1I-filtered instruction miss stream the L2 sees. OFF by default: the
-  // data path is unchanged and instruction fetches stay blocked (DPC4 parity). When on,
-  // the module opts the cache into delivering instruction accesses and routes them to a
-  // separate branch-edge predictor (its own residency filter; never touches the region
-  // table). Physical-address space (L2 is physically indexed) -> issue needs no translation.
+  // Models the L1I-filtered instruction miss stream the L2 sees. When on, instruction accesses
+  // (INSTRUCTION_LOAD / INSTRUCTION_PREFETCH) route to a separate branch-edge predictor (its own
+  // residency filter; never touches the region table); when off they train the data path like any
+  // other access. Physical-address space (L2 is physically indexed) -> issue needs no translation.
   bool enable_instr_prefetch = true; // ON by default: +5.8% datacenter / +0.08% control, no regression,
                                      // ~2.5 KiB. Instruction prefetching is now part of SPPAM. (DSE-validated
                                      // IP-space branch graph; set false to get the data-only prefetcher.)
-  // Marginal-value experiment knobs: instr_feed_data lets instruction fetches ALSO train the data
+  // Marginal-value experiment knob: instr_feed_data lets instruction accesses ALSO train the data
   // path (no early return after the branch graph) so we can measure the branch graph's contribution
-  // ON TOP of the data path handling instructions. unblock_instructions opts the cache into
-  // delivering instruction fetches even with the branch graph OFF (the data-path-only arm).
+  // ON TOP of the data path handling instructions.
   bool instr_feed_data = false;
-  bool unblock_instructions = false;
   // v2 instruction refinements (DSE holistic-id/bg_residency findings; default OFF = B, C enables):
   int instr_nextn = 0;                 // sequential fallback: prefetch this many phys blocks ahead within the code page (next-2 ~= full SPPAM on the sequential residual)
   bool instr_packed_residency = false; // branch graph shares SPPAM's PACKED code residency (4KiB-page/both-maps) instead of its own filter -> lower redundancy, zero extra state
@@ -1106,7 +1103,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(enable_instr_prefetch); SET(instr_la_depth); SET(instr_conf); SET(instr_table_entries); SET(instr_delta_bits); SET(instr_xlate_entries); SET(instr_filter_entries);
   SET(instr_ft_blocks); SET(instr_dir_bits);
   SET(instr_walk_budget); SET(instr_cost_strong); SET(instr_cost_weak); SET(instr_miss_conf);
-  SET(instr_feed_data); SET(unblock_instructions);
+  SET(instr_feed_data);
   SET(instr_nextn); SET(instr_packed_residency);
   SET(enable_region_thrash_throttle); SET(region_thrash_min_blocks); SET(region_thrash_table); SET(region_thrash_lo); SET(region_thrash_hi); SET(region_thrash_max_drop);
   SET(enable_pe_management); SET(pe_phase); SET(pe_throttle_div); SET(pfht_entries); SET(pfht_tag_bits); SET(pe_sample_div); SET(pe_pf_demand_weight);

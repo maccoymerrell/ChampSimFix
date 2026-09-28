@@ -37,12 +37,13 @@ struct ev_access_record {
   uint64_t vaddr;
   uint64_t paddr;
   uint64_t instr_id;
-  uint8_t type;          // access_type: 0 LOAD 1 RFO 2 PREFETCH 3 WRITE 4 TRANSLATION
+  uint8_t type;          // generic access_type: 0 LOAD 1 RFO 2 PREFETCH 3 WRITE 4 TRANSLATION
   uint8_t is_prefetch;   // 1 if this access is a prefetch issued by THIS cache
   uint8_t hit;           // 1 if it hit
   uint8_t useful;        // 1 if it hit a prefetched, not-yet-demand-used line
   uint8_t is_translated; // 1 if paddr is valid
-  uint8_t pad[3];
+  uint8_t is_instr;      // 1 if instruction-side (INSTRUCTION_LOAD / INSTRUCTION_PREFETCH)
+  uint8_t pad[2];
 };
 
 // One row per prefetch the cache's prefetcher requests (prefetch_line).

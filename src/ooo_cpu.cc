@@ -278,6 +278,7 @@ bool O3_CPU::do_fetch_instruction(champsim::ring_buffer<ooo_model_instr>::iterat
   fetch_packet.v_address = begin->ip;
   fetch_packet.instr_id = begin->instr_id;
   fetch_packet.ip = begin->ip;
+  fetch_packet.type = access_type::INSTRUCTION_LOAD;
 
   std::transform(begin, end, std::back_inserter(fetch_packet.instr_depend_on_me), [](const auto& instr) { return instr.instr_id; });
 
@@ -789,6 +790,7 @@ bool O3_CPU::execute_load(const LSQ_ENTRY& lq_entry)
   data_packet.v_address = lq_entry.virtual_address;
   data_packet.instr_id = lq_entry.instr_id;
   data_packet.ip = lq_entry.ip;
+  data_packet.type = access_type::DATA_LOAD;
 
   if constexpr (champsim::debug_print) {
     fmt::print("[LQ] {} instr_id: {} vaddr: {}\n", __func__, data_packet.instr_id, data_packet.v_address);
@@ -1104,7 +1106,6 @@ bool CacheBus::issue_read(request_type data_packet)
 
   data_packet.address = data_packet.v_address;
   data_packet.is_translated = false;
-  data_packet.type = access_type::LOAD;
 
   return lower_level->add_rq(data_packet);
 }

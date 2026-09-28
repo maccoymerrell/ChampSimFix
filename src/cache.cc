@@ -148,6 +148,7 @@ champsim::address CACHE::module_address(const T& element) const
 bool CACHE::handle_fill(const fill_type& fill)
 {
   last_served_origin = fill.origin;
+  last_served_is_instr_ = is_instruction_access(fill.type);
 
   // find victim
   auto [set_begin, set_end] = get_set_span(fill.address);
@@ -240,6 +241,7 @@ bool CACHE::handle_fill(const fill_type& fill)
 bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
 {
   last_served_origin = handle_pkt.origin;
+  last_served_is_instr_ = is_instruction_access(handle_pkt.type);
 
   // access cache
   auto [set_begin, set_end] = get_set_span(handle_pkt.address);
@@ -256,7 +258,8 @@ bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
     r.vaddr = handle_pkt.v_address.to<uint64_t>();
     r.paddr = handle_pkt.address.to<uint64_t>();
     r.instr_id = handle_pkt.instr_id;
-    r.type = static_cast<uint8_t>(champsim::to_underlying(handle_pkt.type));
+    r.type = static_cast<uint8_t>(champsim::to_underlying(generic_access_type(handle_pkt.type)));
+    r.is_instr = is_instruction_access(handle_pkt.type) ? uint8_t{1} : uint8_t{0};
     r.is_prefetch = handle_pkt.prefetch_from_this ? uint8_t{1} : uint8_t{0};
     r.hit = hit ? uint8_t{1} : uint8_t{0};
     r.useful = useful_prefetch ? uint8_t{1} : uint8_t{0};
@@ -272,9 +275,6 @@ bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
 
   auto metadata_thru = handle_pkt.pf_metadata;
   if (should_activate_prefetcher(handle_pkt)) {
-    // Instruction fetch == ip and v_address share a block; only computed for an opted-in prefetcher.
-    current_access_is_instr_ =
-        prefetch_instructions_ && (champsim::block_number{handle_pkt.ip} == champsim::block_number{handle_pkt.v_address});
     metadata_thru = impl_prefetcher_cache_operate(module_address(handle_pkt), handle_pkt.ip, hit, useful_prefetch, handle_pkt.type, metadata_thru);
   }
 
@@ -332,6 +332,7 @@ bool CACHE::handle_miss(tag_lookup_type& handle_pkt)
   }
 
   last_served_origin = handle_pkt.origin;
+  last_served_is_instr_ = is_instruction_access(handle_pkt.type);
 
   // Check MSHR, then inflight fills. Ring iterators compare by logical position
   // and must not be compared across containers, so carry the found entry as a
@@ -659,14 +660,14 @@ bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint3
   bool accepted = false;
   if (std::size(internal_PQ) < PQ_SIZE) {
     request_type pf_packet;
-    pf_packet.type = access_type::PREFETCH;
+    pf_packet.type = last_served_is_instr_ ? access_type::INSTRUCTION_PREFETCH : access_type::DATA_PREFETCH;
     pf_packet.pf_metadata = prefetch_metadata;
     pf_packet.origin = last_served_origin;
     pf_packet.address = pf_addr;
     pf_packet.v_address = virtual_prefetch ? pf_addr : champsim::address{};
     pf_packet.is_translated = !virtual_prefetch;
-    // Instruction prefetch: carry the PC (== the line's address) to lower-level instruction prefetchers.
-    if (prefetch_ip_from_addr_)
+    // An instruction line's PC is its address: carry it so lower-level prefetchers see a PC.
+    if (last_served_is_instr_)
       pf_packet.ip = pf_packet.v_address;
 
     internal_PQ.emplace_back(pf_packet, true, !fill_this_level);
@@ -765,7 +766,7 @@ void CACHE::issue_translation(tag_lookup_type& q_entry)
   if (!q_entry.translate_issued && !q_entry.is_translated) {
     request_type fwd_pkt;
     fwd_pkt.origin = q_entry.origin;
-    fwd_pkt.type = access_type::LOAD;
+    fwd_pkt.type = is_instruction_access(q_entry.type) ? access_type::INSTRUCTION_LOAD : access_type::DATA_LOAD;
 
     fwd_pkt.address = q_entry.address;
     fwd_pkt.v_address = q_entry.v_address;
@@ -1007,11 +1008,7 @@ void CACHE::end_simulation()
 template <typename T>
 bool CACHE::should_activate_prefetcher(const T& pkt) const
 {
-  // An instruction fetch (ip and v_address in the same block) activates the prefetcher only if it opted in
-  // via set_prefetch_instructions(true). NO_INSTR_BLOCK=1 lifts the block for every prefetcher.
-  static const bool no_instr_block = (std::getenv("NO_INSTR_BLOCK") != nullptr);
-  return !pkt.prefetch_from_this && pref_activate_lut_[champsim::to_underlying(pkt.type)]
-         && (no_instr_block || prefetch_instructions_ || champsim::block_number{pkt.ip} != champsim::block_number{pkt.v_address});
+  return !pkt.prefetch_from_this && pref_activate_lut_[champsim::to_underlying(pkt.type)];
 }
 
 // LCOV_EXCL_START Exclude the following function from LCOV
@@ -1069,48 +1066,49 @@ void champsim::modules::cache_module::format_stats(const stats_type& stats, cham
   auto uniq_end = std::unique(std::begin(cpus), std::end(cpus));
   cpus.erase(uniq_end, std::end(cpus));
 
-  // The plaintext rows want every (type, cpu) key present, so they read mutable copies. The JSON
-  // below reads the originals through value_or and must not see the allocated keys.
-  auto hits = stats.hits;
-  auto misses = stats.misses;
-  auto miss_merge = stats.miss_merge;
-  auto fill = stats.fill;
-
-  for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION}) {
-    for (auto cpu : cpus) {
-      hits.allocate(std::pair{type, cpu});
-      misses.allocate(std::pair{type, cpu});
-      miss_merge.allocate(std::pair{type, cpu});
-      fill.allocate(std::pair{type, cpu});
+  // A generic row (LOAD, PREFETCH) sums its INSTRUCTION_/DATA_ specializations plus any packet that
+  // carried the generic type itself; every other row counts only its own key. The five generic rows
+  // partition all accesses, so they also make up the totals.
+  constexpr std::array generic_rows{access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION};
+  constexpr std::array rows{access_type::LOAD,        access_type::RFO,       access_type::PREFETCH,
+                            access_type::WRITE,       access_type::TRANSLATION, access_type::INSTRUCTION_LOAD,
+                            access_type::DATA_LOAD,   access_type::INSTRUCTION_PREFETCH, access_type::DATA_PREFETCH};
+  auto count = [](const auto& counter, access_type row, std::size_t cpu) {
+    typename std::decay_t<decltype(counter)>::value_type sum{};
+    for (std::size_t t = 0; t < static_cast<std::size_t>(access_type::NUM_TYPES); ++t) {
+      const auto key = static_cast<access_type>(t);
+      if (champsim::to_underlying(key) == champsim::to_underlying(row) || champsim::to_underlying(generic_access_type(key)) == champsim::to_underlying(row))
+        sum += counter.value_or(std::pair{key, cpu}, decltype(sum){});
     }
-  }
+    return sum;
+  };
 
   for (auto cpu : cpus) {
     hits_value_type total_hits = 0;
     misses_value_type total_misses = 0;
     miss_merge_value_type total_miss_merge = 0;
     fill_value_type total_fill = 0;
-    for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION}) {
-      total_hits += hits.value_or(std::pair{type, cpu}, hits_value_type{});
-      total_misses += misses.value_or(std::pair{type, cpu}, misses_value_type{});
-      total_miss_merge += miss_merge.value_or(std::pair{type, cpu}, miss_merge_value_type{});
-      total_fill += fill.value_or(std::pair{type, cpu}, miss_merge_value_type{});
+    for (const auto type : generic_rows) {
+      total_hits += count(stats.hits, type, cpu);
+      total_misses += count(stats.misses, type, cpu);
+      total_miss_merge += count(stats.miss_merge, type, cpu);
+      total_fill += count(stats.fill, type, cpu);
     }
 
     fmt::format_string<std::string_view, std::string_view, int, int, int> hitmiss_fmtstr{
-        "cpu{}->{} {:<12s} ACCESS: {:10d} HIT: {:10d} MISS: {:10d} MISS_MERGE: {:10d}"};
+        "cpu{}->{} {:<20s} ACCESS: {:10d} HIT: {:10d} MISS: {:10d} MISS_MERGE: {:10d}"};
     out.line(fmt::format(hitmiss_fmtstr, cpu, stats.name, "TOTAL", total_hits + total_misses, total_hits, total_misses, total_miss_merge));
-    for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION}) {
-      out.line(fmt::format(hitmiss_fmtstr, cpu, stats.name, access_type_names.at(champsim::to_underlying(type)),
-                           hits.value_or(std::pair{type, cpu}, hits_value_type{}) + misses.value_or(std::pair{type, cpu}, misses_value_type{}),
-                           hits.value_or(std::pair{type, cpu}, hits_value_type{}), misses.value_or(std::pair{type, cpu}, misses_value_type{}),
-                           miss_merge.value_or(std::pair{type, cpu}, miss_merge_value_type{})));
+    for (const auto type : rows) {
+      const auto hits = count(stats.hits, type, cpu);
+      const auto misses = count(stats.misses, type, cpu);
+      out.line(fmt::format(hitmiss_fmtstr, cpu, stats.name, access_type_names.at(champsim::to_underlying(type)), hits + misses, hits, misses,
+                           count(stats.miss_merge, type, cpu)));
     }
 
     out.line(fmt::format("cpu{}->{} PREFETCH REQUESTED: {:10} ISSUED: {:10} USEFUL: {:10} USELESS: {:10}", cpu, stats.name, stats.pf_requested, stats.pf_issued,
                          stats.pf_useful, stats.pf_useless));
 
-    uint64_t total_downstream_demands = total_fill - fill.value_or(std::pair{access_type::PREFETCH, cpu}, fill_value_type{});
+    uint64_t total_downstream_demands = total_fill - count(stats.fill, access_type::PREFETCH, cpu);
     out.line(fmt::format("cpu{}->{} AVERAGE MISS LATENCY: {} cycles", cpu, stats.name,
                          champsim::print_ratio(stats.total_miss_latency_cycles, total_downstream_demands)));
   }
@@ -1123,19 +1121,19 @@ void champsim::modules::cache_module::format_stats(const stats_type& stats, cham
 
   uint64_t total_downstream_demands = stats.fill.total();
   for (auto cpu : cpus)
-    total_downstream_demands -= stats.fill.value_or(std::pair{access_type::PREFETCH, cpu}, fill_value_type{});
+    total_downstream_demands -= count(stats.fill, access_type::PREFETCH, cpu);
 
   b.add("miss latency", std::ceil(stats.total_miss_latency_cycles) / std::ceil(total_downstream_demands));
 
-  for (const auto type : {access_type::LOAD, access_type::RFO, access_type::PREFETCH, access_type::WRITE, access_type::TRANSLATION}) {
+  for (const auto type : rows) {
     std::vector<hits_value_type> hit_vec;
     std::vector<misses_value_type> miss_vec;
     std::vector<miss_merge_value_type> miss_merge_vec;
 
     for (auto cpu : cpus) {
-      hit_vec.push_back(stats.hits.value_or(std::pair{type, cpu}, hits_value_type{}));
-      miss_vec.push_back(stats.misses.value_or(std::pair{type, cpu}, misses_value_type{}));
-      miss_merge_vec.push_back(stats.miss_merge.value_or(std::pair{type, cpu}, miss_merge_value_type{}));
+      hit_vec.push_back(count(stats.hits, type, cpu));
+      miss_vec.push_back(count(stats.misses, type, cpu));
+      miss_merge_vec.push_back(count(stats.miss_merge, type, cpu));
     }
 
     auto sub = b.group(std::string{access_type_names.at(champsim::to_underlying(type))});

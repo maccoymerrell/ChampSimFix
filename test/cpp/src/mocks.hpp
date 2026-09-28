@@ -45,6 +45,8 @@ class do_nothing_MRC : public champsim::operable
 public:
   champsim::channel queues{};
   std::deque<champsim::address> addresses{};
+  std::deque<access_type> types{};
+  std::deque<champsim::address> ips{};
   do_nothing_MRC(int lat) : champsim::operable(), latency(lat) {}
   do_nothing_MRC() : do_nothing_MRC(0) {}
 
@@ -57,6 +59,8 @@ public:
       to_insert.data = ret_data_base + steps;
       ++steps;
       addresses.push_back(to_insert.address);
+      types.push_back(to_insert.type);
+      ips.push_back(to_insert.ip);
       packets.push_back(to_insert);
     };
 

@@ -638,13 +638,6 @@ void epi::do_prefetches(uint32_t metadata_in)
 void epi::prefetcher_initialize()
 {
   std::cout << "CPU L1I EPI (Entangling) prefetcher" << std::endl;
-  // EPI is driven by the instruction-fetch stream; instruction fetches (ip == v_address) are
-  // blocked from prefetcher_cache_operate unless we opt in (DPC4-parity gate in the cache).
-  cache_->set_prefetch_instructions(true);
-  // Keep the instruction PC (== the prefetched line's address) attached to our prefetches so
-  // lower-level instruction prefetchers (pythia / sppam) still see the instruction stream with
-  // its PC when EPI absorbs the L1I demand accesses. See CACHE::prefetch_line.
-  cache_->set_prefetch_ip_from_address(true);
   current_cycle_ = cache_->current_cycle();
   last_basic_block_ = 0;
   consecutive_count_ = 0;

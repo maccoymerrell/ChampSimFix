@@ -220,9 +220,7 @@ public:
   bool prefetch_as_load;
   bool match_offset_bits;
   bool virtual_prefetch;
-  bool prefetch_instructions_ = false;  // instruction fetches may activate the prefetcher (opt-in)
-  bool current_access_is_instr_ = false; // set per access in try_hit when opted in
-  bool prefetch_ip_from_addr_ = false;   // prefetch_line stamps ip = v_address
+  bool last_served_is_instr_ = false; // prefetches issued now are instruction-side (inherit the access being served)
   std::vector<access_type> pref_activate_mask;
 
   using stats_type = cache_stats;
@@ -272,9 +270,6 @@ public:
   stats_type get_sim_stats() const final { return sim_stats; }
 
   bool is_virtual_prefetch() const final { return virtual_prefetch; }
-  void set_prefetch_instructions(bool enable) override { prefetch_instructions_ = enable; }
-  bool current_access_is_instruction() const override { return current_access_is_instr_; }
-  void set_prefetch_ip_from_address(bool enable) override { prefetch_ip_from_addr_ = enable; }
 
   // Opt-in event tracer (CHAMPSIM_EVTRACE env var); inactive in normal runs.
   champsim::event_trace_set evtrace_;
@@ -368,8 +363,10 @@ public:
     // Throttled at MSHR_SIZE occupancy, plus at most one cycle's MAX_TAG
     // admissions before the throttle is re-read; growing push covers bursts.
     untranslated_tag_check.set_capacity(static_cast<std::size_t>(MSHR_SIZE) + static_cast<std::size_t>(champsim::to_underlying(MAX_TAG)));
-    for (auto type : pref_activate_mask)
-      pref_activate_lut_[static_cast<std::size_t>(champsim::to_underlying(type))] = true;
+    for (auto mask_type : pref_activate_mask)
+      for (std::size_t t = 0; t < pref_activate_lut_.size(); ++t)
+        if (mask_type == static_cast<access_type>(t))
+          pref_activate_lut_[t] = true;
 
     // Construct prefetcher submodules
     for (const auto& sub : builder.get_submodules("prefetcher", true))

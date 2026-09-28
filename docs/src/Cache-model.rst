@@ -59,7 +59,30 @@ These parameters can be set in the JSON configuration file (see
     If ``true``, prefetcher operates on virtual addresses.
 
 ``pref_activate_mask``
-    List of access types (e.g. ``["LOAD", "PREFETCH"]``) that trigger the prefetcher.
+    List of access types (e.g. ``["LOAD", "PREFETCH"]``) that trigger the prefetcher. ``LOAD`` and
+    ``PREFETCH`` cover both sides; ``INSTRUCTION_LOAD``, ``DATA_LOAD``, ``INSTRUCTION_PREFETCH``, and
+    ``DATA_PREFETCH`` select one. See `Access types`_.
+
+--------------------------------------
+Access types
+--------------------------------------
+
+Every request carries an ``access_type``: ``LOAD``, ``RFO``, ``PREFETCH``, ``WRITE``, or
+``TRANSLATION``. Loads and prefetches also say which side they serve. The core issues instruction
+fetches as ``INSTRUCTION_LOAD`` and memory operands as ``DATA_LOAD``, and a miss keeps its type as it
+travels down the hierarchy. A cache's prefetches take the side of the access it is serving:
+``INSTRUCTION_PREFETCH`` (whose ``ip`` is the prefetched line's address, since an instruction line's
+PC is its address) or ``DATA_PREFETCH``.
+
+``LOAD`` and ``PREFETCH`` are generic. In comparisons they equal either specialization
+(``access_type::LOAD == access_type::DATA_LOAD``), while the specializations differ from each other
+(``access_type::INSTRUCTION_LOAD != access_type::DATA_LOAD``). A prefetcher that checks
+``type == access_type::LOAD`` therefore sees both sides, and one that needs the side compares against
+the specific type or calls ``is_instruction_access(type)``. This equality is not transitive, so
+containers keyed by ``access_type`` order on the underlying value.
+
+Statistics are recorded per specific type. The ``LOAD`` and ``PREFETCH`` rows and JSON groups report
+the sum of their specializations, and the specializations are reported alongside them.
 
 --------------------------------------
 Submodules

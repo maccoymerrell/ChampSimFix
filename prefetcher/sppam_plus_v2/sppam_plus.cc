@@ -99,7 +99,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(enable_instr_prefetch); CFG(instr_la_depth); CFG(instr_conf); CFG(instr_table_entries); CFG(instr_delta_bits); CFG(instr_xlate_entries); CFG(instr_filter_entries);
   CFG(instr_ft_blocks); CFG(instr_dir_bits);
   CFG(instr_walk_budget); CFG(instr_cost_strong); CFG(instr_cost_weak); CFG(instr_miss_conf);
-  CFG(instr_feed_data); CFG(unblock_instructions);
+  CFG(instr_feed_data);
   CFG(instr_nextn); CFG(instr_packed_residency);
   CFG(pattern_validate); CFG(pv_feed_confidence); CFG(pv_conf_penalty); CFG(pv_sample_div); CFG(pv_min_samples); CFG(pv_bad_pct); CFG(pv_sample_cap);
   CFG(pv_sample_directmap); CFG(pv_sample_ttl); CFG(pv_sample_evict_div); // direct-mapped probabilistic sample table
@@ -132,10 +132,6 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   if (ipred_ && P.instr_packed_residency)
     ipred_->set_shared_residency([this](uint64_t b) { return pred_->filter_probe_code(b); },
                                  [this](uint64_t b) { pred_->filter_mark_code(b); });
-  // Opt the L2 into delivering instruction fetches when the branch graph is on OR when we
-  // explicitly want the data path to see instructions (the branch-graph-off marginal-value arm).
-  if (P.enable_instr_prefetch || P.unblock_instructions)
-    cache_->set_prefetch_instructions(true);
 }
 
 void sppam_plus::prefetcher_initialize()
@@ -183,12 +179,12 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
     sd_observe(block, cache_hit, useful_prefetch);
     ipf_observe(block, cache_hit); // adaptive ip_filter duel: per-set demand hit rate
   }
-  // Instruction stream (L1I misses): route to the branch-graph prefetcher and return. Kept
-  // fully separate from the data predictors -- instruction packets never train the region/
-  // access maps. ip == v_address for instructions, so the graph learns in IP (virtual) space
-  // (compact deltas) while `block` is the physical block; the predictor's own vpage->ppage
-  // table translates its IP predictions back to physical to issue.
-  if (ipred_ && cache_->current_access_is_instruction()) {
+  // Instruction stream (INSTRUCTION_LOAD = L1I misses, INSTRUCTION_PREFETCH = L1I prefetches): route
+  // to the branch-graph prefetcher and return. Kept fully separate from the data predictors --
+  // instruction packets never train the region/access maps. ip == v_address for instructions, so the
+  // graph learns in IP (virtual) space (compact deltas) while `block` is the physical block; the
+  // predictor's own vpage->ppage table translates its IP predictions back to physical to issue.
+  if (ipred_ && is_instruction_access(type)) {
     if (cache_hit) { // an instruction demand hit a block we prefetched -> useful, resolve it
       auto iit = instr_pf_unused_.find(block);
       if (iit != instr_pf_unused_.end()) {

@@ -87,7 +87,8 @@ Some parameters use typed wrapper objects instead of plain values:
     A bandwidth value (operations per cycle).
 
 ``{"access_types": ["LOAD", "PREFETCH"]}``
-    A bitmask of access types.
+    A set of access types. ``LOAD`` and ``PREFETCH`` also match their ``INSTRUCTION_`` and ``DATA_``
+    specializations, which can be listed on their own (e.g. ``["DATA_LOAD"]``).
 
 ``{"null": "channel"}``
     A null reference for an optional module connection.
