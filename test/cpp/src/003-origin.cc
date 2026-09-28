@@ -6,33 +6,33 @@ TEST_CASE("An origin exposes the same identities under canonical and domain name
 {
   champsim::origin uut{3, 7};
 
-  // The aliases are the same identity: cpu() IS the consumer, asid() IS the stream
+  // The aliases are the same identity: cpu() IS the consumer, asid() IS the producer
   REQUIRE(uut.consumer() == 3);
   REQUIRE(uut.cpu() == uut.consumer());
-  REQUIRE(uut.stream() == 7);
-  REQUIRE(uut.asid() == uut.stream());
+  REQUIRE(uut.producer() == 7);
+  REQUIRE(uut.asid() == uut.producer());
 }
 
 TEST_CASE("A default origin is invalid in both coordinates")
 {
   champsim::origin uut{};
   REQUIRE_FALSE(uut.has_consumer());
-  REQUIRE_FALSE(uut.has_stream());
+  REQUIRE_FALSE(uut.has_producer());
   REQUIRE(uut.consumer() == champsim::origin::invalid_id);
-  REQUIRE(uut.stream() == champsim::origin::invalid_id);
+  REQUIRE(uut.producer() == champsim::origin::invalid_id);
 }
 
 TEST_CASE("Origin derivation helpers replace one coordinate and keep the other")
 {
   champsim::origin base{1, 2};
 
-  auto moved = base.with_consumer(9); // e.g. a stream migrating between consumers
+  auto moved = base.with_consumer(9); // e.g. a producer migrating between consumers
   REQUIRE(moved.consumer() == 9);
-  REQUIRE(moved.stream() == 2);
+  REQUIRE(moved.producer() == 2);
 
-  auto respaced = base.with_stream(5); // e.g. a trace record overriding the address space
+  auto respaced = base.with_producer(5); // e.g. a trace record overriding the producer id
   REQUIRE(respaced.consumer() == 1);
-  REQUIRE(respaced.stream() == 5);
+  REQUIRE(respaced.producer() == 5);
 }
 
 TEST_CASE("Origins compare by both coordinates")

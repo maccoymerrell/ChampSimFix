@@ -6,11 +6,11 @@
 champsim::modules::prefetcher::register_module<spp_dev> spp_dev_register("spp_dev");
 
 spp_dev::spp_dev(champsim::modules::ModuleBuilder builder)
-  : log2_block_size_(builder.get_parameter<unsigned>("log2_block_size")),
-    block_in_page_extent_(champsim::data::bits{builder.get_parameter<unsigned>("log2_page_size")},
-                          champsim::data::bits{builder.get_parameter<unsigned>("log2_block_size")}),
-    tag_extent_(champsim::data::bits{ST_TAG_BIT + builder.get_parameter<unsigned>("log2_page_size")},
-                champsim::data::bits{builder.get_parameter<unsigned>("log2_page_size")})
+    : log2_block_size_(builder.get_parameter<unsigned>("log2_block_size")),
+      block_in_page_extent_(champsim::data::bits{builder.get_parameter<unsigned>("log2_page_size")},
+                            champsim::data::bits{builder.get_parameter<unsigned>("log2_block_size")}),
+      tag_extent_(champsim::data::bits{ST_TAG_BIT + builder.get_parameter<unsigned>("log2_page_size")},
+                  champsim::data::bits{builder.get_parameter<unsigned>("log2_page_size")})
 {
   cache_ = builder.get_parent<champsim::modules::cache_module>();
 }
@@ -372,8 +372,11 @@ void spp_dev::PATTERN_TABLE::read_pattern(uint32_t curr_sig, std::vector<typenam
       pf_conf = depth ? (_parent->GHR.global_accuracy * c_delta[set][way] / c_sig[set] * lookahead_conf / 100) : local_conf;
 
       if (pf_conf >= PF_THRESHOLD) {
-        confidence_q[pf_q_tail] = pf_conf;
-        delta_q[pf_q_tail] = delta[set][way];
+        // Check :: pf_q_tail is within bounds before writing
+        if (pf_q_tail < delta_q.size() && pf_q_tail < confidence_q.size()) {
+          confidence_q[pf_q_tail] = pf_conf;
+          delta_q[pf_q_tail] = delta[set][way];
+        }
 
         // Lookahead path follows the most confident entry
         if (pf_conf > max_conf) {
@@ -560,7 +563,11 @@ uint32_t spp_dev::GLOBAL_REGISTER::check_entry(offset_type page_offset)
   uint32_t max_conf = 0, max_conf_way = MAX_GHR_ENTRY;
 
   for (uint32_t i = 0; i < MAX_GHR_ENTRY; i++) {
-    if ((offset[i] == page_offset) && (max_conf < confidence[i])) {
+    // Gate on valid[] exactly as update_entry does: an invalid slot holds a
+    // default-constructed offset whose extent differs from page_offset, and
+    // comparing mismatched-extent slices throws. Invalid slots carry confidence 0
+    // and could never win, so this is behavior-preserving.
+    if (valid[i] && (offset[i] == page_offset) && (max_conf < confidence[i])) {
       max_conf = confidence[i];
       max_conf_way = i;
     }

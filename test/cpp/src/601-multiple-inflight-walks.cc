@@ -29,7 +29,7 @@ SCENARIO("A page table walker can handle multiple concurrent walks")
 
     std::array<champsim::operable*, 3> elements{{&mock_ul, &uut, &mock_ll}};
 
-    uut.begin_phase(false, true);
+    uut.begin_phase(false);
 
     WHEN("The PTW receives two requests")
     {
@@ -93,7 +93,7 @@ SCENARIO("Concurrent page table walks can be merged")
 
     std::array<champsim::operable*, 3> elements{{&mock_ul, &uut, &mock_ll}};
 
-    uut.begin_phase(false, true);
+    uut.begin_phase(false);
 
     WHEN("The PTW receives a request and fills the PSCLs")
     {

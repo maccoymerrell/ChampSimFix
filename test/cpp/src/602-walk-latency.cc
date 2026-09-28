@@ -30,7 +30,7 @@ SCENARIO("The issued steps incur appropriate latencies")
 
     std::array<champsim::operable*, 3> elements{{&mock_ul, &uut, &mock_ll}};
 
-    uut.begin_phase(false, true);
+    uut.begin_phase(false);
 
     if (level == 5) {
       (void)vmem.va_to_pa(champsim::origin{0, 0}, champsim::page_number{access_address});

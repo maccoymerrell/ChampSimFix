@@ -6,6 +6,7 @@
 #include "environment.h"
 #include "instr.h"
 #include "modules.h"
+#include "instruction_producer.h"
 
 namespace champsim
 {
@@ -15,38 +16,20 @@ void assign_identities(modules::environment_module& env);
 namespace
 {
 
-// A stream identity held via the mixin rather than a workload_source interface;
-// must be counted by num_sources/num_streams and enumerated by assign_identities
-// exactly like a workload_source.
-struct probe_streaming_core_505 : public champsim::modules::core_module, public champsim::modules::stream_source {
-  explicit probe_streaming_core_505(champsim::modules::ModuleBuilder) : core_module(champsim::chrono::picoseconds{250}) {}
-
-  void push_instruction(ooo_model_instr) override {}
-  std::size_t instructions_requested() override { return 0; }
-  uint64_t sim_instr() const override { return 0; }
-  uint64_t sim_cycle() const override { return 0; }
-  long operate() override { return 0; }
-  cpu_stats get_sim_stats() const override { return {}; }
-  cpu_stats get_roi_stats() const override { return {}; }
-  bool source_eof() const override { return true; }
-};
-
-static champsim::modules::core_module::register_module<probe_streaming_core_505> probe_streaming_core_reg("PROBE_STREAMING_CORE_505");
-
-struct probe_source_505 : public champsim::modules::instruction_source {
-  explicit probe_source_505(champsim::modules::ModuleBuilder builder) { stream_label_ = builder.get_parameter<std::string>("stream", true, std::string{}); }
+struct probe_producer_505 : public champsim::modules::instruction_producer {
+  explicit probe_producer_505(champsim::modules::ModuleBuilder builder) { producer_group_ = builder.get_parameter<std::string>("producer_group", true, std::string{}); }
   const ooo_model_instr* peek() override { return nullptr; }
   void consume() override {}
   [[nodiscard]] bool eof() const override { return true; }
 };
 
-static champsim::modules::workload_source::register_module<probe_source_505> probe_source_reg("PROBE_SOURCE_505");
+static champsim::modules::instruction_producer::register_module<probe_producer_505> probe_producer_reg("PROBE_PRODUCER_505");
 
 struct probe_core_505 : public champsim::modules::core_module {
   explicit probe_core_505(champsim::modules::ModuleBuilder builder) : core_module(champsim::chrono::picoseconds{250})
   {
-    for (const auto& sub : builder.get_submodules("workload_source", true)) {
-      champsim::modules::workload_source::create_instance(sub, static_cast<champsim::modules::source_consumer*>(this));
+    for (const auto& sub : builder.get_submodules("instruction_producer", true)) {
+      champsim::modules::instruction_producer::create_instance(sub, static_cast<champsim::modules::packet_consumer*>(this));
     }
   }
 
@@ -56,20 +39,19 @@ struct probe_core_505 : public champsim::modules::core_module {
   uint64_t sim_cycle() const override { return 0; }
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return {}; }
-  cpu_stats get_roi_stats() const override { return {}; }
-  bool source_eof() const override { return true; }
+  bool producers_eof() const override { return true; }
 };
 
 static champsim::modules::core_module::register_module<probe_core_505> probe_core_reg("PROBE_CORE_505");
 
 } // namespace
 
-TEST_CASE("num_consumers, num_sources, and num_streams are each counted in their own space")
+TEST_CASE("num_consumers, num_producers, and num_producer_groups are each counted in their own space")
 {
-  // Three consumers (two cores + one stream_source-mixin core), four sources
-  // (c0's two share a label, c1's one, the mixin core its own), three streams
-  // (the shared label collapses c0's pair). Every count differs, so any
-  // conflation fails loudly.
+  // Two consumers (cores). Four producers: c0 holds three (two sharing a
+  // producer_group label, one on its own), c1 holds one. Three producer groups: the
+  // shared label collapses c0's pair onto one id. Every count differs (2, 4, 3),
+  // so any conflation fails loudly.
   nlohmann::json config = {
       {"children",
        nlohmann::json::array({
@@ -79,8 +61,9 @@ TEST_CASE("num_consumers, num_sources, and num_streams are each counted in their
                {"model", "PROBE_CORE_505"},
                {"children",
                 nlohmann::json::array({
-                    nlohmann::json{{"name", "t505_c0_srcA"}, {"module", "workload_source"}, {"model", "PROBE_SOURCE_505"}, {"stream", "t505_shared"}},
-                    nlohmann::json{{"name", "t505_c0_srcB"}, {"module", "workload_source"}, {"model", "PROBE_SOURCE_505"}, {"stream", "t505_shared"}},
+                    nlohmann::json{{"name", "t505_c0_srcA"}, {"module", "instruction_producer"}, {"model", "PROBE_PRODUCER_505"}, {"producer_group", "t505_shared"}},
+                    nlohmann::json{{"name", "t505_c0_srcB"}, {"module", "instruction_producer"}, {"model", "PROBE_PRODUCER_505"}, {"producer_group", "t505_shared"}},
+                    nlohmann::json{{"name", "t505_c0_srcC"}, {"module", "instruction_producer"}, {"model", "PROBE_PRODUCER_505"}},
                 })},
            },
            nlohmann::json{
@@ -89,10 +72,9 @@ TEST_CASE("num_consumers, num_sources, and num_streams are each counted in their
                {"model", "PROBE_CORE_505"},
                {"children",
                 nlohmann::json::array({
-                    nlohmann::json{{"name", "t505_c1_src"}, {"module", "workload_source"}, {"model", "PROBE_SOURCE_505"}},
+                    nlohmann::json{{"name", "t505_c1_src"}, {"module", "instruction_producer"}, {"model", "PROBE_PRODUCER_505"}},
                 })},
            },
-           nlohmann::json{{"name", "t505_c2"}, {"module", "core"}, {"model", "PROBE_STREAMING_CORE_505"}},
        })},
   };
 
@@ -102,23 +84,23 @@ TEST_CASE("num_consumers, num_sources, and num_streams are each counted in their
   REQUIRE(env != nullptr);
 
   auto& globals = champsim::modules::ModuleBuilder::globals();
-  CHECK(globals.get_parameter<std::size_t>("num_consumers") == 3);
-  CHECK(globals.get_parameter<std::size_t>("num_sources") == 4);
-  CHECK(globals.get_parameter<std::size_t>("num_streams") == 3);
+  CHECK(globals.get_parameter<std::size_t>("num_consumers") == 2);
+  CHECK(globals.get_parameter<std::size_t>("num_producers") == 4);
+  CHECK(globals.get_parameter<std::size_t>("num_producer_groups") == 3);
 
-  // The mixin source is enumerated symmetrically with interface sources. View
-  // order is top-level modules before nested ones, so assertions key on names,
-  // not positions.
+  // c0's labeled pair share one producer id; c0's third producer and c1's producer
+  // each get their own. (View order is top-level modules before nested ones, so
+  // assertions key on names, not positions.)
   champsim::assign_identities(*env);
-  auto sources = env->typed_view<champsim::modules::stream_source>("stream_source");
-  REQUIRE(std::size(sources) == 4);
-  std::map<std::string, uint32_t> stream_of;
-  for (auto& src : sources) {
-    stream_of[src.get().source_name()] = src.get().stream_id();
+  auto producers = env->typed_view<champsim::modules::packet_producer>("packet_producer");
+  REQUIRE(std::size(producers) == 4);
+  std::map<std::string, uint32_t> producer_of;
+  for (auto& src : producers) {
+    producer_of[src.get().producer_name()] = src.get().producer_id();
   }
-  REQUIRE(std::size(stream_of) == 4);
-  CHECK(stream_of.at("t505_c0_srcA") == stream_of.at("t505_c0_srcB")); // shared label, one stream
-  CHECK(stream_of.at("t505_c1_src") != stream_of.at("t505_c0_srcA"));
-  CHECK(stream_of.at("t505_c2") != stream_of.at("t505_c0_srcA"));
-  CHECK(stream_of.at("t505_c2") != stream_of.at("t505_c1_src"));
+  REQUIRE(std::size(producer_of) == 4);
+  CHECK(producer_of.at("t505_c0_srcA") == producer_of.at("t505_c0_srcB")); // shared label, one producer id
+  CHECK(producer_of.at("t505_c0_srcC") != producer_of.at("t505_c0_srcA"));
+  CHECK(producer_of.at("t505_c1_src") != producer_of.at("t505_c0_srcA"));
+  CHECK(producer_of.at("t505_c1_src") != producer_of.at("t505_c0_srcC"));
 }

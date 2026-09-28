@@ -26,7 +26,6 @@
 #include "util/bit_enum.h"
 #include "util/ratio.h"
 
-
 namespace champsim
 {
 

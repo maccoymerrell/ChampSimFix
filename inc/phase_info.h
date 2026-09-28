@@ -17,25 +17,23 @@
 #ifndef PHASE_INFO_H
 #define PHASE_INFO_H
 
-#include <any>
 #include <cstdint>
-#include <map>
 #include <string>
 #include <utility>
 #include <vector>
-
+#include <nlohmann/json.hpp>
 
 namespace champsim
 {
 
 // A phase of the run: a name, a warmup flag, an ROI flag, and a length
-// denominated in each source consumer's own progress unit (instructions for
+// denominated in each consumer's own progress unit (instructions for
 // cores, packets for a network consumer, ...). roi selects whether the phase
 // contributes to region-of-interest statistics — typically !is_warmup, but
 // independent so a run can contain unmeasured non-warmup phases (e.g. a
 // fast-forward between warmup and the measured region). Workload identity
-// (e.g. trace paths) is not part of the phase — sources describe themselves
-// via workload_source::describe().
+// (e.g. trace paths) is not part of the phase — producers describe themselves
+// via packet_producer::describe().
 struct phase_info {
   std::string name;
   bool is_warmup;
@@ -43,15 +41,15 @@ struct phase_info {
   uint64_t length;
 };
 
+// One measured phase's statistics: what its governed modules reported, in both output formats.
+// A phase is the measurement window, so there is exactly one set of numbers per entry.
 struct phase_stats {
   std::string name;
-  std::vector<std::string> trace_names;
-  // Pre-collected by collect_phase_stats
-  std::vector<std::string> sim_lines;   // all sim plaintext lines
-  std::vector<std::string> roi_lines;   // all roi plaintext lines
-  // interface -> [(module_name, json_any)] for JSON compilation
-  std::map<std::string, std::vector<std::pair<std::string, std::any>>> sim_json;
-  std::map<std::string, std::vector<std::pair<std::string, std::any>>> roi_json;
+  // (consumer id, workload description) -- the id comes from the consumer being fed, not from
+  // counting producers, so a consumer with two producers names both against itself.
+  std::vector<std::pair<int, std::string>> workloads;
+  std::vector<std::string> lines; // every reporting module's plaintext lines, in interface order
+  nlohmann::json stats;           // [interface][model][instance name]
 };
 
 } // namespace champsim

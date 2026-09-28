@@ -25,32 +25,32 @@
 #include "address.h"
 #include "bandwidth.h"
 #include "channel.h"
-#include "operable.h"
 #include "msl/lru_table.h"
+#include "operable.h"
 #include "util/latency_queue.h"
 #include "util/ring_buffer.h"
 #include "waitable.h"
 
-class PageTableWalker : public champsim::modules::page_table_walker_module, public champsim::module_phase
+class PageTableWalker : public champsim::modules::page_table_walker_module
 {
   struct pscl_entry {
     champsim::address vaddr;
     champsim::address ptw_addr;
     std::size_t level;
-    // Address space of this cached walk step. The walker is shared hardware,
-    // so entries are stream-tagged to keep concurrent streams from hitting
-    // each other's steps.
-    champsim::origin::id_type stream = 0;
+    // The address space this cached walk step belongs to. A walker is
+    // hardware owned by a consumer, not by an address space: entries are
+    // asid-tagged so concurrent address spaces never hit each other's steps.
+    champsim::origin::id_type asid = 0;
   };
 
   struct pscl_indexer {
     champsim::data::bits shamt;
-    auto operator()(const pscl_entry& entry) const { return entry.vaddr.to<uint64_t>() >> champsim::to_underlying(shamt); }
+    auto operator()(const pscl_entry& entry) const { return entry.vaddr.slice_upper(shamt); }
   };
 
   struct pscl_tagger {
     champsim::data::bits shamt;
-    auto operator()(const pscl_entry& entry) const { return std::pair{entry.vaddr.to<uint64_t>() >> champsim::to_underlying(shamt), entry.stream}; }
+    auto operator()(const pscl_entry& entry) const { return std::pair{entry.vaddr.slice_upper(shamt), entry.asid}; }
   };
 
   using pscl_type = champsim::msl::lru_table<pscl_entry, pscl_indexer, pscl_tagger>;
@@ -109,13 +109,13 @@ public:
   long operate() final;
   long poll_cycle() final;
 
-  void begin_phase(bool warmup, bool roi) override;
-  void end_phase() override {}
+  void begin_phase(bool warmup) override;
   void print_deadlock() final;
 
 private:
   bool warmup_ = true;
   unsigned log2_page_size_ = 12;
+
 public:
   bool is_warmup() const { return warmup_; }
 };

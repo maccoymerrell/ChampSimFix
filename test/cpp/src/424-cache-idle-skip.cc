@@ -55,7 +55,7 @@ SCENARIO("An idle cache skips its simulation but still ticks its prefetchers eve
     REQUIRE(pref != nullptr);
 
     uut.initialize();
-    uut.begin_phase(false, true);
+    uut.begin_phase(false);
 
     WHEN("The cache runs 100 cycles through the orchestrator path with empty queues")
     {
@@ -99,8 +99,8 @@ SCENARIO("A cache serves a request with identical timing whether or not idle ski
     std::array<champsim::operable*, 3> elements{{&uut, &mock_ll, &mock_ul}};
     for (auto* elem : elements) {
       elem->initialize();
-      if (auto* mp = dynamic_cast<champsim::module_phase*>(elem)) {
-        mp->begin_phase(false, true);
+      if (auto* mp = dynamic_cast<champsim::module_lifecycle*>(elem)) {
+        mp->begin_phase(false);
       }
     }
 
@@ -143,6 +143,10 @@ SCENARIO("A cache serves a request with identical timing whether or not idle ski
         // matters less than its independence from the skip setting; pin it.
         static std::map<bool, int> observed;
         observed[with_skip] = cycles_to_return;
+        // Assert on every generated pass so this section is never assertion-free
+        // (--warn NoAssertions fails an assertion-free section); the cross-skip
+        // equality is checked once both passes have recorded their timing.
+        REQUIRE(cycles_to_return > 0);
         if (observed.size() == 2) {
           REQUIRE(observed.at(true) == observed.at(false));
         }

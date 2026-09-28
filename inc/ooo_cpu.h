@@ -29,10 +29,10 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <unordered_map>
 #include <queue>
 #include <stdexcept>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 #include "bandwidth.h"
@@ -40,11 +40,12 @@
 #include "channel.h"
 #include "core_stats.h"
 #include "instruction.h"
+#include "instruction_producer.h"
 #include "modules.h"
+#include "msl/lru_table.h"
 #include "operable.h"
 #include "register_allocator.h"
 #include "util/ring_buffer.h"
-#include "msl/lru_table.h"
 #include "util/to_underlying.h"
 
 class CACHE;
@@ -86,10 +87,11 @@ struct LSQ_ENTRY : champsim::program_ordered<LSQ_ENTRY> {
 };
 
 // cpu
-class O3_CPU : public champsim::modules::core_module, public champsim::module_phase, public champsim::module_stat
+class O3_CPU : public champsim::modules::core_module
 {
 public:
-  // This core's consumer id (its "CPU number"): hardware-context identity.
+  // This core's consumer id (its "CPU number"): hardware-context identity
+  // for provenance stamping, tables, stats, and phase tracking.
 
   // cycle
   champsim::chrono::clock::time_point begin_phase_time{};
@@ -102,7 +104,7 @@ public:
 
   using stats_type = cpu_stats;
 
-  stats_type roi_stats{}, sim_stats{};
+  stats_type sim_stats{};
 
   // instruction buffer
   struct dib_shift {
@@ -196,17 +198,11 @@ public:
 
   void initialize() final;
   long operate() final;
-  long poll_cycle() final;
-  void begin_phase(bool warmup, bool roi) override;
-  void end_phase() override;
-
-  // module_stat
-  std::vector<std::string> print_stats(bool roi) const override;
-  void json_stats(champsim::json_stat_builder& b, bool roi) const override;
+  void begin_phase(bool warmup) override;
+  void end_phase(champsim::stat_report& out) override;
 
 private:
   bool warmup_ = true;
-  [[maybe_unused]] bool roi_ = false;
   // Free LQ slot count, maintained at the four LQ mutation sites so dispatch
   // need not re-count the optionals per iteration.
   long lq_free_slots_ = 0;
@@ -255,9 +251,6 @@ private:
   // into a slot; rebuilt from LQ/SQ/ROB in the resync_* paths.
   std::vector<rob_mem_handle> rob_mem_handles_;
 
-  // Post-EOF drain latch for poll_cycle (see there).
-  bool drained_latch_ = false;
-
   // Frontend scan positions over IFETCH_BUFFER. dib_checked entries form a
   // strict prefix, so ifetch_dib_checked_ is its exact length.
   // ifetch_fetch_scan_ is a monotone lower bound on the first fetch-ready
@@ -287,10 +280,7 @@ private:
 
   // Block-address key for the return index: same shift handle_memory_return
   // applies, so issue-site insert and return-site lookup land on one key.
-  static uint64_t hmr_block_key(champsim::address addr)
-  {
-    return addr.to<uint64_t>() >> champsim::to_underlying(champsim::block_number_extent{}.lower);
-  }
+  static uint64_t hmr_block_key(champsim::address addr) { return addr.to<uint64_t>() >> champsim::to_underlying(champsim::block_number_extent{}.lower); }
 
   // Visit the set bits of `bits` within physical slots [from, to), ascending.
   // fn(slot) returns false to stop; returns false if stopped early.
@@ -406,7 +396,6 @@ private:
       ++ifetch_dib_checked_;
     }
     ifetch_fetch_scan_ = 0; // always-valid lower bound; the scan re-advances
-    drained_latch_ = false;
   }
 
   // Recompute all derived state from the underlying structures (used by the
@@ -462,11 +451,10 @@ private:
     // promotion pops from the front in time order
     std::sort(std::begin(lq_pending_ready_), std::end(lq_pending_ready_));
     rebuild_rob_mem_handles();
-    drained_latch_ = false;
   }
+
 public:
   bool is_warmup() const { return warmup_; }
-  bool is_roi() const    { return roi_; }
 
   void push_instruction(ooo_model_instr instr) final;
   std::size_t instructions_requested() final;
@@ -498,21 +486,19 @@ public:
   bool do_complete_store(const LSQ_ENTRY& sq_entry);
   bool execute_load(const LSQ_ENTRY& lq_entry);
 
-  [[nodiscard]] auto roi_instr() const { return roi_stats.instrs(); }
-  [[nodiscard]] auto roi_cycle() const { return roi_stats.cycles(); }
   [[nodiscard]] uint64_t sim_instr() const final { return num_retired - begin_phase_instr; }
   [[nodiscard]] uint64_t sim_cycle() const final { return (current_time.time_since_epoch() / clock_period) - sim_stats.begin_cycles; }
   stats_type get_sim_stats() const final { return sim_stats; }
-  stats_type get_roi_stats() const final { return roi_stats; }
 
   void print_deadlock() final;
 
   std::vector<champsim::modules::branch_predictor*> branch_module_pimpl;
   std::vector<champsim::modules::btb*> btb_module_pimpl;
-  std::vector<champsim::modules::instruction_source*> workload_source_pimpl;
+  std::vector<champsim::modules::instruction_producer*> instruction_producer_pimpl;
 
-  void fill_from_sources();
-  bool source_eof() const final;
+  void fill_from_producers();
+  bool producers_eof() const final;
+  std::vector<std::string> producer_descriptions() const final;
 
   // NOLINTBEGIN(readability-make-member-function-const): legacy modules use non-const hooks
   void impl_initialize_branch_predictor() const;
@@ -528,15 +514,33 @@ public:
 
   explicit O3_CPU(champsim::modules::ModuleBuilder builder)
       : core_module(builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
-        DIB(builder.get_parameter<uint32_t>("dib_set"), builder.get_parameter<uint32_t>("dib_way"), {champsim::data::bits{champsim::lg2(builder.get_parameter<std::size_t>("dib_window"))}}, {champsim::data::bits{champsim::lg2(builder.get_parameter<std::size_t>("dib_window"))}}),
-        LQ(builder.get_parameter<uint32_t>("lq_size")), IFETCH_BUFFER_SIZE(builder.get_parameter<uint32_t>("ifetch_buffer_size")), DISPATCH_BUFFER_SIZE(builder.get_parameter<uint32_t>("dispatch_buffer_size")), DECODE_BUFFER_SIZE(builder.get_parameter<uint32_t>("decode_buffer_size")),
-        REGISTER_FILE_SIZE(builder.get_parameter<uint32_t>("register_file_size")), ROB_SIZE(builder.get_parameter<uint32_t>("rob_size")), SQ_SIZE(builder.get_parameter<uint32_t>("sq_size")), DIB_HIT_BUFFER_SIZE(builder.get_parameter<uint32_t>("dib_hit_buffer_size")),
-        FETCH_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("fetch_width")), DECODE_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("decode_width")), DISPATCH_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("dispatch_width")), SCHEDULER_SIZE(builder.get_parameter<champsim::bandwidth::maximum_type>("schedule_width")),
-        EXEC_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("execute_width")), DIB_INORDER_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("dib_inorder_width")), LQ_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("lq_width")), SQ_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("sq_width")), RETIRE_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("retire_width")),
-        BRANCH_MISPREDICT_PENALTY(builder.get_parameter<unsigned>("mispredict_penalty") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), DISPATCH_LATENCY(builder.get_parameter<unsigned>("dispatch_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
-        DECODE_LATENCY(builder.get_parameter<unsigned>("decode_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), SCHEDULING_LATENCY(builder.get_parameter<unsigned>("schedule_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
-        EXEC_LATENCY(builder.get_parameter<unsigned>("execute_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), DIB_HIT_LATENCY(builder.get_parameter<unsigned>("dib_hit_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")), L1I_BANDWIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("l1i_bandwidth")),
-        L1D_BANDWIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("l1d_bandwidth")), IN_QUEUE_SIZE(2 * champsim::to_underlying(builder.get_parameter<champsim::bandwidth::maximum_type>("fetch_width"))), L1I_bus(builder.get_parameter<champsim::modules::channel_module*>("fetch_queues")),
+        DIB(builder.get_parameter<uint32_t>("dib_set"), builder.get_parameter<uint32_t>("dib_way"),
+            {champsim::data::bits{champsim::lg2(builder.get_parameter<std::size_t>("dib_window"))}},
+            {champsim::data::bits{champsim::lg2(builder.get_parameter<std::size_t>("dib_window"))}}),
+        LQ(builder.get_parameter<uint32_t>("lq_size")), IFETCH_BUFFER_SIZE(builder.get_parameter<uint32_t>("ifetch_buffer_size")),
+        DISPATCH_BUFFER_SIZE(builder.get_parameter<uint32_t>("dispatch_buffer_size")),
+        DECODE_BUFFER_SIZE(builder.get_parameter<uint32_t>("decode_buffer_size")), REGISTER_FILE_SIZE(builder.get_parameter<uint32_t>("register_file_size")),
+        ROB_SIZE(builder.get_parameter<uint32_t>("rob_size")), SQ_SIZE(builder.get_parameter<uint32_t>("sq_size")),
+        DIB_HIT_BUFFER_SIZE(builder.get_parameter<uint32_t>("dib_hit_buffer_size")),
+        FETCH_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("fetch_width")),
+        DECODE_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("decode_width")),
+        DISPATCH_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("dispatch_width")),
+        SCHEDULER_SIZE(builder.get_parameter<champsim::bandwidth::maximum_type>("schedule_width")),
+        EXEC_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("execute_width")),
+        DIB_INORDER_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("dib_inorder_width")),
+        LQ_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("lq_width")),
+        SQ_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("sq_width")),
+        RETIRE_WIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("retire_width")),
+        BRANCH_MISPREDICT_PENALTY(builder.get_parameter<unsigned>("mispredict_penalty") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+        DISPATCH_LATENCY(builder.get_parameter<unsigned>("dispatch_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+        DECODE_LATENCY(builder.get_parameter<unsigned>("decode_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+        SCHEDULING_LATENCY(builder.get_parameter<unsigned>("schedule_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+        EXEC_LATENCY(builder.get_parameter<unsigned>("execute_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+        DIB_HIT_LATENCY(builder.get_parameter<unsigned>("dib_hit_latency") * builder.get_parameter<champsim::chrono::picoseconds>("clock_period")),
+        L1I_BANDWIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("l1i_bandwidth")),
+        L1D_BANDWIDTH(builder.get_parameter<champsim::bandwidth::maximum_type>("l1d_bandwidth")),
+        IN_QUEUE_SIZE(2 * champsim::to_underlying(builder.get_parameter<champsim::bandwidth::maximum_type>("fetch_width"))),
+        L1I_bus(builder.get_parameter<champsim::modules::channel_module*>("fetch_queues")),
         L1D_bus(builder.get_parameter<champsim::modules::channel_module*>("data_queues")), l1i(builder.get_parameter<champsim::modules::cache_module*>("l1i"))
   {
     // Construct branch predictor submodules
@@ -561,16 +565,11 @@ public:
     lq_unissued_.assign((std::size(LQ) + 63) / 64, 0);
     lq_ready_.assign((std::size(LQ) + 63) / 64, 0);
 
-    // Cores must always have at least one workload source attached, and a
-    // core consumes instruction tokens: reject sources of any other token type.
-    for (const auto& sub : builder.get_submodules("workload_source")) {
-      auto* src = champsim::modules::workload_source::create_instance(sub, static_cast<champsim::modules::source_consumer*>(this));
-      auto* instr_src = dynamic_cast<champsim::modules::instruction_source*>(src);
-      if (instr_src == nullptr) {
-        fmt::print("[{}] ERROR: workload source {} does not provide instructions (not an instruction_source)\n", builder.get_name(), sub.get_name());
-        std::exit(-1);
-      }
-      workload_source_pimpl.push_back(instr_src);
+    // The core consumes instruction packets, so it attaches instruction_producer
+    // children directly — the interface it is designed for.
+    for (const auto& sub : builder.get_submodules("instruction_producer")) {
+      instruction_producer_pimpl.push_back(
+          champsim::modules::instruction_producer::create_instance(sub, static_cast<champsim::modules::packet_consumer*>(this)));
     }
   }
 };

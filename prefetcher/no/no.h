@@ -19,7 +19,7 @@ public:
   void prefetcher_final_stats() override {}
   void prefetcher_branch_operate(champsim::address ip, uint8_t branch_type, champsim::address branch_target) override {}
 
-  no(champsim::modules::ModuleBuilder /*builder*/) {};
+  no(champsim::modules::ModuleBuilder /*builder*/){};
 };
 
 #endif

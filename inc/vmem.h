@@ -32,7 +32,7 @@ class MEMORY_CONTROLLER;
 
 using pte_entry = champsim::data::size<long long, std::ratio<8>>;
 
-class VirtualMemory: public champsim::modules::vmem_module
+class VirtualMemory : public champsim::modules::vmem_module
 {
 private:
   std::map<std::pair<uint32_t, champsim::page_number>, champsim::page_number> vpage_to_ppage_map;

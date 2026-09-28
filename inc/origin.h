@@ -24,30 +24,9 @@
 namespace champsim
 {
 
-/**
- * The provenance of a unit of work: which consumer injected it into the
- * system, and which stream of work it belongs to.
- *
- * These are two distinct identities that only coincide in the classic
- * one-trace-per-core shape:
- *
- *  - The CONSUMER is the hardware context (a core, an injector, a port).
- *    Consumer ids are dense in [0, num_consumers). Schemes partitioning a
- *    hardware resource key on it: per-"core" replacement tables, prefetch
- *    attribution, cache stat keys, phase tracking.
- *  - The STREAM is the workload / address space the token belongs to.
- *    Translation keys on it: virtual memory, page-table walks, TLB tagging.
- *    This is the ASID. A stream defaults to its consumer's id, so the pair
- *    stays degenerate unless a config says otherwise (two traces into one
- *    core, a stream migrating between consumers, ...).
- *
- * Access goes through methods rather than bare fields, under both the
- * canonical names (consumer(), stream()) and the domain-familiar aliases
- * (cpu(), asid()) — the same identity either way. The methods are the seam:
- * schemes read the coordinate they mean, and future behaviors (remapping,
- * validation, virtualization layers) can be patched in here without touching
- * every access site.
- */
+// Provenance of a work unit: the CONSUMER (hardware context — core/injector/port, dense in [0,num_consumers), aliased cpu()) and the SOURCE
+// (which producer the packet came from, aliased asid() where that producer doubles as an address space), equal in the one-producer-per-core case. Access via
+// methods so future remapping lands in one place.
 class origin
 {
 public:
@@ -56,33 +35,32 @@ public:
 
 private:
   id_type consumer_ = invalid_id;
-  id_type stream_ = invalid_id;
+  id_type producer_ = invalid_id;
 
 public:
   constexpr origin() = default;
-  constexpr origin(id_type consumer_id, id_type stream_id) : consumer_(consumer_id), stream_(stream_id) {}
+  constexpr origin(id_type consumer_id, id_type producer_id) : consumer_(consumer_id), producer_(producer_id) {}
 
   // Canonical accessors
   [[nodiscard]] constexpr id_type consumer() const { return consumer_; }
-  [[nodiscard]] constexpr id_type stream() const { return stream_; }
+  [[nodiscard]] constexpr id_type producer() const { return producer_; }
 
-  // Domain-familiar aliases: the hardware context is what "cpu" always
-  // meant in ChampSim's module hooks; the stream is the address space id.
+  // Domain-familiar aliases: cpu() is the hardware context, asid() the producer viewed as an address space.
   [[nodiscard]] constexpr id_type cpu() const { return consumer(); }
-  [[nodiscard]] constexpr id_type asid() const { return stream(); }
+  [[nodiscard]] constexpr id_type asid() const { return producer(); }
 
   [[nodiscard]] constexpr bool has_consumer() const { return consumer_ != invalid_id; }
-  [[nodiscard]] constexpr bool has_stream() const { return stream_ != invalid_id; }
+  [[nodiscard]] constexpr bool has_producer() const { return producer_ != invalid_id; }
 
   // Derivation helpers for stamping sites
-  [[nodiscard]] constexpr origin with_consumer(id_type consumer_id) const { return origin{consumer_id, stream_}; }
-  [[nodiscard]] constexpr origin with_stream(id_type stream_id) const { return origin{consumer_, stream_id}; }
+  [[nodiscard]] constexpr origin with_consumer(id_type consumer_id) const { return origin{consumer_id, producer_}; }
+  [[nodiscard]] constexpr origin with_producer(id_type producer_id) const { return origin{consumer_, producer_id}; }
 
-  friend constexpr bool operator==(const origin& lhs, const origin& rhs) { return lhs.consumer_ == rhs.consumer_ && lhs.stream_ == rhs.stream_; }
+  friend constexpr bool operator==(const origin& lhs, const origin& rhs) { return lhs.consumer_ == rhs.consumer_ && lhs.producer_ == rhs.producer_; }
   friend constexpr bool operator!=(const origin& lhs, const origin& rhs) { return !(lhs == rhs); }
   friend constexpr bool operator<(const origin& lhs, const origin& rhs)
   {
-    return lhs.consumer_ < rhs.consumer_ || (lhs.consumer_ == rhs.consumer_ && lhs.stream_ < rhs.stream_);
+    return lhs.consumer_ < rhs.consumer_ || (lhs.consumer_ == rhs.consumer_ && lhs.producer_ < rhs.producer_);
   }
 };
 
@@ -92,7 +70,7 @@ template <>
 struct fmt::formatter<champsim::origin> : fmt::formatter<std::string> {
   auto format(const champsim::origin& value, fmt::format_context& ctx) const
   {
-    return fmt::formatter<std::string>::format(fmt::format("origin{{consumer={}, stream={}}}", value.consumer(), value.stream()), ctx);
+    return fmt::formatter<std::string>::format(fmt::format("origin{{consumer={}, producer={}}}", value.consumer(), value.producer()), ctx);
   }
 };
 

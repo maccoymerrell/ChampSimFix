@@ -177,25 +177,17 @@ Channels connect modules together. A channel definition looks like::
     }
 
 ----------------------------------
-Cores and Workload Sources
+Cores and Instruction Producers
 ----------------------------------
 
-A core's ``consumer_id`` (its hardware-context identity) is *not* declared in the config:
-it is assigned at startup by enumerating cores in config-declaration order, densely from 0
-(see ``assign_identities`` in ``src/champsim.cc``). The ``consumer_id`` key shown in the
-sample below is therefore inert — it takes effect only when it happens to equal the
-enumerated value, and may be omitted. A core attaches one or more workload sources as
-children. Each source is likewise stamped with a ``stream`` (address-space) identity
-assigned by the framework at startup — there is no numeric stream id to set in the config.
-By default every source gets its own distinct stream, so two traces feeding one core
-occupy different address spaces; give sibling sources the same string ``stream`` label to
-make them share one address space::
+A core attaches its branch predictor, BTB, and one or more instruction producers as
+``children``. An ``INSTRUCTION_PRODUCER`` reads instructions from the trace named by its
+``trace_file`` parameter::
 
     {
         "name": "cpu0",
         "module": "core",
         "model": "DEFAULT_CORE",
-        "consumer_id": 0,
         "fetch_queues": "@cpu0_cpu0_L1I_channel",
         "data_queues": "@cpu0_cpu0_L1D_channel",
         "l1i": "@cpu0_L1I",
@@ -203,16 +195,23 @@ make them share one address space::
         "children": [
             {"name": "cpu0_bp",  "module": "branch_predictor", "model": "hashed_perceptron"},
             {"name": "cpu0_btb", "module": "btb", "model": "basic_btb"},
-            {"name": "cpu0_trace", "module": "workload_source", "model": "TRACE_WORKLOAD_SOURCE",
+            {"name": "cpu0_trace", "module": "instruction_producer", "model": "INSTRUCTION_PRODUCER",
              "trace_file": "$trace0"}
         ]
     }
 
-Page-table walkers are shared hardware and do not take an address-space parameter: the
-address space (CR3 root) is resolved per walk from each request's origin/stream at
-runtime, so the same walker serves every consumer that routes through it. (The ``"asid"``
-key sometimes seen in older sample PTW blocks is inert and ignored.) See
-:ref:`Orchestration` for the consumer/stream identity model.
+A core may hold more than one producer. By default each producer gets its own
+framework-assigned id (its own address space); to place several producers under one shared
+id, give them a matching ``producer_group`` label::
+
+    "children": [
+        {"name": "cpu0_bp",  "module": "branch_predictor", "model": "hashed_perceptron"},
+        {"name": "cpu0_btb", "module": "btb", "model": "basic_btb"},
+        {"name": "cpu0_t0",  "module": "instruction_producer", "model": "INSTRUCTION_PRODUCER",
+         "trace_file": "$trace0", "producer_group": "shared"},
+        {"name": "cpu0_t1",  "module": "instruction_producer", "model": "INSTRUCTION_PRODUCER",
+         "trace_file": "$trace1", "producer_group": "shared"}
+    ]
 
 ----------------------------------
 Orchestration Modules
@@ -227,19 +226,14 @@ Phase controllers and listeners are ordinary top-level children::
         "deadlock_cycles": 500,
         "warmup_length": "$warmup_instructions",
         "simulation_length": "$simulation_instructions"
-    },
-    {
-        "name": "hb",
-        "module": "listener",
-        "model": "HEARTBEAT",
-        "interval": 10000000
     }
 
 Any number of phase controllers may be declared (each optionally governing a subset of
 consumers), a controller may define an arbitrary phase list including unmeasured
-fast-forward phases, and root-level keys ``"cycle_skip"``, ``"heartbeat_frequency"``, and
-``"num_consumers"`` tune the orchestration defaults. The full contracts, parameters, and
-composition rules are documented in :ref:`Orchestration`.
+fast-forward phases, and the root-level keys ``"cycle_skip"`` and ``"heartbeat_frequency"``
+tune the orchestration defaults. (Event listeners such as the heartbeat are compile-time
+instrumentation, not config modules — see :ref:`Orchestration`.) The full contracts,
+parameters, and composition rules are documented in :ref:`Orchestration`.
 
 ----------------------------------
 A Minimal Example

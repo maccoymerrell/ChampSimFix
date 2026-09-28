@@ -127,14 +127,15 @@ struct ooo_model_instr : champsim::program_ordered<ooo_model_instr> {
   std::vector<champsim::address> destination_memory = {};
   std::vector<champsim::address> source_memory = {};
 
-
 private:
   template <typename T>
   ooo_model_instr(T instr, champsim::origin local_origin) : ip(instr.ip), is_branch(instr.is_branch), branch_taken(instr.branch_taken), origin(local_origin)
   {
     // Reserve the exact element counts: growth through back_inserter cost up
     // to three reallocations per vector, per instruction read from the trace.
-    auto count_nonzero = [](const auto& arr) { return static_cast<std::size_t>(std::count_if(std::begin(arr), std::end(arr), [](auto x) { return x != 0; })); };
+    auto count_nonzero = [](const auto& arr) {
+      return static_cast<std::size_t>(std::count_if(std::begin(arr), std::end(arr), [](auto x) { return x != 0; }));
+    };
     if (auto n = count_nonzero(instr.destination_registers); n != 0) {
       this->destination_registers.reserve(n);
     }
@@ -209,8 +210,8 @@ private:
 public:
   ooo_model_instr(champsim::origin local_origin, input_instr instr) : ooo_model_instr(instr, local_origin) {}
   // Cloudsuite traces carry their own address-space id: the record's asid
-  // overrides the source's stream while the consumer identity is kept.
-  ooo_model_instr(champsim::origin local_origin, cloudsuite_instr instr) : ooo_model_instr(instr, local_origin.with_stream(instr.asid[0])) {}
+  // overrides the producer id while the consumer identity is kept.
+  ooo_model_instr(champsim::origin local_origin, cloudsuite_instr instr) : ooo_model_instr(instr, local_origin.with_producer(instr.asid[0])) {}
 
   [[nodiscard]] std::size_t num_mem_ops() const { return std::size(destination_memory) + std::size(source_memory); }
 };

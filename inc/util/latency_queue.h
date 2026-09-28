@@ -102,10 +102,7 @@ public:
 
   /** Ready-time of the front entry, or time_point::max() when empty. O(1). The
    *  next-event hook for idle-skip; not consulted by drain_ready(). */
-  champsim::chrono::clock::time_point next_ready_time() const
-  {
-    return empty() ? champsim::chrono::clock::time_point::max() : ReadyTime{}(buf_.front());
-  }
+  champsim::chrono::clock::time_point next_ready_time() const { return empty() ? champsim::chrono::clock::time_point::max() : ReadyTime{}(buf_.front()); }
 
   /** Whether the front entry is ready at now (front ready-time <= now). O(1).
    *  False when empty. */
@@ -125,7 +122,9 @@ public:
   template <typename Fn>
   long drain_ready(champsim::chrono::clock::time_point now, champsim::bandwidth& bw, Fn&& process)
   {
-    auto is_ready = [now](const value_type& entry) { return ReadyTime{}(entry) <= now; };
+    auto is_ready = [now](const value_type& entry) {
+      return ReadyTime{}(entry) <= now;
+    };
     auto [ready_begin, ready_end] = champsim::get_span_p(buf_.cbegin(), buf_.cend(), bw, is_ready);
     auto drain_end = std::find_if_not(ready_begin, ready_end, std::forward<Fn>(process));
     auto drained = std::distance(ready_begin, drain_end);

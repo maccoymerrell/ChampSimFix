@@ -32,7 +32,7 @@ SCENARIO("The same instruction hits the DIB on the second time")
                    .add_parameter("dispatch_width", champsim::bandwidth::maximum_type{1})
                    .add_parameter("fetch_width", champsim::bandwidth::maximum_type{1})
                    .add_parameter("retire_width", champsim::bandwidth::maximum_type{1})};
-    uut.begin_phase(false, true);
+    uut.begin_phase(false);
     std::vector test_instructions(1, champsim::test::instruction_with_ip(1));
 
     uut.modify_ifetch_buffer([&](auto& buf) { buf.insert(std::end(buf), std::begin(test_instructions), std::end(test_instructions)); });

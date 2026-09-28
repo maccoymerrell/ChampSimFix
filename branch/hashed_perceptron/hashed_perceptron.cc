@@ -50,7 +50,8 @@ sources for you to plagiarize.
 #include <numeric>
 
 champsim::modules::branch_predictor::register_module<hashed_perceptron> hp_register("hashed_perceptron");
-bool hashed_perceptron::predict_branch(champsim::address pc, [[maybe_unused]] champsim::address predicted_target, [[maybe_unused]] bool always_taken, [[maybe_unused]] uint8_t branch_type)
+bool hashed_perceptron::predict_branch(champsim::address pc, [[maybe_unused]] champsim::address predicted_target, [[maybe_unused]] bool always_taken,
+                                       [[maybe_unused]] uint8_t branch_type)
 {
   auto get_index = [pc_slice = pc.slice_lower<TABLE_INDEX_BITS>().to<uint64_t>()](const auto& hist) {
     return hist.value() ^ pc_slice; // seed in the PC to spread accesses around (like gshare) XOR in the last word

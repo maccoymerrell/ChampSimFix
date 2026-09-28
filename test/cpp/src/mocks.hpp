@@ -9,31 +9,29 @@
 #include "defaults.hpp"
 #include "instruction.h"
 #include "matchers.hpp"
-#include "module_phase.h"
 #include "modules.h"
 #include "operable.h"
 
-// Test-only no-op workload source registered as "NULL_WORKLOAD_SOURCE" (see
-// test/cpp/src/null_workload_source_mock.cc). Tests that build a core
-// (which requires a workload_source submodule) but feed instructions through
+// Test-only no-op instruction producer registered as "NULL_INSTRUCTION_PRODUCER" (see
+// test/cpp/src/null_instruction_producer_mock.cc). Tests that build a core
+// (which requires a instruction_producer submodule) but feed instructions through
 // IFETCH_BUFFER directly attach this mock under that model name.
 
 // Returns the standard default_core builder with a uniquely-named
-// NULL_WORKLOAD_SOURCE submodule attached, satisfying the core's required
-// workload_source. Pass a per-test mock name so trace messages identify which
-// test scenario constructed the source.
+// NULL_INSTRUCTION_PRODUCER submodule attached, satisfying the core's required
+// instruction_producer. Pass a per-test mock name so trace messages identify which
+// test scenario constructed the producer.
 inline champsim::modules::ModuleBuilder test_core_defaults(const std::string& ws_name)
 {
   auto b = champsim::defaults::default_core();
-  b.add_submodule("workload_source",
-                  champsim::modules::ModuleBuilder{ws_name, "NULL_WORKLOAD_SOURCE"});
+  b.add_submodule("instruction_producer", champsim::modules::ModuleBuilder{ws_name, "NULL_INSTRUCTION_PRODUCER"});
   return b;
 }
 
 /*
  * A MemoryRequestConsumer that simply returns all packets on the next cycle
  */
-class do_nothing_MRC : public champsim::operable, public champsim::module_phase
+class do_nothing_MRC : public champsim::operable
 {
   struct packet : champsim::channel::request_type {
     int event_cycle = std::numeric_limits<int>::max();
@@ -83,15 +81,14 @@ public:
     return 1; // never deadlock
   }
 
-  void begin_phase(bool, bool) override {}
-  void end_phase() override {}
+  void begin_phase(bool) override {}
   std::size_t packet_count() const { return std::size(addresses); }
 };
 
 /*
  * A MemoryRequestConsumer that returns only a particular address
  */
-class filter_MRC : public champsim::operable, public champsim::module_phase
+class filter_MRC : public champsim::operable
 {
   struct packet : champsim::channel::request_type {
     int event_cycle = std::numeric_limits<int>::max();
@@ -139,15 +136,14 @@ public:
     return 1; // never deadlock
   }
 
-  void begin_phase(bool, bool) override {}
-  void end_phase() override {}
+  void begin_phase(bool) override {}
   std::size_t packet_count() const { return mpacket_count; }
 };
 
 /*
  * A MemoryRequestConsumer that releases blocks when instructed to
  */
-class release_MRC : public champsim::operable, public champsim::module_phase
+class release_MRC : public champsim::operable
 {
   std::deque<champsim::channel::request_type> packets;
   std::size_t mpacket_count = 0;
@@ -176,8 +172,7 @@ public:
     return 1; // never deadlock
   }
 
-  void begin_phase(bool, bool) override {}
-  void end_phase() override {}
+  void begin_phase(bool) override {}
   std::size_t packet_count() const { return mpacket_count; }
 
   void release_all()
@@ -217,7 +212,7 @@ struct counting_MRP {
   }
 };
 
-struct queue_issue_MRP : public champsim::operable, public champsim::module_phase {
+struct queue_issue_MRP : public champsim::operable {
   using request_type = typename champsim::channel::request_type;
   using response_type = typename champsim::channel::response_type;
 
@@ -256,8 +251,7 @@ struct queue_issue_MRP : public champsim::operable, public champsim::module_phas
     return 1; // never deadlock
   }
 
-  void begin_phase(bool, bool) override {}
-  void end_phase() override {}
+  void begin_phase(bool) override {}
 };
 
 namespace Catch

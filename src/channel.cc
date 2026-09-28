@@ -41,7 +41,10 @@ std::size_t initial_queue_capacity(std::size_t configured_size)
 } // namespace
 
 champsim::channel::channel(champsim::modules::ModuleBuilder builder)
-    : RQ_SIZE(builder.get_parameter<std::size_t>("rq_size", false, 0)), PQ_SIZE(builder.get_parameter<std::size_t>("pq_size", false, 0)), WQ_SIZE(builder.get_parameter<std::size_t>("wq_size", false, 0)), OFFSET_BITS(builder.get_parameter<champsim::data::bits>("offset_bits", false, champsim::data::bits{0})), match_offset_bits(builder.get_parameter<bool>("match_offset_bits", false, false))
+    : RQ_SIZE(builder.get_parameter<std::size_t>("rq_size", false, 0)), PQ_SIZE(builder.get_parameter<std::size_t>("pq_size", false, 0)),
+      WQ_SIZE(builder.get_parameter<std::size_t>("wq_size", false, 0)),
+      OFFSET_BITS(builder.get_parameter<champsim::data::bits>("offset_bits", false, champsim::data::bits{0})),
+      match_offset_bits(builder.get_parameter<bool>("match_offset_bits", false, false))
 {
   // Request queues are admission-gated at their configured sizes. Responses
   // have no modeled bound, so the returned queue starts at a heuristic capacity
@@ -86,7 +89,6 @@ bool champsim::channel::add_rq(const request_type& packet)
 
   return result;
 }
-
 
 bool champsim::channel::add_wq(const request_type& packet)
 {

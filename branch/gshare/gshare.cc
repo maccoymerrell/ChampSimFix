@@ -13,7 +13,8 @@ std::size_t gshare::gs_table_hash(champsim::address ip, std::bitset<GLOBAL_HISTO
   return hash % GS_HISTORY_TABLE_SIZE;
 }
 
-bool gshare::predict_branch(champsim::address ip, [[maybe_unused]] champsim::address predicted_target, [[maybe_unused]] bool always_taken, [[maybe_unused]] uint8_t branch_type)
+bool gshare::predict_branch(champsim::address ip, [[maybe_unused]] champsim::address predicted_target, [[maybe_unused]] bool always_taken,
+                            [[maybe_unused]] uint8_t branch_type)
 {
   auto gs_hash = gs_table_hash(ip, branch_history_vector);
   auto value = gs_history_table[gs_hash];

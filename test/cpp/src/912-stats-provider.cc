@@ -9,17 +9,15 @@
 #include "core_stats.h"
 #include "dram_stats.h"
 #include "json_stat_builder.h"
-#include "module_phase.h"
-#include "module_stat.h"
 #include "modules.h"
 #include "phase_info.h"
+#include "stat_report.h"
 
 namespace {
 
-// A test core that publishes stats via the module_stat interface.
-struct stats_core : public champsim::modules::core_module, public champsim::module_stat {
+// A test core that publishes stats via the module_lifecycle interface.
+struct stats_core : public champsim::modules::core_module {
   cpu_stats sim_stats_{};
-  cpu_stats roi_stats_{};
 
   explicit stats_core(champsim::modules::ModuleBuilder)
     : core_module(champsim::chrono::picoseconds{250}) {}
@@ -30,24 +28,15 @@ struct stats_core : public champsim::modules::core_module, public champsim::modu
   uint64_t sim_cycle() const override { return 200; }
   long operate() override { return 0; }
   cpu_stats get_sim_stats() const override { return sim_stats_; }
-  cpu_stats get_roi_stats() const override { return roi_stats_; }
 
-  std::vector<std::string> print_stats(bool roi) const override
-  {
-    return format_plaintext(roi ? roi_stats_ : sim_stats_);
-  }
-  void json_stats(champsim::json_stat_builder& b, bool roi) const override
-  {
-    format_json(roi ? roi_stats_ : sim_stats_, b);
-  }
+  void end_phase(champsim::stat_report& out) override { format_stats(sim_stats_, out); }
 };
 
 static champsim::modules::core_module::register_module<stats_core> stats_core_reg("STATS_CORE_912");
 
-// A test cache that publishes stats via the module_stat interface.
-struct stats_cache : public champsim::modules::cache_module, public champsim::module_stat {
+// A test cache that publishes stats via the module_lifecycle interface.
+struct stats_cache : public champsim::modules::cache_module {
   cache_stats sim_stats_{};
-  cache_stats roi_stats_{};
 
   explicit stats_cache(champsim::modules::ModuleBuilder)
     : cache_module(champsim::chrono::picoseconds{250}) {}
@@ -55,7 +44,6 @@ struct stats_cache : public champsim::modules::cache_module, public champsim::mo
   long operate() override { return 0; }
   champsim::bandwidth::maximum_type get_max_tag_bandwidth() const override { return {}; }
   cache_stats get_sim_stats() const override { return sim_stats_; }
-  cache_stats get_roi_stats() const override { return roi_stats_; }
   bool is_virtual_prefetch() const override { return false; }
   bool prefetch_line(champsim::address, bool, uint32_t) override { return false; }
   void impl_update_replacement_state(champsim::origin, long, long, champsim::address, champsim::address,
@@ -78,14 +66,7 @@ struct stats_cache : public champsim::modules::cache_module, public champsim::mo
   std::size_t num_ways() const override { return 0; }
   champsim::data::bits get_offset_bits() const override { return champsim::data::bits{}; }
 
-  std::vector<std::string> print_stats(bool roi) const override
-  {
-    return format_plaintext(roi ? roi_stats_ : sim_stats_);
-  }
-  void json_stats(champsim::json_stat_builder& b, bool roi) const override
-  {
-    format_json(roi ? roi_stats_ : sim_stats_, b);
-  }
+  void end_phase(champsim::stat_report& out) override { format_stats(sim_stats_, out); }
 };
 
 static champsim::modules::cache_module::register_module<stats_cache> stats_cache_reg("STATS_CACHE_912");
@@ -114,26 +95,27 @@ struct stats_env : public champsim::modules::environment_module {
 
 } // anonymous namespace
 
-TEST_CASE("module_stat::print_stats returns formatted plaintext from format_plaintext") {
+TEST_CASE("module_lifecycle::report_stats fills the report with formatted plaintext") {
   auto builder = champsim::modules::ModuleBuilder("test_core", "STATS_CORE_912");
   stats_env env_dummy(champsim::modules::ModuleBuilder{});
   auto* core = champsim::modules::core_module::create_instance(builder, &env_dummy);
 
   auto* impl = static_cast<stats_core*>(core);
-  impl->roi_stats_.name = "core0";
-  impl->roi_stats_.begin_instrs = 0;
-  impl->roi_stats_.end_instrs = 100;
-  impl->roi_stats_.begin_cycles = 0;
-  impl->roi_stats_.end_cycles = 50;
+  impl->sim_stats_.name = "core0";
+  impl->sim_stats_.begin_instrs = 0;
+  impl->sim_stats_.end_instrs = 100;
+  impl->sim_stats_.begin_cycles = 0;
+  impl->sim_stats_.end_cycles = 50;
 
-  auto* ms = dynamic_cast<champsim::module_stat*>(core);
+  auto* ms = dynamic_cast<champsim::module_lifecycle*>(core);
   REQUIRE(ms != nullptr);
-  auto lines = ms->print_stats(true);
-  REQUIRE(!lines.empty());
-  REQUIRE(lines.front().find("core0 cumulative IPC") != std::string::npos);
+  champsim::stat_report report;
+  ms->end_phase(report);
+  REQUIRE(!report.text().empty());
+  REQUIRE(report.text().front().find("core0 cumulative IPC") != std::string::npos);
 }
 
-TEST_CASE("module_stat::json_stats fills the json_stat_builder") {
+TEST_CASE("module_lifecycle::report_stats fills the report's JSON object") {
   auto builder = champsim::modules::ModuleBuilder("test_core_json", "STATS_CORE_912");
   stats_env env_dummy(champsim::modules::ModuleBuilder{});
   auto* core = champsim::modules::core_module::create_instance(builder, &env_dummy);
@@ -145,34 +127,35 @@ TEST_CASE("module_stat::json_stats fills the json_stat_builder") {
   impl->sim_stats_.begin_cycles = 0;
   impl->sim_stats_.end_cycles = 100;
 
-  auto* ms = dynamic_cast<champsim::module_stat*>(core);
+  auto* ms = dynamic_cast<champsim::module_lifecycle*>(core);
   REQUIRE(ms != nullptr);
-  champsim::json_stat_builder b;
-  ms->json_stats(b, false);
-  REQUIRE(!b.empty());
-  REQUIRE(b.json().contains("instructions"));
-  REQUIRE(b.json().contains("cycles"));
+  champsim::stat_report report;
+  ms->end_phase(report);
+  REQUIRE(!report.empty());
+  REQUIRE(report.json_object().contains("instructions"));
+  REQUIRE(report.json_object().contains("cycles"));
 }
 
-TEST_CASE("cache module_stat::print_stats produces lines tagged with the cache name") {
+TEST_CASE("cache module_lifecycle::report_stats produces lines tagged with the cache name") {
   auto builder = champsim::modules::ModuleBuilder("test_cache_912", "STATS_CACHE_912");
   stats_env env_dummy(champsim::modules::ModuleBuilder{});
   auto* cache = champsim::modules::cache_module::create_instance(builder, &env_dummy);
 
   auto* impl = static_cast<stats_cache*>(cache);
-  impl->roi_stats_.name = "L1D";
-  impl->roi_stats_.hits.set({access_type::LOAD, std::size_t{0}}, 100);
+  impl->sim_stats_.name = "L1D";
+  impl->sim_stats_.hits.set({access_type::LOAD, std::size_t{0}}, 100);
 
-  auto* ms = dynamic_cast<champsim::module_stat*>(cache);
+  auto* ms = dynamic_cast<champsim::module_lifecycle*>(cache);
   REQUIRE(ms != nullptr);
-  auto lines = ms->print_stats(true);
-  REQUIRE(!lines.empty());
-  REQUIRE(lines.front().find("L1D") != std::string::npos);
+  champsim::stat_report report;
+  ms->end_phase(report);
+  REQUIRE(!report.text().empty());
+  REQUIRE(report.text().front().find("L1D") != std::string::npos);
 }
 
-TEST_CASE("interface_registry exposes module_stat conversions for opted-in interfaces") {
-  REQUIRE(champsim::modules::interface_registry::get_to_module_stat("core") != nullptr);
-  REQUIRE(champsim::modules::interface_registry::get_to_module_stat("cache") != nullptr);
+TEST_CASE("interface_registry exposes module_lifecycle conversions for opted-in interfaces") {
+  REQUIRE(champsim::modules::interface_registry::get_to_module_lifecycle("core") != nullptr);
+  REQUIRE(champsim::modules::interface_registry::get_to_module_lifecycle("cache") != nullptr);
 }
 
 TEST_CASE("interface_registry::identify reports model and name for an instance") {

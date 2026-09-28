@@ -27,14 +27,14 @@
 #include "address.h"
 #include "cache_stats.h"
 #include "champsim.h"
-#include "packet.h"
 #include "modules.h"
+#include "packet.h"
 #include "util/ring_buffer.h"
 
 namespace champsim
 {
 
-class channel: public champsim::modules::channel_module
+class channel : public champsim::modules::channel_module
 {
 
   template <typename R>
@@ -54,7 +54,7 @@ public:
   champsim::ring_buffer<request_type> RQ{}, PQ{}, WQ{};
   champsim::ring_buffer<response_type> returned{};
 
-  stats_type sim_stats{}, roi_stats{};
+  stats_type sim_stats{};
 
   channel();
   channel(champsim::modules::ModuleBuilder builder);
@@ -77,7 +77,6 @@ public:
   champsim::ring_buffer<response_type>& get_returned() override { return returned; }
 
   stats_type& get_sim_stats() override { return sim_stats; }
-  stats_type& get_roi_stats() override { return roi_stats; }
 };
 } // namespace champsim
 

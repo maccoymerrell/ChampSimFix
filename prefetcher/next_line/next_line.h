@@ -16,7 +16,7 @@ struct next_line : public champsim::modules::prefetcher {
   void prefetcher_final_stats() override {}
   void prefetcher_branch_operate(champsim::address /*ip*/, uint8_t /*branch_type*/, champsim::address /*branch_target*/) override {}
 
-  next_line(champsim::modules::ModuleBuilder) {};
+  next_line(champsim::modules::ModuleBuilder){};
 };
 
 #endif

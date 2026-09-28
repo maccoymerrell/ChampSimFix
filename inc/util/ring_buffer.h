@@ -148,16 +148,34 @@ class ring_buffer
       }
       return *this;
     }
-    iterator_impl operator++(int) { auto tmp = *this; ++*this; return tmp; }
+    iterator_impl operator++(int)
+    {
+      auto tmp = *this;
+      ++*this;
+      return tmp;
+    }
     iterator_impl& operator--()
     {
       --pos_;
       phys_ = (phys_ == 0 ? cap_ : phys_) - 1;
       return *this;
     }
-    iterator_impl operator--(int) { auto tmp = *this; --*this; return tmp; }
-    iterator_impl& operator+=(difference_type n) { advance(n); return *this; }
-    iterator_impl& operator-=(difference_type n) { advance(-n); return *this; }
+    iterator_impl operator--(int)
+    {
+      auto tmp = *this;
+      --*this;
+      return tmp;
+    }
+    iterator_impl& operator+=(difference_type n)
+    {
+      advance(n);
+      return *this;
+    }
+    iterator_impl& operator-=(difference_type n)
+    {
+      advance(-n);
+      return *this;
+    }
 
     friend iterator_impl operator+(iterator_impl it, difference_type n) { return it += n; }
     friend iterator_impl operator+(difference_type n, iterator_impl it) { return it += n; }

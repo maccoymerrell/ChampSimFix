@@ -26,9 +26,11 @@
 using namespace champsim::data::data_literals;
 
 VirtualMemory::VirtualMemory(champsim::modules::ModuleBuilder builder)
-    : randomization_seed(builder.get_parameter<std::optional<uint64_t>>("randomization_seed", true)), dram(builder.get_parameter<champsim::modules::memory_controller_module*>("dram")), minor_fault_penalty(builder.get_parameter<champsim::chrono::clock::duration>("minor_fault_penalty")), pt_levels(builder.get_parameter<std::size_t>("page_table_levels")), pte_page_size(builder.get_parameter<champsim::data::bytes>("page_table_page_size")),
-      page_size_(builder.get_parameter<unsigned>("page_size", true, 4096u)),
-      log2_page_size_(builder.get_parameter<unsigned>("log2_page_size", true, 12u)),
+    : randomization_seed(builder.get_parameter<std::optional<uint64_t>>("randomization_seed", true)),
+      dram(builder.get_parameter<champsim::modules::memory_controller_module*>("dram")),
+      minor_fault_penalty(builder.get_parameter<champsim::chrono::clock::duration>("minor_fault_penalty")),
+      pt_levels(builder.get_parameter<std::size_t>("page_table_levels")), pte_page_size(builder.get_parameter<champsim::data::bytes>("page_table_page_size")),
+      page_size_(builder.get_parameter<unsigned>("page_size", true, 4096u)), log2_page_size_(builder.get_parameter<unsigned>("log2_page_size", true, 12u)),
       next_pte_page(
           champsim::dynamic_extent{champsim::data::bits{log2_page_size_}, champsim::data::bits{champsim::lg2(champsim::data::bytes{pte_page_size}.count())}}, 0)
 {
@@ -116,7 +118,8 @@ std::pair<champsim::page_number, champsim::chrono::clock::duration> VirtualMemor
   return std::pair{ppage->second, penalty};
 }
 
-std::pair<champsim::address, champsim::chrono::clock::duration> VirtualMemory::get_pte_pa(champsim::origin origin, champsim::page_number vaddr, std::size_t level)
+std::pair<champsim::address, champsim::chrono::clock::duration> VirtualMemory::get_pte_pa(champsim::origin origin, champsim::page_number vaddr,
+                                                                                          std::size_t level)
 {
   champsim::dynamic_extent pte_table_entry_extent{champsim::address::bits, shamt(level + 1)};
   auto [ppage, fault] =

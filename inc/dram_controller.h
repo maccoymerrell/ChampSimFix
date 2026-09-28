@@ -64,15 +64,20 @@ struct DRAM_ADDRESS_MAPPING {
   unsigned long get_column(champsim::address address) const;
 
   /**
-   * Hash row bits into the channel/bank/bankgroup index to spread DRAM parallelism.
-   * Each iteration XORs the selected segment bits into `field`, until no un-XOR'd
-   * row bits remain.
+   * Perform the hashing operations for indexing our channels, banks, and bankgroups.
+   * This is done to increase parallelism when serving requests at the DRAM level.
    *
-   * :param address: The physical address being hashed.
-   * :param segment_size: Row bits consumed per iteration; (row bits / segment_size) == # of XORs.
-   * :param segment_offset: Bit offset within each segment; extracted bits are [segment_offset + field_bits : segment_offset].
-   * :param field: The index being permuted.
+   * :param address: The physical address at which the hashing operation is occurring.
+   * :param segment_size: The number of row bits extracted during each iteration. (# of row bits / segment_size) == # of XOR operations
+   * :param segment_offset: The bit offset within the segment that the XOR operation will occur at. The bits taken from the segment will be [segment_offset +
+   * field_bits : segment_offset]
+   *
+   * :param field: The input index that is being permuted by the operation.
    * :param field_bits: The length of the index in bits.
+   *
+   * Each iteration of the operation takes the selected bits of the segment and XORs them with the entirety of the field
+   * which should be equal or greater than length (in the case of the last iteration). This continues until no bits remain
+   * within the row that have not been XOR'd with the field.
    */
   unsigned long swizzle_bits(champsim::address address, unsigned long segment_size, champsim::data::bits segment_offset, unsigned long field,
                              unsigned long field_bits) const;
@@ -88,9 +93,8 @@ struct DRAM_ADDRESS_MAPPING {
 };
 
 struct DRAM_CHANNEL final : public champsim::operable {
-  // Warmup/ROI flags are propagated from the owning MEMORY_CONTROLLER each phase.
+  // The warmup flag is propagated from the owning MEMORY_CONTROLLER each phase.
   bool warmup = true;
-  bool roi    = false;
 
   using response_type = champsim::response;
 
@@ -159,7 +163,6 @@ private:
   request_array_type::iterator active_request;
 
 public:
-
   // track bankgroup accesses
   std::vector<champsim::chrono::clock::time_point> bankgroup_readytime{address_mapping.ranks() * address_mapping.bankgroups(),
                                                                        champsim::chrono::clock::time_point{}};
@@ -182,11 +185,11 @@ private:
   // Incrementally maintained counters: O(1) reads replacing a full-capacity
   // scan per cycle. All mutation flows through member functions (or
   // modify_*/resync_counters), so they cannot desync.
-  long rq_occupancy_ct = 0;      // RQ slots with has_value
-  long wq_occupancy_ct = 0;      // WQ slots with has_value
-  long rq_unchecked_ct = 0;      // occupied RQ slots with !forward_checked
-  long wq_unchecked_ct = 0;      // occupied WQ slots with !forward_checked
-  long valid_bank_count = 0;     // bank_request entries with valid
+  long rq_occupancy_ct = 0;       // RQ slots with has_value
+  long wq_occupancy_ct = 0;       // WQ slots with has_value
+  long rq_unchecked_ct = 0;       // occupied RQ slots with !forward_checked
+  long wq_unchecked_ct = 0;       // occupied WQ slots with !forward_checked
+  long valid_bank_count = 0;      // bank_request entries with valid
   long refresh_pending_banks = 0; // bank_request entries with need_refresh || under_refresh
 
   // Recompute every counter from the underlying structures.
@@ -220,7 +223,7 @@ public:
   }
 
   using stats_type = dram_stats;
-  stats_type roi_stats, sim_stats;
+  stats_type sim_stats;
 
   // Latencies
   const champsim::chrono::clock::duration tRP, tRCD, tCAS, tRAS, tREF, tRFC, DRAM_DBUS_TURN_AROUND_TIME, DRAM_DBUS_RETURN_TIME, DRAM_DBUS_BANKGROUP_STALL;
@@ -245,22 +248,18 @@ public:
   long operate() final;
   void print_deadlock() final;
 
-  // True if operate() would do or settle any work at time t (queued entries,
-  // bank/bus activity, due refresh, or a write->read switch). Used by the
-  // owning MEMORY_CONTROLLER's poll_cycle(); this channel is parent-ticked.
+  // True if operate() would perform (or settle) any work at time t: pending
+  // queue entries, bank/bus activity, a due refresh, or a write->read mode
+  // switch. Used by the owning MEMORY_CONTROLLER's poll_cycle(); this channel
+  // is parent-ticked, so its own poll_cycle() is never consulted.
   bool would_do_work_at(champsim::chrono::clock::time_point t) const;
-
-  // Timer-scheduled work in flight (refresh, busy banks, an occupied data
-  // bus): completes at a known future time without external input. Vetoes
-  // the zero-progress deadlock abort while requests stall behind a refresh.
-  bool has_pending_work() const final;
 
   std::size_t bank_request_capacity() const;
   std::size_t bankgroup_request_capacity() const;
   [[nodiscard]] champsim::data::bytes density() const;
 };
 
-class MEMORY_CONTROLLER : public champsim::modules::memory_controller_module, public champsim::module_phase, public champsim::module_stat
+class MEMORY_CONTROLLER : public champsim::modules::memory_controller_module
 {
   using channel_type = champsim::modules::channel_module;
   using request_type = typename channel_type::request_type;
@@ -286,17 +285,11 @@ public:
   void initialize() final;
   long operate() final;
   long poll_cycle() final;
-  bool has_pending_work() const final;
-  void begin_phase(bool warmup, bool roi) override;
-  void end_phase() override;
+  void begin_phase(bool warmup) override;
+  void end_phase(champsim::stat_report& out) override;
   void print_deadlock() final;
 
-  // module_stat
-  std::vector<std::string> print_stats(bool roi) const override;
-  void json_stats(champsim::json_stat_builder& b, bool roi) const override;
-
   stats_type get_sim_stats(std::size_t channel_no) const final;
-  stats_type get_roi_stats(std::size_t channel_no) const final;
   std::size_t get_num_channels() const final { return channels.size(); }
 
   [[nodiscard]] champsim::data::bytes size() const;
