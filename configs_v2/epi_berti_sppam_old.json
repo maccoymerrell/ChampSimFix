@@ -607,8 +607,7 @@
      4,
      8
     ]
-   ],
-   "asid": 0
+   ]
   },
   {
    "name": "cpu0",
@@ -682,21 +681,19 @@
      "model": "basic_btb"
     },
     {
-     "name": "cpu0_trace_source",
-     "module": "workload_source",
-     "model": "TRACE_WORKLOAD_SOURCE",
+     "name": "cpu0_trace_producer",
+     "module": "instruction_producer",
+     "model": "INSTRUCTION_PRODUCER",
      "trace_file": "$trace0",
      "cloudsuite": false,
-     "repeat": true,
-     "stream_id": 0
+     "repeat": true
     }
-   ],
-   "consumer_id": 0
+   ]
   },
   {
    "name": "phase_controller",
    "module": "phase_controller",
-   "model": "INSTRUCTION_PHASE_CONTROLLER",
+   "model": "PHASE_CONTROLLER",
    "deadlock_cycles": 500000,
    "warmup_length": "$warmup_instructions",
    "simulation_length": "$simulation_instructions"
