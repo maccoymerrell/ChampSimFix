@@ -75,6 +75,26 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   // many a demand later re-accessed (right addr, too early). Truly-bad = ip_ev_ - ip_untimely_ (never re-hit).
   std::vector<uint32_t> ip_ev_ = std::vector<uint32_t>(IPBK, 0);       // evicted-unused count per issuing IP
   std::vector<uint32_t> ip_untimely_ = std::vector<uint32_t>(IPBK, 0); // of those, later re-demanded (untimely)
+  // LLC-only prefetch samples, separate from pfht_: sparser (1/llc_sample_div) and pinned far longer
+  // (llc_track_timeout), since an LLC line waits much longer for its use than an L2 line. An entry follows
+  // its line if a later prefetch moves it into L2 (in_l2), and then resolves on that L2 copy's fate.
+  struct llc_track {
+    bool valid = false;
+    bool in_l2 = false;
+    uint64_t block = 0;
+    uint64_t issue = 0;
+    uint16_t iph = 0;
+  };
+  std::vector<llc_track> llcs_;
+  uint64_t llc_sample_ctr_ = 0;
+  std::vector<uint32_t> ip_llc_useful_ = std::vector<uint32_t>(IPBK, 0);  // sampled LLC-only prefetches that served a later L2 miss
+  std::vector<uint32_t> ip_llc_useless_ = std::vector<uint32_t>(IPBK, 0); // ... that timed out, or were promoted and evicted unused
+  uint64_t dbg_llc_redirect_ = 0, dbg_llc_bad_ = 0, dbg_llc_dup_ = 0, dbg_llc_use_ = 0, dbg_llc_useless_ = 0;
+  // An IP whose LLC-only prefetches are sampled useless below ip_llc_thresh % is dropped, not redirected.
+  bool ip_llc_bad(uint32_t iph) const {
+    const uint64_t u = ip_llc_useful_[iph], n = u + ip_llc_useless_[iph];
+    return n >= P.ip_filter_min_samples && u * 100 < static_cast<uint64_t>(P.ip_llc_thresh) * n;
+  }
   std::unordered_map<uint64_t, uint16_t> pf_issue_iph_; // issued (in-flight/resident) block -> issuing-IP hash
   std::unordered_map<uint64_t, uint16_t> pf_evict_iph_; // evicted-unused block -> issuing-IP hash (untimely-watch)
   uint64_t l2_dem_acc_ = 0, l2_dem_hit_ = 0; // running L2 demand hit rate (cache-stress gate for depth-throttle)
@@ -321,6 +341,7 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
     }
     if ((ip_age_ctr_ & ((uint64_t{1} << P.ip_filter_age_shift) - 1)) == 0)
       for (int i = 0; i < IPBK; ++i) { ip_useful_[i] >>= 1; ip_useless_[i] >>= 1; ip_ev_[i] >>= 1; ip_untimely_[i] >>= 1; ip_pe_[i] *= 0.5; ip_pe_n_[i] >>= 1;
+        ip_llc_useful_[i] >>= 1; ip_llc_useless_[i] >>= 1;
         snap_ip_pe_[i] *= 0.5; snap_ip_pe_n_[i] >>= 1; ip_ph_harm_[i] >>= 1; ip_ph_active_[i] >>= 1; } // decay phase census too
   }
   static uint32_t iphash(uint64_t ip) { return static_cast<uint32_t>((ip * 0x9E3779B97F4A7C15ull) >> 52) & 0xFFFu; }

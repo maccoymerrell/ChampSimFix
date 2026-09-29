@@ -563,6 +563,9 @@ public:
   // Set by the module each access from the EXISTING per-IP filter table (ip_trickle_div) -- the IP gate
   // reuses that sparse-IP signal instead of tracking any per-region/per-block IP state.
   void set_ip_gate(bool g) { cur_ip_gate_ = g; }
+  // LLC shadow map (blocks placed in the LLC by an LLC-only prefetch), for the module's LLC redirect.
+  void mark_llc(uint64_t block) { add_to_llc_pagemap(block); }
+  bool llc_marked(uint64_t block) { return check_llc_pagemap(block); }
   // BG-driven lookahead hooks (set by the module from the shared branch-graph). `train` learns the per-region
   // PC-hash sequence (prev_pht -> cur_pht on each access to a region); `next` predicts the next PC hash to
   // access the current region (the advancing lookahead context). Off until set.

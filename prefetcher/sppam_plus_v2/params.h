@@ -103,6 +103,14 @@ struct params {
   int ip_filter_trickle_hard = 24;     // HARSH throttle divisor (near-dead IPs: issue 1/N) [swept]. Graded: harsher
                                        // at high uselessness, lighter at mid usefulness.
   uint32_t ip_filter_age_shift = 20;   // halve the per-IP counters every 2^shift issues (adaptivity)
+  // LLC-aware volume throttle: a prefetch the per-IP trickle would drop is placed in the LLC only instead,
+  // unless that IP's sampled LLC usefulness is below ip_llc_thresh %. LLC-only prefetches are scored in their
+  // own per-IP counters (an L2 miss on a sampled LLC-only block = LLC-useful; timeout = LLC-useless).
+  bool ip_llc_redirect = false;
+  int ip_llc_thresh = 20;
+  std::size_t llc_sample_entries = 64;      // LLC-only sample table (pinned until resolved)
+  uint64_t llc_sample_div = 2048;           // sample 1/N LLC-only prefetches: ~pfht_'s occupancy (1/16 x 80x longer life x 1/4 the entries)
+  uint64_t llc_track_timeout = 4000000;     // cycles an LLC-only sample may wait for its use before counting useless
   int ip_filter_max_useful_loss = 100; // auto-backoff budget (OFF by default: useful-loss does NOT predict
                                        // AMAT -- cc5 is pollution-limited so throttling HELPS it; sierra is
                                        // coverage-limited and the estimate cannot catch it. Proper gate is
@@ -989,6 +997,8 @@ struct params {
     if (enable_pe_management || enable_ip_filter) {
       const uint64_t iph_b = lg2(ip_table_entries > 1 ? static_cast<uint64_t>(ip_table_entries) : 2);
       mgmt += static_cast<uint64_t>(pfht_entries) * (1 + pfht_tag_bits + 1 + 16 + 1 + 17 + iph_b);  // pf_track: valid+tag+from_spp+issue+filled+lat+iph
+      if (ip_llc_redirect)                                                                          // llc_track: valid+in_l2+tag+coarse issue time+iph
+        mgmt += static_cast<uint64_t>(llc_sample_entries) * (1 + 1 + pfht_tag_bits + 16 + iph_b);
       mgmt += static_cast<uint64_t>(pfht_entries) * (1 + pfht_tag_bits + pfht_tag_bits + 1 + iph_b); // poll_track: valid+victim-tag+pf-tag+from_spp+iph
     }
     if (enable_bw_feedback) mgmt += 16 * 5 + 16;
@@ -1021,6 +1031,7 @@ struct params {
         uint64_t arrays = 3;                                            // useful + useless + gate_ctr
         if (ip_filter_depth_throttle) arrays += 2;                      // ev + untimely
         if (bwd_useful_gate) arrays += 2;                               // bwd_useful + bwd_useless
+        if (ip_llc_redirect) arrays += 2;                               // llc_useful + llc_useless
         t.ipf += arrays * E * ip_ctr_bits;
       }
       if (enable_ip_filter || pattern_validate)                         // pf_sample_ shared by filtering & validation
@@ -1097,6 +1108,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(enable_shadow_squash); SET(exact_shadow_test); SET(enable_hybrid_bidding); SET(bid_by_value); SET(bid_explore_div);
   SET(enable_resid_bloom); SET(resid_bloom_bits); SET(resid_bloom_k); SET(resid_bloom_clear);
   SET(enable_am_bloom); SET(am_bloom_size); SET(am_bloom_k); SET(am_bloom_clear_thresh); SET(am_bloom_clear_frac);
+  SET(ip_llc_redirect); SET(ip_llc_thresh); SET(llc_sample_entries); SET(llc_sample_div); SET(llc_track_timeout);
   SET(enable_ip_filter); SET(ip_filter_threshold); SET(ip_filter_min_samples); SET(ip_filter_trickle); SET(ip_filter_age_shift);
   SET(ip_filter_threshold_hard); SET(ip_filter_trickle_hard); SET(ip_filter_use_pe); SET(ip_pe_hard_frac);
   SET(ip_filter_pe_veto); SET(ip_pe_veto_frac);

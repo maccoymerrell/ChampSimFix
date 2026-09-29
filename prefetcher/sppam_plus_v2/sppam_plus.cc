@@ -73,6 +73,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(enable_hybrid_bidding); CFG(bid_by_value); CFG(enable_shadow_squash);
   CFG(enable_resid_bloom); CFG(resid_bloom_bits); CFG(resid_bloom_k); CFG(resid_bloom_clear);
   CFG(enable_am_bloom); CFG(am_bloom_size); CFG(am_bloom_k); CFG(am_bloom_clear_thresh); CFG(am_bloom_clear_frac);
+  CFG(ip_llc_redirect); CFG(ip_llc_thresh); CFG(llc_sample_entries); CFG(llc_sample_div); CFG(llc_track_timeout);
   CFG(enable_ip_filter); CFG(ip_filter_threshold); CFG(ip_filter_min_samples); CFG(ip_filter_trickle); CFG(ip_filter_age_shift);
   CFG(ip_filter_threshold_hard); CFG(ip_filter_trickle_hard); CFG(ip_filter_use_pe); CFG(ip_pe_hard_frac);
   CFG(ip_filter_pe_veto); CFG(ip_pe_veto_frac);
@@ -148,6 +149,8 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
 
 void sppam_plus::prefetcher_initialize()
 {
+  if (P.ip_llc_redirect)
+    llcs_.assign(P.llc_sample_entries ? P.llc_sample_entries : 1, llc_track{});
   // Emit the storage cost so every sweep run records its buildability (geometry knobs trade
   // against the budget). Depends only on the config, not the trace.
   fmt::print("[SPPAM+] state ~{:.1f} KiB (region {}x{} bits={} pattern {}/{} spp={} pe={})\n", P.state_kib(), P.region_sets, P.region_ways,
@@ -324,6 +327,12 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
       e.valid = false; // resolved (used)
     }
   }
+  // LLC-aware throttle: resolve a sampled LLC-only prefetch. Still LLC-only and now missed on in L2 -> the LLC
+  // copy served it (useful); promoted into L2 by a later prefetch and now hit -> useful through the promotion.
+  if (P.ip_llc_redirect && !llcs_.empty()) {
+    llc_track& le = llcs_[block % llcs_.size()];
+    if (le.valid && le.block == block && (le.in_l2 ? cache_hit : !cache_hit)) { ++ip_llc_useful_[le.iph]; ++dbg_llc_use_; le.valid = false; }
+  }
   if (pe_terms || (P.enable_ip_filter && P.ip_filter_depth_throttle) || P.enable_sig_feedback) { // lightweight inflight counters for the MLP gate (+ per-signature pollution detection)
     // The demand stream = ALL L2 accesses; berti's PREFETCH-type accesses are demand at
     // weight pe_pf_demand_weight (<1, more slack serving a prefetch), true loads/RFOs at 1.
@@ -400,6 +409,7 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
     // Shadow cache: any (data) fill marks the block resident.
     pred_->shadow_fill(block);
     if (prefetch) {
+      if (!llcs_.empty()) { llc_track& le = llcs_[block % llcs_.size()]; if (le.valid && le.block == block) le.in_l2 = true; } // moved LLC -> L2
       pf_unused_[block] = metadata_in; // freshly prefetched; carry full generation tag
       // DSE-faithful PE: measure THIS prefetch's real fill latency directly into perc_track_ (every data fill, not
       // gated on pfht_ sampling) -> DRAM-covering useful prefetches get their true high PE, not the llc_hit fallback.
@@ -433,6 +443,10 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
     }
     auto uit = pf_unused_.find(evb);
     evict_was_unused = (uit != pf_unused_.end());
+    if (!llcs_.empty()) { // a promoted LLC-only sample leaving L2 without a hit was never needed
+      llc_track& le = llcs_[evb % llcs_.size()];
+      if (le.valid && le.in_l2 && le.block == evb) { ++ip_llc_useless_[le.iph]; ++dbg_llc_useless_; le.valid = false; }
+    }
     if (evict_was_unused) {
       const uint32_t tag = uit->second; const uint8_t src = tag & 1u;
       const int depth = (tag >> 1) & 15, order = (tag >> 5) & 7;
@@ -580,8 +594,12 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
     uint32_t div = P.ip_filter_use_pe_phase ? ip_pe_phase_trickle_div(iph)
                  : P.ip_filter_use_pe ? ip_pe_trickle_div(iph) : ip_trickle_div(iph);
     if (P.ip_filter_pe_veto && div > 1 && ip_pe_positive(iph)) div = 1; // spare a clearly PE-positive IP
-    if (div > 1 && (++ip_trickle_ctr_ % div) != 0)
-      return false; // graded throttle (still issue 1/div so the IP keeps getting feedback)
+    if (div > 1 && (++ip_trickle_ctr_ % div) != 0) { // graded throttle (still issue 1/div so the IP keeps getting feedback)
+      if (!P.ip_llc_redirect) return false;
+      if (ip_llc_bad(iph)) { ++dbg_llc_bad_; return false; }        // its LLC placements don't pay either -> drop
+      if (pred_->llc_marked(block)) { ++dbg_llc_dup_; return false; } // already placed in the LLC
+      if (fill_l2) { fill_l2 = false; ++dbg_llc_redirect_; }        // place it in the LLC instead of dropping it
+    }
   }
   // Set-duel: guard groups + graded follower throttle (redirect L2->LLC / drop). Final placement.
   if (!sd_decide(block, fill_l2))
@@ -595,7 +613,15 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
   // hold 1/pe_sample_div of ISSUED prefetches. PINNED insert -- take only a FREE slot, never clobber
   // an in-flight (valid) entry, so a long-lived useless prefetch survives to its eviction resolve
   // (removing the bias that plagued a churn-overwrite table).
-  if ((P.enable_pe_management || P.enable_ip_filter || P.enable_perceptron_filter || P.enable_sig_feedback) && (++pe_sample_ctr_ % P.pe_sample_div == 0)) {
+  if (P.ip_llc_redirect && !fill_l2) {
+    if (!llcs_.empty() && (++llc_sample_ctr_ % P.llc_sample_div == 0)) {
+      llc_track& slot = llcs_[block % llcs_.size()];
+      const bool stale = slot.valid && (real_cycle_ - slot.issue) > P.llc_track_timeout;
+      if (stale) { ++ip_llc_useless_[slot.iph]; ++dbg_llc_useless_; }
+      if (!slot.valid || stale)
+        slot = llc_track{true, false, block, real_cycle_, static_cast<uint16_t>(iphash(cur_trigger_ip_))};
+    }
+  } else if ((P.enable_pe_management || P.enable_ip_filter || P.enable_perceptron_filter || P.enable_sig_feedback) && (++pe_sample_ctr_ % P.pe_sample_div == 0)) {
     pf_track& slot = pfht_[block % pfht_.size()];
     const bool stale = slot.valid && (real_cycle_ - slot.issue) > P.ip_track_timeout;
     if (!slot.valid || stale) {
@@ -615,6 +641,7 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
   if (from_spp && fill_l2)
     pred_->shadow_fill(block);
   const bool enqueued = prefetch_line(block << BLOCK_SHIFT, fill_l2, gen_tag | (from_spp ? 1u : 0u)); // carry generation tag (diagnostics)
+  if (enqueued && !fill_l2 && P.ip_llc_redirect) pred_->mark_llc(block); // LLC-only: dedupe later proposals of this block
   if (enqueued) ++data_pf_issued_;               // instruction-activity gate: count data prefetch issues (denominator of the instr-pf fraction)
   // (Perceptron issue tracking is perc_note_issue -> perc_track_; the fill latency is fed later by the pfht_ fill
   //  hook via pred_->perc_note_fill(). No separate perc_sdm_ insert.)
@@ -680,6 +707,7 @@ void sppam_plus::prefetcher_final_stats()
   fmt::print("[SPPAM+] prefetches issued: {} | squashed-redundant: {} | filter-passed[region-absent: {}, bit-clear: {}]\n",
              pf_issued_, pf_squashed_redundant_, pf_pass_region_absent_, pf_pass_bit_clear_);
   if (P.enable_ip_filter) fmt::print("[SPPAM+] ip-filter: active(end)={} thr={}% budget={}% | sampletab ins={} skip={} use-res={} evict-res={}\n", ip_filter_active_, P.ip_filter_threshold, P.ip_filter_max_useful_loss, dbg_ins_, dbg_skip_, dbg_use_, dbg_evict_);
+  if (P.ip_llc_redirect) fmt::print("[SPPAM+] llc-redirect: redirected={} dropped(llc-bad)={} dropped(in-llc)={} | llc samples useful={} useless={}\n", dbg_llc_redirect_, dbg_llc_bad_, dbg_llc_dup_, dbg_llc_use_, dbg_llc_useless_);
   for (int s = 0; s < 2; ++s) {
     const uint64_t u = char_useful_[s], ul = char_useless_[s], tm = char_timely_[s];
     const double acc = (u + ul) ? 100.0 * u / (u + ul) : 0.0;
