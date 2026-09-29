@@ -106,10 +106,10 @@ struct params {
   // LLC-aware volume throttle: a prefetch the per-IP trickle would drop is placed in the LLC only instead,
   // unless that IP's sampled LLC usefulness is below ip_llc_thresh %. LLC-only prefetches are scored in their
   // own per-IP counters (an L2 miss on a sampled LLC-only block = LLC-useful; timeout = LLC-useless).
-  bool ip_llc_redirect = false;
-  int ip_llc_thresh = 20;
+  bool ip_llc_redirect = true;
+  int ip_llc_thresh = 50;
   uint32_t ip_llc_min_samples = 8;          // LLC samples before an IP's LLC usefulness is trusted
-  uint32_t ip_llc_probe_div = 0;            // unproven IPs redirect only 1/N of would-be drops (0 = redirect all)
+  uint32_t ip_llc_probe_div = 8;            // unproven IPs redirect only 1/N of would-be drops (0 = redirect all)
   std::size_t llc_sample_entries = 64;      // LLC-only sample table (pinned until resolved)
   uint64_t llc_sample_div = 2048;           // sample 1/N LLC-only prefetches: ~pfht_'s occupancy (1/16 x 80x longer life x 1/4 the entries)
   uint64_t llc_track_timeout = 4000000;     // cycles an LLC-only sample may wait for its use before counting useless
