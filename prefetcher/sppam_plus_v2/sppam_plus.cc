@@ -262,7 +262,7 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
     // DENSE training: this prefetch was demand-USED -> useful (+1), first-outcome (retires its dense entry).
     if (P.perc_dense_train) pred_->perc_dense_resolve(block, /*useful=*/true);
   }
-  pred_->operate(block, cur_trigger_ip_, cache_hit, pf_used, /*delta_additive=*/false, static_cast<sppam_dse::atype>(type), cycle_, perc_pe);
+  pred_->operate(block, cur_trigger_ip_, cache_hit, pf_used, /*delta_additive=*/false, static_cast<sppam_dse::atype>(generic_access_type(type)), cycle_, perc_pe); // DATA_LOAD -> LOAD, DATA_PREFETCH -> PREFETCH
   if (spp_)
     spp_->operate(block);
 
