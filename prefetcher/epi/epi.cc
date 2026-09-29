@@ -76,11 +76,33 @@ void epi::init_hist_table()
     e.time_diff = 0;
     e.bb_size = 0;
   }
+  hist_tag_index_.clear();
+}
+
+// The ring is written only at its head, so the entry written becomes the newest; the one it replaces was the oldest.
+void epi::set_hist_head_tag(uint64_t tag)
+{
+  auto& entry = hist_table_[hist_table_head_];
+  if (entry.tag != 0) {
+    auto old = hist_tag_index_.find(entry.tag);
+    if (--old->second.count == 0)
+      hist_tag_index_.erase(old);
+  }
+  entry.tag = tag;
+  if (tag != 0) {
+    auto& occ = hist_tag_index_[tag];
+    occ.newest = static_cast<uint32_t>(hist_table_head_);
+    ++occ.count;
+  }
 }
 
 uint64_t epi::find_hist_entry(uint64_t line_addr) const
 {
   uint64_t tag = line_addr & L1I_HIST_TAG_MASK;
+  if (tag != 0) {
+    auto it = hist_tag_index_.find(tag);
+    return it == std::end(hist_tag_index_) ? L1I_HIST_TABLE_ENTRIES : it->second.newest;
+  }
   for (uint32_t count = 0, i = (hist_table_head_ + L1I_HIST_TABLE_MASK) % L1I_HIST_TABLE_ENTRIES; count < L1I_HIST_TABLE_ENTRIES;
        count++, i = (i + L1I_HIST_TABLE_MASK) % L1I_HIST_TABLE_ENTRIES) {
     if (hist_table_[i].tag == tag)
@@ -94,14 +116,14 @@ void epi::add_hist_table(uint64_t line_addr)
 {
   // Insert empty addresses in hist not to have timediff overflows
   while (current_cycle_ - hist_table_head_time_ >= L1I_TIME_DIFF_OVERFLOW) {
-    hist_table_[hist_table_head_].tag = 0;
+    set_hist_head_tag(0);
     hist_table_[hist_table_head_].time_diff = L1I_TIME_DIFF_MASK;
     hist_table_[hist_table_head_].bb_size = 0;
     hist_table_head_ = (hist_table_head_ + 1) % L1I_HIST_TABLE_ENTRIES;
     hist_table_head_time_ += L1I_TIME_DIFF_MASK;
   }
 
-  hist_table_[hist_table_head_].tag = line_addr & L1I_HIST_TAG_MASK;
+  set_hist_head_tag(line_addr & L1I_HIST_TAG_MASK);
   hist_table_[hist_table_head_].time_diff = (current_cycle_ - hist_table_head_time_) & L1I_TIME_DIFF_MASK;
   hist_table_[hist_table_head_].bb_size = 0;
   hist_table_head_ = (hist_table_head_ + 1) % L1I_HIST_TABLE_ENTRIES;
@@ -131,35 +153,36 @@ uint32_t epi::find_bb_merge_hist_table(uint64_t line_addr) const
   return 0;
 }
 
-// return bere (best request -- entangled address)
-uint64_t epi::get_bere_hist_table(uint64_t line_addr, uint64_t latency, uint32_t skip) const
+// bere (best request -- entangled address) candidates: bere[skip] is the skip-th candidate, 0 if there is none.
+// Returns false (the original's NO_BERE) when the line has no history tag.
+bool epi::get_bere_hist_table(uint64_t line_addr, uint64_t latency, uint64_t* bere, uint32_t tries) const
 {
+  std::fill_n(bere, tries, 0);
   uint64_t tag = line_addr & L1I_HIST_TAG_MASK;
   if (!tag) {
-    return NO_BERE;
+    return false;
   }
   uint32_t first = (hist_table_head_ + L1I_HIST_TABLE_MASK) % L1I_HIST_TABLE_ENTRIES;
   uint64_t time_i = hist_table_head_time_;
   uint64_t req_time = 0;
-  uint32_t num_skipped = 0;
-  for (uint32_t count = 0, i = first; count < L1I_HIST_TABLE_ENTRIES; count++, i = (i + L1I_HIST_TABLE_MASK) % L1I_HIST_TABLE_ENTRIES) {
+  uint32_t found = 0;
+  for (uint32_t count = 0, i = first; count < L1I_HIST_TABLE_ENTRIES && found < tries; count++, i = (i == 0 ? L1I_HIST_TABLE_ENTRIES : i) - 1) {
+    if (req_time == 0 && time_i + latency < current_cycle_) {
+      break; // entry times only decrease from here, so none of the rest can be the request
+    }
     if (req_time == 0 && hist_table_[i].tag == tag && time_i + latency >= current_cycle_) { // Its me (miss or late prefetcher)
       req_time = time_i;
     } else if (req_time) { // Not me (check only older than me)
       if (hist_table_[i].tag == tag) {
-        return 0; // Second time it appeared (evicted in between) or many for the same set. No entangle
+        break; // Second time it appeared (evicted in between) or many for the same set. No entangle
       }
       if (time_i + latency <= req_time && hist_table_[i].tag) {
-        if (skip == num_skipped) {
-          return hist_table_[i].tag;
-        } else {
-          num_skipped++;
-        }
+        bere[found++] = hist_table_[i].tag;
       }
     }
     time_i -= hist_table_[i].time_diff;
   }
-  return 0;
+  return true;
 }
 
 // ---------------- TIMING TABLES ----------------
@@ -174,15 +197,30 @@ void epi::init_timing_tables()
   timing_cache_table_.assign(tc_num_set_, std::vector<l1i_timing_cache_entry>(tc_num_way_, l1i_timing_cache_entry{}));
   for (auto& e : timing_mshr_table_)
     e.valid = false;
+  timing_mshr_slot_.clear();
+  timing_mshr_free_.fill(0);
+  for (uint32_t i = 0; i < L1I_TIMING_MSHR_SIZE; i++)
+    timing_mshr_free_[i / 64] |= uint64_t{1} << (i % 64);
+}
+
+void epi::set_timing_mshr_valid(uint32_t slot, bool valid)
+{
+  auto& entry = timing_mshr_table_[slot];
+  if (entry.valid)
+    timing_mshr_slot_.erase(entry.tag);
+  entry.valid = valid;
+  if (valid) {
+    timing_mshr_slot_.emplace(entry.tag, slot);
+    timing_mshr_free_[slot / 64] &= ~(uint64_t{1} << (slot % 64));
+  } else {
+    timing_mshr_free_[slot / 64] |= uint64_t{1} << (slot % 64);
+  }
 }
 
 uint64_t epi::find_timing_mshr_entry(uint64_t line_addr) const
 {
-  for (uint32_t i = 0; i < L1I_TIMING_MSHR_SIZE; i++) {
-    if (timing_mshr_table_[i].tag == (line_addr & L1I_TIMING_MSHR_TAG_MASK) && timing_mshr_table_[i].valid)
-      return i;
-  }
-  return L1I_TIMING_MSHR_SIZE;
+  auto it = timing_mshr_slot_.find(line_addr & L1I_TIMING_MSHR_TAG_MASK);
+  return it == std::end(timing_mshr_slot_) ? L1I_TIMING_MSHR_SIZE : it->second;
 }
 
 uint64_t epi::find_timing_cache_entry(uint64_t line_addr) const
@@ -197,9 +235,9 @@ uint64_t epi::find_timing_cache_entry(uint64_t line_addr) const
 
 uint32_t epi::get_invalid_timing_mshr_entry() const
 {
-  for (uint32_t i = 0; i < L1I_TIMING_MSHR_SIZE; i++) {
-    if (!timing_mshr_table_[i].valid)
-      return i;
+  for (std::size_t w = 0; w < std::size(timing_mshr_free_); w++) {
+    if (timing_mshr_free_[w])
+      return static_cast<uint32_t>(w * 64 + __builtin_ctzll(timing_mshr_free_[w]));
   }
   return L1I_TIMING_MSHR_SIZE;
 }
@@ -226,8 +264,8 @@ void epi::add_timing_entry(uint64_t line_addr, uint64_t bere_line_addr)
   if (i == L1I_TIMING_MSHR_SIZE) {
     return;
   }
-  timing_mshr_table_[i].valid = true;
   timing_mshr_table_[i].tag = line_addr & L1I_TIMING_MSHR_TAG_MASK;
+  set_timing_mshr_valid(i, true);
   timing_mshr_table_[i].bere_line_addr = bere_line_addr;
   timing_mshr_table_[i].timestamp = current_cycle_ & L1I_TIME_MASK;
   timing_mshr_table_[i].accessed = false;
@@ -238,7 +276,7 @@ void epi::invalid_timing_mshr_entry(uint64_t line_addr)
   uint32_t index = find_timing_mshr_entry(line_addr);
   if (index >= L1I_TIMING_MSHR_SIZE)
     return;
-  timing_mshr_table_[index].valid = false;
+  set_timing_mshr_valid(index, false);
 }
 
 void epi::move_timing_entry(uint64_t line_addr)
@@ -359,7 +397,7 @@ void epi::init_entangled_table()
 {
   for (uint32_t i = 0; i < L1I_ENTANGLED_TABLE_SETS; i++) {
     for (uint32_t j = 0; j < L1I_ENTANGLED_TABLE_WAYS; j++) {
-      entangled_table_[i][j].tag = 0;
+      set_entangled_tag(i, j, 0);
       entangled_table_[i][j].format = 1;
       for (uint32_t k = 0; k < L1I_MAX_ENTANGLED_PER_LINE; k++) {
         entangled_table_[i][j].entangled_addr[k] = 0;
@@ -371,12 +409,18 @@ void epi::init_entangled_table()
   }
 }
 
+void epi::set_entangled_tag(uint32_t set, uint32_t way, uint64_t tag)
+{
+  entangled_table_[set][way].tag = tag;
+  entangled_tags_[set][way] = tag;
+}
+
 uint32_t epi::get_way_entangled_table(uint64_t line_addr) const
 {
   uint64_t tag = (line_addr >> L1I_ENTANGLED_TABLE_INDEX_BITS) & L1I_TAG_MASK;
   uint32_t set = line_addr % L1I_ENTANGLED_TABLE_SETS;
   for (uint32_t i = 0; i < L1I_ENTANGLED_TABLE_WAYS; i++) {
-    if (entangled_table_[set][i].tag == tag) {
+    if (entangled_tags_[set][i] == tag) {
       return i;
     }
   }
@@ -390,7 +434,7 @@ void epi::add_entangled_table(uint64_t line_addr, uint64_t entangled_addr)
   uint32_t way = get_way_entangled_table(line_addr);
   if (way == L1I_ENTANGLED_TABLE_WAYS) {
     way = entangled_fifo_[set];
-    entangled_table_[set][way].tag = tag;
+    set_entangled_tag(set, way, tag);
     entangled_table_[set][way].format = 1;
     for (uint32_t k = 0; k < L1I_MAX_ENTANGLED_PER_LINE; k++) {
       entangled_table_[set][way].entangled_addr[k] = 0;
@@ -491,7 +535,7 @@ void epi::add_bbsize_table(uint64_t line_addr, uint32_t bb_size)
   uint32_t way = get_way_entangled_table(line_addr);
   if (way == L1I_ENTANGLED_TABLE_WAYS) {
     way = entangled_fifo_[set];
-    entangled_table_[set][way].tag = tag;
+    set_entangled_tag(set, way, tag);
     entangled_table_[set][way].format = 1;
     for (uint32_t k = 0; k < L1I_MAX_ENTANGLED_PER_LINE; k++) {
       entangled_table_[set][way].entangled_addr[k] = 0;
@@ -507,8 +551,12 @@ void epi::add_bbsize_table(uint64_t line_addr, uint32_t bb_size)
 
 uint64_t epi::get_entangled_addr_entangled_table(uint64_t line_addr, uint32_t index_k) const
 {
+  return get_entangled_addr_entangled_table(line_addr, index_k, get_way_entangled_table(line_addr));
+}
+
+uint64_t epi::get_entangled_addr_entangled_table(uint64_t line_addr, uint32_t index_k, uint32_t way) const
+{
   uint32_t set = line_addr % L1I_ENTANGLED_TABLE_SETS;
-  uint32_t way = get_way_entangled_table(line_addr);
   if (way < L1I_ENTANGLED_TABLE_WAYS) {
     if (entangled_table_[set][way].entangled_conf[index_k] >= L1I_CONFIDENCE_COUNTER_THRESHOLD) {
       return extend_format_entangled(line_addr, entangled_table_[set][way].entangled_addr[index_k], entangled_table_[set][way].format);
@@ -517,10 +565,11 @@ uint64_t epi::get_entangled_addr_entangled_table(uint64_t line_addr, uint32_t in
   return 0;
 }
 
-uint32_t epi::get_bbsize_entangled_table(uint64_t line_addr) const
+uint32_t epi::get_bbsize_entangled_table(uint64_t line_addr) const { return get_bbsize_entangled_table(line_addr, get_way_entangled_table(line_addr)); }
+
+uint32_t epi::get_bbsize_entangled_table(uint64_t line_addr, uint32_t way) const
 {
   uint32_t set = line_addr % L1I_ENTANGLED_TABLE_SETS;
-  uint32_t way = get_way_entangled_table(line_addr);
   if (way < L1I_ENTANGLED_TABLE_WAYS) {
     return entangled_table_[set][way].bb_size;
   }
@@ -662,15 +711,16 @@ uint32_t epi::prefetcher_cache_operate(champsim::address addr, champsim::address
     consecutive = true;
   }
 
-  // Queue basic block prefetches
-  uint32_t bb_size = get_bbsize_entangled_table(line_addr);
+  // Queue basic block prefetches (the entangled table is only read until the lookups below finish)
+  uint32_t line_way = get_way_entangled_table(line_addr);
+  uint32_t bb_size = get_bbsize_entangled_table(line_addr, line_way);
   if (bb_size > 0) {
     add_xpq(line_addr + 1, 0, bb_size);
   }
 
   // Queue entangled and basic block of entangled prefetches
   for (uint32_t k = 0; k < L1I_MAX_ENTANGLED_PER_LINE; k++) {
-    uint64_t entangled_addr = get_entangled_addr_entangled_table(line_addr, k);
+    uint64_t entangled_addr = get_entangled_addr_entangled_table(line_addr, k, line_way);
     if (entangled_addr && (entangled_addr != line_addr)) {
       uint32_t ent_bb_size = get_bbsize_entangled_table(entangled_addr);
       add_xpq(entangled_addr, line_addr, ent_bb_size + 1);
@@ -752,9 +802,15 @@ uint32_t epi::prefetcher_cache_fill(champsim::address addr, long /*set*/, long /
 
   // Get and update entangled
   if (latency) {
+    // The history table does not change during the fill, so one scan gives the candidate for every try
+    static_assert(L1I_TRIES_AVAIL_ENTANGLED_NOT_PRESENT <= L1I_TRIES_AVAIL_ENTANGLED);
+    std::array<uint64_t, L1I_TRIES_AVAIL_ENTANGLED> beres;
+    const bool has_bere = get_bere_hist_table(line_addr, latency, beres.data(), L1I_TRIES_AVAIL_ENTANGLED);
+    auto bere_at = [&](uint32_t skip) { return has_bere ? beres[skip] : NO_BERE; };
+
     bool inserted = false;
     for (uint32_t i = 0; i < L1I_TRIES_AVAIL_ENTANGLED; i++) {
-      uint64_t bere = get_bere_hist_table(line_addr, latency, i);
+      uint64_t bere = bere_at(i);
       if (bere == NO_BERE) {
         continue;
       }
@@ -768,7 +824,7 @@ uint32_t epi::prefetcher_cache_fill(champsim::address addr, long /*set*/, long /
     }
     if (!inserted) {
       for (uint32_t i = 0; i < L1I_TRIES_AVAIL_ENTANGLED_NOT_PRESENT; i++) {
-        uint64_t bere = get_bere_hist_table(line_addr, latency, i);
+        uint64_t bere = bere_at(i);
         if (bere == NO_BERE) {
           continue;
         }
@@ -782,7 +838,7 @@ uint32_t epi::prefetcher_cache_fill(champsim::address addr, long /*set*/, long /
       }
     }
     if (!inserted) {
-      uint64_t bere = get_bere_hist_table(line_addr, latency);
+      uint64_t bere = bere_at(0);
       if (bere == NO_BERE) {
         return metadata_in;
       }

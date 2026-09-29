@@ -41,6 +41,7 @@
 #include "cache.h"
 
 #include <algorithm>
+#include <bitset>
 #include <iostream>
 #include <stdlib.h>
 #include <cassert>
@@ -51,6 +52,7 @@
 #include <queue>
 #include <cmath>
 #include <map>
+#include <unordered_map>
 #include "msl/lru_table.h"
 #include <fstream>
 
@@ -108,14 +110,19 @@ class berti_plus : public champsim::modules::prefetcher {
         };
         int size;
         
-        latency_table *latencyt;
+        std::vector<latency_table> latencyt;
+
+        // Nonzero addresses are unique in the table (add updates an existing entry in place), and an entry
+        // with addr 0 is free and all-zero. Tags change only through set_tag.
+        std::unordered_map<uint64_t, int> slot; // nonzero addr -> entry
+        std::vector<uint64_t> untagged;         // bit per entry with tag 0; add allocates the highest
+        void set_tag(int i, uint64_t tag);
     
         public:
-        LatencyTable(const int size) : size(size)
+        LatencyTable(const int size) : size(size), latencyt(size), untagged((size + 63) / 64, 0)
         {
-            latencyt = new latency_table[size];
+            for (int i = 0; i < size; i++) untagged[i / 64] |= uint64_t{1} << (i % 64);
         }
-        ~LatencyTable() { delete latencyt;}
     
         uint8_t  add(uint64_t addr, uint64_t tag, bool pf, uint64_t cycle);
         uint64_t get(uint64_t addr);
@@ -135,23 +142,22 @@ class berti_plus : public champsim::modules::prefetcher {
     
         int sets;
         int ways;
-        shadow_cache **scache;
+        std::vector<shadow_cache> scache; // [set * ways + way]
+
+        // Lookups use the first entry in (set, way) order holding the address. An address can sit in several
+        // entries: a stale copy stays when its line leaves the cache without a fill taking its place.
+        struct occurrences {
+            uint32_t first;
+            uint32_t count;
+        };
+        std::unordered_map<uint64_t, occurrences> index;
+        shadow_cache *find(uint64_t addr);
     
         public:
         uint64_t aliased_cache_hits = 0;
-        ShadowCache(const int sets, const int ways)
+        ShadowCache(const int sets, const int ways) : sets(sets), ways(ways), scache(static_cast<std::size_t>(sets * ways))
         {
-            scache = new shadow_cache*[sets];
-            for (int i = 0; i < sets; i++) scache[i] = new shadow_cache[ways];
-    
-            this->sets = sets;
-            this->ways = ways;
-        }
-    
-        ~ShadowCache()
-        {
-            for (int i = 0; i < sets; i++) delete scache[i];
-            delete scache;
+            if (!scache.empty()) index.emplace(0, occurrences{0, static_cast<uint32_t>(scache.size())});
         }
     
         bool add(uint32_t set, uint32_t way, uint64_t addr, bool pf, uint64_t lat);
@@ -213,65 +219,25 @@ class berti_plus : public champsim::modules::prefetcher {
 
     struct region_type {
         static constexpr unsigned int PAGE_BITS = 12;
-        struct page_extent : champsim::dynamic_extent {
-        page_extent() : dynamic_extent(champsim::data::bits{64}, champsim::data::bits{PAGE_BITS}) {}
-      };
-      using page = champsim::address_slice<page_extent>;
-
-      struct block_in_page_extent : champsim::dynamic_extent {
-        block_in_page_extent() : dynamic_extent(champsim::data::bits{PAGE_BITS}, champsim::data::bits{LOG2_BLOCK_SIZE}) {}
-      };
-      using block_in_page = champsim::address_slice<block_in_page_extent>;
+        using page = champsim::address_slice<champsim::static_extent<champsim::data::bits{64}, champsim::data::bits{PAGE_BITS}>>;
+        using block_in_page = champsim::address_slice<champsim::static_extent<champsim::data::bits{PAGE_BITS}, champsim::data::bits{LOG2_BLOCK_SIZE}>>;
         page vpn;
-        std::vector<bool> access_map{};
+        std::bitset<(1 << PAGE_BITS) / BLOCK_SIZE> access_map{};
 
         region_type() : region_type(page{}) {}
-        explicit region_type(page allocate_vpn)
-          : vpn(allocate_vpn), access_map((1 << PAGE_BITS) / BLOCK_SIZE)
-        {
-        }
+        explicit region_type(page allocate_vpn) : vpn(allocate_vpn) {}
     };
 
-
-    struct region_coverage_type {
-        static constexpr unsigned int PAGE_BITS = 12;
-        struct page_extent : champsim::dynamic_extent {
-        page_extent() : dynamic_extent(champsim::data::bits{64}, champsim::data::bits{PAGE_BITS}) {}
-      };
-      using page = champsim::address_slice<page_extent>;
-
-      struct block_in_page_extent : champsim::dynamic_extent {
-        block_in_page_extent() : dynamic_extent(champsim::data::bits{PAGE_BITS}, champsim::data::bits{LOG2_BLOCK_SIZE}) {}
-      };
-      using block_in_page = champsim::address_slice<block_in_page_extent>;
-        page vpn;
-        std::vector<bool> access_map{}; //demand accesses
-        std::vector<bool> prefetch_map{}; //useful prefetches
-        std::vector<int> delta_map{};
-
-        region_coverage_type() : region_coverage_type(page{}) {}
-        explicit region_coverage_type(page allocate_vpn)
-          : vpn(allocate_vpn), access_map((1 << PAGE_BITS) / BLOCK_SIZE), prefetch_map((1 << PAGE_BITS) / BLOCK_SIZE), delta_map((1 << PAGE_BITS) / BLOCK_SIZE, 0)
-        {
-        }
-    };
     struct region_indexer {
     auto operator()(const region_type& entry) const { return entry.vpn; }
     };
-    struct region_coverageindexer {
-    auto operator()(const region_coverage_type& entry) const { return entry.vpn; }
-    };
     champsim::msl::lru_table<region_type,region_indexer,region_indexer> region_history_table{BERTI_REGION_HISTORY_SETS,BERTI_REGION_HISTORY_WAYS};
-    champsim::msl::lru_table<region_coverage_type,region_coverageindexer,region_coverageindexer> region_coverage_table{BERTI_REGION_COVERAGE_SETS,BERTI_REGION_COVERAGE_WAYS};
     void add_region_history(champsim::address addr);
     bool get_region_history(champsim::address addr);
     void remove_region_history(champsim::address addr);
-    
-    void add_coverage_region_demand(champsim::address addr);
-    void add_coverage_region_prefetch(champsim::address addr);
-    void add_coverage_region_delta(champsim::address addr, int delta);
 
     std::map<uint64_t, berti_table*> bertit;
+    std::vector<delta_t> deltas_; // prefetch candidates of the current access
     std::queue<uint64_t> bertit_queue;
         
     uint64_t size = 0;

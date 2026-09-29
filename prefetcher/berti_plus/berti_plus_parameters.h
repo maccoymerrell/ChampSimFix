@@ -125,9 +125,6 @@ namespace berti_plus_space
  # define BERTI_REGION_HISTORY_SETS    64
  # define BERTI_REGION_HISTORY_WAYS    12
 
- # define BERTI_REGION_COVERAGE_SETS    2048
- # define BERTI_REGION_COVERAGE_WAYS    1
-
  # define BERTI_STREAM_ID_MASK 0xff
  # define BERTI_DIRECTION_BIT 8
  # define BERTI_IP_ENCODING_OFFSET 9

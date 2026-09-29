@@ -51,13 +51,20 @@ berti_plus::berti_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
 /******************************************************************************/
 
 
+void berti_plus::LatencyTable::set_tag(int i, uint64_t tag)
+{
+  latencyt[i].tag = tag;
+  if (tag == 0) untagged[i / 64] |= uint64_t{1} << (i % 64);
+  else untagged[i / 64] &= ~(uint64_t{1} << (i % 64));
+}
+
 uint8_t berti_plus::LatencyTable::add(uint64_t addr, uint64_t tag, bool pf, uint64_t cycle)
 {
   /*
    * Save if possible the new miss into the pqmshr (latency) table
    *
    * Parameters:
-   *  - addr: address without cache offset
+   *  - addr: address without cache offset (nonzero)
    *  - access: is theh entry accessed by a demand request
    *  - cycle: time to use in the latency table
    *
@@ -71,40 +78,38 @@ uint8_t berti_plus::LatencyTable::add(uint64_t addr, uint64_t tag, bool pf, uint
     std::cout << " prefetch: " << std::dec << +pf << " cycle: " << cycle;
   }
 
-  latency_table *free;
-  free   = nullptr;
-
-  for (int i = 0; i < size; i++)
+  // If the addr already exists we does not have to do nothing more
+  if (auto found = slot.find(addr); found != std::end(slot))
   {
-    // Search if the addr already exists. If it exist we does not have
-    // to do nothing more
-    if (latencyt[i].addr == addr)
+    latency_table &entry = latencyt[found->second];
+    if constexpr (champsim::debug_print) 
     {
-      if constexpr (champsim::debug_print) 
-      {
-        std::cout << " line already found; find_tag: " << latencyt[i].tag;
-        std::cout << " find_pf: " << +latencyt[i].pf << std::endl;
-      }
-      // latencyt[i].time = cycle;
-      latencyt[i].pf   = pf;
-      latencyt[i].tag  = tag;
-      return latencyt[i].pf;
+      std::cout << " line already found; find_tag: " << entry.tag;
+      std::cout << " find_pf: " << +entry.pf << std::endl;
     }
-
-    // We discover a free space into the latency table, save it for later
-    if (latencyt[i].tag == 0) free = &latencyt[i];
+    // entry.time = cycle;
+    entry.pf = pf;
+    set_tag(found->second, tag);
+    return entry.pf;
   }
 
-  if (free == nullptr) assert(0 && "No free space latency table");
+  // The free space is the last entry with no tag
+  int free = -1;
+  for (int w = static_cast<int>(untagged.size()) - 1; w >= 0 && free < 0; w--)
+    if (untagged[w]) free = w * 64 + 63 - __builtin_clzll(untagged[w]);
 
-  // We save the new entry into the latency table
-  free->addr = addr;
-  free->time = cycle;
-  free->tag  = tag;
-  free->pf   = pf;
+  if (free < 0) assert(0 && "No free space latency table");
+
+  // We save the new entry into the latency table (an untagged entry can still hold an address)
+  if (latencyt[free].addr != 0) slot.erase(latencyt[free].addr);
+  latencyt[free].addr = addr;
+  latencyt[free].time = cycle;
+  set_tag(free, tag);
+  latencyt[free].pf   = pf;
+  slot.emplace(addr, free);
 
   if constexpr (champsim::debug_print) std::cout << " new entry" << std::endl;
-  return free->pf;
+  return latencyt[free].pf;
 }
 
 uint64_t berti_plus::LatencyTable::del(uint64_t addr)
@@ -124,29 +129,29 @@ uint64_t berti_plus::LatencyTable::del(uint64_t addr)
     std::cout << " addr: " << std::hex << addr;
   }
 
-  for (int i = 0; i < size; i++)
+  // Line already in the table (entries with addr 0 are already free)
+  if (auto found = (addr != 0) ? slot.find(addr) : std::end(slot); found != std::end(slot))
   {
-    // Line already in the table
-    if (latencyt[i].addr == addr)
+    int i = found->second;
+    slot.erase(found);
+
+    // Calculate latency
+    uint64_t time = latencyt[i].time;
+
+    if constexpr (champsim::debug_print)
     {
-      // Calculate latency
-      uint64_t time = latencyt[i].time;
-
-      if constexpr (champsim::debug_print)
-      {
-        std::cout << " tag: " << latencyt[i].tag;
-        std::cout << " prefetch: " << std::dec << +latencyt[i].pf;
-        std::cout << " cycle: " << latencyt[i].time << std::endl;
-      }
-
-      latencyt[i].addr = 0; // Free the entry
-      latencyt[i].tag  = 0; // Free the entry
-      latencyt[i].time = 0; // Free the entry
-      latencyt[i].pf   = 0; // Free the entry
-
-      // Return the latency
-      return time;
+      std::cout << " tag: " << latencyt[i].tag;
+      std::cout << " prefetch: " << std::dec << +latencyt[i].pf;
+      std::cout << " cycle: " << latencyt[i].time << std::endl;
     }
+
+    latencyt[i].addr = 0; // Free the entry
+    set_tag(i, 0);        // Free the entry
+    latencyt[i].time = 0; // Free the entry
+    latencyt[i].pf   = 0; // Free the entry
+
+    // Return the latency
+    return time;
   }
 
   // We should always track the misses
@@ -171,17 +176,14 @@ uint64_t berti_plus::LatencyTable::get(uint64_t addr)
     std::cout << " addr: " << std::hex << addr << std::dec;
   }
 
-  for (int i = 0; i < size; i++)
+  // Search if the addr already exists (entries with addr 0 have time 0)
+  if (auto found = (addr != 0) ? slot.find(addr) : std::end(slot); found != std::end(slot))
   {
-    // Search if the addr already exists
-    if (latencyt[i].addr == addr)
+    if constexpr (champsim::debug_print)
     {
-      if constexpr (champsim::debug_print)
-      {
-        std::cout << " time: " << latencyt[i].time << std::endl;
-      }
-      return latencyt[i].time;
+      std::cout << " time: " << latencyt[found->second].time << std::endl;
     }
+    return latencyt[found->second].time;
   }
 
   if constexpr (champsim::debug_print) std::cout << " NOT FOUND" << std::endl;
@@ -205,16 +207,13 @@ uint64_t berti_plus::LatencyTable::get_tag(uint64_t addr)
     std::cout << " addr: " << std::hex << addr;
   }
 
-  for (int i = 0; i < size; i++)
+  if (auto found = (addr != 0) ? slot.find(addr) : std::end(slot); found != std::end(slot) && latencyt[found->second].tag) // This is the address
   {
-    if (latencyt[i].addr == addr && latencyt[i].tag) // This is the address
+    if constexpr (champsim::debug_print) 
     {
-      if constexpr (champsim::debug_print) 
-      {
-        std::cout << " tag: " << latencyt[i].tag << std::endl;
-      }
-      return latencyt[i].tag;
+      std::cout << " tag: " << latencyt[found->second].tag << std::endl;
     }
+    return latencyt[found->second].tag;
   }
 
   if constexpr (champsim::debug_print) std::cout << " NOT_FOUND" << std::endl;
@@ -224,6 +223,12 @@ uint64_t berti_plus::LatencyTable::get_tag(uint64_t addr)
 /******************************************************************************/
 /*                       Shadow Cache functions                               */
 /******************************************************************************/
+berti_plus::ShadowCache::shadow_cache *berti_plus::ShadowCache::find(uint64_t addr)
+{
+  auto found = index.find(addr);
+  return found == std::end(index) ? nullptr : &scache[found->second.first];
+}
+
 bool berti_plus::ShadowCache::add(uint32_t set, uint32_t way, uint64_t addr, bool pf, uint64_t lat)
 {
   /*
@@ -246,10 +251,27 @@ bool berti_plus::ShadowCache::add(uint32_t set, uint32_t way, uint64_t addr, boo
     std::cout << " latency: " << lat << std::endl;
   }
 
-  scache[set][way].addr = addr;
-  scache[set][way].pf   = pf;
-  scache[set][way].lat  = lat;
-  return scache[set][way].pf;
+  const uint32_t pos = set * static_cast<uint32_t>(ways) + way;
+  shadow_cache &entry = scache[pos];
+  if (entry.addr != addr)
+  {
+    auto old = index.find(entry.addr);
+    if (--old->second.count == 0) index.erase(old);
+    else if (old->second.first == pos)
+    {
+      uint32_t next = pos + 1;
+      while (scache[next].addr != entry.addr) next++;
+      old->second.first = next;
+    }
+
+    auto [now, inserted] = index.try_emplace(addr, occurrences{pos, 0});
+    if (!inserted && pos < now->second.first) now->second.first = pos;
+    now->second.count++;
+    entry.addr = addr;
+  }
+  entry.pf   = pf;
+  entry.lat  = lat;
+  return entry.pf;
 }
 
 bool berti_plus::ShadowCache::get(uint64_t addr)
@@ -267,22 +289,7 @@ bool berti_plus::ShadowCache::get(uint64_t addr)
     std::cout << " addr: " << std::hex << addr << std::endl;
   }
 
-  for (int i = 0; i < sets; i++)
-  {
-    for (int ii = 0; ii < ways; ii++)
-    {
-      if (scache[i][ii].addr == addr) 
-      {
-        if constexpr (champsim::debug_print)
-        {
-          std::cout << " set: " << i << " way: " << i << std::endl;
-        }
-        return true;
-      }
-    }
-  }
-
-  return false;
+  return find(addr) != nullptr;
 }
 
 void berti_plus::ShadowCache::set_pf(uint64_t addr, bool pf)
@@ -299,22 +306,15 @@ void berti_plus::ShadowCache::set_pf(uint64_t addr, bool pf)
     std::cout << " addr: " << std::hex << addr << std::dec;
   }
 
-  for (int i = 0; i < sets; i++)
+  if (shadow_cache *entry = find(addr); entry != nullptr)
   {
-    for (int ii = 0; ii < ways; ii++)
+    if constexpr (champsim::debug_print)
     {
-      if (scache[i][ii].addr == addr) 
-      {
-        if constexpr (champsim::debug_print)
-        {
-          std::cout << " set: " << i << " way: " << ii;
-          std::cout << " old_pf_value: " << +scache[i][ii].pf;
-          std::cout << " new_pf_value: " << +pf << std::endl;
-        }
-        scache[i][ii].pf = pf;
-        return;
-      }
+      std::cout << " old_pf_value: " << +entry->pf;
+      std::cout << " new_pf_value: " << +pf << std::endl;
     }
+    entry->pf = pf;
+    return;
   }
 
   // The address should always be in the cache
@@ -337,21 +337,14 @@ bool berti_plus::ShadowCache::is_pf(uint64_t addr)
     std::cout << " addr: " << std::hex << addr << std::dec;
   }
 
-  for (int i = 0; i < sets; i++)
+  if (shadow_cache *entry = find(addr); entry != nullptr)
   {
-    for (int ii = 0; ii < ways; ii++)
+    if constexpr (champsim::debug_print)
     {
-      if (scache[i][ii].addr == addr)
-      {
-        if constexpr (champsim::debug_print)
-        {
-          std::cout << " set: " << i << " way: " << ii;
-          std::cout << " pf: " << +scache[i][ii].pf << std::endl;
-        }
-
-        return scache[i][ii].pf;
-      }
+      std::cout << " pf: " << +entry->pf << std::endl;
     }
+
+    return entry->pf;
   }
 
   aliased_cache_hits++;
@@ -375,21 +368,14 @@ uint64_t berti_plus::ShadowCache::get_latency(uint64_t addr)
     std::cout << " addr: " << std::hex << addr << std::dec;
   }
 
-  for (int i = 0; i < sets; i++)
+  if (shadow_cache *entry = find(addr); entry != nullptr)
   {
-    for (int ii = 0; ii < ways; ii++)
+    if constexpr (champsim::debug_print)
     {
-      if (scache[i][ii].addr == addr) 
-      {
-        if constexpr (champsim::debug_print)
-        {
-          std::cout << " set: " << i << " way: " << ii;
-          std::cout << " latency: " << scache[i][ii].lat << std::endl;
-        }
-
-        return scache[i][ii].lat;
-      }
+      std::cout << " latency: " << entry->lat << std::endl;
     }
+
+    return entry->lat;
   }
   aliased_cache_hits++;
   //assert((0) && "Address is must be in shadow cache");
@@ -526,7 +512,8 @@ void berti_plus::increase_conf_tag(uint64_t tag)
   if constexpr (champsim::debug_print)
     std::cout << "[BERTI_BERTI] " << __func__ << " tag: " << std::hex << tag << std::dec;
 
-  if (bertit.find(tag) == bertit.end())
+  auto found = bertit.find(tag);
+  if (found == bertit.end())
   {
     // Tag not found
     if constexpr (champsim::debug_print) 
@@ -536,18 +523,19 @@ void berti_plus::increase_conf_tag(uint64_t tag)
   }
 
   // Get the entries and the deltas
+  berti_table *entry = found->second;
 
-  bertit[tag]->conf += CONFIDENCE_INC;
+  entry->conf += CONFIDENCE_INC;
 
   if constexpr (champsim::debug_print) 
-    std::cout << " global_conf: " << bertit[tag]->conf;
+    std::cout << " global_conf: " << entry->conf;
 
 
-  if (bertit[tag]->conf == CONFIDENCE_MAX) 
+  if (entry->conf == CONFIDENCE_MAX) 
   {
 
     // Max confidence achieve
-    for (auto &i: bertit[tag]->deltas)
+    for (auto &i: entry->deltas)
     {
       // Set bits to prefetch level
       if (i.conf > CONFIDENCE_L1)i.rpl = BERTI_L1;
@@ -565,7 +553,7 @@ void berti_plus::increase_conf_tag(uint64_t tag)
       i.conf = 0; // Reset confidence
     }
 
-    bertit[tag]->conf = 0; // Reset global confidence
+    entry->conf = 0; // Reset global confidence
   }
 
   if constexpr (champsim::debug_print) std::cout << std::endl;
@@ -602,7 +590,8 @@ void berti_plus::add(uint64_t tag, int64_t delta)
     *it = new_delta;
   };
 
-  if (bertit.find(tag) == bertit.end())
+  auto found = bertit.find(tag);
+  if (found == bertit.end())
   {
     if constexpr (champsim::debug_print)
       std::cout << " allocating a new entry;";
@@ -642,7 +631,7 @@ void berti_plus::add(uint64_t tag, int64_t delta)
   }
 
   // Get the delta
-  berti_table *entry  = bertit[tag];
+  berti_table *entry  = found->second;
 
   for (auto &i: entry->deltas)
   {
@@ -673,7 +662,7 @@ void berti_plus::add(uint64_t tag, int64_t delta)
   }
 
   // We find the delta with less confidence
-  std::sort(std::begin(entry->deltas), std::end(entry->deltas), compare_rpl);
+  std::sort(std::begin(entry->deltas), std::end(entry->deltas), [](const delta_t& a, const delta_t& b) { return compare_rpl(a, b); });
   if (entry->deltas.front().rpl == BERTI_R || entry->deltas.front().rpl == BERTI_L2R) 
   {
     if constexpr (champsim::debug_print)
@@ -700,7 +689,8 @@ uint8_t berti_plus::get(uint64_t tag, std::vector<delta_t> &res)
     std::cout << std::dec;
   }
 
-  if (!bertit.count(tag))
+  auto found = bertit.find(tag);
+  if (found == bertit.end())
   {
     if constexpr (champsim::debug_print)
       std::cout << " TAG NOT FOUND" << std::endl;
@@ -712,7 +702,8 @@ uint8_t berti_plus::get(uint64_t tag, std::vector<delta_t> &res)
   if constexpr (champsim::debug_print) std::cout << std::endl;
 
   // We found the tag
-  berti_table *entry  = bertit[tag];
+  berti_table *entry  = found->second;
+  const auto given = static_cast<std::ptrdiff_t>(res.size());
 
   for (auto &i: entry->deltas) if (i.delta != 0 && i.rpl != BERTI_R) res.push_back(i);
 
@@ -733,8 +724,23 @@ uint8_t berti_plus::get(uint64_t tag, std::vector<delta_t> &res)
     }
   }
 
-  // Sort the entries
-  std::sort(std::begin(res), std::end(res), compare_greater_delta);
+  // Sort the entries. The deltas added above are never BERTI_R, so identical BERTI_R deltas passed in sort
+  // after them; if the added ones are also pairwise distinct in the ordering, the sorted result is unique
+  // and sorting just the added ones (then moving the given ones behind) produces it.
+  auto cmp = [](const delta_t& a, const delta_t& b) { return compare_greater_delta(a, b); };
+  auto added = std::next(std::begin(res), given);
+  bool unique = std::all_of(std::begin(res), added, [&](const delta_t& d) {
+    return d.rpl == BERTI_R && d.delta == res.front().delta && d.conf == res.front().conf;
+  });
+  for (auto a = added; unique && a != std::end(res); ++a)
+    for (auto b = std::next(a); unique && b != std::end(res); ++b)
+      unique = cmp(*a, *b) || cmp(*b, *a);
+  if (unique) {
+    std::sort(added, std::end(res), cmp);
+    std::rotate(std::begin(res), added, std::end(res));
+  } else {
+    std::sort(std::begin(res), std::end(res), cmp);
+  }
   return 1;
 }
 
@@ -809,7 +815,7 @@ bool berti_plus::get_region_history(champsim::address addr) {
 
   auto entry = region_history_table.check_hit(temp_region);
   if(entry.has_value())
-    return entry->access_map.at(po.to<uint64_t>());
+    return entry->access_map.test(po.to<uint64_t>());
   return false;
 }
 
@@ -820,7 +826,7 @@ void berti_plus::remove_region_history(champsim::address addr) {
 
   auto entry = region_history_table.check_hit(temp_region);
   if(entry.has_value()) {
-    entry->access_map.at(po.to<uint64_t>()) = false;
+    entry->access_map.set(po.to<uint64_t>(), false);
     region_history_table.fill(entry.value());
   }
 }
@@ -832,56 +838,11 @@ void berti_plus::add_region_history(champsim::address addr) {
 
   auto entry = region_history_table.check_hit(temp_region);
   if(entry.has_value()) {
-    entry->access_map.at(po.to<uint64_t>()) = true;
+    entry->access_map.set(po.to<uint64_t>(), true);
     region_history_table.fill(entry.value());
   } else {
-    temp_region.access_map.at(po.to<uint64_t>()) = true;
+    temp_region.access_map.set(po.to<uint64_t>(), true);
     region_history_table.fill(temp_region);
-  }
-}
-
-void berti_plus::add_coverage_region_demand(champsim::address addr) {
-  region_coverage_type::page pn = region_coverage_type::page(addr);
-  region_coverage_type::block_in_page po = region_coverage_type::block_in_page{addr};
-  auto temp_region = region_coverage_type{pn};
-
-  auto entry = region_coverage_table.check_hit(temp_region);
-  if(entry.has_value()) {
-    entry->access_map.at(po.to<uint64_t>()) = true;
-    region_coverage_table.fill(entry.value());
-  } else {
-    temp_region.access_map.at(po.to<uint64_t>()) = true;
-    region_coverage_table.fill(temp_region);
-  }
-}
-
-void berti_plus::add_coverage_region_prefetch(champsim::address addr) {
-  region_coverage_type::page pn = region_coverage_type::page(addr);
-  region_coverage_type::block_in_page po = region_coverage_type::block_in_page{addr};
-  auto temp_region = region_coverage_type{pn};
-
-  auto entry = region_coverage_table.check_hit(temp_region);
-  if(entry.has_value()) {
-    entry->prefetch_map.at(po.to<uint64_t>()) = true;
-    region_coverage_table.fill(entry.value());
-  } else {
-    temp_region.prefetch_map.at(po.to<uint64_t>()) = true;
-    region_coverage_table.fill(temp_region);
-  }
-}
-
-void berti_plus::add_coverage_region_delta(champsim::address addr, int delta) {
-  region_coverage_type::page pn = region_coverage_type::page(addr);
-  region_coverage_type::block_in_page po = region_coverage_type::block_in_page{addr};
-  auto temp_region = region_coverage_type{pn};
-
-  auto entry = region_coverage_table.check_hit(temp_region);
-  if(entry.has_value()) {
-    entry->delta_map.at(po.to<uint64_t>()) = delta;
-    region_coverage_table.fill(entry.value());
-  } else {
-    temp_region.delta_map.at(po.to<uint64_t>()) = delta;
-    region_coverage_table.fill(temp_region);
   }
 }
 
@@ -1081,11 +1042,6 @@ uint32_t berti_plus::prefetcher_cache_operate(champsim::address addr, champsim::
   ShadowCache* tscache = scache;
   HistoryTable* thistoryt = historyt;
 
-  if(useful_prefetch)
-    add_coverage_region_prefetch(addr);
-  else
-    add_coverage_region_demand(addr);
-
   champsim::block_number line_addr{addr}; // Line addr
    
   if (line_addr.to<uint64_t>() == 0) return metadata_in;
@@ -1126,8 +1082,8 @@ uint32_t berti_plus::prefetcher_cache_operate(champsim::address addr, champsim::
       std::cout << "[BERTI] operate cache hit" << std::endl;
   }
 
-  std::vector<delta_t> deltas(BERTI_TABLE_DELTA_SIZE);
-  get(ip_hash, deltas);
+  deltas_.assign(BERTI_TABLE_DELTA_SIZE, delta_t{});
+  get(ip_hash, deltas_);
 
   bool first_issue = true;
 
@@ -1139,13 +1095,15 @@ uint32_t berti_plus::prefetcher_cache_operate(champsim::address addr, champsim::
   if(stream_id >= 256)
     stream_id = 1;
   bool is_first = true;
-  for (auto i: deltas)
+  for (auto i: deltas_)
   {
+    // BERTI_R entries sort last and are the initial empty deltas: from here on nothing more is done
+    if (i.rpl == BERTI_R) return metadata_in;
+
     champsim::address p_addr{line_addr + i.delta};
     champsim::block_number p_b_addr = line_addr + i.delta;
 
     if (tlatencyt->get(p_b_addr.to<uint64_t>())) continue;
-    if (i.rpl == BERTI_R) return metadata_in;
     if (p_addr.to<uint64_t>() == 0) continue;
 
     // Ablation: BERTI_NO_REGION_FILTER=1 bypasses the (oversized ~9.4 KiB) region-history filter.
@@ -1176,7 +1134,6 @@ uint32_t berti_plus::prefetcher_cache_operate(champsim::address addr, champsim::
     //fmt::print("[Berti+] Sent IP of: {}\n",(ip.to<uint64_t>() & BERTI_IP_MASK));
     if (prefetch_line(p_addr, fill_this_level, metadata))
     {
-      add_coverage_region_delta(p_addr, i.delta);
       ++average_issued;
       if (first_issue)
       {
@@ -1292,10 +1249,4 @@ void berti_plus::prefetcher_final_stats()
   std::cout << "BERTI";
   std::cout << " AVERAGE_ISSUED: " << ((1.0*average_issued)/average_num);
   std::cout << std::endl;
-
-
-  // (Per-page region-coverage dump removed during the port: it relied on an
-  // lru_table::get_blocks() accessor not present in this ChampSim, wrote to a
-  // hardcoded filename that parallel runs would clobber, and is purely
-  // diagnostic — not needed for prefetch behaviour.)
 }

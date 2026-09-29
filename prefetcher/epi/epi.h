@@ -16,6 +16,7 @@
 
 #include <array>
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include "address.h"
@@ -80,21 +81,11 @@ struct epi : public champsim::modules::prefetcher {
   uint32_t consecutive_count_ = 0;
   uint32_t basic_block_merge_diff_ = 0;
 
-  // History table (FIFO ring)
-  std::array<l1i_hist_entry, L1I_HIST_TABLE_ENTRIES> hist_table_{};
-  uint64_t hist_table_head_ = 0;
-  uint64_t hist_table_head_time_ = 0;
-
-  // Timing tables (approximate the MSHR + the real L1I cache)
-  std::array<l1i_timing_mshr_entry, L1I_TIMING_MSHR_SIZE> timing_mshr_table_{};
+  // Timing cache (approximates the real L1I cache)
   std::vector<std::vector<l1i_timing_cache_entry>> timing_cache_table_; // [set][way]
   uint32_t tc_num_set_ = 64;
   uint32_t tc_num_way_ = 8;
   uint32_t tc_num_set_bits_ = 6;
-
-  // Entangled prediction table
-  std::array<std::array<l1i_entangled_entry, L1I_ENTANGLED_TABLE_WAYS>, L1I_ENTANGLED_TABLE_SETS> entangled_table_{};
-  std::array<uint32_t, L1I_ENTANGLED_TABLE_SETS> entangled_fifo_{};
 
   // Extra prefetch queue (basic-block expansion)
   std::array<l1i_xpq_entry, L1I_XPQ_ENTRIES> xpq_{};
@@ -123,7 +114,7 @@ struct epi : public champsim::modules::prefetcher {
   void add_hist_table(uint64_t line_addr);
   void add_bb_size_hist_table(uint64_t line_addr, uint32_t bb_size);
   uint32_t find_bb_merge_hist_table(uint64_t line_addr) const;
-  uint64_t get_bere_hist_table(uint64_t line_addr, uint64_t latency, uint32_t skip = 0) const;
+  bool get_bere_hist_table(uint64_t line_addr, uint64_t latency, uint64_t* bere, uint32_t tries) const;
 
   // timing tables
   void init_timing_tables();
@@ -148,6 +139,8 @@ struct epi : public champsim::modules::prefetcher {
   uint64_t compress_format_entangled(uint64_t entangled_addr, uint32_t format) const;
   void init_entangled_table();
   uint32_t get_way_entangled_table(uint64_t line_addr) const;
+  uint64_t get_entangled_addr_entangled_table(uint64_t line_addr, uint32_t index_k, uint32_t way) const;
+  uint32_t get_bbsize_entangled_table(uint64_t line_addr, uint32_t way) const;
   void add_entangled_table(uint64_t line_addr, uint64_t entangled_addr);
   bool avail_entangled_table(uint64_t line_addr, uint64_t entangled_addr, bool insert_not_present) const;
   void add_bbsize_table(uint64_t line_addr, uint32_t bb_size);
@@ -164,6 +157,32 @@ struct epi : public champsim::modules::prefetcher {
   // issue helper (shared by cache_operate + cycle_operate)
   void do_prefetches(uint32_t metadata_in);
   bool pq_full() const;
+
+private:
+  // Tables with lookup indices. The indices are derived state: tags and valid bits change only through the setters below.
+  // History table (FIFO ring)
+  std::array<l1i_hist_entry, L1I_HIST_TABLE_ENTRIES> hist_table_{};
+  uint64_t hist_table_head_ = 0;
+  uint64_t hist_table_head_time_ = 0;
+  struct hist_occurrences {
+    uint32_t newest; // slot of the most recent entry with this tag
+    uint32_t count;
+  };
+  std::unordered_map<uint64_t, hist_occurrences> hist_tag_index_; // nonzero tags only
+
+  // Timing MSHR (approximates the L1I MSHR); valid tags are unique
+  std::array<l1i_timing_mshr_entry, L1I_TIMING_MSHR_SIZE> timing_mshr_table_{};
+  std::unordered_map<uint64_t, uint32_t> timing_mshr_slot_;                   // valid tag -> slot
+  std::array<uint64_t, (L1I_TIMING_MSHR_SIZE + 63) / 64> timing_mshr_free_{}; // bit per invalid slot
+
+  // Entangled prediction table
+  std::array<std::array<l1i_entangled_entry, L1I_ENTANGLED_TABLE_WAYS>, L1I_ENTANGLED_TABLE_SETS> entangled_table_{};
+  std::array<std::array<uint64_t, L1I_ENTANGLED_TABLE_WAYS>, L1I_ENTANGLED_TABLE_SETS> entangled_tags_{}; // contiguous copy for the way search
+  std::array<uint32_t, L1I_ENTANGLED_TABLE_SETS> entangled_fifo_{};
+
+  void set_hist_head_tag(uint64_t tag);
+  void set_timing_mshr_valid(uint32_t slot, bool valid);
+  void set_entangled_tag(uint32_t set, uint32_t way, uint64_t tag);
 };
 
 #endif
