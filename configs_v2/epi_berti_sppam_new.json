@@ -1,5 +1,5 @@
 {
- "_description": "EPI (L1I) + berti_plus (L1D) + SPPAM_PLUS_V2 (L2, BG on: PC-block BTB + bimodal dir + confidence-budget walk)",
+ "_description": "EPI (L1I) + berti_plus (L1D) + SPPAM_PLUS_V2 (L2, BG on: PC-block BTB + bimodal dir + confidence-budget walk; berti-IP region context)",
  "environment": "ENVIRONMENT",
  "block_size": 64,
  "page_size": 4096,
@@ -429,7 +429,8 @@
      "instr_cost_weak": 2,
      "instr_miss_conf": 0,
      "instr_ft_blocks": 3,
-     "instr_dir_bits": 2
+     "instr_dir_bits": 2,
+     "use_berti_src_ip": true
     },
     {
      "name": "cpu0_L2C_replacement",
