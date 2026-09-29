@@ -318,6 +318,7 @@ public:
   void impl_prefetcher_initialize() const;
   [[nodiscard]] uint32_t impl_prefetcher_cache_operate(champsim::address addr, champsim::address ip, bool cache_hit, bool useful_prefetch, access_type type,
                                                        uint32_t metadata_in) const;
+  void impl_prefetcher_cache_evict(champsim::address evicted_addr, bool unused_prefetch) const;
   [[nodiscard]] uint32_t impl_prefetcher_cache_fill(champsim::address addr, long set, long way, bool prefetch, champsim::address evicted_addr,
                                                     uint32_t metadata_in) const;
   void impl_prefetcher_cycle_operate() const;

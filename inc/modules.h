@@ -1068,6 +1068,14 @@ struct prefetcher : public module_base<prefetcher, cache_module> {
   virtual uint32_t prefetcher_cache_fill(champsim::address addr, long set, long way, bool prefetch, champsim::address evicted_addr, uint32_t metadata_in) = 0;
 
   /**
+   * Called when a fill replaces a valid block, before prefetcher_cache_fill.
+   *
+   * \param evicted_addr The address of the evicted block.
+   * \param unused_prefetch True if the block was prefetched by this cache and never used (the cache's per-line prefetch bit).
+   */
+  virtual void prefetcher_cache_evict(champsim::address /*evicted_addr*/, bool /*unused_prefetch*/) {}
+
+  /**
    * Called each cycle after all other cache operations have completed.
    */
   virtual void prefetcher_cycle_operate() = 0;

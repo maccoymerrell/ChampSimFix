@@ -209,6 +209,8 @@ bool CACHE::handle_fill(const fill_type& fill)
     evtrace_.evict(r);
   }
 
+  if (way != set_end && way->valid)
+    impl_prefetcher_cache_evict(evicting_address, way->prefetch);
   auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill), get_set_index(fill.address), way_idx, (fill.type == access_type::PREFETCH),
                                                   evicting_address, fill.data_promise->pf_metadata);
   impl_replacement_cache_fill(fill.origin, get_set_index(fill.address), way_idx, module_address(fill), fill.ip, evicting_address, fill.type);
@@ -905,6 +907,11 @@ uint32_t CACHE::impl_prefetcher_cache_operate(champsim::address addr, champsim::
   std::for_each(pref_module_pimpl.begin(), pref_module_pimpl.end(),
                 [&](const auto pref) { metadata_out = pref->prefetcher_cache_operate(addr, ip, cache_hit, useful_prefetch, type, metadata_out); });
   return (metadata_out);
+}
+
+void CACHE::impl_prefetcher_cache_evict(champsim::address evicted_addr, bool unused_prefetch) const
+{
+  std::for_each(pref_module_pimpl.begin(), pref_module_pimpl.end(), [&](const auto pref) { pref->prefetcher_cache_evict(evicted_addr, unused_prefetch); });
 }
 
 uint32_t CACHE::impl_prefetcher_cache_fill(champsim::address addr, long set, long way, bool prefetch, champsim::address evicted_addr,

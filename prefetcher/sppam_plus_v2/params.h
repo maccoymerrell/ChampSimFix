@@ -123,7 +123,6 @@ struct params {
   // ev/untimely + optional bwd) is ip_table_entries x ip_ctr_bits.
   uint32_t ip_table_entries = 4096;    // per-trigger-IP bucket count (power of 2)
   uint32_t ip_ctr_bits = 8;            // saturating width of each per-IP counter
-  uint32_t evicted_unused_cap = 2048;  // bound on the depth-throttle re-demand watch list (block->IP)
   uint32_t ip_sample_div = 4;          // sample 1/N issued prefetches into the block->IP attribution table
   uint64_t ip_track_timeout = 50000;   // cycles: a pinned in-flight sample older than this is stale ->
                                        // reclaimed and counted USELESS (sppam_b USELESS_ON_TIMEOUT), so
@@ -731,6 +730,7 @@ struct params {
   bool instr_feed_data = false;
   // v2 instruction refinements (DSE holistic-id/bg_residency findings; default OFF = B, C enables):
   int instr_nextn = 0;                 // sequential fallback: prefetch this many phys blocks ahead within the code page (next-2 ~= full SPPAM on the sequential residual)
+  uint32_t bg_inflight_entries = 64;   // in-flight branch-graph prefetches (direct-mapped block tags), to keep their fills out of the data maps
   bool instr_packed_residency = false; // branch graph shares SPPAM's PACKED code residency (4KiB-page/both-maps) instead of its own filter -> lower redundancy, zero extra state
   int instr_la_depth = 32;           // lookahead HARD ceiling; the confidence budget is the real limiter (see below)
   int instr_llc_depth = 99;          // BG multi-level placement: prefetches at walk depth >= this fill LLC (not L2) --
@@ -994,15 +994,17 @@ struct params {
       // from the pfht_ SAMPLING table below -- that is the whole point of sampling. Only the per-source PE counters.
       mgmt += 2 * (32 + 32 + 32 + 32 + lg2(pe_throttle_div + 1)) + lg2(pe_phase);
     }
-    // pfht_ (sampled prefetch-outcome tracker) + poll_ (pollution victims): the sampling table the whole design leans
-    // on for PE + per-IP attribution. SHARED by PE-management and the ip-filter; allocated whenever either is on.
-    if (enable_pe_management || enable_ip_filter) {
-      const uint64_t iph_b = lg2(ip_table_entries > 1 ? static_cast<uint64_t>(ip_table_entries) : 2);
+    const uint64_t iph_b = lg2(ip_table_entries > 1 ? static_cast<uint64_t>(ip_table_entries) : 2);
+    // pfht_ (sampled outcomes with fill latency) + poll_ (pollution victims): only the PE-management, per-signature
+    // feedback and perceptron options allocate them.
+    if (enable_pe_management || enable_sig_feedback || enable_perceptron_filter) {
       mgmt += static_cast<uint64_t>(pfht_entries) * (1 + pfht_tag_bits + 1 + 16 + 1 + 17 + iph_b);  // pf_track: valid+tag+from_spp+issue+filled+lat+iph
-      if (ip_llc_redirect)                                                                          // llc_track: valid+in_l2+tag+coarse issue time+iph
-        mgmt += static_cast<uint64_t>(llc_sample_entries) * (1 + 1 + pfht_tag_bits + 16 + iph_b);
       mgmt += static_cast<uint64_t>(pfht_entries) * (1 + pfht_tag_bits + pfht_tag_bits + 1 + iph_b); // poll_track: valid+victim-tag+pf-tag+from_spp+iph
     }
+    if (enable_ip_filter && ip_llc_redirect)                            // llc_track: valid+in_l2+tag+coarse issue time+iph
+      mgmt += static_cast<uint64_t>(llc_sample_entries) * (1 + 1 + pfht_tag_bits + 16 + iph_b);
+    if (enable_ip_filter && ip_filter_depth_throttle)                   // depth-throttle gates: is-true-demand bit per MSHR entry
+      mgmt += 64 + 2 * 8 + 5 * 32;                                      // + in-flight counts + hit-rate and occupancy accumulators
     if (enable_bw_feedback) mgmt += 16 * 5 + 16;
     if (enable_bw_market) mgmt += 16;
     mgmt += 2 * 48;                                                      // shared: L_DRAM running mean + in-flight register
@@ -1015,6 +1017,7 @@ struct params {
       const uint64_t dirb = (instr_dir_bits > 0 && instr_dir_bits <= 8) ? instr_dir_bits : 2;
       const uint64_t per_edge = 16 + 1 + db + dirb; // tag16 + valid + signed delta target + bimodal dir counter (2b)
       t.instr = po2(instr_table_entries) * per_edge + po2(instr_xlate_entries) * (36 + 36);
+      t.instr += static_cast<uint64_t>(bg_inflight_entries) * (16 + 1); // in-flight BG prefetch tags (tag16 + valid)
       if (!instr_packed_residency)                                       // packed residency reuses SPPAM's maps -> no private filter
         t.instr += po2(instr_filter_entries) * 16;
     }
@@ -1027,8 +1030,8 @@ struct params {
     {
       const uint64_t E = ip_table_entries ? ip_table_entries : 1;
       const uint64_t iph_bits = lg2(E);
-      const uint64_t samp_entry = 16 /*block tag*/ + iph_bits + lg2(pattern_size + 2) /*position*/ + 1 /*bwd*/
-                                + (pv_sample_directmap ? (8 /*stamp*/ + 1 /*occ*/) : 0);
+      const uint64_t samp_entry = 16 /*block tag*/ + iph_bits + (pattern_validate ? key_bits : 0) /*pattern key*/
+                                + lg2(pattern_size + 2) /*position*/ + 1 /*bwd*/ + 1 /*spp*/ + 1 /*watch*/ + 8 /*stamp*/ + 1 /*occ*/;
       if (enable_ip_filter) {
         uint64_t arrays = 3;                                            // useful + useless + gate_ctr
         if (ip_filter_depth_throttle) arrays += 2;                      // ev + untimely
@@ -1036,10 +1039,10 @@ struct params {
         if (ip_llc_redirect) arrays += 2;                               // llc_useful + llc_useless
         t.ipf += arrays * E * ip_ctr_bits;
       }
-      if (enable_ip_filter || pattern_validate)                         // pf_sample_ shared by filtering & validation
-        t.ipf += pv_sample_cap * samp_entry;
-      if (enable_ip_filter && ip_filter_depth_throttle)                 // evicted_unused_ re-demand watch list (block->IP)
-        t.ipf += evicted_unused_cap * (16 + iph_bits);
+      if (enable_ip_filter || pattern_validate) {                       // THE sampling table (per-IP + per-pattern outcomes)
+        std::size_t n = 1; while (n < pv_sample_cap) n <<= 1;
+        t.ipf += n * samp_entry;
+      }
       if (pattern_validate) {                                           // pat_val_ (u,n) keyed by the pattern key
         const uint64_t pv_entries = (key_bits < 20) ? (uint64_t{1} << key_bits) : (uint64_t{1} << 20);
         t.ipf += pv_entries * (2 * 12);
@@ -1117,7 +1120,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(ip_filter_use_pe_phase); SET(ip_pe_phase_soft); SET(ip_pe_phase_hard); SET(ip_pe_phase_margin);
   SET(ip_filter_depth_throttle); SET(ip_depth_mid); SET(ip_depth_min); SET(ip_untimely_thresh); SET(ip_depth_hitrate_min); SET(ip_depth_mlp_max);
   SET(ip_filter_max_useful_loss); SET(ip_sample_div); SET(ip_track_timeout);
-  SET(ip_table_entries); SET(ip_ctr_bits); SET(evicted_unused_cap);
+  SET(ip_table_entries); SET(ip_ctr_bits);
   SET(enable_fallthrough); SET(fallthrough_explore_div);
   SET(enable_spp); SET(spp_st_entries); SET(spp_sig_bits); SET(spp_lookahead); SET(spp_threshold); SET(spp_share_region_table); SET(spp_usefulness_feedback);
   SET(spp_ghr); SET(spp_ghr_entries); SET(spp_min_delta); SET(spp_min_conf); SET(spp_multi_high_throttle);

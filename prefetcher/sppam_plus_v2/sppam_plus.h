@@ -33,13 +33,14 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   // Sees the L1I-filtered instruction miss stream; issues into L2 on physical addresses.
   std::unique_ptr<sppam_dse::iprefetch_predictor> ipred_;  // instruction walk (L1I-miss control flow) -- committed, kept pristine
   std::unique_ptr<sppam_dse::iprefetch_predictor> dpred_;  // SEPARATE data BG for the per-region PC-sequence lookahead (Idea A) -- no shared-table contamination
-  // Instruction prefetches not yet demand-used (block -> 1), for coverage/accuracy stats.
-  // Resolved useful on an instruction demand hit, useless on eviction. Separate from the
-  // data path's pf_unused_ so the two streams' accuracy never mix.
-  std::unordered_map<uint64_t, uint32_t> instr_pf_unused_; // value = issue real-cycle (for the BG fill-latency PE); membership = "instruction prefetch, not yet demand-used"
-  uint64_t instr_useful_ = 0;   // instruction prefetch later demand-hit before eviction
-  uint64_t instr_pf_issued_ = 0, data_pf_issued_ = 0; // instruction-activity gate: prefetch-issue counts -> instr fraction fed to the perceptron (datacenter discriminator)
-  uint64_t instr_useless_ = 0;  // instruction prefetch evicted before any demand use
+  // Branch-graph (instruction) prefetches in flight, so their fills stay out of the data maps: a small direct-mapped
+  // table of block numbers (bg_inflight_entries), cleared at the fill. A collision loses the older entry, whose fill
+  // is then treated as a data fill.
+  std::vector<uint64_t> bg_inflight_;
+  bool bg_inflight_take(uint64_t block);
+  uint64_t instr_useful_ = 0;   // instruction demand hit an unused prefetched line (the cache's own prefetch bit)
+  uint64_t instr_useless_ = 0;  // unused prefetched code line evicted
+  uint64_t instr_pf_issued_ = 0, data_pf_issued_ = 0; // prefetch-issue counts -> instruction fraction fed to the perceptron
 
   uint64_t cycle_ = 0;          // monotonic operate counter (predictor timing)
   uint64_t cur_trigger_ip_ = 0; // trigger PC of the current demand access (for per-IP attribution)
@@ -49,35 +50,13 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   uint64_t pf_squashed_redundant_ = 0; // prefetches dropped pre-issue by the shadow-residency filter
   uint64_t pf_pass_region_absent_ = 0; // filter passed: block's region not in the table
   uint64_t pf_pass_bit_clear_ = 0;     // filter passed: region present but residency bit clear
-  // Blocks we prefetched that a demand has not yet used, block -> source (0=SPPAM,1=SPP).
-  // Reconstructs the "evicted unused prefetch" signal ChampSim's fill hook does not expose.
-  std::unordered_map<uint64_t, uint32_t> pf_unused_; // block -> generation tag (src|depth|order|scan)
-  // --- accuracy characterization (per source: 0=SPPAM 1=SPP) ---
-  uint64_t char_useful_[2] = {0,0};   // [src] prefetched block later demand-hit before eviction
-  uint64_t char_useless_[2] = {0,0};  // [src] prefetched block evicted before any demand use
-  uint64_t char_timely_[2] = {0,0};   // [src] of useless: block demanded after eviction (untimely, addr right)
-  uint64_t useful_by_depth_[2][16] = {};   // [src][lookahead depth]
-  uint64_t useless_by_depth_[2][16] = {};
-  uint64_t useful_by_order_[8] = {};       // SPPAM pattern order
-  uint64_t useless_by_order_[8] = {};
-  uint64_t useful_by_scan_[8] = {};        // SPPAM scan distance (trigger offset from demand)
-  uint64_t useless_by_scan_[8] = {};
-  // Per-trigger-IP usefulness (used vs evicted-unused). Attribution rides the SHARED pfht_ sample
-  // table (merged with PE): an entry is PINNED from issue until it resolves -- freed on demand hit
-  // (useful) or line eviction (useless). New samples take only FREE slots (never overwrite an
-  // in-flight entry -> no bias toward short-lived/useful); only a STALE in-flight entry is reclaimed,
-  // counted useless (it sat resident, unused, past its welcome). No per-line metadata.
-  static constexpr int IPBK = 4096;
-  std::vector<uint32_t> ip_useful_ = std::vector<uint32_t>(IPBK, 0);
-  std::vector<uint32_t> ip_useless_ = std::vector<uint32_t>(IPBK, 0);
-  // EXACT per-ISSUING-IP timeliness (fixes the sampled undercount): carry the issuing IP from issue ->
-  // eviction -> re-demand. ip_ev_ = evicted-unused prefetches from this IP; ip_untimely_ = of those, how
-  // many a demand later re-accessed (right addr, too early). Truly-bad = ip_ev_ - ip_untimely_ (never re-hit).
-  std::vector<uint32_t> ip_ev_ = std::vector<uint32_t>(IPBK, 0);       // evicted-unused count per issuing IP
-  std::vector<uint32_t> ip_untimely_ = std::vector<uint32_t>(IPBK, 0); // of those, later re-demanded (untimely)
-  // LLC-only prefetch samples, separate from pfht_: sparser (1/llc_sample_div) and pinned far longer
-  // (llc_track_timeout), since an LLC line waits much longer for its use than an L2 line. An entry follows
-  // its line if a later prefetch moves it into L2 (in_l2), and then resolves on that L2 copy's fate.
+  // The eviction the cache reported just before the fill that caused it, with the cache's per-line prefetch bit.
+  uint64_t last_evict_block_ = 0;
+  bool last_evict_unused_ = false;
+  // LLC-only prefetch samples, separate from the L2 sampling table: sparser (1/llc_sample_div) and pinned far longer
+  // (llc_track_timeout), since an LLC line waits much longer for its use than an L2 line. An entry follows its line
+  // if a later prefetch moves it into L2 (in_l2), and then resolves on that L2 copy's fate. Outcomes go to the
+  // predictor's per-IP table.
   struct llc_track {
     bool valid = false;
     bool in_l2 = false;
@@ -87,41 +66,11 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   };
   std::vector<llc_track> llcs_;
   uint64_t llc_sample_ctr_ = 0;
-  std::vector<uint32_t> ip_llc_useful_ = std::vector<uint32_t>(IPBK, 0);  // sampled LLC-only prefetches that served a later L2 miss
-  std::vector<uint32_t> ip_llc_useless_ = std::vector<uint32_t>(IPBK, 0); // ... that timed out, or were promoted and evicted unused
-  uint64_t dbg_llc_redirect_ = 0, dbg_llc_bad_ = 0, dbg_llc_dup_ = 0, dbg_llc_use_ = 0, dbg_llc_useless_ = 0;
-  // An IP whose LLC-only prefetches are sampled useless below ip_llc_thresh % is dropped, not redirected.
-  bool ip_llc_proven(uint32_t iph) const { return ip_llc_useful_[iph] + ip_llc_useless_[iph] >= P.ip_llc_min_samples; }
-  bool ip_llc_bad(uint32_t iph) const {
-    const uint64_t u = ip_llc_useful_[iph], n = u + ip_llc_useless_[iph];
-    return ip_llc_proven(iph) && u * 100 < static_cast<uint64_t>(P.ip_llc_thresh) * n;
-  }
-  uint64_t llc_probe_ctr_ = 0, dbg_llc_unproven_ = 0;
-  std::unordered_map<uint64_t, uint16_t> pf_issue_iph_; // issued (in-flight/resident) block -> issuing-IP hash
-  std::unordered_map<uint64_t, uint16_t> pf_evict_iph_; // evicted-unused block -> issuing-IP hash (untimely-watch)
+  uint64_t dbg_llc_redirect_ = 0, dbg_llc_dup_ = 0, dbg_llc_use_ = 0, dbg_llc_useless_ = 0;
   uint64_t l2_dem_acc_ = 0, l2_dem_hit_ = 0; // running L2 demand hit rate (cache-stress gate for depth-throttle)
   uint64_t occ_n_ = 0, occ_tot_ = 0, occ_up_ = 0; // MLP measurement: avg total MSHR occ / upstream(demand+berti) occ
   double l2_hit_rate() const { return l2_dem_acc_ > 4096 ? static_cast<double>(l2_dem_hit_) / l2_dem_acc_ : 1.0; }
   double avg_upstream_occ() const { return occ_n_ > 4096 ? static_cast<double>(occ_up_) / occ_n_ : 0.0; } // inherent MLP
-  // Alternative per-IP metric: PE = I_UPF - I_POLL - I_LAT accumulated PER TRIGGER IP (latency units).
-  // Captures coverage-vs-pollution (which usefulness misses): a coverage-limited IP stays PE>0 and is
-  // spared; a pollution-limited IP goes PE<0 and is throttled. Selected by P.ip_filter_use_pe.
-  std::vector<double> ip_pe_ = std::vector<double>(IPBK, 0.0);
-  std::vector<uint32_t> ip_pe_n_ = std::vector<uint32_t>(IPBK, 0);
-  // Per-IP per-phase harm census (ip_filter_use_pe_phase): snapshot each IP's PE at phase boundaries and
-  // count the fraction of ACTIVE phases where its per-phase PE went negative (unconfounded by averaging).
-  std::vector<double> snap_ip_pe_ = std::vector<double>(IPBK, 0.0);
-  std::vector<uint32_t> snap_ip_pe_n_ = std::vector<uint32_t>(IPBK, 0);
-  std::vector<uint32_t> ip_ph_harm_ = std::vector<uint32_t>(IPBK, 0);   // active phases this IP was net-harmful
-  std::vector<uint32_t> ip_ph_active_ = std::vector<uint32_t>(IPBK, 0); // active phases (any PE activity)
-  uint64_t ip_trickle_ctr_ = 0;             // 1/N pass-through when a trigger IP is throttled
-  uint64_t ip_age_ctr_ = 0;                 // outcomes since last backoff eval / halving
-  bool ip_filter_active_ = true;            // auto-backoff: set false by ip_age_tick when IP stops discriminating
-  uint64_t dbg_ins_=0, dbg_skip_=0, dbg_use_=0, dbg_evict_=0; // sample-table diagnostics
-  std::unordered_map<uint64_t, uint32_t> pf_evicted_unused_; // evicted-unused block -> tag, to detect later demand
-  // (perc_sdm_ removed: it was a near-exact duplicate of pf_track/pfht_ below -- same key, same issue->fill->lat
-  //  lifecycle. The perceptron's fill-latency PE now reads pfht_ directly; the only unique field, `cost`, moved to
-  //  pf_track. ONE outcome table now serves the per-IP filter, PE-management, AND the perceptron's PE magnitude.)
 
   // ---- I-POP-style Prefetch-Effectiveness throttle: PE = I_UPF - I_POLL - I_LAT ----
   // Per source (index 0 = SPPAM, 1 = SPP), in real-cycle latency units. Attribution is
@@ -202,151 +151,15 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   int sd_l2_limit() const override { return sd_l2_limit_value(); }
   bool pe_ramp_active_ = false; // SPPAM net-useful (PE>min) AND DRAM-bound (avg_lat>min)
   bool pe_ramp_active() const override { return pe_ramp_active_; }
-  // Is this IP's uselessness dominated by UNTIMELY (right-addr-too-early) rather than truly-bad prefetches?
-  bool ip_is_untimely(uint32_t iph) const {
-    if (l2_hit_rate() < P.ip_depth_hitrate_min) return false; // cache-stress gate: low hit rate -> timeliness moot
-    if (P.ip_depth_mlp_max > 0.0 && avg_upstream_occ() > P.ip_depth_mlp_max) return false; // MLP gate: program
-      // already parallel (high inherent demand+berti MSHR occ) -> deep prefetches are parallelism, not waste
-    const uint32_t l = ip_ev_[iph]; // EXACT evicted-unused count for this issuing IP
-    return l >= P.ip_filter_min_samples &&
-           static_cast<uint64_t>(ip_untimely_[iph]) * 100 >= static_cast<uint64_t>(P.ip_untimely_thresh) * l;
+  // Depth throttle meta-gates: untimeliness matters only when the L2 is not thrashing (demand hit rate >=
+  // ip_depth_hitrate_min) and the program is not already memory-parallel (upstream MSHR occupancy <= ip_depth_mlp_max).
+  bool depth_throttle_allowed() const override
+  {
+    if (l2_hit_rate() < P.ip_depth_hitrate_min) return false;
+    return !(P.ip_depth_mlp_max > 0.0 && avg_upstream_occ() > P.ip_depth_mlp_max);
   }
-  // Per-IP lookahead-depth cap (depth throttle): shallower as the trigger IP's usefulness degrades -- but
-  // ONLY for UNTIMELY IPs. A truly-bad IP gets full depth here (the volume trickle drops its wrong prefetches).
-  int ip_depth_cap() const override {
-    if (!P.enable_ip_filter || !P.ip_filter_depth_throttle) return 1 << 20;
-    const uint32_t iph = iphash(cur_trigger_ip_);
-    if (!ip_is_untimely(iph)) return 1 << 20; // truly-bad -> full depth, handled by the volume trickle
-    const uint32_t u = ip_useful_[iph], l = ip_useless_[iph];
-    const uint64_t tot = static_cast<uint64_t>(u) + l;
-    if (tot < P.ip_filter_min_samples) return 1 << 20;                                 // too few samples -> full depth
-    const uint64_t pct = static_cast<uint64_t>(u) * 100;
-    if (pct >= static_cast<uint64_t>(P.ip_filter_threshold) * tot) return 1 << 20;     // >= soft usefulness -> full
-    if (pct < static_cast<uint64_t>(P.ip_filter_threshold_hard) * tot) return P.ip_depth_min; // near-dead -> shallowest
-    return P.ip_depth_mid;                                                             // mid -> medium depth
-  }
-
-  // ---- Adaptive ip_filter set-duel: filter-OFF (cat 0) vs filter-ON (cat 1) sample sets, hit-rate metric ----
-  std::size_t ipf_rate_ = 0;                          // categorizer sample rate (set in initialize)
-  uint64_t ipf_gd0=0, ipf_gh0=0, ipf_gd1=0, ipf_gh1=0; // filter-off / filter-on sample: demands, hits (windowed)
-  uint64_t ipf_dem_=0; bool ipf_apply_followers_=true; // default: filter ON for followers
-  uint32_t ipf_epoch_=0; bool ipf_measuring_=true;     // duty cycle: leaders live only in measurement epochs
-  int ipf_category(uint64_t block) const {
-    if(!P.enable_ipf_duel) return 2;
-    return (int)champsim::msl::categorizer<long>(ipf_rate_).get_sample_category((long)(block % P.l2_sets));
-  }
-  void ipf_observe(uint64_t block, bool hit){
-    if(!P.enable_ipf_duel) return;
-    if(ipf_measuring_){ // leaders live: accumulate the counterfactual, but skip the first HALF of the epoch
-      // so the leader sets have re-warmed under their own policy before we read them (avoids the flip transient)
-      if(ipf_dem_ >= P.ipf_eval_period/2){
-        const int c=ipf_category(block);
-        if(c==0){ ++ipf_gd0; ipf_gh0+=hit?1:0; } else if(c==1){ ++ipf_gd1; ipf_gh1+=hit?1:0; }
-      }
-    }
-    if(++ipf_dem_>=P.ipf_eval_period){ // epoch boundary
-      ipf_dem_=0; ++ipf_epoch_;
-      if(ipf_measuring_){ ipf_ratchet(); ipf_gd0=ipf_gh0=ipf_gd1=ipf_gh1=0; } // decide, then fresh read next measurement
-      ipf_measuring_ = (P.ipf_duty<=1) || (ipf_epoch_ % P.ipf_duty == 0);       // measure 1 epoch in ipf_duty
-    }
-  }
-  void ipf_ratchet(){
-    const double h0 = ipf_gd0?(double)ipf_gh0/ipf_gd0:0.0; // filter-OFF sample hit rate
-    const double h1 = ipf_gd1?(double)ipf_gh1/ipf_gd1:0.0; // filter-ON  sample hit rate
-    // Keep-if-safe: the filter barely moves a hit rate that's significant -> reuse to protect, marginal
-    // aggression not worth the pollution risk -> keep it ON. Otherwise follow the hit-rate direction:
-    // big filter-off win (mcf) or a low hit rate where aggression is safe (triangle) -> disable.
-    const bool barely = (h0 - h1) < P.ipf_barely;   // filter-off only marginally higher (or lower)
-    const bool significant = h1 >= P.ipf_significant;
-    if(ipf_gd0<64 || ipf_gd1<64) return; // too few samples this epoch -> hold the decision
-    if(barely && significant) ipf_apply_followers_=true;          // protect a working cache
-    else if(h0 > h1 + P.ipf_margin) ipf_apply_followers_=false;   // aggression clearly/safely helps -> drop
-    else ipf_apply_followers_=true;                              // filter neutral/helpful
-  }
-  // Should the ip_filter throttle be applied to a prefetch targeting this block's set?
-  bool ipf_should_apply(uint64_t block) const {
-    if(!P.enable_ipf_duel) return true;
-    if(!ipf_measuring_) return ipf_apply_followers_; // commit epoch: every set follows the decision, no leaders
-    const int c=ipf_category(block);
-    if(c==0) return false; // filter-off leader
-    if(c==1) return true;  // filter-on leader
-    return ipf_apply_followers_;
-  }
-  // Halve the per-IP usefulness counters every 2^ip_filter_age_shift outcomes (adaptivity).
-  // Graded throttle divisor for a trigger IP: 1 = issue fully; >1 = issue only 1/div. Harsh at very
-  // low usefulness (near-dead pointer chases), light at mid usefulness, none above the soft threshold.
-  // PE-metric graded divisor: throttle IPs whose per-prefetch PE (latency saved minus pollution/induced
-  // latency) is negative; harsh when strongly negative relative to the mean fill latency.
-  uint32_t ip_pe_trickle_div(uint32_t iph) const {
-    const uint32_t n = ip_pe_n_[iph];
-    if (n < P.ip_filter_min_samples) return 1;
-    const double rate = ip_pe_[iph] / n;                 // avg PE per resolved prefetch
-    if (rate >= 0.0) return 1;                            // net-beneficial -> full issue
-    const double al = avg_lat() > 1.0 ? avg_lat() : 1.0;  // scale thresholds by mean fill latency
-    if (rate < -P.ip_pe_hard_frac * al)
-      return static_cast<uint32_t>(P.ip_filter_trickle_hard ? P.ip_filter_trickle_hard : 1); // strongly harmful
-    return static_cast<uint32_t>(P.ip_filter_trickle ? P.ip_filter_trickle : 1);             // mildly harmful
-  }
-  bool ip_pe_positive(uint32_t iph) const { // clearly net-beneficial PE -> spare from throttling
-    const uint32_t n = ip_pe_n_[iph];
-    if (n < P.ip_filter_min_samples) return false;
-    const double al = avg_lat() > 1.0 ? avg_lat() : 1.0;
-    return (ip_pe_[iph] / n) > P.ip_pe_veto_frac * al;
-  }
-  // Per-IP per-phase harm throttle: fraction of this IP's ACTIVE phases with net-negative PE. Mirrors
-  // ip_trickle_div's graded shape, but keyed on temporal harm-consistency instead of usefulness.
-  uint32_t ip_pe_phase_trickle_div(uint32_t iph) const {
-    const uint32_t a = ip_ph_active_[iph];
-    if (a < P.ip_filter_min_samples) return 1;                                   // too few active phases -> full
-    // Guard: only throttle an IP that is ALSO net-negative on average. Frequent per-phase harm on a
-    // net-useful IP is DRAM-contention noise (cactus), not real harm -- the avg-PE sign disambiguates.
-    const uint32_t n = ip_pe_n_[iph];
-    const double al = avg_lat() > 1.0 ? avg_lat() : 1.0;
-    if (n == 0 || ip_pe_[iph] / n >= -P.ip_pe_phase_margin * al) return 1;      // net-useful (or only marginally negative) -> spare
-    const uint64_t pct = static_cast<uint64_t>(ip_ph_harm_[iph]) * 100;
-    if (pct < static_cast<uint64_t>(P.ip_pe_phase_soft) * a) return 1;           // low harm -> full issue
-    if (pct >= static_cast<uint64_t>(P.ip_pe_phase_hard) * a)
-      return static_cast<uint32_t>(P.ip_filter_trickle_hard ? P.ip_filter_trickle_hard : 1); // high harm -> harsh
-    return static_cast<uint32_t>(P.ip_filter_trickle ? P.ip_filter_trickle : 1);             // mid -> light
-  }
-  // Phase boundary: census each IP's per-phase PE delta (active iff it moved), then re-snapshot.
-  void ip_pe_phase_tick() {
-    for (int i = 0; i < IPBK; ++i) {
-      const double d = ip_pe_[i] - snap_ip_pe_[i];
-      const bool active = (d != 0.0) || (ip_pe_n_[i] != snap_ip_pe_n_[i]);
-      if (active) { ++ip_ph_active_[i]; if (d < 0.0) ++ip_ph_harm_[i]; }
-      snap_ip_pe_[i] = ip_pe_[i]; snap_ip_pe_n_[i] = ip_pe_n_[i];
-    }
-  }
-  uint32_t ip_trickle_div(uint32_t iph) const {
-    const uint32_t u = ip_useful_[iph], l = ip_useless_[iph];
-    const uint64_t tot = u + l;
-    if (tot < P.ip_filter_min_samples) return 1;                                        // too few samples -> full
-    const uint64_t pct = static_cast<uint64_t>(u) * 100;
-    if (pct >= static_cast<uint64_t>(P.ip_filter_threshold) * tot) return 1;            // >= soft -> full
-    if (pct < static_cast<uint64_t>(P.ip_filter_threshold_hard) * tot)
-      return static_cast<uint32_t>(P.ip_filter_trickle_hard ? P.ip_filter_trickle_hard : 1); // near-dead -> harsh
-    return static_cast<uint32_t>(P.ip_filter_trickle ? P.ip_filter_trickle : 1);        // mid -> light
-  }
-  void ip_age_tick() {
-    ++ip_age_ctr_;
-    // Auto-backoff (every 64k outcomes): would-be USEFUL-loss if we throttled all sub-threshold IPs.
-    // If it exceeds the budget, IP is NOT separating good from bad (e.g. cc5) -> disable the filter.
-    if ((ip_age_ctr_ & 0xFFFF) == 0 && !P.ip_filter_use_pe_phase) { // usefulness backoff N/A to the pe-phase metric
-      uint64_t tot = 0, lost = 0;
-      for (int i = 0; i < IPBK; ++i) {
-        tot += ip_useful_[i];
-        const uint32_t d = ip_trickle_div(static_cast<uint32_t>(i));
-        if (d > 1) lost += static_cast<uint64_t>(ip_useful_[i]) * (d - 1) / d; // fraction of useful dropped
-      }
-      if (tot) ip_filter_active_ = (100 * lost < static_cast<uint64_t>(P.ip_filter_max_useful_loss) * tot);
-    }
-    if ((ip_age_ctr_ & ((uint64_t{1} << P.ip_filter_age_shift) - 1)) == 0)
-      for (int i = 0; i < IPBK; ++i) { ip_useful_[i] >>= 1; ip_useless_[i] >>= 1; ip_ev_[i] >>= 1; ip_untimely_[i] >>= 1; ip_pe_[i] *= 0.5; ip_pe_n_[i] >>= 1;
-        ip_llc_useful_[i] >>= 1; ip_llc_useless_[i] >>= 1;
-        snap_ip_pe_[i] *= 0.5; snap_ip_pe_n_[i] >>= 1; ip_ph_harm_[i] >>= 1; ip_ph_active_[i] >>= 1; } // decay phase census too
-  }
-  static uint32_t iphash(uint64_t ip) { return static_cast<uint32_t>((ip * 0x9E3779B97F4A7C15ull) >> 52) & 0xFFFu; }
+  void on_spp_sample(uint64_t block, bool useful) override { if (spp_) spp_->reward(useful, block); }
+  void prefetcher_cache_evict(champsim::address evicted_addr, bool unused_prefetch) override;
 
   // ============ Set-dueling L2->LLC redirect throttle (P.enable_set_duel) ============
   // Tiny sample via champsim::msl::categorizer: category 0 = prefetch-guarded (its prefetches are
