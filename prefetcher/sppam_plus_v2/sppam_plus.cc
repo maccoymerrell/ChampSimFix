@@ -51,11 +51,12 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   // Route every sweepable scalar knob through the config (unset -> keep the default above
   // or the params.h default). decltype picks each field's exact type.
 #define CFG(field) P.field = builder.get_parameter<decltype(P.field)>(#field, true, P.field)
-  CFG(region_bits); CFG(region_sets); CFG(region_ways); CFG(region_tag_bits);
+  CFG(region_bits); CFG(region_sets); CFG(region_ways); CFG(region_tag_bits); CFG(region_evict_policy);
   CFG(pattern_table_sets); CFG(pattern_table_ways); CFG(negative_table_sets); CFG(negative_table_ways); // PHT geometry (fwd + decoupled backward)
   CFG(region_page_aligned_sets); CFG(within_page_shadow);
-  CFG(pattern_size); CFG(min_pattern_size); CFG(pattern_context_bits); CFG(pattern_pc_bits); CFG(pattern_context_src);
-  CFG(min_confidence_to_prefetch); CFG(counter_up); CFG(counter_down); CFG(table_or_counter);
+  CFG(pattern_size); CFG(min_pattern_size); CFG(pattern_context_bits); CFG(pattern_pc_bits); CFG(pc_ctx_block); CFG(pc_ctx_wide); CFG(bg_pc_lookahead); CFG(bg_advance_strong); CFG(bg_no_advance); CFG(pattern_context_src);
+  CFG(dense_window_train); CFG(dense_train_window); CFG(dense_train_pc_trigger); CFG(dense_train_prob); CFG(dense_advance_furthest);
+  CFG(min_confidence_to_prefetch); CFG(counter_max); CFG(counter_up); CFG(counter_down); CFG(table_or_counter);
   CFG(online_learning); CFG(online_neg_samples); CFG(online_theta_train);
   CFG(pattern_perceptron); CFG(pp_hist_bits); CFG(pp_pc_bits); CFG(pp_weight_cap);
   CFG(do_lookahead); CFG(lookahead_conf_cutoff); CFG(lookahead_conf_factor); CFG(lookahead_depth);
@@ -84,6 +85,10 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(spp_ghr); CFG(spp_ghr_entries); CFG(spp_min_delta); CFG(spp_min_conf); CFG(spp_multi_high_throttle);
   CFG(spp_sig_bits); CFG(spp_pt_sets); CFG(spp_pt_ways); CFG(spp_deltas_per_sig); CFG(spp_conf_bits); CFG(spp_st_entries);
   CFG(enable_pe_management); CFG(pe_throttle_div); CFG(pe_phase); CFG(pe_sample_div); CFG(pfht_entries);
+  CFG(enable_sig_feedback); CFG(sig_fb_entries);
+  CFG(sig_fb_consume); CFG(sig_fb_min_samples); CFG(sig_fb_poll_soft); CFG(sig_fb_poll_hard); CFG(sig_fb_deg_soft); CFG(sig_fb_deg_hard);
+  CFG(degree_boost);
+  CFG(sig_fb_kill_useless); CFG(sig_fb_kill_amount);
   CFG(enable_bw_feedback); CFG(bw_mult);
   CFG(enable_bw_market); CFG(bw_market_target_util);
   CFG(enable_bw_rank); CFG(bw_rank_strength); CFG(bw_rank_lo); CFG(bw_rank_hi);
@@ -100,7 +105,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(instr_ft_blocks); CFG(instr_dir_bits);
   CFG(instr_walk_budget); CFG(instr_cost_strong); CFG(instr_cost_weak); CFG(instr_miss_conf);
   CFG(instr_feed_data);
-  CFG(instr_nextn); CFG(instr_packed_residency);
+  CFG(instr_nextn); CFG(instr_packed_residency); CFG(instr_llc_depth);
   CFG(pattern_validate); CFG(pv_feed_confidence); CFG(pv_conf_penalty); CFG(pv_sample_div); CFG(pv_min_samples); CFG(pv_bad_pct); CFG(pv_sample_cap);
   CFG(pv_sample_directmap); CFG(pv_sample_ttl); CFG(pv_sample_evict_div); // direct-mapped probabilistic sample table
   CFG(pv_adaptive_rate); CFG(pv_rate_window); CFG(pv_churn_hi); CFG(pv_churn_lo); CFG(pv_div_min); CFG(pv_div_max); // adaptive sample rate
@@ -126,12 +131,19 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
     spp_ = std::make_unique<sppam_dse::spp_predictor>(P, this);
   if (P.enable_instr_prefetch)
     ipred_ = std::make_unique<sppam_dse::iprefetch_predictor>(P);
+  if (P.bg_pc_lookahead) // SEPARATE data BG (Idea A) -- never shares edges with the instruction walk
+    dpred_ = std::make_unique<sppam_dse::iprefetch_predictor>(P);
   // v2: route the branch graph's residency through SPPAM's PACKED code map (4KiB-page/both-maps) instead of
   // its own private filter -> one shared filter, lower redundancy, zero extra state. filter_evict_code (below)
   // keeps it coherent with L2 eviction.
   if (ipred_ && P.instr_packed_residency)
     ipred_->set_shared_residency([this](uint64_t b) { return pred_->filter_probe_code(b); },
                                  [this](uint64_t b) { pred_->filter_mark_code(b); });
+  // BG-driven data lookahead (Idea A): SPPAM trains the SEPARATE data BG (dpred_) on each region's PC-hash
+  // sequence and advances its lookahead context along it (predict the next PC to access the current region).
+  if (dpred_ && P.bg_pc_lookahead)
+    pred_->set_bg_lookahead([this](uint64_t pht) { return dpred_->bg_next(pht); },
+                            [this](uint64_t prev, uint64_t cur) { dpred_->train_region_pc(prev, cur); });
 }
 
 void sppam_plus::prefetcher_initialize()
@@ -219,7 +231,7 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
       if (gate_bg
           && !pred_->perc_keep(b, 3, depth, trig_ip, static_cast<int>(conf * 15.0), nx_ip))
         return false;
-      bool fl2 = true;
+      bool fl2 = (depth < P.instr_llc_depth);      // MULTI-LEVEL: deep BG prefetches stage in LLC, not L2 (capacity, no L1I/L2 thrash)
       if (!sd_decide(b, fl2))    // set-duel may drop or redirect the instruction prefetch (kept off the re-propose list)
         return true;
       ++instr_pf_issued_;                          // instruction-activity gate: count BG prefetch issues (datacenter discriminator)
@@ -227,7 +239,7 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
         instr_pf_unused_[b] = static_cast<uint32_t>(real_cycle_) | 1u; // issue cycle for the BG fill-latency PE (|1 so it's never 0 = the "no issue" sentinel)
         if (gate_bg) pred_->perc_note_issue(b);   // training snapshot for the branch-graph gate (perc_track_ holds features+lat+cost)
       }
-      return true;
+      return fl2;   // mark resident ONLY for L2 fills; LLC-staged prefetches stay off the residency map (re-proposable) per the caveat
     });
     // By default the instruction stream is exclusive to the branch graph. With instr_feed_data
     // the same access ALSO falls through to the data path below, so we can measure the branch
@@ -298,9 +310,10 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
   // (resolved useless in the fill hook) -- so useless prefetches are never lost to churn.
   const bool pe_terms = P.enable_pe_management || (P.enable_ip_filter && (P.ip_filter_use_pe || P.ip_filter_pe_veto || P.ip_filter_use_pe_phase))
     || (P.enable_perceptron_filter && (P.perc_pe_cost || P.perc_pe_gate || (P.perc_feat_mask & 0x700000u))); // perceptron's PE cost/features need the I_LAT/I_POLL machinery even with the throttles OFF
-  if ((P.enable_pe_management || P.enable_ip_filter) && pf_used) {
+  if ((P.enable_pe_management || P.enable_ip_filter || P.enable_sig_feedback) && pf_used) {
     pf_track& e = pfht_[block % pfht_.size()];
     if (e.valid && e.block == block) {
+      if (P.enable_sig_feedback) pred_->sig_feedback(e.eng, e.sig, 0); // per-signature: this prefetch was demand-used
       if (P.enable_ip_filter) { ++ip_useful_[e.iph]; ++dbg_use_; ip_age_tick(); }
       if (pe_terms) {
         const uint64_t saved = e.filled ? e.lat : (real_cycle_ >= e.issue ? real_cycle_ - e.issue : 0);
@@ -311,7 +324,7 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
       e.valid = false; // resolved (used)
     }
   }
-  if (pe_terms || (P.enable_ip_filter && P.ip_filter_depth_throttle)) { // lightweight inflight counters for the MLP gate
+  if (pe_terms || (P.enable_ip_filter && P.ip_filter_depth_throttle) || P.enable_sig_feedback) { // lightweight inflight counters for the MLP gate (+ per-signature pollution detection)
     // The demand stream = ALL L2 accesses; berti's PREFETCH-type accesses are demand at
     // weight pe_pf_demand_weight (<1, more slack serving a prefetch), true loads/RFOs at 1.
     const double w = access_weight(type, P.pe_pf_demand_weight);
@@ -330,10 +343,11 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
         else
           ++inflight_berti_;
         // I_POLL: this miss lands on a line a sampled prefetch evicted -> pollution miss (PE modes only).
-        if (pe_terms) {
+        if (pe_terms || P.enable_sig_feedback) {
           poll_track& v = poll_[block % poll_.size()];
           if (v.valid && v.block == block) {
             const double pollcost = w * avg_lat(); // I_POLL (-): pf evicted a useful line, now a demand miss
+            if (P.enable_sig_feedback) pred_->sig_feedback(v.eng, v.sig, 2); // per-signature: this prefetch polluted (evicted a useful line, now a miss)
             if (P.enable_pe_management) i_poll_[v.from_spp ? 1 : 0] += pollcost;
             if (P.enable_ip_filter && (P.ip_filter_use_pe || P.ip_filter_use_pe_phase)) ip_pe_[v.iph] -= pollcost;
             if (P.enable_perceptron_filter && P.perc_pe_cost) // charge I_POLL to the EVICTING prefetch's perceptron PE
@@ -443,9 +457,11 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
     // A PINNED pfht_ entry for the evicted line resolves USELESS here (issued, filled, never used).
     // This is the unbiased counterpart to the USE resolve -- long-lived useless prefetches are only
     // caught at eviction, so we never overwrite an in-flight entry before this fires.
-    if (P.enable_ip_filter || P.enable_pe_management) {
+    if (P.enable_ip_filter || P.enable_pe_management || P.enable_sig_feedback) {
       pf_track& et = pfht_[evb % pfht_.size()];
       if (et.valid && et.block == evb) {
+        if (P.enable_sig_feedback) pred_->sig_feedback(et.eng, et.sig, 1); // per-signature: evicted before use = useless
+        if (P.sig_fb_kill_useless) pred_->sig_kill(et.eng, et.sig, et.order, et.pos); // targeted: kill the specific wrong (sig,order,offset)
         if (P.enable_ip_filter) { ++ip_useless_[et.iph]; ++dbg_evict_; ip_age_tick(); }
         et.valid = false; // resolved (evicted unused)
       }
@@ -481,7 +497,7 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
   // Shared fill resolve on the merged pfht_: confirm the sampled prefetch filled, and if a demand
   // had already merged into its MSHR (promoted) resolve it USEFUL. PE additionally books its fill
   // latency and, for a prefetch that filled ahead of an in-flight demand, I_LAT/I_POLL (Eq4/Eq3).
-  if (P.enable_pe_management || P.enable_ip_filter || P.enable_perceptron_filter) { // perceptron needs the fill-latency / I_UPF / usefulness feed even with the throttles off
+  if (P.enable_pe_management || P.enable_ip_filter || P.enable_perceptron_filter || P.enable_sig_feedback) { // perceptron needs the fill-latency / I_UPF / usefulness feed even with the throttles off (sig-feedback needs the fill + poll-victim insert)
     pf_track& e = pfht_[block % pfht_.size()];
     if (e.valid && e.block == block && !e.filled) {
       e.filled = true;
@@ -516,7 +532,7 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
         // I_POLL setup: displaced a USEFUL line (a demand line or used prefetch) -> remember
         // the victim, the evicting prefetch (to charge its perceptron PE), and its IP; a later demand miss = pollution.
         if (had_evict && !evict_was_unused)
-          poll_[evb % poll_.size()] = poll_track{true, evb, block, e.from_spp, e.iph};
+          poll_[evb % poll_.size()] = poll_track{true, evb, block, e.from_spp, e.iph, e.sig, e.eng};
       }
     }
   }
@@ -579,14 +595,16 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
   // hold 1/pe_sample_div of ISSUED prefetches. PINNED insert -- take only a FREE slot, never clobber
   // an in-flight (valid) entry, so a long-lived useless prefetch survives to its eviction resolve
   // (removing the bias that plagued a churn-overwrite table).
-  if ((P.enable_pe_management || P.enable_ip_filter || P.enable_perceptron_filter) && (++pe_sample_ctr_ % P.pe_sample_div == 0)) {
+  if ((P.enable_pe_management || P.enable_ip_filter || P.enable_perceptron_filter || P.enable_sig_feedback) && (++pe_sample_ctr_ % P.pe_sample_div == 0)) {
     pf_track& slot = pfht_[block % pfht_.size()];
     const bool stale = slot.valid && (real_cycle_ - slot.issue) > P.ip_track_timeout;
     if (!slot.valid || stale) {
       // sppam_b USELESS_ON_TIMEOUT: a stale in-flight entry sat unused past the timeout -> resolve it
       // USELESS (removing the under-sampling bias) before reusing its slot. A RECENT entry is pinned.
       if (stale && P.enable_ip_filter) { ++ip_useless_[slot.iph]; ++dbg_evict_; ip_age_tick(); }
+      if (stale && P.enable_sig_feedback) pred_->sig_feedback(slot.eng, slot.sig, 1); // timed-out unused -> useless
       slot = pf_track{true, block, from_spp, real_cycle_, false, 0, static_cast<uint16_t>(iphash(cur_trigger_ip_))};
+      if (P.enable_sig_feedback) { slot.sig = pred_->fb_sig_; slot.eng = pred_->fb_eng_; slot.order = pred_->fb_order_; slot.pos = pred_->fb_pos_; } // record request's (engine,sig,order,offset)
       ++dbg_ins_;
     } else ++dbg_skip_;
   }
@@ -658,6 +676,7 @@ void sppam_plus::prefetcher_final_stats()
                ipred_->demands(), ipred_->issued(), iu, il, iacc, ipred_->unencodable(), instr_pf_unused_.size());
     ipred_->dump_walk();
   }
+  if (dpred_) dpred_->bg_seq_dump(P.name.c_str()); // data BG: per-region PC-sequence predictability
   fmt::print("[SPPAM+] prefetches issued: {} | squashed-redundant: {} | filter-passed[region-absent: {}, bit-clear: {}]\n",
              pf_issued_, pf_squashed_redundant_, pf_pass_region_absent_, pf_pass_bit_clear_);
   if (P.enable_ip_filter) fmt::print("[SPPAM+] ip-filter: active(end)={} thr={}% budget={}% | sampletab ins={} skip={} use-res={} evict-res={}\n", ip_filter_active_, P.ip_filter_threshold, P.ip_filter_max_useful_loss, dbg_ins_, dbg_skip_, dbg_use_, dbg_evict_);

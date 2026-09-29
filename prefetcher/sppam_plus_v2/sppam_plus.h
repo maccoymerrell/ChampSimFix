@@ -31,7 +31,8 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   std::unique_ptr<sppam_dse::spp_predictor> spp_;
   // Branch-graph instruction prefetcher (constructed only when enable_instr_prefetch).
   // Sees the L1I-filtered instruction miss stream; issues into L2 on physical addresses.
-  std::unique_ptr<sppam_dse::iprefetch_predictor> ipred_;
+  std::unique_ptr<sppam_dse::iprefetch_predictor> ipred_;  // instruction walk (L1I-miss control flow) -- committed, kept pristine
+  std::unique_ptr<sppam_dse::iprefetch_predictor> dpred_;  // SEPARATE data BG for the per-region PC-sequence lookahead (Idea A) -- no shared-table contamination
   // Instruction prefetches not yet demand-used (block -> 1), for coverage/accuracy stats.
   // Resolved useful on an instruction demand hit, useless on eviction. Separate from the
   // data path's pf_unused_ so the two streams' accuracy never mix.
@@ -115,6 +116,10 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
     bool filled = false; // fill observed -> lat valid
     uint64_t lat = 0;    // measured issue->fill latency (real cycles)
     uint16_t iph = 0;    // trigger-IP hash (per-IP accuracy filter shares this sampled table)
+    uint32_t sig = 0;    // engine signature of the request (enable_sig_feedback: per-signature outcome attribution)
+    uint8_t eng = 0;     // engine that issued it (0 fwd / 1 bwd / 2 delta-SPP / 3 BG)
+    uint8_t order = 0;   // SPPAM PHT order (which pattern-size table) that predicted this block
+    uint8_t pos = 0;     // prediction_counter offset within that PHT entry (for the targeted uselessness kill)
   };
   struct poll_track {
     bool valid = false;
@@ -122,6 +127,8 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
     uint64_t pf_block = 0; // the prefetch that evicted it (to charge I_POLL to its perceptron reward)
     bool from_spp = false;
     uint16_t iph = 0;    // trigger-IP hash of the prefetch that evicted this victim (per-IP PE)
+    uint32_t sig = 0;    // engine signature of the evicting prefetch (per-signature pollution attribution)
+    uint8_t eng = 0;     // engine that issued the evicting prefetch
   };
   std::vector<pf_track> pfht_;       // sampled in-flight/resident prefetch tracker (size pfht_entries)
   std::vector<poll_track> poll_;     // sampled pollution victims (size pfht_entries)

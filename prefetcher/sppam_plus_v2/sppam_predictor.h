@@ -85,10 +85,14 @@ public:
       dpht_.assign(static_cast<std::size_t>(P.delta_pht_sets) * P.delta_pht_ways, dpht_entry{});
       dpht_spec_.assign(blocks_per_region_, 0);
     }
+    if (P.enable_sig_feedback)
+      sig_fb_.assign(P.sig_fb_entries > 0 ? static_cast<std::size_t>(P.sig_fb_entries) : 1, sig_fb_entry{});
     if (P.walk_accumulate) {
       walk_spec_.assign(blocks_per_region_, 0);
       walk_issued_.assign(blocks_per_region_, 0);
       walk_acc_.assign(blocks_per_region_, 0);
+    } else if (P.dense_advance_furthest) {
+      walk_spec_.assign(blocks_per_region_, 0); // partial-advance re-index needs the speculative overlay too
     }
     delta_psel_ = P.delta_pht_sd_max / 2;
     walk_psel_ = P.delta_pht_sd_max / 2;
@@ -205,6 +209,50 @@ public:
     if (P.walk_accumulate)
       std::fprintf(stderr, "[walk] %s steps=%llu issued=%llu psel=%d/%d\n", P.name.c_str(),
                    (unsigned long long)dbg_walk_steps_, (unsigned long long)dbg_walk_issued_, walk_psel_, P.delta_pht_sd_max);
+    std::fprintf(stderr, "[pc-region] %s region-reaccesses=%llu pc-changed=%llu (%.1f%%)  pc-less(ip==0)=%llu (%.1f%% -- berti/prefetch pollution now discarded)\n",
+                 P.name.c_str(), (unsigned long long)dbg_reaccess_, (unsigned long long)dbg_pc_change_,
+                 dbg_reaccess_ ? 100.0 * static_cast<double>(dbg_pc_change_) / static_cast<double>(dbg_reaccess_) : 0.0,
+                 (unsigned long long)dbg_pc0_, dbg_reaccess_ ? 100.0 * static_cast<double>(dbg_pc0_) / static_cast<double>(dbg_reaccess_) : 0.0);
+    std::fprintf(stderr, "[pc-alphabet] %s regions=%llu avg-distinct-PC/region=%.2f  hist[1,2,3-4,5-8,9+]=%llu/%llu/%llu/%llu/%llu\n",
+                 P.name.c_str(), (unsigned long long)dbg_distpc_regs_,
+                 dbg_distpc_regs_ ? static_cast<double>(dbg_distpc_sum_) / static_cast<double>(dbg_distpc_regs_) : 0.0,
+                 (unsigned long long)dbg_distpc_hist_[0], (unsigned long long)dbg_distpc_hist_[1], (unsigned long long)dbg_distpc_hist_[2],
+                 (unsigned long long)dbg_distpc_hist_[3], (unsigned long long)dbg_distpc_hist_[4]);
+    seq_width_dump();
+    { std::string s; for (int d = 0; d < 16; ++d) if (dbg_la_iss_[d] || dbg_la_look_[d]) { char b[64];
+        std::snprintf(b, sizeof b, "d%d:iss=%llu look=%llu hit=%.0f%% ", d, (unsigned long long)dbg_la_iss_[d],
+          (unsigned long long)dbg_la_look_[d], dbg_la_look_[d] ? 100.0*dbg_la_hit_[d]/dbg_la_look_[d] : 0.0); s += b; }
+      std::fprintf(stderr, "[la-depth] %s %s\n", P.name.c_str(), s.c_str()); }
+    std::fprintf(stderr, "[la-stop] %s degree=%llu usefulness=%llu depth-cap=%llu pp-zero=%llu\n", P.name.c_str(),
+                 (unsigned long long)dbg_stop_degree_, (unsigned long long)dbg_stop_useful_,
+                 (unsigned long long)dbg_stop_depth_, (unsigned long long)dbg_stop_ppzero_);
+    { std::string s3, s4, s5;
+      for (int b = 0; b < 8; ++b) if (dbg_bit_set_[b]) { char t[64];
+        std::snprintf(t, sizeof t, "b%d(+%d)=%.0f%% ", b, static_cast<int>(P.pattern_size)-b,
+                      dbg_pred_n_ ? 100.0*dbg_bit_set_[b]/dbg_pred_n_ : 0.0); s3 += t; }
+      for (int c = 0; c < 8; ++c) if (dbg_pc_hist_[c]) { char t[48];
+        std::snprintf(t, sizeof t, "%d:%.0f%% ", c, dbg_pred_n_ ? 100.0*dbg_pc_hist_[c]/dbg_pred_n_ : 0.0); s4 += t; }
+      for (int c = 0; c < 8; ++c) if (dbg_ctz_hist_[c]) { char t[48];
+        std::snprintf(t, sizeof t, "adv%d:%.0f%% ", static_cast<int>(P.pattern_size)-c,
+                      dbg_pred_n_ ? 100.0*dbg_ctz_hist_[c]/dbg_pred_n_ : 0.0); s5 += t; }
+      std::fprintf(stderr, "[pred-shape] %s n=%llu bitset[%s] popcount[%s] advance[%s]\n", P.name.c_str(),
+                   (unsigned long long)dbg_pred_n_, s3.c_str(), s4.c_str(), s5.c_str()); }
+    if (P.dense_advance_furthest)
+      std::fprintf(stderr, "[part-adv] %s steps=%llu rederive=%llu differ=%llu avg_adv=%.2f\n", P.name.c_str(),
+                   (unsigned long long)dbg_pa_steps_, (unsigned long long)dbg_pa_rederive_,
+                   (unsigned long long)dbg_pa_differ_, dbg_pa_steps_ ? static_cast<double>(dbg_pa_advsum_)/static_cast<double>(dbg_pa_steps_) : 0.0);
+    { std::string s2; for (int d = 0; d < 4; ++d) { char b[160];
+        std::snprintf(b, sizeof b, "d%d:bits=%llu resid=%.0f%% page=%.0f%% degcap=%.0f%% | ", d,
+          (unsigned long long)dbg_sq_bits_[d],
+          dbg_sq_bits_[d] ? 100.0*dbg_sq_res_[d]/dbg_sq_bits_[d] : 0.0,
+          dbg_sq_bits_[d] ? 100.0*dbg_sq_page_[d]/dbg_sq_bits_[d] : 0.0,
+          dbg_sq_bits_[d] ? 100.0*dbg_sq_deg_[d]/dbg_sq_bits_[d] : 0.0); s2 += b; }
+      std::fprintf(stderr, "[la-squash] %s %s\n", P.name.c_str(), s2.c_str()); }
+    if (P.dense_window_train)
+      std::fprintf(stderr, "[dense-train] %s flush(oow=%llu pc=%llu prob=%llu) skip_bwd=%llu frames=%llu avg_predbits=%.2f\n",
+                   P.name.c_str(), (unsigned long long)dbg_dw_flush_oow_, (unsigned long long)dbg_dw_flush_pc_,
+                   (unsigned long long)dbg_dw_flush_prob_, (unsigned long long)dbg_dw_skip_bwd_,
+                   (unsigned long long)dbg_dw_frames_, dbg_dw_frames_ ? static_cast<double>(dbg_dw_predbits_)/static_cast<double>(dbg_dw_frames_) : 0.0);
     if (P.enable_ip_filter) {
       uint64_t tu = 0, tl = 0; int active = 0;
       for (std::size_t i = 0; i < ip_useful_.size(); ++i) { tu += ip_useful_[i]; tl += ip_useless_[i]; if (ip_useful_[i] + ip_useless_[i]) ++active; }
@@ -262,6 +310,7 @@ public:
                      (unsigned long long)dbg_tr_pos_[e], (unsigned long long)dbg_tr_neg_[e]);
       if (P.perc_dump_weights) perc_dump();
     }
+    if (P.enable_sig_feedback && !sig_fb_.empty()) sig_fb_dump();
     if (P.pattern_validate) {
       uint64_t tot = dbg_pv_bad_ + dbg_pv_good_; if (!tot) tot = 1;
       std::fprintf(stderr, "[pv] %s triggers_bad=%.1f%% patterns_scored=%zu (bad=%zu) samples_live=%zu\n", P.name.c_str(),
@@ -337,6 +386,8 @@ public:
       add_to_llc_pagemap(block);
     if (P.online_learning && (type == atype::LOAD || !P.train_demand_only))
       learn_on_access(block, ip); // train on the PRIOR map, before this access is marked below
+    if (P.dense_window_train && (type == atype::LOAD || !P.train_demand_only))
+      dense_window_access(block, ip); // convention-B dense forward trainer (owns the forward table when on)
     if (type == atype::LOAD || !P.train_demand_only) {
       if (!cache_hit || !P.access_map_miss_only)
         add_to_pagemap(block, false, ip);
@@ -424,7 +475,7 @@ public:
     const region_type* rb = shadow_back(r), *rf = shadow_fwd(r);
     const int ps = static_cast<int>(P.pattern_size), bpr = static_cast<int>(blocks_per_region_);
     const uint64_t ctx = ctx_of(r);
-    const uint64_t ctx_pc = ctx | (P.pattern_pc_bits ? (static_cast<uint64_t>(r->pc_pht) & mask(P.pattern_pc_bits)) << P.pattern_context_bits : 0);
+    const uint64_t ctx_pc = ctx | (P.pattern_pc_bits ? (region_pc_ctx(r) & mask(P.pattern_pc_bits)) << P.pattern_context_bits : 0);
     std::string am, pm;
     for (int o = 0; o < bpr; ++o) { am += r->access_map[o] ? '1' : '.'; pm += r->prefetch_map[o] ? '1' : '.'; }
     char buf[512]; std::string out;
@@ -512,6 +563,14 @@ public:
   // Set by the module each access from the EXISTING per-IP filter table (ip_trickle_div) -- the IP gate
   // reuses that sparse-IP signal instead of tracking any per-region/per-block IP state.
   void set_ip_gate(bool g) { cur_ip_gate_ = g; }
+  // BG-driven lookahead hooks (set by the module from the shared branch-graph). `train` learns the per-region
+  // PC-hash sequence (prev_pht -> cur_pht on each access to a region); `next` predicts the next PC hash to
+  // access the current region (the advancing lookahead context). Off until set.
+  void set_bg_lookahead(std::function<uint64_t(uint64_t)> next, std::function<void(uint64_t, uint64_t)> train)
+  {
+    bg_next_ = std::move(next);
+    bg_train_ = std::move(train);
+  }
   // Analysis: is this block's region entry still resident in the region table (context/PHT-training retained)?
   bool region_resident(uint64_t block) { return regions_.probe_key(region_of(block)) != nullptr; }
   // Analysis: delta from the region's LAST accessed offset to this block's offset (self-reference test). -1000 if no region.
@@ -570,6 +629,7 @@ private:
     uint64_t since_last_scrape = 0;
     uint32_t pat_ctx = 0; // per-region context folded into the pattern key
     uint8_t pc_pht = 0;   // PHT index of the PREVIOUS accessing PC in this page (stable per-region PC context)
+    uint16_t pc_wide = 0; // DIAGNOSTIC: wider (16-bit) hash of the prev accessing PC -- to test PC-seq aliasing at wider keys
     uint8_t entry_ip = 0; // trigger-PC hash that ALLOCATED this region (cold-start delta learning key)
     uint64_t xkey = 0;    // cross-page PHT key (predecessor map + entry offset) this region was entered with
     bool xkey_set = false;
@@ -577,6 +637,9 @@ private:
     std::vector<bool> delta_map;   // blocks THIS region got from the delta-PHT (usefulness attribution for its self-throttle)
     uint16_t pf_used = 0, pf_dead = 0; // this region's prefetches that were demand-used vs evicted-unused (eviction policy)
     uint16_t dmiss = 0;            // demand misses seen in this region (eviction policy: evict low-value regions)
+    int16_t train_anchor = -1;    // dense-window trainer: region-offset of the current training anchor (-1 = unset)
+    int16_t train_hi = -1, train_lo = -1; // furthest / nearest offset reached since the anchor (frontier both directions)
+    uint8_t train_pc = 0;         // pc_ctx_hash captured at anchor-set; keys this episode's dense frames (matches predict)
     region_type() = default;
     region_type(uint64_t vpn_, uint64_t bpr) : vpn(vpn_), access_map(bpr, false), prefetch_map(bpr, false), block_ip(bpr, 0) {}
   };
@@ -634,7 +697,7 @@ private:
     void pp_update(int o, uint64_t hist, int dir)
     {
       if (dir > 0)
-        prediction_counter[o] = std::min<uint64_t>(prediction_counter[o] + P->counter_up, 100);
+        prediction_counter[o] = std::min<uint64_t>(prediction_counter[o] + P->counter_up, P->counter_max);
       else
         prediction_counter[o] = prediction_counter[o] > P->counter_down ? prediction_counter[o] - P->counter_down : 0;
       const int H = P->pp_bits();
@@ -666,12 +729,25 @@ private:
       if (P && P->table_or_counter) {
         for (std::size_t i = 0; i < prediction_counter.size(); ++i) {
           if (prediction & (uint64_t{1} << i))
-            prediction_counter[i] = std::min<uint64_t>(prediction_counter[i] + P->counter_up, 100);
+            prediction_counter[i] = std::min<uint64_t>(prediction_counter[i] + P->counter_up, P->counter_max);
           else
             prediction_counter[i] = prediction_counter[i] > P->counter_down ? prediction_counter[i] - P->counter_down : 0;
         }
       } else if (!prediction_table.incr_conf(prediction).has_value())
         prediction_table.fill(prediction);
+    }
+    // Dense-window trainer (convention B): reinforce EVERY accessed bit; erode only unaccessed bits that were
+    // REACHED this episode (erode_valid, i.e. <= frontier); leave unreached bits (beyond the frontier) untouched
+    // so a partial/early window never punishes a block it simply hadn't gotten to yet. Counter mode only.
+    void increment_prediction_masked(uint64_t accessed, uint64_t erode_valid)
+    {
+      if (!(P && P->table_or_counter)) { increment_prediction(accessed); return; } // conf-table has no masked form; fall back
+      for (std::size_t i = 0; i < prediction_counter.size(); ++i) {
+        if (accessed & (uint64_t{1} << i))
+          prediction_counter[i] = std::min<uint64_t>(prediction_counter[i] + P->counter_up, P->counter_max);
+        else if (erode_valid & (uint64_t{1} << i))
+          prediction_counter[i] = prediction_counter[i] > P->counter_down ? prediction_counter[i] - P->counter_down : 0;
+      }
     }
   };
   struct pattern_idx {
@@ -756,6 +832,38 @@ private:
 
   // ----- region / page maps -----
   static uint8_t ip_hash(uint64_t ip) { return ip ? static_cast<uint8_t>((ip * 0x9E3779B97F4A7C15ull) >> 56) : 0; }
+  // PC context for the pattern PHT: full-ip baseline (Idea A keeps this -- the BG predicts a raw region-accessing
+  // PC whose ip_hash is exactly this, so the advanced lookahead context matches how positions were trained).
+  // block-granular only under the (now unused) pc_ctx_block experiment.
+  uint8_t pc_ctx_hash(uint64_t ip) const
+  {
+    if (P.use_berti_src_ip) ip &= 0x7fffffull; // match berti's 23-bit IP encoding so demand + berti-forwarded of the SAME load agree
+    return ip_hash(P.pc_ctx_block ? (ip >> 6) : ip);
+  }
+  static uint32_t ip_hash_wide(uint64_t ip) { return ip ? static_cast<uint32_t>((ip * 0x9E3779B97F4A7C15ull) >> 40) & 0xFFFFu : 0; } // 16-bit
+  // Pattern-PHT PC context source for a region: 16-bit pc_wide (pc_ctx_wide, ceiling probe) or 8-bit pc_pht (baseline).
+  uint64_t region_pc_ctx(const region_type* r) const { return r ? (P.pc_ctx_wide ? static_cast<uint64_t>(r->pc_wide) : static_cast<uint64_t>(r->pc_pht)) : 0; }
+  // DIAGNOSTIC: last-value predictor of the per-region PC sequence at 3 key widths -- isolates whether the low
+  // 8-bit predictability is hash ALIASING (rises with width) or real randomness (stays flat).
+  void measure_seq(uint16_t prev_wide, uint16_t cur_wide)
+  {
+    static const int W[3] = {8, 12, 16};
+    for (int i = 0; i < 3; ++i) {
+      const uint32_t m = (1u << W[i]) - 1;
+      const uint32_t key = prev_wide & m, succ = cur_wide & m;
+      if (seqk_[i][key] == succ) ++seq_hit_[i];
+      seqk_[i][key] = static_cast<uint16_t>(succ);
+      ++seq_tot_[i];
+    }
+  }
+  void seq_width_dump() const
+  {
+    static const int W[3] = {8, 12, 16};
+    for (int i = 0; i < 3; ++i)
+      std::fprintf(stderr, "[pc-seq-width] %s key=%2d-bit  transitions=%llu predicted=%llu (%.1f%%)\n",
+                   P.name.c_str(), W[i], (unsigned long long)seq_tot_[i], (unsigned long long)seq_hit_[i],
+                   seq_tot_[i] ? 100.0 * static_cast<double>(seq_hit_[i]) / static_cast<double>(seq_tot_[i]) : 0.0);
+  }
   // ---- Access-map bloom: shared backing store, one filter per within-region offset ----
   static uint64_t am_hash(uint64_t region, uint64_t off, int i)
   {
@@ -833,7 +941,20 @@ private:
         if (P.enable_am_bloom) am_insert(pn, off);
         uint8_t iph = ip_hash(ip);
         r->block_ip[off] = iph;
-        r->pc_pht = iph; // update the per-page accessing-PC context (learn_on_access already read the prior value)
+        // Per-region PC-sequence: DISCARD pc-less accesses (ip==0, e.g. berti prefetch) -- a 0 is a wildcard that
+        // can't advance a real-PC sequence and would poison predictability. Only real-PC accesses train/measure.
+        ++dbg_reaccess_; if (ip == 0) ++dbg_pc0_;
+        if (ip != 0) {
+          if (r->pc_pht != pc_ctx_hash(ip)) ++dbg_pc_change_;
+          const uint16_t cw = static_cast<uint16_t>(ip_hash_wide(ip));
+          if (r->pc_wide != 0 && cw != r->pc_wide) measure_seq(r->pc_wide, cw); // PC-seq predictability @ wider keys
+          r->pc_wide = cw;
+          // BG (Idea A): learn this region's PC-access sequence (train BEFORE overwriting the prior pc_pht).
+          // Dense-window mode trains the BG on ANCHOR-PC transitions instead (episode edges), so skip the
+          // per-access edge here to avoid double/conflicting training of the shared table.
+          if (P.bg_pc_lookahead && !P.dense_window_train && bg_train_ && r->pc_pht != 0) bg_train_(r->pc_pht, pc_ctx_hash(ip));
+          r->pc_pht = pc_ctx_hash(ip); // per-page accessing-PC context (keep the last REAL accessor; skip pc==0)
+        }
         if (r->last_block < off) {
           r->momentum = r->momentum < 7 ? r->momentum + 1 : 7;
           if ((P.ip_direction || P.neg_dir_pc) && ip_dir_[iph] < 63) ++ip_dir_[iph];   // per-IP direction: forward stride
@@ -875,7 +996,8 @@ private:
         nr.prefetch_map[off] = true;
         if (P.enable_am_bloom) am_insert(pn, off);
         nr.block_ip[off] = ip_hash(ip);
-        nr.pc_pht = ip_hash(ip); // first access to this page seeds its PC context
+        nr.pc_pht = pc_ctx_hash(ip); // first access to this page seeds its PC context (block-granular under pc_ctx_block)
+        nr.pc_wide = static_cast<uint16_t>(ip_hash_wide(ip)); // seed the wide context too (pc_ctx_wide ceiling probe)
         nr.entry_ip = ip_hash(ip); // cold-start: remember the allocating PC to learn its startup delta
         nr.last_block = off;
         nr.since_last_scrape += 1;
@@ -1002,6 +1124,24 @@ private:
       ne.increment_prediction(prediction);
       ne.usefulness = global_usefulness_index_;
     }
+  }
+
+  // Dense-window variant: same key handling, but train the prediction bitmap with a frontier erode-mask
+  // (see increment_prediction_masked). `pattern` = behind-window signature (the key), `prediction` = the dense
+  // ahead footprint, `erode_valid` = which prediction bits were reached this episode.
+  void increment_access_pattern_masked(uint64_t pattern, uint64_t prediction, uint64_t erode_valid, uint64_t ctx, int order, bool negative)
+  {
+    if (pattern == 0)
+      return;
+    auto& tbl = (negative && P.separate_negative_tables) ? negative_pattern_tables_.at(order) : pattern_tables_.at(order);
+    uint64_t key = pat_key(pattern, ctx);
+    pattern_type* e = tbl.find_key(key);
+    if (e == nullptr) {
+      e = &tbl.insert(pattern_type{key, &P});
+      e->usefulness = global_usefulness_index_;
+    }
+    e->P = &P;
+    e->increment_prediction_masked(prediction, erode_valid);
   }
 
   // ---- Delta-PHT: spatial-context -> next-access signed delta (SPP-style single dominant delta) ----
@@ -1214,6 +1354,51 @@ private:
     if (m & 0x400000) pr("I_POLL", pw_poll_[f[21]], f[21]);
     std::fprintf(stderr, "\n");
   }
+public:
+  // ---- PER-SIGNATURE FEEDBACK (enable_sig_feedback) ----
+  // The sampling table records each request's (engine, signature); at resolve the module forwards the
+  // useful/useless/pollution outcome here, accumulating a per-(engine,signature) metric. Phase 1: record + dump.
+  struct sig_fb_entry { uint16_t useful = 0, useless = 0, polluted = 0; };
+  std::vector<sig_fb_entry> sig_fb_;
+  uint8_t fb_eng_ = 0; uint32_t fb_sig_ = 0;   // engine + signature stashed at the current issue site
+  uint8_t fb_order_ = 0, fb_pos_ = 0;          // SPPAM PHT order + prediction offset stashed at issue (for the uselessness kill)
+  void set_fb(uint8_t eng, uint32_t sig) { fb_eng_ = eng; fb_sig_ = sig; }
+  // USELESSNESS -> targeted kill: aggressively decrement the SPECIFIC (signature, order, offset) prediction_counter in
+  // the SPPAM PHT that predicted this useless block. Precise (the sampling table knows the exact issuing signature).
+  uint64_t dbg_kill_hit_ = 0, dbg_kill_miss_ = 0; // verify the recorded sig resolves to the entry that predicted
+  void sig_kill(uint8_t eng, uint32_t sig, uint8_t order, uint8_t pos) {
+    if (eng > 1 || order >= pattern_tables_.size()) return; // fwd/bwd only (delta/BG: future)
+    pattern_type* e = (eng == 1 && P.separate_negative_tables) ? negative_pattern_tables_.at(order).find_key(sig)
+                                                               : pattern_tables_.at(order).find_key(sig);
+    if (e == nullptr || pos >= e->prediction_counter.size()) { ++dbg_kill_miss_; return; }
+    ++dbg_kill_hit_;
+    uint64_t& c = e->prediction_counter[pos];
+    c = (c > static_cast<uint64_t>(P.sig_fb_kill_amount)) ? c - static_cast<uint64_t>(P.sig_fb_kill_amount) : 0;
+  }
+  std::size_t fb_index(uint8_t eng, uint32_t sig) const {
+    const uint64_t k = static_cast<uint64_t>(sig) * 0x9E3779B97F4A7C15ull ^ (static_cast<uint64_t>(eng) * 0xD6E8FEB86659FD93ull);
+    return static_cast<std::size_t>(k >> 40) % sig_fb_.size();
+  }
+  void sig_feedback(uint8_t eng, uint32_t sig, int kind) {  // 0 = useful, 1 = useless, 2 = polluted
+    if (sig_fb_.empty()) return;
+    sig_fb_entry& e = sig_fb_[fb_index(eng, sig)];
+    uint16_t& c = (kind == 0) ? e.useful : (kind == 1) ? e.useless : e.polluted;
+    if (c < 0xFFFF) ++c;
+  }
+  int64_t sig_deg_cap_ = 1 << 20;   // pollution->depth: degree cap for the current trigger signature (no cap by default)
+  // POLLUTION -> DEPTH: a signature that pollutes a lot is good-but-costly -> cap its degree (soft/hard bands),
+  // never below sig_fb_deg_hard (keep coverage + continued sampling). Returns a degree ceiling.
+  int64_t sig_fb_degree_cap(uint8_t eng, uint32_t sig) const {
+    if (sig_fb_.empty()) return 1 << 20;
+    const sig_fb_entry& e = sig_fb_[fb_index(eng, sig)];
+    const uint32_t denom = static_cast<uint32_t>(e.useful) + e.useless + e.polluted;
+    if (denom < static_cast<uint32_t>(P.sig_fb_min_samples)) return 1 << 20; // not enough data -> no cap
+    const uint32_t pct = 100u * e.polluted / denom;
+    if (pct >= static_cast<uint32_t>(P.sig_fb_poll_hard)) return P.sig_fb_deg_hard;
+    if (pct >= static_cast<uint32_t>(P.sig_fb_poll_soft)) return P.sig_fb_deg_soft;
+    return 1 << 20;
+  }
+
 public: // perc_keep + perc_note_issue are the engine call sites' entry points (SPPAM internal, plus the glue's branch-graph functor)
   bool perc_keep(uint64_t block, int engine, int depth, uint64_t pc, int conf, uint64_t sig) {
     int y = perc_score(block, engine, depth, pc, conf, sig, perc_last_feat_);
@@ -1501,6 +1686,32 @@ public:
   void perc_set_rc(uint64_t rc) { perc_rc_ = rc; }                         // real cycle, refreshed each operate/fill (self-measured fill latency)
   void perc_set_instr_pct(int pct) { perc_instr_pct_ = pct; }              // instruction-pf activity fraction (%), refreshed per operate (datacenter gate)
 private:
+  // Per-signature feedback summary: is pollution/uselessness CONCENTRATED in few signatures (-> a per-signature
+  // throttle is viable) or spread out (-> per-signature can't help)? Reports totals + pollution concentration.
+  void sig_fb_dump() const {
+    uint64_t U = 0, L = 0, Pl = 0; std::size_t active = 0, polluters = 0, pure_pol = 0;
+    std::vector<uint32_t> polv;
+    for (const auto& e : sig_fb_) {
+      uint32_t t = static_cast<uint32_t>(e.useful) + e.useless + e.polluted;
+      if (!t) continue;
+      ++active; U += e.useful; L += e.useless; Pl += e.polluted;
+      if (e.polluted) { ++polluters; polv.push_back(e.polluted); if (e.useful == 0) ++pure_pol; }
+    }
+    std::sort(polv.begin(), polv.end(), [](uint32_t a, uint32_t b) { return a > b; });
+    std::size_t topk = std::max<std::size_t>(1, polv.size() / 100);
+    uint64_t topsum = 0; for (std::size_t i = 0; i < topk && i < polv.size(); ++i) topsum += polv[i];
+    std::fprintf(stderr,
+        "[sig-fb] %s active_sigs=%zu useful=%llu useless=%llu polluted=%llu | polluting_sigs=%zu (%.1f%% of active, pure-polluter[u==0]=%zu) | top-1%%(%zu sigs) hold %.1f%% of pollution\n",
+        P.name.c_str(), active, (unsigned long long)U, (unsigned long long)L, (unsigned long long)Pl,
+        polluters, active ? 100.0 * static_cast<double>(polluters) / static_cast<double>(active) : 0.0, pure_pol,
+        topk, Pl ? 100.0 * static_cast<double>(topsum) / static_cast<double>(Pl) : 0.0);
+    if (P.sig_fb_kill_useless) {
+      const uint64_t kt = dbg_kill_hit_ + dbg_kill_miss_;
+      std::fprintf(stderr, "[sig-fb] %s kill find_key: hit=%llu miss=%llu (%.1f%% hit -- low hit => sig mis-recorded)\n",
+                   P.name.c_str(), (unsigned long long)dbg_kill_hit_, (unsigned long long)dbg_kill_miss_,
+                   kt ? 100.0 * static_cast<double>(dbg_kill_hit_) / static_cast<double>(kt) : 0.0);
+    }
+  }
   // Per-feature accumulated weight magnitude -> which features actually carry signal (sum|w|/mean|w| high = used).
   void perc_dump() const {
     auto stat = [&](const std::vector<int16_t>& w, const char* nm) {
@@ -1633,7 +1844,7 @@ private:
           auto& pc = e->prediction_counter;
           std::size_t b = static_cast<std::size_t>(s.bit);
           if (b < pc.size()) {
-            if (useful) pc[b] = std::min<uint64_t>(pc[b] + P.counter_up, 100);
+            if (useful) pc[b] = std::min<uint64_t>(pc[b] + P.counter_up, P.counter_max);
             else pc[b] = pc[b] > static_cast<uint64_t>(P.pv_conf_penalty) ? pc[b] - P.pv_conf_penalty : 0;
           }
         }
@@ -1849,7 +2060,7 @@ private:
         e->pp_update(pos_bit, hist, +1);
         e->pp_update(c, hist, -1);
       } else {
-        pc[pos_bit] = std::min<uint64_t>(pc[pos_bit] + P.counter_up, 100);
+        pc[pos_bit] = std::min<uint64_t>(pc[pos_bit] + P.counter_up, P.counter_max);
         pc[c] = pc[c] > P.counter_down ? pc[c] - P.counter_down : 0;
       }
     }
@@ -1867,11 +2078,14 @@ private:
     const uint64_t ctx = ctx_of(r);
     // PC context = this page's PREVIOUS accessing PC (r->pc_pht is not yet updated for the current
     // access -- add_to_pagemap runs after learn_on_access), matching what do_prefetch used at predict.
-    const uint64_t ctx_pc = ctx | (P.pattern_pc_bits ? (static_cast<uint64_t>(r->pc_pht) & mask(P.pattern_pc_bits)) << P.pattern_context_bits : 0);
+    const uint64_t ctx_pc = ctx | (P.pattern_pc_bits ? (region_pc_ctx(r) & mask(P.pattern_pc_bits)) << P.pattern_context_bits : 0);
     const int off = static_cast<int>(offset_of(block));
     const int ps = static_cast<int>(P.pattern_size);
     const int bpr = static_cast<int>(blocks_per_region_);
     // FORWARD: a trigger at off-d (behind) predicts this block at bit ps-d.
+    // Dense-window mode owns the FORWARD table (event-driven dense trainer); skip the online single-bit forward
+    // so the two don't fight over the same entries. Backward + delta below stay online in both modes.
+    if (!P.dense_window_train)
     for (int d = 1; d <= ps; ++d) {
       auto [ap, neg] = patterns_at(r, rb, rf, off - d, false);
       (void)neg;
@@ -1906,6 +2120,72 @@ private:
     if (P.delta_pht) {
       int prev = static_cast<int>(r->last_block);
       dpht_train(delta_sig(r, prev), off - prev);
+    }
+  }
+
+  // ----- dense-window trainer (convention B, event-driven) -----
+  uint32_t dense_lfsr_ = 0x1234567u;
+  uint32_t dense_lfsr_next() { dense_lfsr_ ^= dense_lfsr_ << 13; dense_lfsr_ ^= dense_lfsr_ >> 17; dense_lfsr_ ^= dense_lfsr_ << 5; return dense_lfsr_; }
+  void dense_set_anchor(region_type* r, int off, uint64_t ip)
+  {
+    r->train_anchor = static_cast<int16_t>(off);
+    r->train_hi = static_cast<int16_t>(off);
+    r->train_lo = static_cast<int16_t>(off);
+    r->train_pc = pc_ctx_hash(ip); // this access's PC (== what pc_pht will be set to => matches predict's context)
+  }
+  // Per demand access (runs at the learn_on_access slot, before add_to_pagemap marks this block): accumulate the
+  // window; on window-exit / PC-change / probabilistic tick, dense-train the accumulated footprint at the anchor
+  // and re-anchor here. The map read at flush excludes the current (triggering) block -- consistent with the
+  // frontier, which also excludes it. On bg_pc_lookahead the BG trains on the anchor-PC transition (episode edge).
+  void dense_window_access(uint64_t block, uint64_t ip)
+  {
+    region_type* r = regions_.find_key(region_of(block));
+    if (r == nullptr) return;                        // fresh region: anchor is set on the next access (region now exists)
+    const int off = static_cast<int>(offset_of(block));
+    if (r->train_anchor < 0) { dense_set_anchor(r, off, ip); return; }
+    const uint8_t pc = pc_ctx_hash(ip);
+    const bool pc_changed = P.dense_train_pc_trigger && r->train_pc != 0 && pc != 0 && pc != r->train_pc;
+    int dist = off - static_cast<int>(r->train_anchor); if (dist < 0) dist = -dist;
+    const bool oow = dist > static_cast<int>(P.dense_train_window);
+    const bool prob = P.dense_train_prob && (dense_lfsr_next() % P.dense_train_prob == 0);
+    if (oow || pc_changed || prob) {
+      if (oow) ++dbg_dw_flush_oow_; else if (pc_changed) ++dbg_dw_flush_pc_; else ++dbg_dw_flush_prob_;
+      dense_train_flush(r);
+      if (P.bg_pc_lookahead && bg_train_ && r->train_pc != 0 && pc != 0) bg_train_(r->train_pc, pc);
+      dense_set_anchor(r, off, ip);
+    } else {
+      if (off > r->train_hi) r->train_hi = static_cast<int16_t>(off);
+      if (off < r->train_lo) r->train_lo = static_cast<int16_t>(off);
+    }
+  }
+  // Dense-train the frames anchored at r->train_anchor over the accumulated window, frontier-masked, in the
+  // FORWARD direction (backward + delta stay on the online path). Frame at signature-end S: signature = behind
+  // window [S-ps+1..S] (the KEY, exactly what patterns_at reads at predict), prediction = ahead footprint
+  // [S+1..S+ps] (the dense value); erode only bits reached this episode (region-offset <= frontier).
+  void dense_train_flush(region_type* r)
+  {
+    if (r->train_anchor < 0) return;
+    const int anchor = static_cast<int>(r->train_anchor);
+    r->train_anchor = -1; // consumed (before any early return below)
+    if (!(r->momentum > P.forward_momentum_min)) { ++dbg_dw_skip_bwd_; return; } // strongly-backward -> online backward path owns it
+    const int ps = static_cast<int>(P.pattern_size);
+    const int frontier = static_cast<int>(r->train_hi);
+    const region_type* rb = shadow_back(r);
+    const region_type* rf = shadow_fwd(r);
+    const uint64_t ctx = ctx_of(r)
+      | (P.pattern_pc_bits ? (static_cast<uint64_t>(r->train_pc) & mask(P.pattern_pc_bits)) << P.pattern_context_bits : 0);
+    for (int S = anchor; S <= frontier; ++S) {
+      const int i = S + 1; // shadow frame-start: signature = shadow[i..i+ps-1], prediction = shadow[i+ps..i+2ps-1]
+      uint64_t ap = 0;
+      for (int j = i; j < i + 2 * ps; ++j)
+        ap = (ap << 1) | uint64_t(shadow_bit(r, rb, rf, j));
+      const uint64_t predicted = ap & mask(ps);         // ahead footprint [S+1..S+ps]; bit b => region-offset S+ps-b
+      const uint64_t accessed  = (ap >> ps) & mask(ps); // behind signature [S-ps+1..S] (the PHT key)
+      if (accessed == 0) continue;
+      uint64_t erode_valid = 0;                          // erode an unaccessed prediction bit only if it was reached
+      for (int b = 0; b < ps; ++b) if (S + ps - b <= frontier) erode_valid |= (uint64_t{1} << b);
+      increment_access_pattern_masked(accessed, predicted, erode_valid, ctx, 0, false);
+      ++dbg_dw_frames_; dbg_dw_predbits_ += static_cast<uint64_t>(__builtin_popcountll(predicted));
     }
   }
 
@@ -2090,13 +2370,29 @@ private:
     region_type* r_addr = regions_.find_key(region_of(addr));
     int momentum = r_addr ? r_addr->momentum : 0;
     // PC context = this page's accessing-PC PHT index (stable per-region; consistent with learn_on_access).
-    const uint64_t pc_part = P.pattern_pc_bits ? ((r_addr ? static_cast<uint64_t>(r_addr->pc_pht) : 0) & mask(P.pattern_pc_bits)) << P.pattern_context_bits : 0;
+    const uint64_t pc_part = P.pattern_pc_bits ? (region_pc_ctx(r_addr) & mask(P.pattern_pc_bits)) << P.pattern_context_bits : 0;
+    // BG-driven lookahead: advance the PHT's PC context along the BG's predicted next-load RAW-PC chain, one PC
+    // per lookahead step. RAW PC keeps SPPAM on its baseline full-PC context (ip_hash(pc)) -- no re-index shift.
+    const bool bg_la = P.bg_pc_lookahead && bg_next_ && !P.bg_no_advance;
     // per-IP dominant stride direction. Computed for ip_direction (forward-suppression) OR neg_dir_pc (backward
     // gate) -- decoupled so neg_dir_pc can gate the backward scan WITHOUT ip_direction's forward-suppression.
     int ipd = (P.ip_direction || P.neg_dir_pc) ? ip_dir_[ip_hash(ip)] : 0;
     uint64_t addr_region = region_of(addr); // region-entry granularity
     uint64_t addr_page = page_of(addr);      // 4 KB page (squash boundary)
     int pf_issued = 0;
+    // Per-signature feedback: attribute this trigger's forward-engine issues to its forward PHT KEY -- the same
+    // pat_key(pattern, ctx) the SPPAM pattern table is indexed by (folds in page context + PC bits), not the bare
+    // 5-bit spatial pattern (too coarse). The delta-PHT section overrides to engine 2 with its delta signature.
+    if (P.enable_sig_feedback) {
+      uint32_t k = 0;
+      if (r_addr) {
+        const uint64_t tsig = patterns_at(r_addr, shadow_back(r_addr), shadow_fwd(r_addr),
+                                          static_cast<int64_t>(offset_of(addr)), false).first;
+        k = static_cast<uint32_t>(pat_key(tsig, ctx_of(r_addr) | pc_part));
+      }
+      set_fb(0, k);
+      sig_deg_cap_ = P.sig_fb_consume ? sig_fb_degree_cap(0, k) : (1 << 20); // pollution->depth cap for this trigger's walk
+    }
     // IP-FILTER throttle (faithful): a low-usefulness trigger IP is throttled. Action depends on WHY it's low:
     // UNTIMELY (right addr, evicted-before-use) -> cap DEPTH (shallower lands in time); TRULY-BAD -> volume trickle.
     int ip_depth_cap = 1 << 20; // no cap by default
@@ -2206,6 +2502,7 @@ private:
         const bool perc_drop = P.enable_perceptron_filter
                              && !perc_keep(step, 2, k, ip, static_cast<int>(e->conf), delta_sig(r_addr, cur, dpht_spec_.data()));
         if (delta_sd_allow(step) && !r_addr->prefetch_map[nd] && !perc_drop) {
+          if (P.enable_sig_feedback) set_fb(2, static_cast<uint32_t>(delta_sig(r_addr, cur, dpht_spec_.data())));
           const bool placed = sink_->issue_prefetch(step, true, false, 1.0, 0);
           if (placed) {
             mark_prefetch(r_addr, nd, step);
@@ -2388,8 +2685,19 @@ private:
           }
           bool continue_outer = false;
           int lookaheads = 0, lookahead_offset = 0;
+          // BG lookahead state (per prediction chain): depth-0 uses the region's context (cctx_pc, baseline);
+          // each deeper step advances the pc_pht context to the next predicted PC to access this region.
+          uint64_t bg_ctx = cctx_pc, bg_pht = r_addr ? static_cast<uint64_t>(r_addr->pc_pht) : 0;
+          // Partial-advance (dense_advance_furthest) needs the signature RE-DERIVED at the new position, because
+          // reusing `pp` is only valid for a FULL-window advance (there pp == the behind-window at pf_base+ps).
+          // Seed a speculative overlay with the predicted offsets so patterns_at() sees real map bits behind the
+          // trigger and speculative bits ahead of it.
+          const bool part_adv = forward && P.dense_advance_furthest && P.do_lookahead;
+          if (part_adv && !walk_spec_.empty()) std::fill(walk_spec_.begin(), walk_spec_.end(), 0);
           while (true) {
-            current_usefulness = std::clamp(do_4_bit_mult(do_4_bit_mult(static_cast<int>(P.lookahead_conf_factor), set_prefetch_degree(ap, cctx_pc, order, current_usefulness)), current_usefulness), 0, 15);
+            current_usefulness = std::clamp(do_4_bit_mult(do_4_bit_mult(static_cast<int>(P.lookahead_conf_factor), set_prefetch_degree(ap, bg_ctx, order, current_usefulness)), current_usefulness), 0, 15);
+            if (P.degree_boost && current_pf_degree_ > 0) current_pf_degree_ += P.degree_boost;                // aggression FIRST (add coverage)
+            if (P.sig_fb_consume) current_pf_degree_ = std::min<int64_t>(current_pf_degree_, sig_deg_cap_);    // then pollution->depth throttle (shed the far pollution)
             // PE-ramp: accurate DRAM-bound stream -> deeper per-trigger degree (dense tail spills to LLC).
             if (P.enable_pe_ramp && sink_->pe_ramp_active())
               current_pf_degree_ = std::min<int64_t>(P.pe_ramp_degree_cap, current_pf_degree_ + P.pe_ramp_degree_add);
@@ -2400,26 +2708,43 @@ private:
                 break;
               }
             }
-            if (pp == 0 && !pv) { continue_outer = true; break; }
-            if (pp == 0) break;
+            if (forward && lookaheads == 0 && pp != 0) { // d0 prediction shape: which bit positions are confident?
+              ++dbg_pred_n_;
+              for (int b = 0; b < i && b < 8; ++b) if (pp & (uint64_t{1} << b)) ++dbg_bit_set_[b];
+              int pc_ = __builtin_popcountll(pp & mask(static_cast<uint32_t>(i))); if (pc_ < 8) ++dbg_pc_hist_[pc_];
+              int cz_ = __builtin_ctzll(pp); if (cz_ < 8) ++dbg_ctz_hist_[cz_];
+            }
+            if (pp == 0 && !pv) { if (forward && lookaheads > 0) ++dbg_stop_ppzero_; continue_outer = true; break; }
+            if (pp == 0) { if (forward && lookaheads > 0) ++dbg_stop_ppzero_; break; }
             for (int j = 0; j < i; ++j) {
-              if (pf_issued >= current_pf_degree_) break;
+              const int dlv = (forward && lookaheads < 4) ? lookaheads : -1;
+              if (pf_issued >= current_pf_degree_) {
+                if (dlv >= 0) for (int q = j; q < i; ++q) if (pp & (uint64_t{1} << (i - 1 - q))) { ++dbg_sq_bits_[dlv]; ++dbg_sq_deg_[dlv]; }
+                break;
+              }
               if (pp & (uint64_t{1} << (i - 1 - j))) {
+                if (dlv >= 0) ++dbg_sq_bits_[dlv];
                 uint64_t step = forward ? pf_base + static_cast<uint64_t>(j + 1 + lookahead_offset) : pf_base - static_cast<uint64_t>(j + 1 + lookahead_offset);
+                // speculative trajectory for the partial-advance re-index (mark the PREDICTION, issued or not --
+                // the next signature must reflect what we committed to down this path)
+                if (part_adv && region_of(step) == addr_region && !walk_spec_.empty()) walk_spec_[offset_of(step)] = 1;
                 // 4 KB physical page is a hard prefetch boundary (cross-page squash).
-                if (page_of(step) != addr_page)
+                if (page_of(step) != addr_page) {
+                  if (dlv >= 0) ++dbg_sq_page_[dlv];
                   continue;
+                }
                 // Region prefetch-map filter/mark applies within the trigger's
                 // region entry; a step in a different (sub-page) region uses the
                 // general path.
                 bool same_region = (region_of(step) == addr_region);
                 uint64_t soff = offset_of(step);
                 bool already = same_region ? (r_addr ? r_addr->prefetch_map[soff] : false) : check_pagemap(step, true);
+                if (already && dlv >= 0) ++dbg_sq_res_[dlv];
                 if (!already) {
                   // PERCEPTRON final gate (prototype): learned keep/drop over all throttle signals. Runs AFTER
                   // the residency filter (above) and supersedes the ip-filter/depth throttle. engine 0=SPPAM-fwd, 1=bwd.
                   if (P.perc_profile) perc_raw_ap_ = ap; // stash the raw spatial bitmap for the opposite-direction methodology-check feature
-                  if (P.enable_perceptron_filter && !perc_keep(step, forward ? 0 : 1, lookaheads, ip, current_usefulness, pat_key(ap, cctx_pc)))
+                  if (P.enable_perceptron_filter && !perc_keep(step, forward ? 0 : 1, lookaheads, ip, current_usefulness, pat_key(ap, bg_ctx)))
                     continue; // dropped (and not chosen for exploration); sig = the SPPAM pattern key that predicted this block
 
                   bool fill_l2 = (pf_issued < l2_fill_limit);
@@ -2427,6 +2752,12 @@ private:
                     // already in LLC map -> filter
                   } else {
                     // benefit = usefulness/15 (expected usefulness ~ coverage/bandwidth).
+                    if (P.enable_sig_feedback) { // precise per-step attribution: this (engine, PHT key, order, offset) predicted `step`
+                      fb_eng_ = static_cast<uint8_t>(forward ? 0 : 1);
+                      fb_sig_ = static_cast<uint32_t>(pat_key(ap, bg_ctx));
+                      fb_order_ = static_cast<uint8_t>(order);
+                      fb_pos_ = static_cast<uint8_t>(i - 1 - j);
+                    }
                     bool placed = sink_->issue_prefetch(step, fill_l2, /*from_spp=*/false, /*benefit=*/current_usefulness / 15.0,
                     /*gen_tag=*/ ((static_cast<uint32_t>(lookaheads > 15 ? 15 : lookaheads)) << 1)
                                  | ((static_cast<uint32_t>(order > 7 ? 7 : order)) << 5)
@@ -2444,22 +2775,56 @@ private:
                       pf_sample_issue(step, trig_pk, iphash(ip), (forward && lookaheads == 0) ? (i - 1 - j) : -1, /*backward=*/!forward);
                     ++pf_issued;
                     ++prefetches_issued;
+                    if (forward && lookaheads < 16) ++dbg_la_iss_[lookaheads]; // per-depth lookahead issue count (accuracy probe)
                     if (pf_issued >= current_pf_degree_) break;
                   }
                 }
               }
             }
             if (P.do_lookahead && pf_issued < current_pf_degree_) {
-              auto la = get_prefetch_pattern(pp, cctx_pc, order, neg);
-              ap = pp; pp = la.first; pv = la.second;
-              ++lookaheads; lookahead_offset += i;
+              // End-over-end advance. Default: the FULL window (i) -- and only then is reusing `pp` as the next
+              // key correct, because pp IS the behind-window at pf_base+i (bit b <-> offset base+ps-b, same
+              // convention as patterns_at). dense_advance_furthest advances only to the FURTHEST predicted delta
+              // (i - lowest set bit) so a sparse prediction doesn't skip the un-prefetched tail; that shifts the
+              // position by k<i, so the key MUST be re-derived at the new position (real map bits behind it,
+              // speculative bits ahead) instead of reusing pp. residency-blind either way.
+              ++lookaheads;
+              int adv = i;
+              if (part_adv && pp != 0) adv = i - static_cast<int>(__builtin_ctzll(pp));
+              lookahead_offset += adv;
+              if (bg_la) { // advance the pc_pht context to the next predicted PC to access this region
+                const uint64_t nxt = bg_next_(bg_pht);
+                if (nxt != bg_pht) {
+                  bg_pht = nxt;
+                  bg_ctx = cctx | ((bg_pht & mask(P.pattern_pc_bits)) << P.pattern_context_bits);
+                }
+              }
+              // Key for the next step. Full advance: pp already IS the behind-window at the new position. Partial
+              // advance: re-derive at pf_base+lookahead_offset over the speculative overlay (mixes real history
+              // behind the new position with the predictions we committed ahead of it).
+              uint64_t nkey = pp;
+              if (part_adv) { ++dbg_pa_steps_; dbg_pa_advsum_ += static_cast<uint64_t>(adv); }
+              if (part_adv && adv != i && cr != nullptr && !walk_spec_.empty()
+                  && region_of(pf_base + static_cast<uint64_t>(lookahead_offset)) == addr_region) {
+                nkey = patterns_at(cr, crb, crf, static_cast<int64_t>(offset_of(pf_base)) + lookahead_offset,
+                                   false, walk_spec_.data()).first;
+                ++dbg_pa_rederive_; if (nkey != pp) ++dbg_pa_differ_;
+              }
+              auto la = get_prefetch_pattern(nkey, bg_ctx, order, neg); // deeper pattern under the (possibly advanced) PC context
+              if (forward && lookaheads < 16) { ++dbg_la_look_[lookaheads]; if (la.first != 0) ++dbg_la_hit_[lookaheads]; } // deep-lookup PHT-hit rate
+              ap = nkey; pp = la.first; pv = la.second; // ap must be the key we actually looked up (drives set_prefetch_degree / sampling)
               int eff_depth = static_cast<int>(P.lookahead_depth) + ((P.enable_pe_ramp && sink_->pe_ramp_active()) ? static_cast<int>(P.pe_ramp_lookahead_add) : 0);
               eff_depth = std::min(eff_depth, sink_->ip_depth_cap()); // per-IP: shallower as usefulness degrades
               eff_depth = std::min(eff_depth, ip_depth_cap);          // ported depth-throttle: cap untimely trigger IPs
-              if (lookaheads > eff_depth || current_usefulness < static_cast<int>(P.lookahead_conf_cutoff)) break;
+              if (lookaheads > eff_depth || current_usefulness < static_cast<int>(P.lookahead_conf_cutoff)) {
+                if (forward) { if (lookaheads > eff_depth) ++dbg_stop_depth_; else ++dbg_stop_useful_; }
+                break;
+              }
               if (pp != 0) ++total_lookaheads;
-            } else
+            } else {
+              if (forward) ++dbg_stop_degree_; // pf_issued >= current_pf_degree_ (or !do_lookahead)
               break;
+            }
           }
           if (!continue_outer) break;
           ++order;
@@ -2527,6 +2892,12 @@ private:
   {
     if (r.vpn & CODE_KEY_BIT) return; // PACKED code-residency entry: maps are residency, not access history -> no bloom spill / density stats
     ++region_evictions;
+    // DIAGNOSTIC: distinct-PC ALPHABET of this region (how many distinct PC hashes touched its blocks) --
+    // small alphabet => a compact per-region PC subset (learnable sequence); large => a wide/random one.
+    { bool seen[256] = {false}; int distinct = 0;
+      for (uint8_t v : r.block_ip) if (v && !seen[v]) { seen[v] = true; ++distinct; }
+      ++dbg_distpc_regs_; dbg_distpc_sum_ += static_cast<uint64_t>(distinct);
+      ++dbg_distpc_hist_[distinct <= 1 ? 0 : distinct == 2 ? 1 : distinct <= 4 ? 2 : distinct <= 8 ? 3 : 4]; }
     { int pop = 0; for (bool b : r.access_map) if (b) ++pop; // access-map fill fraction at eviction (min-size signal)
       dbg_amap_bits_ += static_cast<uint64_t>(pop); ++dbg_amap_regs_;
       if (pop <= 1) ++dbg_amap_sparse_; else if (pop >= static_cast<int>(blocks_per_region_)) ++dbg_amap_full_; }
@@ -2606,12 +2977,25 @@ private:
   uint64_t dbg_dchk_[16] = {0}, dbg_ddrop_[16] = {0}; // prob_drop: checks & drops bucketed by current_usefulness
   std::unordered_set<uint64_t> dbg_exact_; // pure L2-residency mirror (fill inserts / evict erases) for shadow-leak diagnosis
   uint64_t dbg_bwd_scan_ = 0, dbg_bwd_pred_ = 0, dbg_bwd_issued_ = 0; // backward scan entered / non-zero prediction / prefetch issued
+  uint64_t dbg_reaccess_ = 0, dbg_pc_change_ = 0, dbg_pc0_ = 0; // region re-accesses / PC-change count / pc-less (ip==0, berti) count
+  // dense-window trainer diagnostics: flushes by trigger kind, frames trained, mean prediction popcount trained
+  uint64_t dbg_bit_set_[8]={0,0,0,0,0,0,0,0}, dbg_pc_hist_[8]={0,0,0,0,0,0,0,0}, dbg_ctz_hist_[8]={0,0,0,0,0,0,0,0}, dbg_pred_n_=0; // per-bit set freq / popcount hist / ctz hist at d0 forward prediction
+  uint64_t dbg_pa_steps_=0, dbg_pa_rederive_=0, dbg_pa_differ_=0, dbg_pa_advsum_=0; // partial-advance: steps / re-derives / key-actually-changed / total advance
+  uint64_t dbg_sq_res_[4]={0,0,0,0}, dbg_sq_page_[4]={0,0,0,0}, dbg_sq_deg_[4]={0,0,0,0}, dbg_sq_bits_[4]={0,0,0,0}; // per-depth: predicted bits squashed by residency / page / degree-cap, and total predicted bits
+  uint64_t dbg_dw_flush_oow_ = 0, dbg_dw_flush_pc_ = 0, dbg_dw_flush_prob_ = 0, dbg_dw_frames_ = 0, dbg_dw_predbits_ = 0, dbg_dw_skip_bwd_ = 0;
+  uint64_t dbg_distpc_regs_ = 0, dbg_distpc_sum_ = 0, dbg_distpc_hist_[5] = {0}; // distinct-PC-per-region: count / sum / hist(1,2,3-4,5-8,9+)
+  std::array<std::vector<uint16_t>, 3> seqk_ = {std::vector<uint16_t>(256, 0xFFFF), std::vector<uint16_t>(4096, 0xFFFF), std::vector<uint16_t>(65536, 0xFFFF)}; // last-value seq predictors @ 8/12/16-bit keys
+  uint64_t seq_tot_[3] = {0, 0, 0}, seq_hit_[3] = {0, 0, 0};
+  uint64_t dbg_la_iss_[16] = {0}, dbg_la_look_[16] = {0}, dbg_la_hit_[16] = {0}; // per-depth: prefetch issues / deep-lookup count / PHT-hit
+  uint64_t dbg_stop_degree_ = 0, dbg_stop_useful_ = 0, dbg_stop_depth_ = 0, dbg_stop_ppzero_ = 0; // why the forward lookahead stops
   uint64_t cycle_ = 0;
   // --- Region staging gate state ---
   std::vector<uint64_t> staging_tag_; // spatial gate: direct-mapped per-page hit-count filter
   std::vector<uint8_t> staging_cnt_;
   bool cur_ip_gate_ = false;          // set by the module per-access from the EXISTING ip table (no new state)
   uint32_t ip_gate_explore_ctr_ = 0;  // paces IP-gate exploration (never permanently gate an IP)
+  std::function<uint64_t(uint64_t)> bg_next_;         // BG lookahead: predicted next-in-region PC hash (unset => off)
+  std::function<void(uint64_t, uint64_t)> bg_train_;  // BG training: per-region (prev_pht -> cur_pht) on each access
   std::array<int8_t, 256> ip_dir_{};  // per-IP (ip_hash) saturating stride-direction counter (replaces momentum)
   uint64_t staging_drops_ = 0;        // demand allocations gated out of the region table
   bool region_just_created_ = false;  // cold-start: current access allocated a fresh region entry this operate

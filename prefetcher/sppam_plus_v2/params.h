@@ -227,6 +227,30 @@ struct params {
   // PCs learns different predictions (gives SPPAM IP correlation). Needs pattern_table_sets/ways bumped
   // to hold the widened keyspace; state grows ~2^pattern_pc_bits. 0 = off (no PC in the pattern key).
   uint32_t pattern_pc_bits = 4; // PROMOTED default: PC in the pattern key (small accuracy win; needs the bigger PHT below)
+  // BLOCK-GRANULAR PC context: key the pattern PHT's PC bits off ip_hash(ip>>6) instead of ip_hash(full ip).
+  // Required so the BG-driven lookahead PC-advancement (bg_pc_lookahead) can re-index the PHT with a predicted
+  // PC BLOCK consistently (the BG is block-granular). Standalone so its baseline impact can be measured alone.
+  bool pc_ctx_block = false;
+  bool pc_ctx_wide = false; // CEILING probe: source the pattern-PHT PC context from the 16-bit pc_wide hash (vs 8-bit
+                            // pc_pht) so pattern_pc_bits can exceed 8 without aliasing -- needs a big pattern_table_sets.
+  // BG-driven lookahead PC-advancement: the shared BG (trained on demand-load PC blocks too) predicts the
+  // PC chain; SPPAM's lookahead advances the PHT's PC context along it, paced by each PC block's learned
+  // data-access run-length. Requires pc_ctx_block (block-granular context) for a consistent re-index.
+  bool bg_pc_lookahead = false;
+  bool bg_advance_strong = false; // advance the lookahead PC only on a STRONG (saturated) next-PC prediction, not merely
+                                  // dir>midpoint -- on noisy (datacenter) chains this mostly stays put, sparing coverage.
+  bool bg_no_advance = false;     // DIAGNOSTIC: train the data-PC edges but never advance the context (isolates the
+                                  // shared-table training-contention cost from the advancement's effect).
+  // Dense-window trainer (convention B, event-driven): replaces the online single-bit FORWARD trainer with a
+  // localized frontier-masked dense scrape. Per region, an anchor + window accumulate accesses; on window-exit,
+  // PC-change, or a probabilistic tick, the accumulated footprint is dense-trained (behind->ahead frame, keyed
+  // to match the predict path) and the anchor advances. Backward + delta stay on the online path. Default off =>
+  // unchanged behaviour. Meshes with bg_pc_lookahead: the BG trains on anchor-PC transitions instead of per-access.
+  bool dense_window_train = false;
+  uint32_t dense_train_window = 12;  // an access farther than this many blocks from the anchor triggers flush+re-anchor
+  bool dense_train_pc_trigger = true; // a PC-context change also triggers flush+re-anchor (keeps episodes PC-homogeneous)
+  uint32_t dense_train_prob = 0;      // probabilistic early flush+re-anchor: 1/N per in-window access (0=off; phase diversity)
+  bool dense_advance_furthest = false; // end-over-end: advance the lookahead by the FURTHEST predicted delta, not the full window
   uint32_t pattern_context_src = 0;
   // DEFAULT = contrastive per-block COUNTER mode: real-ChampSim AMAT geomean 0.8349 vs the old
   // positive-only conf-table's 0.8434 (~1% better, HW-free). The counter's +up on accessed /
@@ -235,6 +259,11 @@ struct params {
   // alternative per-access trainer -- more pf-efficient but ~0.15% worse AMAT -- default off.)
   bool table_or_counter = true;    // false = conf-table prediction, true = per-bit counters
   uint64_t min_confidence_to_prefetch = 4;
+  // Confidence-counter ceiling. DEFAULT 100 reproduces the historical hardcoded cap, but note cap:threshold is
+  // 100:4 = 25:1 with counter_up=2/counter_down=1 -> a bit that saturates needs ~96 consecutive non-access
+  // decrements to stop being predicted. Measured effect: the PHT predicts ALL ps ahead-blocks 80-86% of the time
+  // (i.e. degenerates toward an unconditional next-ps-lines prefetcher). Lower this to restore selectivity.
+  uint64_t counter_max = 100;      // confidence ceiling (>= min_confidence_to_prefetch to predict at all)
   uint64_t counter_up = 2;         // counter-mode increment
   uint64_t counter_down = 1;       // counter-mode decrement
   // Online (Funnel-style) learning: instead of harvesting the finalized footprint at page
@@ -564,6 +593,7 @@ struct params {
   bool prefetch_demand_only = false;
   // usefulness[0..15] -> prefetch degree; drop chance out of 128.
   std::array<int64_t, 16> prefetch_degrees_usefulness = {1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 8, 8, 12, 12, 16, 16};
+  int degree_boost = 0;            // scalar aggression: added to a nonzero per-trigger walk degree (datacenter coverage lever; a loadable knob, unlike the prefetch_degrees_usefulness array)
   std::array<int64_t, 16> prefetch_drop_chance_usefulness = {123, 120, 110, 110, 80, 50, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0};
   // --- Bandwidth feedback (reinstated from the original SPPAM; needs timing) ---
   // bw_util index = f(DRAM utilization x LLC miss rate); throttles prefetch degree
@@ -591,6 +621,26 @@ struct params {
   uint64_t pe_phase = 1024;       // demands per PE evaluation phase
   uint64_t pe_throttle_div = 8;   // non-positive-PE prefetcher throttled to 1/N (NEVER gated -- a
                                   // complete gate is unrecoverable: no prefetch -> no PE signal)
+  // PER-SIGNATURE FEEDBACK: the sampling table also records each request's (engine, signature); at resolve, the
+  // useful/useless/pollution outcome is fed back to a per-(engine,signature) table -- an internal feedback metric
+  // each engine can consult (Phase 1 = record + dump only; consumption is a follow-up). Default off (zero overhead).
+  bool enable_sig_feedback = false;
+  int sig_fb_entries = 4096;       // per-(engine,signature) feedback table size (hashed; engine folded into the index)
+  // Phase 2 consumption -- POLLUTION -> DEPTH throttle: a high-pollution signature is good-but-costly (like untimely),
+  // so cap its walk DEGREE (fewer/shallower prefetches -> shed the far pollution, keep near-term coverage), graded by
+  // pollution rate in soft/hard bands. Never to zero (keeps coverage + continued sampling). Needs enable_sig_feedback.
+  bool sig_fb_consume = false;
+  int sig_fb_min_samples = 16;     // resolved+polluted samples on a signature before its pollution rate is trusted
+  int sig_fb_poll_soft = 20;       // pollution %% >= this -> cap degree to sig_fb_deg_soft
+  int sig_fb_poll_hard = 40;       // pollution %% >= this -> cap degree to sig_fb_deg_hard (heavy polluter)
+  int sig_fb_deg_soft = 2;
+  int sig_fb_deg_hard = 1;
+  // Phase 2 consumption -- USELESSNESS -> targeted confidence decrement: on a sampled-useless prefetch, aggressively
+  // decrement the SPECIFIC (signature, order, offset) prediction_counter in the SPPAM PHT that predicted it -- kills the
+  // proven-wrong prediction precisely (the sampling table knows the exact issuing signature), rather than a coarse
+  // overall-signature confidence. Complements the dense eviction training. Needs enable_sig_feedback.
+  bool sig_fb_kill_useless = false;
+  int sig_fb_kill_amount = 25;     // decrement applied to prediction_counter[offset] (0..100 scale) per sampled useless
   std::size_t pfht_entries = 256;  // shared sampled prefetch-outcome table (PE + per-IP filter attribution)
   uint32_t pfht_tag_bits = 8;     // hashed PfHT tag width (for the state estimate)
   uint64_t pe_sample_div = 16;    // shared attribution: track 1/N issued prefetches (probabilistic sampling,
@@ -673,8 +723,11 @@ struct params {
   int instr_nextn = 0;                 // sequential fallback: prefetch this many phys blocks ahead within the code page (next-2 ~= full SPPAM on the sequential residual)
   bool instr_packed_residency = false; // branch graph shares SPPAM's PACKED code residency (4KiB-page/both-maps) instead of its own filter -> lower redundancy, zero extra state
   int instr_la_depth = 32;           // lookahead HARD ceiling; the confidence budget is the real limiter (see below)
+  int instr_llc_depth = 99;          // BG multi-level placement: prefetches at walk depth >= this fill LLC (not L2) --
+                                     // stage the deep (capacity-limited) instruction prefetches in LLC without thrashing
+                                     // L1I/L2. Default 99 = off (all L2). LLC fills are NOT marked resident (re-proposable).
   int instr_conf = 60;              // STRONG/WEAK threshold (percent): a predicted step whose direction confidence
-                                    // (|dir-mid|/mid; a table miss = instr_miss_conf) is >= this is "strong", else "weak".
+                                    // (|dir-mid|/mid; a table miss = 1.0) is >= this is "strong", else "weak".
   // Confidence-BUDGET walk gate (replaces the hard per-step cutoff): the walk starts each access with
   // instr_walk_budget and spends instr_cost_strong on a strong step, instr_cost_weak on a weak one; when the
   // budget goes negative the walk stops. Weak (ambiguous-direction) predictions drain it faster, so the walk
@@ -1056,8 +1109,9 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(spp_ghr); SET(spp_ghr_entries); SET(spp_min_delta); SET(spp_min_conf); SET(spp_multi_high_throttle);
   SET(spp_per_sig_usefulness); SET(spp_pf_filter_entries); SET(spp_pf_sample_div); SET(spp_usefulness_bits); SET(spp_per_sig_floor); SET(spp_per_sig_prior);
   SET(spp_pt_sets); SET(spp_pt_ways); SET(spp_deltas_per_sig); SET(spp_conf_bits); SET(region_tag_bits);
-  SET(pattern_size); SET(min_pattern_size); SET(pattern_context_bits); SET(pattern_pc_bits); SET(pattern_context_src); SET(table_or_counter);
-  SET(min_confidence_to_prefetch); SET(counter_up); SET(counter_down);
+  SET(pattern_size); SET(min_pattern_size); SET(pattern_context_bits); SET(pattern_pc_bits); SET(pc_ctx_block); SET(pc_ctx_wide); SET(bg_pc_lookahead); SET(bg_advance_strong); SET(bg_no_advance); SET(pattern_context_src); SET(table_or_counter);
+  SET(dense_window_train); SET(dense_train_window); SET(dense_train_pc_trigger); SET(dense_train_prob); SET(dense_advance_furthest);
+  SET(min_confidence_to_prefetch); SET(counter_max); SET(counter_up); SET(counter_down);
   SET(online_learning); SET(online_neg_samples); SET(online_theta_train);
   SET(pattern_perceptron); SET(pp_hist_bits); SET(pp_pc_bits); SET(pp_weight_cap);
   SET(pattern_table_sets); SET(pattern_table_ways); SET(negative_table_sets); SET(negative_table_ways);

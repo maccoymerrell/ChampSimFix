@@ -168,6 +168,40 @@ private:
     e.dir = static_cast<int8_t>(std::min(int{e.dir} + 1, smax_));
   }
 
+public:
+  // DATA training in the SPATIAL (per-region) context (shared BG table, bg_pc_lookahead). Idea A: SPPAM's PHT
+  // context IS a region's accessing PC hash (r->pc_pht). So train the SAME edge/bimodal structure on the
+  // per-region PC SEQUENCE -- for each region, `train_region_pc(prev_pht, cur_pht)` on consecutive accesses TO
+  // THAT REGION (prev_pht = the region's last accessor, cur_pht = this one). `bg_next` then predicts the NEXT
+  // PC to access the CURRENT region -- exactly the pc_pht context, so the advanced lookahead re-indexes the
+  // bucket those spatial positions were trained under. Bounded (pc_pht is 8-bit => <=256 keys, no flood).
+  void train_region_pc(uint64_t prev_pht, uint64_t cur_pht)
+  {
+    if (prev_pht == cur_pht) return; // no progress in the region's PC sequence
+    // DIAGNOSTIC: was this transition correctly predicted by the current table? (per-region PC-seq predictability)
+    ++bg_seq_total_;
+    if (bg_next(prev_pht) == cur_pht) ++bg_seq_hit_;
+    bool created = false;
+    edge& e = alloc_slot(prev_pht, created);
+    const int16_t nd = static_cast<int16_t>(static_cast<int>(cur_pht) - static_cast<int>(prev_pht)); // signed pht delta (|.|<256)
+    if (created) { e.d0 = nd; e.dir = sinit_; }                                        // first sighting -> weak
+    else if (e.d0 == nd) e.dir = static_cast<int8_t>(std::min(int{e.dir} + 1, smax_)); // consistent next-in-region PC
+    else { e.dir = static_cast<int8_t>(std::max(int{e.dir} - 1, 0)); if (e.dir == 0) e.d0 = nd; } // varying -> decay, replace when exhausted
+  }
+
+  // Lookahead: the confidently-predicted NEXT-in-region accessing PC hash for `pht`, or `pht` itself when
+  // there's no confident successor (=> keep the current context rather than guess and corrupt the walk).
+  uint64_t bg_next(uint64_t pht) const
+  {
+    const edge* e = find(pht);
+    if (!e) return pht; // unlearned -> do not advance
+    const bool ok = P.bg_advance_strong ? (e->dir >= smax_) : (static_cast<double>(e->dir) > smid_);
+    if (!ok) return pht;
+    return (pht + static_cast<uint64_t>(static_cast<int64_t>(e->d0))) & 0xFFu; // stay in the 8-bit pc_pht space
+  }
+
+private:
+
   edge& alloc_slot(uint64_t ib, bool& created)
   {
     edge& e = edges_[static_cast<std::size_t>(hash(ib) & emask_)];
@@ -245,6 +279,12 @@ private:
   bool have_last_ = false;
   uint64_t demands_ = 0, issued_ = 0, unencodable_ = 0;
 public:
+  uint64_t bg_seq_total_ = 0, bg_seq_hit_ = 0; // per-region PC-sequence: transitions seen / correctly predicted (predictability)
+  void bg_seq_dump(const char* tag) const {
+    std::fprintf(stderr, "[pc-seq %s] transitions=%llu predicted=%llu (%.1f%% -- high => regular/learnable per-region PC sequence)\n",
+                 tag, (unsigned long long)bg_seq_total_, (unsigned long long)bg_seq_hit_,
+                 bg_seq_total_ ? 100.0 * static_cast<double>(bg_seq_hit_) / static_cast<double>(bg_seq_total_) : 0.0);
+  }
   mutable uint64_t dbg_reach_[16] = {0}, dbg_issd_[16] = {0}, dbg_brk_conf_ = 0, dbg_xmiss_ = 0, dbg_probe_ = 0;
   void dump_walk() const {
     std::fprintf(stderr, "[bg-walk] reach(iss) by depth: ");
