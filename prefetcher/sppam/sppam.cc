@@ -1187,7 +1187,9 @@ int sppam::Sppam_Module::set_prefetch_degree(uint64_t pattern, int order, bool n
 uint8_t sppam::Sppam_Module::get_fairness_factor() {
   if(NUM_CPUS == 1)
     return 15; //cannot be unfair in a single-core sim
-  return 15 - fairness_index;
+  // fairness_index comes from the LLC partner (bingo_plus) through fill metadata; without that partner the
+  // metadata carries other prefetchers' bits and can decode past the 16-level scale -> treat as no signal.
+  return fairness_index <= 15 ? 15 - fairness_index : 15;
 }
 
 void sppam::Sppam_Module::decrease_usefulness_counter() {
