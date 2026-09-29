@@ -108,6 +108,8 @@ struct params {
   // own per-IP counters (an L2 miss on a sampled LLC-only block = LLC-useful; timeout = LLC-useless).
   bool ip_llc_redirect = false;
   int ip_llc_thresh = 20;
+  uint32_t ip_llc_min_samples = 8;          // LLC samples before an IP's LLC usefulness is trusted
+  uint32_t ip_llc_probe_div = 0;            // unproven IPs redirect only 1/N of would-be drops (0 = redirect all)
   std::size_t llc_sample_entries = 64;      // LLC-only sample table (pinned until resolved)
   uint64_t llc_sample_div = 2048;           // sample 1/N LLC-only prefetches: ~pfht_'s occupancy (1/16 x 80x longer life x 1/4 the entries)
   uint64_t llc_track_timeout = 4000000;     // cycles an LLC-only sample may wait for its use before counting useless
@@ -1108,7 +1110,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(enable_shadow_squash); SET(exact_shadow_test); SET(enable_hybrid_bidding); SET(bid_by_value); SET(bid_explore_div);
   SET(enable_resid_bloom); SET(resid_bloom_bits); SET(resid_bloom_k); SET(resid_bloom_clear);
   SET(enable_am_bloom); SET(am_bloom_size); SET(am_bloom_k); SET(am_bloom_clear_thresh); SET(am_bloom_clear_frac);
-  SET(ip_llc_redirect); SET(ip_llc_thresh); SET(llc_sample_entries); SET(llc_sample_div); SET(llc_track_timeout);
+  SET(ip_llc_redirect); SET(ip_llc_thresh); SET(ip_llc_min_samples); SET(ip_llc_probe_div); SET(llc_sample_entries); SET(llc_sample_div); SET(llc_track_timeout);
   SET(enable_ip_filter); SET(ip_filter_threshold); SET(ip_filter_min_samples); SET(ip_filter_trickle); SET(ip_filter_age_shift);
   SET(ip_filter_threshold_hard); SET(ip_filter_trickle_hard); SET(ip_filter_use_pe); SET(ip_pe_hard_frac);
   SET(ip_filter_pe_veto); SET(ip_pe_veto_frac);

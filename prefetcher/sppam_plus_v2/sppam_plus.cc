@@ -73,7 +73,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(enable_hybrid_bidding); CFG(bid_by_value); CFG(enable_shadow_squash);
   CFG(enable_resid_bloom); CFG(resid_bloom_bits); CFG(resid_bloom_k); CFG(resid_bloom_clear);
   CFG(enable_am_bloom); CFG(am_bloom_size); CFG(am_bloom_k); CFG(am_bloom_clear_thresh); CFG(am_bloom_clear_frac);
-  CFG(ip_llc_redirect); CFG(ip_llc_thresh); CFG(llc_sample_entries); CFG(llc_sample_div); CFG(llc_track_timeout);
+  CFG(ip_llc_redirect); CFG(ip_llc_thresh); CFG(ip_llc_min_samples); CFG(ip_llc_probe_div); CFG(llc_sample_entries); CFG(llc_sample_div); CFG(llc_track_timeout);
   CFG(enable_ip_filter); CFG(ip_filter_threshold); CFG(ip_filter_min_samples); CFG(ip_filter_trickle); CFG(ip_filter_age_shift);
   CFG(ip_filter_threshold_hard); CFG(ip_filter_trickle_hard); CFG(ip_filter_use_pe); CFG(ip_pe_hard_frac);
   CFG(ip_filter_pe_veto); CFG(ip_pe_veto_frac);
@@ -597,6 +597,9 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
     if (div > 1 && (++ip_trickle_ctr_ % div) != 0) { // graded throttle (still issue 1/div so the IP keeps getting feedback)
       if (!P.ip_llc_redirect) return false;
       if (ip_llc_bad(iph)) { ++dbg_llc_bad_; return false; }        // its LLC placements don't pay either -> drop
+      if (P.ip_llc_probe_div && !ip_llc_proven(iph) && (++llc_probe_ctr_ % P.ip_llc_probe_div) != 0) {
+        ++dbg_llc_unproven_; return false;                          // not yet shown to pay: redirect only a probe
+      }
       if (pred_->llc_marked(block)) { ++dbg_llc_dup_; return false; } // already placed in the LLC
       if (fill_l2) { fill_l2 = false; ++dbg_llc_redirect_; }        // place it in the LLC instead of dropping it
     }
@@ -707,7 +710,7 @@ void sppam_plus::prefetcher_final_stats()
   fmt::print("[SPPAM+] prefetches issued: {} | squashed-redundant: {} | filter-passed[region-absent: {}, bit-clear: {}]\n",
              pf_issued_, pf_squashed_redundant_, pf_pass_region_absent_, pf_pass_bit_clear_);
   if (P.enable_ip_filter) fmt::print("[SPPAM+] ip-filter: active(end)={} thr={}% budget={}% | sampletab ins={} skip={} use-res={} evict-res={}\n", ip_filter_active_, P.ip_filter_threshold, P.ip_filter_max_useful_loss, dbg_ins_, dbg_skip_, dbg_use_, dbg_evict_);
-  if (P.ip_llc_redirect) fmt::print("[SPPAM+] llc-redirect: redirected={} dropped(llc-bad)={} dropped(in-llc)={} | llc samples useful={} useless={}\n", dbg_llc_redirect_, dbg_llc_bad_, dbg_llc_dup_, dbg_llc_use_, dbg_llc_useless_);
+  if (P.ip_llc_redirect) fmt::print("[SPPAM+] llc-redirect: redirected={} dropped(llc-bad)={} dropped(unproven)={} dropped(in-llc)={} | llc samples useful={} useless={}\n", dbg_llc_redirect_, dbg_llc_bad_, dbg_llc_unproven_, dbg_llc_dup_, dbg_llc_use_, dbg_llc_useless_);
   for (int s = 0; s < 2; ++s) {
     const uint64_t u = char_useful_[s], ul = char_useless_[s], tm = char_timely_[s];
     const double acc = (u + ul) ? 100.0 * u / (u + ul) : 0.0;

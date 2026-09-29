@@ -91,10 +91,12 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   std::vector<uint32_t> ip_llc_useless_ = std::vector<uint32_t>(IPBK, 0); // ... that timed out, or were promoted and evicted unused
   uint64_t dbg_llc_redirect_ = 0, dbg_llc_bad_ = 0, dbg_llc_dup_ = 0, dbg_llc_use_ = 0, dbg_llc_useless_ = 0;
   // An IP whose LLC-only prefetches are sampled useless below ip_llc_thresh % is dropped, not redirected.
+  bool ip_llc_proven(uint32_t iph) const { return ip_llc_useful_[iph] + ip_llc_useless_[iph] >= P.ip_llc_min_samples; }
   bool ip_llc_bad(uint32_t iph) const {
     const uint64_t u = ip_llc_useful_[iph], n = u + ip_llc_useless_[iph];
-    return n >= P.ip_filter_min_samples && u * 100 < static_cast<uint64_t>(P.ip_llc_thresh) * n;
+    return ip_llc_proven(iph) && u * 100 < static_cast<uint64_t>(P.ip_llc_thresh) * n;
   }
+  uint64_t llc_probe_ctr_ = 0, dbg_llc_unproven_ = 0;
   std::unordered_map<uint64_t, uint16_t> pf_issue_iph_; // issued (in-flight/resident) block -> issuing-IP hash
   std::unordered_map<uint64_t, uint16_t> pf_evict_iph_; // evicted-unused block -> issuing-IP hash (untimely-watch)
   uint64_t l2_dem_acc_ = 0, l2_dem_hit_ = 0; // running L2 demand hit rate (cache-stress gate for depth-throttle)
