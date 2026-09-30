@@ -2454,7 +2454,7 @@ private:
       if (P.ip_filter_depth_throttle && ip_is_untimely(tiph)) {
         uint32_t div = ip_trickle_div(tiph); // reuse the bands: harsher band -> shallower cap
         ip_depth_cap = (div >= static_cast<uint32_t>(P.ip_filter_trickle_hard) ? P.ip_depth_min : P.ip_depth_mid);
-      } else if (!ip_gate(tiph, trigger_llc_only_)) { ++dbg_ip_throttled_; return; }
+      } else if (!P.ip_gate_per_prefetch && !ip_gate(tiph, trigger_llc_only_)) { ++dbg_ip_throttled_; return; }
     }
     // Precise pattern validation: is THIS trigger's e2e pattern proven bad by sampling? If so, suppress e2e's
     // forward path and fall through to the walk. trig_pk = the trigger pattern key we sample every e2e prefetch to.

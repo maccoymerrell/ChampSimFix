@@ -106,6 +106,7 @@ struct params {
   // LLC-aware volume throttle: a prefetch the per-IP trickle would drop is placed in the LLC only instead,
   // unless that IP's sampled LLC usefulness is below ip_llc_thresh %. LLC-only prefetches are scored in their
   // own per-IP counters (an L2 miss on a sampled LLC-only block = LLC-useful; timeout = LLC-useless).
+  bool ip_gate_per_prefetch = false;       // per-IP volume gate on each data prefetch at issue (SPPAM and SPP) instead of per SPPAM trigger
   bool ip_llc_redirect = true;
   int ip_llc_thresh = 50;
   uint32_t ip_llc_min_samples = 8;          // LLC samples before an IP's LLC usefulness is trusted
@@ -1115,7 +1116,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(enable_shadow_squash); SET(exact_shadow_test); SET(enable_hybrid_bidding); SET(bid_by_value); SET(bid_explore_div);
   SET(enable_resid_bloom); SET(resid_bloom_bits); SET(resid_bloom_k); SET(resid_bloom_clear);
   SET(enable_am_bloom); SET(am_bloom_size); SET(am_bloom_k); SET(am_bloom_clear_thresh); SET(am_bloom_clear_frac);
-  SET(ip_llc_redirect); SET(ip_llc_thresh); SET(ip_llc_min_samples); SET(ip_llc_probe_div); SET(llc_sample_entries); SET(llc_sample_div); SET(llc_track_timeout);
+  SET(ip_gate_per_prefetch); SET(ip_llc_redirect); SET(ip_llc_thresh); SET(ip_llc_min_samples); SET(ip_llc_probe_div); SET(llc_sample_entries); SET(llc_sample_div); SET(llc_track_timeout);
   SET(enable_ip_filter); SET(ip_filter_threshold); SET(ip_filter_min_samples); SET(ip_filter_trickle); SET(ip_filter_age_shift);
   SET(ip_filter_threshold_hard); SET(ip_filter_trickle_hard); SET(ip_filter_use_pe); SET(ip_pe_hard_frac);
   SET(ip_filter_pe_veto); SET(ip_pe_veto_frac);

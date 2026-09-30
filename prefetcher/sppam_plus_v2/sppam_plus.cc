@@ -81,7 +81,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(enable_hybrid_bidding); CFG(bid_by_value); CFG(enable_shadow_squash);
   CFG(enable_resid_bloom); CFG(resid_bloom_bits); CFG(resid_bloom_k); CFG(resid_bloom_clear);
   CFG(enable_am_bloom); CFG(am_bloom_size); CFG(am_bloom_k); CFG(am_bloom_clear_thresh); CFG(am_bloom_clear_frac);
-  CFG(ip_llc_redirect); CFG(ip_llc_thresh); CFG(ip_llc_min_samples); CFG(ip_llc_probe_div); CFG(llc_sample_entries); CFG(llc_sample_div); CFG(llc_track_timeout);
+  CFG(ip_gate_per_prefetch); CFG(ip_llc_redirect); CFG(ip_llc_thresh); CFG(ip_llc_min_samples); CFG(ip_llc_probe_div); CFG(llc_sample_entries); CFG(llc_sample_div); CFG(llc_track_timeout);
   CFG(enable_ip_filter); CFG(ip_filter_threshold); CFG(ip_filter_min_samples); CFG(ip_filter_trickle); CFG(ip_filter_age_shift);
   CFG(ip_filter_threshold_hard); CFG(ip_filter_trickle_hard);
   CFG(ip_filter_depth_throttle); CFG(ip_depth_mid); CFG(ip_depth_min); CFG(ip_untimely_thresh); CFG(ip_depth_hitrate_min); CFG(ip_depth_mlp_max);
@@ -496,10 +496,11 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
   // (never fully gated -- a complete gate would erase the very PE signal needed to recover).
   if (P.enable_pe_management && pe_throttle_[src] > 1 && (++pe_pf_count_[src] % pe_throttle_[src]) != 0)
     return false;
-  // Per-IP gate (the predictor's IP table, fed only by its sampling table). SPPAM applied it to the whole trigger
-  // before proposing; SPP prefetches pass it here. A redirected prefetch goes to the LLC only, once per block.
+  // Per-IP gate (the predictor's IP table, fed only by its sampling table). By default SPPAM applies it to the whole
+  // trigger before proposing and SPP prefetches pass it here; with ip_gate_per_prefetch every data prefetch passes it
+  // here instead. A redirected prefetch goes to the LLC only, once per block.
   bool redirected = false;
-  if (from_spp && P.enable_ip_filter) {
+  if ((from_spp || P.ip_gate_per_prefetch) && P.enable_ip_filter) {
     if (!pred_->ip_gate(pred_->ip_bucket(cur_trigger_ip_), redirected))
       return false;
     if (redirected) fill_l2 = false;
