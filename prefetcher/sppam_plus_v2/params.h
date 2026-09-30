@@ -905,10 +905,10 @@ struct params {
   // shadow mirror) are deliberately excluded: they are measurement instruments, not proposed hardware.
   struct state_terms {
     uint64_t region = 0, staging = 0, pattern = 0, cpt = 0, llc = 0, misc = 0, spp = 0, mgmt = 0,
-             instr = 0, am = 0, ipf = 0, ip_dir = 0, cold = 0, dpht = 0, xpage = 0, rbloom = 0, rstage = 0, perc = 0;
+             instr = 0, am = 0, ipt = 0, samp = 0, pv = 0, ip_dir = 0, cold = 0, dpht = 0, xpage = 0, rbloom = 0, rstage = 0, perc = 0;
     uint64_t total() const
     {
-      return region + staging + pattern + cpt + llc + misc + spp + mgmt + instr + am + ipf + ip_dir
+      return region + staging + pattern + cpt + llc + misc + spp + mgmt + instr + am + ipt + samp + pv + ip_dir
            + cold + dpht + xpage + rbloom + rstage + perc;
     }
   };
@@ -1040,15 +1040,15 @@ struct params {
         if (ip_filter_depth_throttle) arrays += 2;                      // ev + untimely
         if (bwd_useful_gate) arrays += 2;                               // bwd_useful + bwd_useless
         if (ip_llc_redirect) arrays += 2;                               // llc_useful + llc_useless
-        t.ipf += arrays * E * ip_ctr_bits;
+        t.ipt = arrays * E * ip_ctr_bits;
       }
       if (enable_ip_filter || pattern_validate) {                       // THE sampling table (per-IP + per-pattern outcomes)
         std::size_t n = 1; while (n < pv_sample_cap) n <<= 1;
-        t.ipf += n * samp_entry;
+        t.samp = n * samp_entry;
       }
       if (pattern_validate) {                                           // pat_val_ (u,n) keyed by the pattern key
         const uint64_t pv_entries = (key_bits < 20) ? (uint64_t{1} << key_bits) : (uint64_t{1} << 20);
-        t.ipf += pv_entries * (2 * 12);
+        t.pv = pv_entries * (2 * 12);
       }
     }
 
@@ -1101,7 +1101,7 @@ struct params {
     auto add = [&](const char* n, uint64_t b) { if (b) s += " " + std::string(n) + "=" + kib(b); };
     add("region", t.region); add("staging", t.staging); add("pattern", t.pattern); add("cpt", t.cpt);
     add("llc", t.llc); add("misc", t.misc); add("spp", t.spp); add("mgmt", t.mgmt); add("instr", t.instr);
-    add("am", t.am); add("ipf", t.ipf); add("ip_dir", t.ip_dir); add("cold", t.cold); add("dpht", t.dpht);
+    add("am", t.am); add("ipt", t.ipt); add("samp", t.samp); add("pv", t.pv); add("ip_dir", t.ip_dir); add("cold", t.cold); add("dpht", t.dpht);
     add("xpage", t.xpage); add("rbloom", t.rbloom); add("rstage", t.rstage); add("perc", t.perc);
     return s;
   }

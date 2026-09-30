@@ -1,6 +1,7 @@
 #include "sppam_plus.h"
 
 #include <fmt/core.h>
+#include <set>
 #include <stdexcept>
 #include <string>
 
@@ -59,8 +60,10 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
       throw std::invalid_argument(std::string{"SPPAM_PLUS_V2: parameter '"} + gone + "' belongs to a removed mechanism");
   if (builder.has_parameter("pv_sample_directmap") && !builder.get_parameter<bool>("pv_sample_directmap", true, true))
     throw std::invalid_argument("SPPAM_PLUS_V2: the sampling table is direct-mapped; pv_sample_directmap=false is not supported");
-#define CFG(field) P.field = builder.get_parameter<decltype(P.field)>(#field, true, P.field)
+  std::set<std::string> known{"pv_sample_directmap"};
+#define CFG(field) (known.insert(#field), P.field = builder.get_parameter<decltype(P.field)>(#field, true, P.field))
   CFG(region_bits); CFG(region_sets); CFG(region_ways); CFG(region_tag_bits); CFG(region_evict_policy);
+  CFG(llc_region_sets); CFG(llc_region_ways);
   CFG(pattern_table_sets); CFG(pattern_table_ways); CFG(negative_table_sets); CFG(negative_table_ways); // PHT geometry (fwd + decoupled backward)
   CFG(region_page_aligned_sets); CFG(within_page_shadow);
   CFG(pattern_size); CFG(min_pattern_size); CFG(pattern_context_bits); CFG(pattern_pc_bits); CFG(pc_ctx_block); CFG(pc_ctx_wide); CFG(bg_pc_lookahead); CFG(bg_advance_strong); CFG(bg_no_advance); CFG(pattern_context_src);
@@ -125,6 +128,10 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(perc_upf_scale); CFG(perc_lat_scale); CFG(perc_poll_scale); CFG(perc_eval_log); CFG(perc_eval_log_div); CFG(perc_sig_xor_pc);
   CFG(bg_inflight_entries);
 #undef CFG
+  // A knob the loader does not read would silently keep its default: refuse it.
+  for (const auto& [key, value] : builder.get_parameters())
+    if (known.count(key) == 0)
+      throw std::invalid_argument("SPPAM_PLUS_V2: unknown parameter '" + key + "'");
 
   if (P.enable_pe_management || P.enable_sig_feedback || P.enable_perceptron_filter) { // their own outcome tables
     pfht_.assign(P.pfht_entries ? P.pfht_entries : 1, pf_track{});
