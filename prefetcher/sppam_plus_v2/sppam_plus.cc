@@ -114,7 +114,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(instr_feed_data);
   CFG(instr_nextn); CFG(instr_packed_residency); CFG(instr_llc_depth);
   CFG(pattern_validate); CFG(pv_feed_confidence); CFG(pv_conf_penalty); CFG(pv_sample_div); CFG(pv_min_samples); CFG(pv_bad_pct); CFG(pv_sample_cap);
-  CFG(pv_sample_ttl);
+  CFG(pv_sample_ttl); CFG(pv_watch_ttl); CFG(pv_watch_yield);
   // Perceptron prefetch filter (optional sub-in; OFF by default). Trained on the glue's REAL per-prefetch fill latency.
   CFG(enable_perceptron_filter); CFG(perc_pc_entries); CFG(perc_weight_max); CFG(perc_tau_keep); CFG(perc_theta_train);
   CFG(perc_explore_div); CFG(perc_label_pe); CFG(perc_pe_margin); CFG(perc_track_cap); CFG(perc_track_ttl); CFG(perc_pe_scale); CFG(perc_pe_step_max);
@@ -365,6 +365,8 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
       // DSE-faithful PE: measure THIS prefetch's real fill latency directly into perc_track_ (every data fill, not
       // gated on pfht_ sampling) -> DRAM-covering useful prefetches get their true high PE, not the llc_hit fallback.
       if (P.enable_perceptron_filter) pred_->perc_fill_measure(block);
+    } else {
+      pred_->sample_demand_fill(block); // a demand merged into a sampled prefetch's miss: that prefetch was used
     }
   }
   bool had_evict = false, evict_was_unused = false;

@@ -263,6 +263,10 @@ public:
       std::fprintf(stderr, "[ipf] %s sampled_useful=%llu sampled_useless=%llu active_ips=%d triggers_throttled=%llu | ev=%llu untimely=%llu untimely_ips=%d\n",
                    P.name.c_str(), (unsigned long long)tu, (unsigned long long)tl, active, (unsigned long long)dbg_ip_throttled_,
                    (unsigned long long)tev, (unsigned long long)tut, nunt);
+      std::fprintf(stderr, "[ipf-samples] %s used=%llu merged=%llu evicted=%llu timed-out=%llu dropped(slot busy)=%llu | watch re-demanded=%llu expired=%llu\n",
+                   P.name.c_str(), (unsigned long long)dbg_samp_useful_, (unsigned long long)dbg_samp_promoted_, (unsigned long long)dbg_samp_evicted_,
+                   (unsigned long long)dbg_samp_timeout_, (unsigned long long)dbg_samp_dropped_, (unsigned long long)dbg_watch_hit_,
+                   (unsigned long long)dbg_watch_expired_);
     }
     if (P.enable_perceptron_filter) {
       const uint64_t seen = dbg_perc_keep_ + dbg_perc_explore_ + dbg_perc_drop_;
@@ -348,6 +352,7 @@ public:
       pf_samp_t& s = pf_sdm_[sdm_idx(block) & pf_sdm_mask_];
       if (s.occ && s.watch && s.tag == static_cast<uint32_t>(block)) {
         ip_bump(ip_untimely_, ip_ev_, s.iph);
+        ++dbg_watch_hit_;
         s.occ = false;
       }
     }
@@ -1852,6 +1857,7 @@ public:
   uint32_t ip_trickle_div_of(uint64_t ip) const { return ip_useful_.empty() ? 1 : ip_trickle_div(iphash(ip)); }
   // THE sampling table also samples the separate SPP engine's prefetches (per-IP usefulness + SPP's feedback).
   void sample_spp_prefetch(uint64_t block, uint64_t ip) { pf_sample_issue(block, 0, iphash(ip), -1, false, /*spp=*/true); }
+  void sample_demand_fill(uint64_t block) { pf_sample_promoted(block); }
 private:
   // Depth-throttle: an IP is UNTIMELY (right address, evicted before use) if a large fraction of its evicted-unused
   // prefetches are LATER re-demanded -> cap its DEPTH (shallower lands in time) instead of dropping volume.
@@ -1919,8 +1925,15 @@ private:
     if (pv_lfsr_ % (P.ip_sample_div ? P.ip_sample_div : 1) != 0) return;
     pf_samp_t& slot = pf_sdm_[sdm_idx(block) & pf_sdm_mask_];
     if (slot.occ) {
-      if (static_cast<uint32_t>(cycle_) - slot.stamp <= P.pv_sample_ttl) return; // pinned: the incumbent keeps its slot
-      if (!slot.watch) apply_pf_resolution(slot, slot.tag, /*useful=*/false, /*evicted=*/false); // outlived its ttl unused
+      const uint32_t age = static_cast<uint32_t>(cycle_) - slot.stamp;
+      if (slot.watch) {
+        if (!P.pv_watch_yield && age <= P.pv_watch_ttl) { ++dbg_samp_dropped_; return; } // the watch keeps its slot
+        ++dbg_watch_expired_;
+      } else {
+        if (age <= P.pv_sample_ttl) { ++dbg_samp_dropped_; return; } // pinned: the incumbent keeps its slot
+        apply_pf_resolution(slot, slot.tag, /*useful=*/false, /*evicted=*/false); // outlived its ttl unused
+        ++dbg_samp_timeout_;
+      }
     }
     slot = pf_samp_t{};
     slot.pat = pk; slot.iph = static_cast<uint16_t>(iph); slot.bit = static_cast<int8_t>(bit); slot.bwd = backward;
@@ -1934,9 +1947,23 @@ private:
     pf_samp_t& slot = pf_sdm_[sdm_idx(block) & pf_sdm_mask_];
     if (!slot.occ || slot.watch || slot.tag != static_cast<uint32_t>(block)) return;
     apply_pf_resolution(slot, block, useful, /*evicted=*/!useful);
+    ++(useful ? dbg_samp_useful_ : dbg_samp_evicted_);
     if (!useful && !ip_untimely_.empty()) { slot.watch = true; slot.stamp = static_cast<uint32_t>(cycle_); }
     else slot.occ = false;
   }
+  // A demand merged into a sampled prefetch's miss before it filled: the prefetch was used (late, but used). The cache
+  // never marks such a line as a used prefetch, so without this it would time out as useless.
+  void pf_sample_promoted(uint64_t block)
+  {
+    if (pf_sdm_.empty()) return;
+    pf_samp_t& slot = pf_sdm_[sdm_idx(block) & pf_sdm_mask_];
+    if (!slot.occ || slot.watch || slot.tag != static_cast<uint32_t>(block)) return;
+    apply_pf_resolution(slot, block, /*useful=*/true, /*evicted=*/false);
+    ++dbg_samp_promoted_;
+    slot.occ = false;
+  }
+  uint64_t dbg_samp_useful_ = 0, dbg_samp_evicted_ = 0, dbg_samp_timeout_ = 0, dbg_samp_promoted_ = 0, dbg_samp_dropped_ = 0;
+  uint64_t dbg_watch_hit_ = 0, dbg_watch_expired_ = 0;
   // Delta-PHT usefulness self-throttle state.
   double delta_add_ema_ = 1.0;      // EMA of ADDITIVE fraction (timely hit on a baseline-miss block)
   double delta_unused_ema_ = 0.0;   // EMA of UNUSED-evict fraction (pollution proxy)

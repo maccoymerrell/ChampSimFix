@@ -491,6 +491,8 @@ struct params {
   // as well (the sampling rate is no longer out of sync with the table size).
   bool pv_sample_directmap = false;
   uint32_t pv_sample_ttl = 4096;         // ops before an unresolved in-flight sample becomes reclaimable
+  uint32_t pv_watch_ttl = 262144;       // an evicted-unused sample waits this many L2 accesses for a re-demand (untimely)
+  bool pv_watch_yield = false;           // a watch entry gives its slot to a new sample (instead of holding it for pv_watch_ttl)
   uint32_t pv_sample_evict_div = 4;      // on a collision, replace the incumbent only 1/N of the time
   // Adaptive sampling rate (directmap only). The sample table is a short-lived issue->resolve holding area;
   // with only ~64 active IPs and PERSISTENT decaying per-IP/pattern counters, we don't need many CONCURRENT
@@ -1156,7 +1158,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(walk_accumulate); SET(walk_max_depth); SET(walk_thresh_base); SET(walk_thresh_slope); SET(walk_degree);
   SET(walk_thresh_cap); SET(walk_jump_relief); SET(walk_advance); SET(walk_usefulness_throttle); SET(walk_replace); SET(walk_fallthrough); SET(walk_ft_usefulness); SET(walk_setduel);
   SET(pattern_validate); SET(pv_sample_div); SET(pv_min_samples); SET(pv_bad_pct); SET(pv_sample_cap);
-  SET(pv_sample_directmap); SET(pv_sample_ttl); SET(pv_sample_evict_div);
+  SET(pv_sample_directmap); SET(pv_sample_ttl); SET(pv_watch_ttl); SET(pv_watch_yield); SET(pv_sample_evict_div);
   SET(pv_adaptive_rate); SET(pv_rate_window); SET(pv_churn_hi); SET(pv_churn_lo); SET(pv_div_min); SET(pv_div_max);
   SET(enable_perceptron_filter); SET(perc_pc_entries); SET(perc_weight_max); SET(perc_tau_keep);
   SET(perc_theta_train); SET(perc_explore_div); SET(perc_label_pe); SET(perc_pe_margin); SET(perc_track_cap); SET(perc_track_ttl); SET(perc_pe_scale); SET(perc_pe_step_max); SET(perc_feat_mask); SET(perc_pe_signonly); SET(perc_sig_entries); SET(perc_pe_norm); SET(perc_pe_cost); SET(perc_untimely_veto); SET(perc_load_gate); SET(perc_load_gate_thresh); SET(perc_instr_gate); SET(perc_instr_gate_pct); SET(perc_pc_encoding); SET(perc_pc_lobit); SET(perc_pc_dropmask); SET(perc_dump_weights); SET(perc_gate_instr); SET(perc_engine_split); SET(perc_profile);
