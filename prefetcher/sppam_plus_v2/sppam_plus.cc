@@ -78,9 +78,9 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(ip_filter_threshold_hard); CFG(ip_filter_trickle_hard); CFG(ip_filter_use_pe); CFG(ip_pe_hard_frac);
   CFG(ip_filter_pe_veto); CFG(ip_pe_veto_frac);
   CFG(ip_filter_use_pe_phase); CFG(ip_pe_phase_soft); CFG(ip_pe_phase_hard); CFG(ip_pe_phase_margin);
-  CFG(ip_filter_depth_throttle); CFG(ip_depth_mid); CFG(ip_depth_min); CFG(ip_untimely_thresh); CFG(ip_depth_hitrate_min); CFG(ip_depth_mlp_max);
-  CFG(ip_filter_max_useful_loss); CFG(ip_sample_div); CFG(ip_track_timeout);
-  CFG(ip_table_entries); CFG(ip_ctr_bits); CFG(evicted_unused_cap); // DSE-sized IP-filter geometry
+  CFG(ip_filter_depth_throttle); CFG(ip_gate_trigger); CFG(ip_depth_mid); CFG(ip_depth_min); CFG(ip_untimely_thresh); CFG(ip_depth_hitrate_min); CFG(ip_depth_mlp_max);
+  CFG(ip_filter_max_useful_loss); CFG(ip_track_timeout);
+  // DSE-sized IP-filter geometry
   CFG(spp_usefulness_feedback); CFG(spp_per_sig_usefulness); CFG(spp_per_sig_prior);
   CFG(spp_lookahead); CFG(spp_threshold); CFG(spp_share_region_table);
   CFG(spp_ghr); CFG(spp_ghr_entries); CFG(spp_min_delta); CFG(spp_min_conf); CFG(spp_multi_high_throttle);
@@ -107,9 +107,8 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(instr_walk_budget); CFG(instr_cost_strong); CFG(instr_cost_weak); CFG(instr_miss_conf);
   CFG(instr_feed_data);
   CFG(instr_nextn); CFG(instr_packed_residency); CFG(instr_llc_depth);
-  CFG(pattern_validate); CFG(pv_feed_confidence); CFG(pv_conf_penalty); CFG(pv_sample_div); CFG(pv_min_samples); CFG(pv_bad_pct); CFG(pv_sample_cap);
-  CFG(pv_sample_directmap); CFG(pv_sample_ttl); CFG(pv_sample_evict_div); // direct-mapped probabilistic sample table
-  CFG(pv_adaptive_rate); CFG(pv_rate_window); CFG(pv_churn_hi); CFG(pv_churn_lo); CFG(pv_div_min); CFG(pv_div_max); // adaptive sample rate
+  CFG(pattern_validate); CFG(pv_sample_div); CFG(pv_feed_confidence); CFG(pv_conf_penalty); CFG(pv_min_samples); CFG(pv_bad_pct);
+  // adaptive sample rate
   // Perceptron prefetch filter (optional sub-in; OFF by default). Trained on the glue's REAL per-prefetch fill latency.
   CFG(enable_perceptron_filter); CFG(perc_pc_entries); CFG(perc_weight_max); CFG(perc_tau_keep); CFG(perc_theta_train);
   CFG(perc_explore_div); CFG(perc_label_pe); CFG(perc_pe_margin); CFG(perc_track_cap); CFG(perc_track_ttl); CFG(perc_pe_scale); CFG(perc_pe_step_max);
@@ -317,7 +316,7 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
     pf_track& e = pfht_[block % pfht_.size()];
     if (e.valid && e.block == block) {
       if (P.enable_sig_feedback) pred_->sig_feedback(e.eng, e.sig, 0); // per-signature: this prefetch was demand-used
-      if (P.enable_ip_filter) { ++ip_useful_[e.iph]; ++dbg_use_; ip_age_tick(); }
+      credit_sample(e, true);
       if (pe_terms) {
         const uint64_t saved = e.filled ? e.lat : (real_cycle_ >= e.issue ? real_cycle_ - e.issue : 0);
         const double contrib = access_weight(type, P.pe_pf_demand_weight) * static_cast<double>(saved); // I_UPF (+)
@@ -476,7 +475,7 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
       if (et.valid && et.block == evb) {
         if (P.enable_sig_feedback) pred_->sig_feedback(et.eng, et.sig, 1); // per-signature: evicted before use = useless
         if (P.sig_fb_kill_useless) pred_->sig_kill(et.eng, et.sig, et.order, et.pos); // targeted: kill the specific wrong (sig,order,offset)
-        if (P.enable_ip_filter) { ++ip_useless_[et.iph]; ++dbg_evict_; ip_age_tick(); }
+        credit_sample(et, false);
         et.valid = false; // resolved (evicted unused)
       }
     }
@@ -525,7 +524,7 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
       const int src = e.from_spp ? 1 : 0;
       if (!prefetch) {
         // Promoted: a demand merged into this prefetch's MSHR before it filled -> useful, timely.
-        if (P.enable_ip_filter) { ++ip_useful_[e.iph]; ip_age_tick(); }
+        credit_sample(e, true);
         if (P.enable_pe_management) i_upf_[src] += static_cast<double>(e.lat);
         if (P.enable_ip_filter && (P.ip_filter_use_pe || P.ip_filter_use_pe_phase)) { ip_pe_[e.iph] += static_cast<double>(e.lat); ++ip_pe_n_[e.iph]; }
         e.valid = false;
@@ -553,7 +552,8 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
   return metadata_in;
 }
 
-bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, double /*benefit*/, uint32_t gen_tag)
+bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, double /*benefit*/, uint32_t gen_tag,
+                                uint64_t pat_key, int pat_bit, bool backward, bool has_pat)
 {
   if (!from_spp)
     sppam_fired_ = true;
@@ -624,15 +624,17 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
       if (!slot.valid || stale)
         slot = llc_track{true, false, block, real_cycle_, static_cast<uint16_t>(iphash(cur_trigger_ip_))};
     }
-  } else if ((P.enable_pe_management || P.enable_ip_filter || P.enable_perceptron_filter || P.enable_sig_feedback) && (++pe_sample_ctr_ % P.pe_sample_div == 0)) {
+  } else if ((P.enable_pe_management || P.enable_ip_filter || P.enable_perceptron_filter || P.enable_sig_feedback || P.pattern_validate)
+             && (++pe_sample_ctr_ % P.pe_sample_div == 0)) {
     pf_track& slot = pfht_[block % pfht_.size()];
     const bool stale = slot.valid && (real_cycle_ - slot.issue) > P.ip_track_timeout;
     if (!slot.valid || stale) {
       // sppam_b USELESS_ON_TIMEOUT: a stale in-flight entry sat unused past the timeout -> resolve it
       // USELESS (removing the under-sampling bias) before reusing its slot. A RECENT entry is pinned.
-      if (stale && P.enable_ip_filter) { ++ip_useless_[slot.iph]; ++dbg_evict_; ip_age_tick(); }
+      if (stale) credit_sample(slot, false, /*stale=*/true);
       if (stale && P.enable_sig_feedback) pred_->sig_feedback(slot.eng, slot.sig, 1); // timed-out unused -> useless
       slot = pf_track{true, block, from_spp, real_cycle_, false, 0, static_cast<uint16_t>(iphash(cur_trigger_ip_))};
+      slot.pat = pat_key; slot.bit = static_cast<int8_t>(pat_bit); slot.bwd = backward; slot.has_pat = has_pat;
       if (P.enable_sig_feedback) { slot.sig = pred_->fb_sig_; slot.eng = pred_->fb_eng_; slot.order = pred_->fb_order_; slot.pos = pred_->fb_pos_; } // record request's (engine,sig,order,offset)
       ++dbg_ins_;
     } else ++dbg_skip_;

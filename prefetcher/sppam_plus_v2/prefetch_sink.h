@@ -16,7 +16,16 @@ struct prefetch_sink {
   // bits5-7 pattern order, bit8 default-prediction path, bits9-11 scan distance).
   // Returns true iff the block was actually placed in L2 -> the predictor marks its residency map only then
   // (a dropped / LLC-only / squashed prefetch returns false, so no stale "issued but never filled" bit).
-  virtual bool issue_prefetch(uint64_t block, bool fill_l2, bool from_spp = false, double benefit = 1.0, uint32_t gen_tag = 0) = 0;
+  // pat_key/pat_bit/backward/has_pat: the SPPAM trigger pattern (and the prediction-counter bit at depth 0) this
+  // prefetch was predicted from, stored in the sampling table for pattern validation.
+  virtual bool issue_prefetch(uint64_t block, bool fill_l2, bool from_spp = false, double benefit = 1.0, uint32_t gen_tag = 0,
+                              uint64_t pat_key = 0, int pat_bit = -1, bool backward = false, bool has_pat = false) = 0;
+  // Per-IP decisions from the one per-IP table (fed only by the sampling table).
+  virtual bool trigger_gate(uint64_t /*ip*/) { return true; }               // volume gate for a SPPAM trigger (untimely IPs pass)
+  virtual bool bwd_is_bad_ip(uint64_t /*ip*/) const { return false; }       // backward scan proven useless for this IP
+  virtual int ip_use_bucket(uint64_t /*ip*/, uint32_t /*min_samples*/) const { return 4; } // 0..7 usefulness, 4 = unknown
+  virtual int ip_tim_bucket(uint64_t /*ip*/) const { return 4; }            // 0..7 untimely fraction, 4 = unknown
+  virtual bool ip_untimely_veto(uint64_t /*ip*/) const { return false; }    // mostly untimely (ungated): never volume-drop
   // Perceptron gate for engines that live OUTSIDE the sppam_predictor (the separate SPP delta/signature engine).
   // Default KEEPS (no perceptron). The glue delegates to the perceptron so all 3 engines pass through one filter;
   // engine ids match perc_score (2 = SPP/delta). perc_note_issue_ext snapshots the gated features for training.

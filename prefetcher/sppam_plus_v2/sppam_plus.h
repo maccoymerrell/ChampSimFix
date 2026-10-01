@@ -73,6 +73,10 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   // EXACT per-ISSUING-IP timeliness (fixes the sampled undercount): carry the issuing IP from issue ->
   // eviction -> re-demand. ip_ev_ = evicted-unused prefetches from this IP; ip_untimely_ = of those, how
   // many a demand later re-accessed (right addr, too early). Truly-bad = ip_ev_ - ip_untimely_ (never re-hit).
+  std::vector<uint32_t> ip_bwd_useful_ = std::vector<uint32_t>(IPBK, 0);  // backward-scan samples (backward gate only)
+  std::vector<uint32_t> ip_bwd_useless_ = std::vector<uint32_t>(IPBK, 0);
+  std::vector<uint32_t> ip_gate_ctr_ = std::vector<uint32_t>(IPBK, 0);     // per-IP trickle counter of the trigger gate
+  uint64_t pv_consume_ctr_ = 0;                                            // pattern validation's 1-in-N consumption counter
   std::vector<uint32_t> ip_ev_ = std::vector<uint32_t>(IPBK, 0);       // evicted-unused count per issuing IP
   std::vector<uint32_t> ip_untimely_ = std::vector<uint32_t>(IPBK, 0); // of those, later re-demanded (untimely)
   // LLC-only prefetch samples, separate from pfht_: sparser (1/llc_sample_div) and pinned far longer
@@ -142,6 +146,10 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
     uint8_t eng = 0;     // engine that issued it (0 fwd / 1 bwd / 2 delta-SPP / 3 BG)
     uint8_t order = 0;   // SPPAM PHT order (which pattern-size table) that predicted this block
     uint8_t pos = 0;     // prediction_counter offset within that PHT entry (for the targeted uselessness kill)
+    uint64_t pat = 0;    // SPPAM trigger pattern key this prefetch was predicted from (pattern validation)
+    int8_t bit = -1;     // prediction_counter index of the depth-0 prediction (-1: deeper / no exact bit)
+    bool bwd = false;    // backward-scan prefetch (credits the backward columns only)
+    bool has_pat = false;
   };
   struct poll_track {
     bool valid = false;
@@ -194,7 +202,8 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   void prefetcher_branch_operate(champsim::address /*ip*/, uint8_t /*branch_type*/, champsim::address /*branch_target*/) override {}
 
   // ---- sppam_dse::prefetch_sink ----
-  bool issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, double benefit, uint32_t gen_tag = 0) override;
+  bool issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, double benefit, uint32_t gen_tag = 0,
+                      uint64_t pat_key = 0, int pat_bit = -1, bool backward = false, bool has_pat = false) override;
   bool perc_gate(uint64_t block, int engine, int depth, uint64_t pc, int conf, uint64_t sig) override; // gate the separate SPP engine through the perceptron
   void perc_note_issue_ext(uint64_t block) override;
   int dram_bw_index() const override;
@@ -213,6 +222,46 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   }
   // Per-IP lookahead-depth cap (depth throttle): shallower as the trigger IP's usefulness degrades -- but
   // ONLY for UNTIMELY IPs. A truly-bad IP gets full depth here (the volume trickle drops its wrong prefetches).
+  bool bwd_is_bad(uint32_t iph) const {
+    const uint32_t u = ip_bwd_useful_[iph], l = ip_bwd_useless_[iph], tot = u + l;
+    if (tot < P.bwd_useful_min_samples) return false; // warmup -> allow
+    return static_cast<uint64_t>(u) * 100 < static_cast<uint64_t>(P.bwd_useful_thresh) * tot;
+  }
+  bool bwd_is_bad_ip(uint64_t ip) const override { return P.bwd_useful_gate && bwd_is_bad(iphash(ip)); }
+  // SPPAM trigger gate: untimely IPs pass (their depth is capped instead); others trickle 1/div with a per-IP counter.
+  bool trigger_gate(uint64_t ip) override {
+    if (!P.ip_gate_trigger || !P.enable_ip_filter || P.enable_perceptron_filter) return true;
+    const uint32_t iph = iphash(ip);
+    if (P.ip_filter_depth_throttle && ip_ev_[iph] >= P.ip_filter_min_samples
+        && static_cast<uint64_t>(ip_untimely_[iph]) * 100 >= static_cast<uint64_t>(P.ip_untimely_thresh) * ip_ev_[iph]) return true;
+    const uint32_t div = ip_trickle_div(iph);
+    return !(div > 1 && (++ip_gate_ctr_[iph] % div != 0));
+  }
+  int ip_use_bucket(uint64_t ip, uint32_t min_samples) const override {
+    const uint32_t iph = iphash(ip), u = ip_useful_[iph], l = ip_useless_[iph], t = u + l;
+    return t < min_samples ? 4 : std::min(7, static_cast<int>(8u * u / t));
+  }
+  int ip_tim_bucket(uint64_t ip) const override {
+    const uint32_t iph = iphash(ip), ev = ip_ev_[iph], un = ip_untimely_[iph];
+    return ev < 4 ? 4 : std::min(7, static_cast<int>(8u * un / ev));
+  }
+  bool ip_untimely_veto(uint64_t ip) const override {
+    const uint32_t iph = iphash(ip);
+    return ip_ev_[iph] >= 4 && 100u * ip_untimely_[iph] >= static_cast<uint32_t>(P.ip_untimely_thresh) * ip_ev_[iph];
+  }
+  // A sampled prefetch resolved: its pattern's validation (SPPAM samples) and its IP's counters (backward samples
+  // credit the backward columns only). A slot reclaimed stale counts useless for the IP (the prefetch sat unused past
+  // the timeout) but is no outcome for pattern validation: the pattern was never proven right or wrong.
+  void credit_sample(const pf_track& e, bool useful, bool stale = false) {
+    if (P.pattern_validate && e.has_pat && !e.from_spp && !stale && (P.pv_sample_div <= 1 || ++pv_consume_ctr_ % P.pv_sample_div == 0))
+      pred_->pattern_outcome(e.pat, e.bit, useful);
+    if (!(P.enable_ip_filter || P.enable_perceptron_filter)) return;
+    if (e.bwd) { if (P.bwd_useful_gate) { if (useful) ++ip_bwd_useful_[e.iph]; else ++ip_bwd_useless_[e.iph]; } }
+    else if (useful) ++ip_useful_[e.iph];
+    else ++ip_useless_[e.iph];
+    if (useful) ++dbg_use_; else ++dbg_evict_;
+    ip_age_tick();
+  }
   int ip_depth_cap() const override {
     if (!P.enable_ip_filter || !P.ip_filter_depth_throttle) return 1 << 20;
     const uint32_t iph = iphash(cur_trigger_ip_);
@@ -343,7 +392,7 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
     }
     if ((ip_age_ctr_ & ((uint64_t{1} << P.ip_filter_age_shift) - 1)) == 0)
       for (int i = 0; i < IPBK; ++i) { ip_useful_[i] >>= 1; ip_useless_[i] >>= 1; ip_ev_[i] >>= 1; ip_untimely_[i] >>= 1; ip_pe_[i] *= 0.5; ip_pe_n_[i] >>= 1;
-        ip_llc_useful_[i] >>= 1; ip_llc_useless_[i] >>= 1;
+        ip_llc_useful_[i] >>= 1; ip_llc_useless_[i] >>= 1; ip_bwd_useful_[i] >>= 1; ip_bwd_useless_[i] >>= 1;
         snap_ip_pe_[i] *= 0.5; snap_ip_pe_n_[i] >>= 1; ip_ph_harm_[i] >>= 1; ip_ph_active_[i] >>= 1; } // decay phase census too
   }
   static uint32_t iphash(uint64_t ip) { return static_cast<uint32_t>((ip * 0x9E3779B97F4A7C15ull) >> 52) & 0xFFFu; }

@@ -122,6 +122,8 @@ struct params {
   // so a byte suffices. iphash() masks to ip_table_entries; every per-IP array (useful/useless/gate + optional
   // ev/untimely + optional bwd) is ip_table_entries x ip_ctr_bits.
   uint32_t ip_table_entries = 4096;    // per-trigger-IP bucket count (power of 2)
+  int ip_gate_trigger = 0;             // 0: the per-prefetch gate at the sink only; 1: also gate each SPPAM trigger (the exemption
+                                       // of untimely IPs there is ungated by the cache-stress/MLP checks, as the predictor's own was)
   uint32_t ip_ctr_bits = 8;            // saturating width of each per-IP counter
   uint32_t evicted_unused_cap = 2048;  // bound on the depth-throttle re-demand watch list (block->IP)
   uint32_t ip_sample_div = 4;          // sample 1/N issued prefetches into the block->IP attribution table
@@ -480,7 +482,7 @@ struct params {
   // is BAD -> SUPPRESS e2e there and FALL THROUGH to the walk (role-2). Fixes "e2e always has a weak prediction so
   // fall-through never fires" -- now it fires exactly on the patterns the sampling proves are wrong.
   bool pattern_validate = false;         // enable precise per-pattern validation + bad-pattern fall-through to the walk
-  int pv_sample_div = 4;                 // sample 1/N issued e2e prefetches into the block->trigger-pattern table
+  int pv_sample_div = 1;                 // pattern validation consumes 1 in N of the sampling table's SPPAM resolutions
   int pv_min_samples = 8;                // resolved samples for a pattern before it can be judged bad
   int pv_bad_pct = 40;                   // validated accuracy (%) below which a pattern is BAD (fall through)
   std::size_t pv_sample_cap = 8192;      // block->pattern sample table capacity (bounded)
@@ -1117,7 +1119,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(ip_filter_use_pe_phase); SET(ip_pe_phase_soft); SET(ip_pe_phase_hard); SET(ip_pe_phase_margin);
   SET(ip_filter_depth_throttle); SET(ip_depth_mid); SET(ip_depth_min); SET(ip_untimely_thresh); SET(ip_depth_hitrate_min); SET(ip_depth_mlp_max);
   SET(ip_filter_max_useful_loss); SET(ip_sample_div); SET(ip_track_timeout);
-  SET(ip_table_entries); SET(ip_ctr_bits); SET(evicted_unused_cap);
+  SET(ip_table_entries); SET(ip_ctr_bits); SET(ip_gate_trigger); SET(evicted_unused_cap);
   SET(enable_fallthrough); SET(fallthrough_explore_div);
   SET(enable_spp); SET(spp_st_entries); SET(spp_sig_bits); SET(spp_lookahead); SET(spp_threshold); SET(spp_share_region_table); SET(spp_usefulness_feedback);
   SET(spp_ghr); SET(spp_ghr_entries); SET(spp_min_delta); SET(spp_min_conf); SET(spp_multi_high_throttle);
