@@ -290,9 +290,8 @@ public:
     if (P.enable_sig_feedback && !sig_fb_.empty()) sig_fb_dump();
     if (P.pattern_validate) {
       uint64_t tot = dbg_pv_bad_ + dbg_pv_good_; if (!tot) tot = 1;
-      std::fprintf(stderr, "[pv] %s triggers_bad=%.1f%% patterns_scored=%zu (bad=%zu)\n", P.name.c_str(),
-                   100.0 * dbg_pv_bad_ / tot, pat_val_.size(),
-                   [&]{ std::size_t b = 0; for (auto& kv : pat_val_) { uint32_t t = kv.second.u + kv.second.n; if (t >= (uint32_t)P.pv_min_samples && 100u*kv.second.u < (uint32_t)P.pv_bad_pct*t) ++b; } return b; }());
+      std::fprintf(stderr, "[pv] %s triggers_bad=%.1f%% patterns bad=%lld\n", P.name.c_str(),
+                   100.0 * dbg_pv_bad_ / tot, (long long)dbg_pv_bad_patterns_);
     }
     if (P.delta_pht) {
       uint64_t term = dbg_delta_used_ + dbg_delta_unused_; if (!term) term = 1;
@@ -528,19 +527,25 @@ public:
   void set_ip_gate(bool g) { cur_ip_gate_ = g; }
   // A sampled SPPAM prefetch resolved (module's sampling table): validate the pattern it was predicted from and feed its
   // depth-0 prediction counter -- a proven-useless prediction is penalized toward silence (natural fall-through).
+  // A sampled prefetch predicted from PHT entry pk at position bit resolved: adjust that prediction counter, and
+  // count the outcome toward the entry's bad bit (ip_epoch outcomes per decision, then both counters reset).
   void pattern_outcome(uint64_t pk, int bit, bool useful)
   {
     if (!P.pattern_validate) return;
-    auto& v = pat_val_[pk]; if (useful) ++v.u; else ++v.n;
+    pattern_type* e = pattern_tables_.at(0).find_key(pk);
+    if (e == nullptr) return;
+    if (useful) ++e->pv_u; else ++e->pv_n;
+    if (e->pv_u + e->pv_n >= P.ip_epoch) {
+      const bool bad = 100u * e->pv_u < static_cast<uint32_t>(P.pv_bad_pct) * P.ip_epoch;
+      if (bad != e->pv_bad) { if (bad) ++dbg_pv_bad_patterns_; else --dbg_pv_bad_patterns_; }
+      e->pv_bad = bad; e->pv_u = e->pv_n = 0;
+    }
     if (P.pv_feed_confidence && bit >= 0) {
-      pattern_type* e = pattern_tables_.at(0).find_key(pk);
-      if (e != nullptr) {
-        auto& pc = e->prediction_counter;
-        std::size_t b = static_cast<std::size_t>(bit);
-        if (b < pc.size()) {
-          if (useful) pc[b] = std::min<uint64_t>(pc[b] + P.counter_up, P.counter_max);
-          else pc[b] = pc[b] > static_cast<uint64_t>(P.pv_conf_penalty) ? pc[b] - P.pv_conf_penalty : 0;
-        }
+      auto& pc = e->prediction_counter;
+      std::size_t b = static_cast<std::size_t>(bit);
+      if (b < pc.size()) {
+        if (useful) pc[b] = std::min<uint64_t>(pc[b] + P.counter_up, P.counter_max);
+        else pc[b] = pc[b] > static_cast<uint64_t>(P.pv_conf_penalty) ? pc[b] - P.pv_conf_penalty : 0;
       }
     }
   }
@@ -646,6 +651,7 @@ private:
     uint64_t pattern = 0;
     uint64_t occurrences = 0, useful = 0, useless = 0;
     int64_t usefulness = 8;
+    uint8_t pv_u = 0, pv_n = 0; bool pv_bad = false; // pattern validation: sampled outcomes this epoch; bad = fall through
     conf_table prediction_table;
     std::vector<uint64_t> prediction_counter;    // per-block bias (== counter mode when pp_hist_bits==0)
     std::vector<int16_t> pweights;               // per-block x pp_hist_bits history weights (perceptron mode)
@@ -1692,8 +1698,7 @@ private:
     small(pw_mshr_, "mshr"); small(pw_guse_, "guse"); small(pw_gtim_, "gtim"); small(pw_hit_, "hit");
     small(pw_upf_, "UPF"); small(pw_lat_, "LAT"); small(pw_poll_, "POLL"); // per-bucket PE-split weights = learned latency/pollution throttle
   }
-  struct pat_val_t { uint32_t u = 0, n = 0; };
-  std::unordered_map<uint64_t, pat_val_t> pat_val_;      // pattern key -> validated useful / useless counts
+  int64_t dbg_pv_bad_patterns_ = 0;                      // PHT entries currently marked bad
   uint32_t evict_lfsr_ = 0x9abcdefu; // random region-eviction policy
   uint64_t dbg_pv_bad_ = 0, dbg_pv_good_ = 0, dbg_ip_throttled_ = 0;
   uint64_t dbg_amap_bits_ = 0, dbg_amap_regs_ = 0, dbg_amap_sparse_ = 0, dbg_amap_full_ = 0; // access-map fill at eviction
@@ -1726,13 +1731,10 @@ private:
     }
   }
   uint32_t iphash(uint64_t ip) const { return static_cast<uint32_t>((ip * 0x9E3779B97F4A7C15ull) >> 52) & ip_mask_; }
-  bool pattern_is_bad(uint64_t pk) const // enough samples AND validated accuracy below the bad threshold
+  bool pattern_is_bad(uint64_t pk) // the entry's last validation epoch judged it bad
   {
-    auto it = pat_val_.find(pk);
-    if (it == pat_val_.end()) return false;
-    uint32_t tot = it->second.u + it->second.n;
-    if (tot < static_cast<uint32_t>(P.pv_min_samples)) return false;
-    return 100u * it->second.u < static_cast<uint32_t>(P.pv_bad_pct) * tot;
+    const pattern_type* e = pattern_tables_.at(0).find_key(pk);
+    return e != nullptr && e->pv_bad;
   }
   // Delta-PHT usefulness self-throttle state.
   double delta_add_ema_ = 1.0;      // EMA of ADDITIVE fraction (timely hit on a baseline-miss block)

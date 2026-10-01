@@ -121,9 +121,12 @@ struct params {
   // a coarse per-IP throttle needs far fewer buckets, and the counters saturate + decay (ip_filter_age_shift)
   // so a byte suffices. iphash() masks to ip_table_entries; every per-IP array (useful/useless/gate + optional
   // ev/untimely + optional bwd) is ip_table_entries x ip_ctr_bits.
-  uint32_t ip_table_entries = 4096;    // per-trigger-IP bucket count (power of 2)
-  int ip_gate_trigger = 0;             // 0: the per-prefetch gate at the sink only; 1: also gate each SPPAM trigger (the exemption
-                                       // of untimely IPs there is ungated by the cache-stress/MLP checks, as the predictor's own was)
+  uint32_t ip_table_entries = 4096;    // per-IP table entries (the module sets 256: one entry per live trigger IP)
+  uint32_t ip_table_ways = 4;          // per-IP table associativity (LRU)
+  uint32_t ip_epoch = 15;              // outcomes per per-IP decision: when a counter pair sums to this, the bin is set and both reset
+  uint32_t ss_sample_rate = 32;        // set sampling: 1 in N L2 sets (hashed) has its prefetches followed for their whole lifetime
+  uint32_t untimely_fifo = 4;          // per sampled set: evicted-unused prefetches watched for a re-demand
+  uint32_t inflight_records = 48;      // sampled prefetches between issue and fill (MSHR + PQ)
   uint32_t ip_ctr_bits = 8;            // saturating width of each per-IP counter
   uint32_t evicted_unused_cap = 2048;  // bound on the depth-throttle re-demand watch list (block->IP)
   uint32_t ip_sample_div = 4;          // sample 1/N issued prefetches into the block->IP attribution table
@@ -1025,27 +1028,23 @@ struct params {
     if (enable_am_bloom)
       t.am = bpr * (static_cast<uint64_t>(am_bloom_size) + lg2(am_bloom_clear_thresh) + lg2(am_bloom_size));
 
-    // ---- IP-filter tables: per-IP throttle counters + sampled block->{pattern,IP} attribution + validation.
-    {
-      const uint64_t E = ip_table_entries ? ip_table_entries : 1;
-      const uint64_t iph_bits = lg2(E);
-      const uint64_t samp_entry = 16 /*block tag*/ + iph_bits + lg2(pattern_size + 2) /*position*/ + 1 /*bwd*/
-                                + (pv_sample_directmap ? (8 /*stamp*/ + 1 /*occ*/) : 0);
+    // ---- Set-sampled prefetch lifetimes + the per-IP table (the module's feedback path).
+    if (enable_ip_filter || pattern_validate) {
+      const uint64_t rows = l2_sets / (ss_sample_rate ? ss_sample_rate : 1);
+      const uint64_t rec = 1 /*valid*/ + 16 /*tag*/ + 16 /*ip hash*/ + key_bits + lg2(pattern_size) /*position*/ + 1 /*has_pat*/ + 2 /*engine*/;
+      t.ipf += rows * l2_ways * rec;                                    // the shadow of the sampled sets
+      t.ipf += inflight_records * rec;                                  // issued toward a sampled set, until the fill
+      t.ipf += rows * untimely_fifo * (1 + 16 + 16 + 1);                // evicted-unused prefetches awaiting a re-demand
       if (enable_ip_filter) {
-        uint64_t arrays = 3;                                            // useful + useless + gate_ctr
-        if (ip_filter_depth_throttle) arrays += 2;                      // ev + untimely
-        if (bwd_useful_gate) arrays += 2;                               // bwd_useful + bwd_useless
-        if (ip_llc_redirect) arrays += 2;                               // llc_useful + llc_useless
-        t.ipf += arrays * E * ip_ctr_bits;
+        const uint64_t ctr = lg2(ip_epoch + 1), grp = 2 * ctr + ctr + 1; // two counters, the bin, bin-valid
+        uint64_t groups = 1;                                            // usefulness
+        if (ip_filter_depth_throttle) ++groups;                         // timeliness
+        if (bwd_useful_gate) ++groups;                                  // backward
+        if (ip_llc_redirect) ++groups;                                  // LLC placements
+        const uint64_t ways = ip_table_ways ? ip_table_ways : 1, sets = ip_table_entries / ways;
+        t.ipf += ip_table_entries * (1 + (16 - lg2(sets)) /*tag*/ + lg2(ways) /*lru*/ + groups * grp);
       }
-      if (enable_ip_filter || pattern_validate)                         // pf_sample_ shared by filtering & validation
-        t.ipf += pv_sample_cap * samp_entry;
-      if (enable_ip_filter && ip_filter_depth_throttle)                 // evicted_unused_ re-demand watch list (block->IP)
-        t.ipf += evicted_unused_cap * (16 + iph_bits);
-      if (pattern_validate) {                                           // pat_val_ (u,n) keyed by the pattern key
-        const uint64_t pv_entries = (key_bits < 20) ? (uint64_t{1} << key_bits) : (uint64_t{1} << 20);
-        t.ipf += pv_entries * (2 * 12);
-      }
+      if (pattern_validate) t.ipf += pattern_table_sets * pattern_table_ways * (4 + 4 + 1); // per PHT entry: useful, useless, bad
     }
 
     // ---- Per-IP stride-direction table (fixed 256 x int8; feeds neg_dir_pc / ip_direction).
@@ -1119,7 +1118,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(ip_filter_use_pe_phase); SET(ip_pe_phase_soft); SET(ip_pe_phase_hard); SET(ip_pe_phase_margin);
   SET(ip_filter_depth_throttle); SET(ip_depth_mid); SET(ip_depth_min); SET(ip_untimely_thresh); SET(ip_depth_hitrate_min); SET(ip_depth_mlp_max);
   SET(ip_filter_max_useful_loss); SET(ip_sample_div); SET(ip_track_timeout);
-  SET(ip_table_entries); SET(ip_ctr_bits); SET(ip_gate_trigger); SET(evicted_unused_cap);
+  SET(ip_table_entries); SET(ip_table_ways); SET(ip_epoch); SET(ss_sample_rate); SET(untimely_fifo); SET(inflight_records); SET(ip_ctr_bits); SET(evicted_unused_cap);
   SET(enable_fallthrough); SET(fallthrough_explore_div);
   SET(enable_spp); SET(spp_st_entries); SET(spp_sig_bits); SET(spp_lookahead); SET(spp_threshold); SET(spp_share_region_table); SET(spp_usefulness_feedback);
   SET(spp_ghr); SET(spp_ghr_entries); SET(spp_min_delta); SET(spp_min_conf); SET(spp_multi_high_throttle);
