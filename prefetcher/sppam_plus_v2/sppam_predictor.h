@@ -366,21 +366,18 @@ public:
     }
     // Depth-throttle: a demand for a block that was an evicted-unused prefetch = UNTIMELY (right address, evicted
     // before use) -> attribute to the prefetch's IP so it gets a shallower (timelier) depth, not a volume drop.
+    if (type == atype::LOAD || type == atype::RFO) dg_demand(block);
     if (!ip_timely_.empty() && (type == atype::LOAD || type == atype::RFO || type == atype::PREFETCH)) {
       const uint16_t consumer = ip16(ip);
       if (cache_hit) {
         if (useful_prefetch) { region_timeliness(consumer, /*untimely=*/false); ++dbg_rg_timely_; }
       } else if (region_type* rr = regions_.find_key(region_of(block)); rr && rr->prefetch_map[offset_of(block)]) {
-        if (sink_ && sink_->request_pending(block)) { region_timeliness(consumer, /*untimely=*/false); ++dbg_rg_late_; } // our prefetch is still queued or in flight: late, not untimely
-        else {                                           // issued, evicted unused, now demanded: untimely
+        if (sink_ && sink_->miss_outstanding(block)) { region_timeliness(consumer, /*untimely=*/false); ++dbg_rg_late_; } // merges into our prefetch: late, used
+        else {                                           // prefetched, evicted unused, now demanded: untimely
           region_timeliness(consumer, /*untimely=*/true); ++dbg_rg_untimely_; dg_region_untimely(block);
+          rr->prefetch_map[offset_of(block)] = false;
         }
       }
-    }
-    if (type == atype::LOAD || type == atype::RFO) dg_demand(block); // after the region check, which classifies against it
-    if (P.diag_ip_truth) {
-      const char c = "LRBWT"[std::min<int>(static_cast<int>(type), 4)];
-      dg_ev(block, cache_hit ? static_cast<char>(c + 32) : c);
     }
     if (!ev_watch_.empty() && (type == atype::LOAD || type == atype::RFO)) {
       ev_watch_t& w = ev_watch_[sdm_idx(block) & ev_watch_mask_];
@@ -458,14 +455,11 @@ public:
       dg_evict(evicted_block);
       if (P.enable_perceptron_filter) perc_resolve(evicted_block, P.perc_label_pe ? pf_value : -1.0); // dense training on PE (or usefulness=-1)
       if (P.region_evict_policy >= 6) { region_type* r = regions_.probe_key(region_of(evicted_block)); if (r && r->pf_dead < 65535) ++r->pf_dead; }
-      if (P.pollution_filter) {
-        dg_ev(evicted_block, 'K');
-        return; // a useless eviction keeps its shadow-map bit
-      }
+      if (P.pollution_filter || !ip_timely_.empty())
+        return; // keep the prefetch-map bit: pollution filter (never re-prefetched) / region timeliness (cleared by the demand)
     } else if (P.scrape_on_evict) {
       scrape_region(evicted_block);
     }
-    if (P.diag_ip_truth) dg_ev(evicted_block, regions_.probe_key(region_of(evicted_block)) ? 'C' : 'N');
     remove_from_pagemap(evicted_block, true);
   }
 
@@ -503,13 +497,11 @@ public:
     }
   }
 
-  void shadow_fill(uint64_t block, uint8_t src = 1)
+  void shadow_fill(uint64_t block)
   {
     if (P.exact_shadow_test) dbg_exact_.insert(block); // TEST ONLY: pure L2-residency mirror (fill inserts, evict erases)
-    if (region_type* r = regions_.probe_key(region_of(block))) {
+    if (region_type* r = regions_.probe_key(region_of(block)))
       r->prefetch_map[offset_of(block)] = true;
-      dg_bit(block, src);
-    } else if (src == 1) dg_ev(block, 'g');
     else if (bloom_on())
       bloom_spill(block); // region not tracked -> record residency in the bloom directly
   }
@@ -989,7 +981,6 @@ private:
       }
       if (prefetch) {
         r->prefetch_map[off] = true;
-        dg_bit(block, 3);
       } else {
         if (P.pattern_context_src == 2) {
           int d = static_cast<int>(off) - static_cast<int>(r->last_block);
@@ -997,7 +988,6 @@ private:
         }
         r->access_map[off] = true;
         r->prefetch_map[off] = true;
-        dg_bit(block, 0);
         if (P.enable_am_bloom) am_insert(pn, off);
         const int iph = ip_slot(ip16(ip), false);
         r->block_ip[off] = iph;
@@ -1051,11 +1041,9 @@ private:
       if (P.enable_am_bloom && !prefetch) am_seed(pn, nr.access_map);
       if (prefetch) {
         nr.prefetch_map[off] = true;
-        dg_bit(block, 3);
       } else {
         nr.access_map[off] = true;
         nr.prefetch_map[off] = true;
-        dg_bit(block, 0);
         if (P.enable_am_bloom) am_insert(pn, off);
         nr.block_ip[off] = ip_hash(ip);
         nr.pc_pht = pc_ctx_hash(ip); // first access to this page seeds its PC context (block-granular under pc_ctx_block)
@@ -1080,7 +1068,6 @@ private:
   // (occasional) scrape trigger, without re-finding the region.
   void mark_prefetch(region_type* r, uint64_t off, uint64_t any_block_in_region)
   {
-    dg_bit(any_block_in_region, 3);
     if (P.scrape_on_idle && (r->last_access_time + P.scrape_idle_time < cycle_)) {
       if (r->since_last_scrape >= P.scrape_min_count)
         scrape_region(any_block_in_region);
@@ -2011,29 +1998,12 @@ public:
       dg_live_.erase(it);
     }
   }
-  // Which path last set a block's residency bit (0 demand access, 1 fill, 2 SPP issue, 3 SPPAM issue), for "neither" events.
-  std::unordered_map<uint64_t, uint8_t> dg_bitsrc_;
-  uint64_t dg_neither_src_[4] = {0, 0, 0, 0};
-  // Per-block lifecycle (last 8 events, newest last): an access by type, upper case = L2 miss, lower = hit (L load, R rfo,
-  // B berti/upper-level prefetch, W write, T translation); f fill mark, g fill with no region entry, S SPP issue mark,
-  // P SPPAM issue mark, C eviction cleared the bit, N eviction found no region entry, K useless eviction kept the bit.
-  std::unordered_map<uint64_t, uint64_t> dg_life_;
-  std::map<std::string, uint64_t> dg_neither_seq_;
-  void dg_ev(uint64_t b, char c) { if (P.diag_ip_truth) { uint64_t& q = dg_life_[b]; q = (q << 8) | static_cast<uint8_t>(c); } }
-  void dg_bit(uint64_t b, uint8_t src) { if (P.diag_ip_truth) { dg_bitsrc_[b] = src; if (src) dg_ev(b, "DfSP"[src & 3]); } }
   void dg_region_untimely(uint64_t b)
   {
     if (!P.diag_ip_truth) return;
     ++dg_rg_n_;
     if (dg_dead_.count(b)) ++dg_rg_true_;
     else if (dg_live_.count(b)) ++dg_rg_pending_;      // issued, not yet used or evicted: queued or in flight (late), not untimely
-    else {
-      if (auto it = dg_bitsrc_.find(b); it != dg_bitsrc_.end()) ++dg_neither_src_[it->second & 3];
-      std::string seq;
-      if (auto it = dg_life_.find(b); it != dg_life_.end())
-        for (int k = 7; k >= 0; --k) if (const char c = static_cast<char>((it->second >> (8 * k)) & 0xFF)) seq += c;
-      ++dg_neither_seq_[seq + "|miss"];
-    }
   }
   void dg_evict(uint64_t b)
   {
@@ -2091,16 +2061,6 @@ public:
       std::fprintf(stderr, "[ip-truth] %s region untimely events=%llu (truly evicted unused: %.1f%%, prefetch still pending: %.1f%%, neither: %.1f%%) vs exact untimely=%llu\n", P.name.c_str(),
                    (unsigned long long)dg_rg_n_, dg_rg_n_ ? 100.0 * dg_rg_true_ / dg_rg_n_ : 0.0, dg_rg_n_ ? 100.0 * dg_rg_pending_ / dg_rg_n_ : 0.0,
                    dg_rg_n_ ? 100.0 * (dg_rg_n_ - dg_rg_true_ - dg_rg_pending_) / dg_rg_n_ : 0.0, (unsigned long long)tun);
-    if (!ip_timely_.empty())
-      std::fprintf(stderr, "[ip-truth] %s   'neither' by last bit setter: demand access=%llu fill=%llu SPP issue=%llu SPPAM issue=%llu\n", P.name.c_str(),
-                   (unsigned long long)dg_neither_src_[0], (unsigned long long)dg_neither_src_[1], (unsigned long long)dg_neither_src_[2], (unsigned long long)dg_neither_src_[3]);
-    if (!ip_timely_.empty()) {
-      std::vector<std::pair<uint64_t, std::string>> v;
-      for (const auto& [k, n] : dg_neither_seq_) v.emplace_back(n, k);
-      std::sort(v.rbegin(), v.rend());
-      for (std::size_t i = 0; i < v.size() && i < 12; ++i)
-        std::fprintf(stderr, "[ip-truth] %s   'neither' lifecycle %-14s %llu\n", P.name.c_str(), v[i].second.c_str(), (unsigned long long)v[i].first);
-    }
   }
 private:
   // Depth-throttle: an IP is UNTIMELY (right address, evicted before use) if a large fraction of its evicted-unused

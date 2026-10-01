@@ -51,7 +51,7 @@ struct params {
   bool enable_shadow_squash = true;
   bool pv_stale_useless = false;   // a sample older than ip_track_timeout counts USELESS when its slot is needed (off: discarded, no outcome)
   bool untimely_from_region = false; // untimely from region residency bits: an unused prefetch keeps its bit when evicted; a demand miss on a
-                                     // set bit with no request pending (PQ, tag check, MSHR, fill) is untimely, a hit on a prefetched line or a pending one is timely, both credited
+                                     // set bit (no miss outstanding) is untimely, a hit on a prefetched line or a merge is timely, both credited
                                      // to the trigger IP that the consumer IP maps to (learned from used samples); replaces the watch list
   bool diag_ip_truth = false;       // DIAGNOSTIC ONLY: exact per-IP prefetch outcomes printed beside the sampled per-IP table (unbounded; never on in evaluations, no effect on decisions)
   bool exact_shadow_test = false;   // TEST ONLY: route the residency filter through a leak-free fill/evict mirror (unbuildable state; measures the coverage lost to stale prefetch-map bits)
@@ -431,7 +431,6 @@ struct params {
   // default thresholds make its own gate a no-op (both directions always scan -> wrong-way pollution). A
   // per-IP saturating direction counter (by ip_hash) learns each trigger-PC's dominant stride direction;
   // a confident IP prefetches ONLY that direction. Fixes predictable-but-large-stride pages (cactuBSSN).
-  bool pollution_filter = false;   // a useless (unused-prefetch) eviction keeps the line's shadow-map bit (data and code maps); off: it is cleared
   bool ip_direction = false;
   int ip_direction_min = 4;        // |per-IP direction counter| >= this -> commit to that one direction
   // berti forwards the SOURCE PC (and direction) in pf_metadata (bits 9-31, mask 0x7fffff). Without this,
@@ -442,6 +441,7 @@ struct params {
   // POLLUTION FILTER (from sppam_b): on a USELESS prefetch eviction, KEEP its prefetch-map bit set so the
   // block reads as resident and is NOT re-prefetched (don't re-waste bandwidth on a proven-useless block).
   // Only USEFUL/demand evictions clear the bit (re-prefetch allowed). Reset naturally on region eviction.
+  bool pollution_filter = false;        // |per-IP direction counter| >= this -> commit to that one direction
   bool cross_page = false;
 
   // Diagnostic: at region eviction, accumulate the access-map fill distribution + effective-storage-granularity

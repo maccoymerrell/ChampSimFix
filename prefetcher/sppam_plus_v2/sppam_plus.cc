@@ -183,11 +183,6 @@ void sppam_plus::prefetcher_initialize()
 uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::address ip, bool cache_hit, bool useful_prefetch, access_type type,
                                               uint32_t metadata_in)
 {
-  // A miss that finds the MSHR full with nothing to merge into is not issued; the cache retries it, calling this hook again,
-  // until it gets an MSHR. Each access is processed once, on the attempt that issues. Writes take no MSHR.
-  if (!cache_hit && generic_access_type(type) != access_type::WRITE && cache_->get_mshr_occupancy() >= cache_->get_mshr_size()
-      && !cache_->miss_outstanding(addr))
-    return metadata_in;
   real_cycle_ = cache_->current_cycle(); // TRUE ChampSim cycle -- the fill-latency / pfht_ / pe-management clock (was NEVER assigned -> stuck at 0 -> all real-cycle timing broken)
   pred_->set_now(real_cycle_);
   const uint64_t block = addr.to<uint64_t>() >> BLOCK_SHIFT;
@@ -232,15 +227,14 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
           && !pred_->perc_keep(b, 3, depth, trig_ip, static_cast<int>(conf * 15.0), nx_ip))
         return false;
       bool fl2 = (depth < P.instr_llc_depth);      // MULTI-LEVEL: deep BG prefetches stage in LLC, not L2 (capacity, no L1I/L2 thrash)
-      if (!sd_decide(b, fl2))    // set-duel may drop or redirect the instruction prefetch
-        return false;
+      if (!sd_decide(b, fl2))    // set-duel may drop or redirect the instruction prefetch (kept off the re-propose list)
+        return true;
       ++instr_pf_issued_;                          // instruction-activity gate: count BG prefetch issues (datacenter discriminator)
-      const bool issued = prefetch_line(b << BLOCK_SHIFT, fl2, 0);
-      if (issued && fl2) {
+      if (prefetch_line(b << BLOCK_SHIFT, fl2, 0) && fl2) {
         bg_inflight_[b % bg_inflight_.size()] = b;
         if (gate_bg) pred_->perc_note_issue(b);   // training snapshot for the branch-graph gate (perc_track_ holds features+lat+cost)
       }
-      return issued && fl2;   // marked resident only when issued to fill L2
+      return fl2;   // mark resident ONLY for L2 fills; LLC-staged prefetches stay off the residency map (re-proposable) per the caveat
     });
     // By default the instruction stream is exclusive to the branch graph. With instr_feed_data
     // the same access ALSO falls through to the data path below, so we can measure the branch
@@ -419,8 +413,8 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
       if (P.perc_dense_train) pred_->perc_dense_resolve(evb, /*useful=*/false);
     }
     pred_->on_l2_evict(evb, cycle_, evict_was_unused, perc_ev); // on_l2_evict frees the perc_track_ entry
-    if (P.instr_packed_residency && !(unused_pf && P.pollution_filter))
-      pred_->filter_evict_code(evb); // clear the packed code-residency bit on eviction (kept for a useless eviction with pollution_filter)
+    if (P.instr_packed_residency)
+      pred_->filter_evict_code(evb); // clear the packed code-residency bit on L2 eviction (no-op for non-code blocks)
   }
 
   if (pe_terms || (P.enable_ip_filter && P.ip_filter_depth_throttle)) { // lightweight inflight counters (MLP gate)
@@ -553,10 +547,13 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
       if (P.enable_sig_feedback) { slot.sig = pred_->fb_sig_; slot.eng = pred_->fb_eng_; slot.order = pred_->fb_order_; slot.pos = pred_->fb_pos_; } // record request's (engine,sig,order,offset)
     }
   }
+  // Mark the shadow map at ISSUE (pending), so in-flight prefetches dedupe before they fill.
+  // SPPAM's do_prefetch already marks its own path; SPP has no marking of its own, so without
+  // this its in-flight prefetches (and any SPPAM re-prediction of the same block) are not
+  // filtered until the fill lands. SPP always fills L2 (fill_l2=true).
+  if (from_spp && fill_l2)
+    pred_->shadow_fill(block);
   const bool enqueued = prefetch_line(block << BLOCK_SHIFT, fill_l2, gen_tag | (from_spp ? 1u : 0u)); // carry generation tag (diagnostics)
-  // The shadow map marks a line at issue: an issued SPP prefetch (SPPAM's do_prefetch marks its own).
-  if (enqueued && from_spp && fill_l2)
-    pred_->shadow_fill(block, /*src=*/2);
   if (enqueued && !fill_l2 && P.ip_llc_redirect) pred_->mark_llc(block); // LLC-only: dedupe later proposals of this block
   if (enqueued && fill_l2 && from_spp && P.enable_ip_filter) pred_->sample_spp_prefetch(block);
   if (enqueued) ++data_pf_issued_;               // instruction-activity gate: count data prefetch issues (denominator of the instr-pf fraction)

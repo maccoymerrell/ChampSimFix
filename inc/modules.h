@@ -881,10 +881,8 @@ struct cache_module : public module_base<cache_module, environment_module>, publ
   virtual long invalidate_entry(champsim::address inval_addr) = 0;
   /** Return the current number of occupied MSHR entries. */
   virtual std::size_t get_mshr_occupancy() const = 0;
-  /** True if a request for the block containing addr is pending: queued prefetch, in tag check, in the MSHR, or returning. */
-  virtual bool request_pending(champsim::address addr) const = 0;
-  /** True if a miss for the block containing addr is in the MSHR or returning (a new miss to it merges). */
-  virtual bool miss_outstanding(champsim::address addr) const = 0;
+  /** True if a miss for the block containing addr is outstanding (MSHR or returning fill). */
+  virtual bool mshr_contains(champsim::address addr) const = 0;
   /** Return the total MSHR capacity. */
   virtual std::size_t get_mshr_size() const = 0;
   /** Return the MSHR occupancy as a ratio in [0, 1]. */
