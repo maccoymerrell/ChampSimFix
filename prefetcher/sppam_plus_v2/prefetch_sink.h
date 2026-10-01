@@ -39,6 +39,8 @@ struct prefetch_sink {
   virtual bool depth_throttle_allowed() const { return true; }
   // A sampled SPP prefetch resolved (used, or evicted/timed out unused): SPP's usefulness feedback.
   virtual void on_spp_sample(uint64_t /*block*/, bool /*useful*/) {}
+  // A miss for this block is outstanding at the cache (MSHR or returning fill).
+  virtual bool miss_outstanding(uint64_t /*block*/) const { return false; }
 };
 } // namespace sppam_dse
 
