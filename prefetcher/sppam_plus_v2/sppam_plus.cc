@@ -1,6 +1,8 @@
 #include "sppam_plus.h"
 
 #include <fmt/core.h>
+#include <set>
+#include <stdexcept>
 #include <string>
 
 namespace
@@ -45,7 +47,8 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
 
   // Route every sweepable scalar knob through the config (unset -> keep the default above
   // or the params.h default). decltype picks each field's exact type.
-#define CFG(field) P.field = builder.get_parameter<decltype(P.field)>(#field, true, P.field)
+  std::set<std::string> known{"name", "module", "model"};
+#define CFG(field) (known.insert(#field), P.field = builder.get_parameter<decltype(P.field)>(#field, true, P.field))
   CFG(region_bits); CFG(region_sets); CFG(region_ways); CFG(region_tag_bits); CFG(region_evict_policy);
   CFG(pattern_table_sets); CFG(pattern_table_ways); CFG(negative_table_sets); CFG(negative_table_ways); // PHT geometry (fwd + decoupled backward)
   CFG(region_page_aligned_sets); CFG(within_page_shadow);
@@ -96,6 +99,10 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(instr_nextn); CFG(instr_packed_residency); CFG(instr_llc_depth);
   CFG(pattern_validate); CFG(pv_feed_confidence); CFG(pv_conf_penalty); CFG(pv_bad_pct);
 #undef CFG
+  // A key the module does not read would silently keep its default: refuse it.
+  for (const auto& [key, value] : builder.get_parameters())
+    if (known.count(key) == 0)
+      throw std::invalid_argument("SPPAM_PLUS_V2: unknown parameter '" + key + "'");
 
   pred_ = std::make_unique<sppam_dse::sppam_predictor>(P, this);
   if (P.enable_spp)
