@@ -131,8 +131,14 @@ public:
     }
     if (P.region_density_report)
       seqk_ = {std::vector<uint16_t>(256, 0xFFFF), std::vector<uint16_t>(4096, 0xFFFF), std::vector<uint16_t>(65536, 0xFFFF)};
-    ip_n_ = P.ip_table_entries ? P.ip_table_entries : 1; // per-IP table depth (DSE-swept)
-    ip_mask_ = ip_n_ - 1;                                // iphash() index mask (ip_n_ must be a power of two)
+    ip_n_ = P.ip_table_entries ? P.ip_table_entries : 1; // per-IP table: indexed by the 16-bit IP hash (ip16)
+    ip_mask_ = ip_n_ - 1;
+    ip_ways_ = P.ip_table_ways;                          // 0 = direct-mapped on the low bits; W = W-way, tagged with the rest
+    if (ip_ways_) {
+      ip_sets_ = ip_n_ / ip_ways_; ip_set_bits_ = 0; while ((1u << ip_set_bits_) < ip_sets_) ++ip_set_bits_;
+      ip_tag_.assign(ip_n_, 0); ip_valid_.assign(ip_n_, 0); ip_lru_.assign(ip_n_, 0);
+    }
+    ip_dir_.assign(ip_n_, 0);
     if (P.enable_ip_filter) {
       ip_useful_.assign(ip_n_, 0);
       ip_useless_.assign(ip_n_, 0);
@@ -144,6 +150,11 @@ public:
     if (P.pattern_validate || P.enable_ip_filter) {
       std::size_t n = 1; while (n < P.pv_sample_cap) n <<= 1;   // direct-mapped sample table (power of two)
       pf_sdm_.assign(n, pf_samp_t{}); pf_sdm_mask_ = static_cast<uint32_t>(n - 1);
+      pv_div_cur_ = P.pv_adaptive_rate ? (P.pv_div_min ? P.pv_div_min : 1) : (P.ip_sample_div ? P.ip_sample_div : 1);
+    }
+    if (P.enable_ip_filter && P.ip_filter_depth_throttle) {   // evicted-unused watch list (block tag -> PC)
+      std::size_t n = 1; while (n < P.evicted_unused_cap) n <<= 1;
+      ev_watch_.assign(n, ev_watch_t{}); ev_watch_mask_ = static_cast<uint32_t>(n - 1);
     }
     if (P.enable_perceptron_filter) {                          // perceptron weight tables (prototype)
       std::size_t n = 1; while (n < P.perc_pc_entries) n <<= 1;
@@ -263,10 +274,11 @@ public:
       std::fprintf(stderr, "[ipf] %s sampled_useful=%llu sampled_useless=%llu active_ips=%d triggers_throttled=%llu | ev=%llu untimely=%llu untimely_ips=%d\n",
                    P.name.c_str(), (unsigned long long)tu, (unsigned long long)tl, active, (unsigned long long)dbg_ip_throttled_,
                    (unsigned long long)tev, (unsigned long long)tut, nunt);
-      std::fprintf(stderr, "[ipf-samples] %s used=%llu merged=%llu evicted=%llu timed-out=%llu dropped(slot busy)=%llu | watch re-demanded=%llu expired=%llu\n",
+      std::fprintf(stderr, "[ipf-samples] %s used=%llu merged=%llu evicted=%llu stale=%llu dropped(slot busy)=%llu sample_div=%u | watch re-demanded=%llu | ip table %u x %s allocs=%llu | key mismatches=%llu\n",
                    P.name.c_str(), (unsigned long long)dbg_samp_useful_, (unsigned long long)dbg_samp_promoted_, (unsigned long long)dbg_samp_evicted_,
-                   (unsigned long long)dbg_samp_timeout_, (unsigned long long)dbg_samp_dropped_, (unsigned long long)dbg_watch_hit_,
-                   (unsigned long long)dbg_watch_expired_);
+                   (unsigned long long)dbg_samp_timeout_, (unsigned long long)dbg_samp_dropped_, pv_div_cur_, (unsigned long long)dbg_watch_hit_,
+                   ip_n_, ip_ways_ ? (std::to_string(ip_ways_) + "-way tagged").c_str() : "direct-mapped", (unsigned long long)dbg_ip_alloc_,
+                   (unsigned long long)dbg_key_mismatch_);
     }
     if (P.enable_perceptron_filter) {
       const uint64_t seen = dbg_perc_keep_ + dbg_perc_explore_ + dbg_perc_drop_;
@@ -348,12 +360,13 @@ public:
     }
     // Depth-throttle: a demand for a block that was an evicted-unused prefetch = UNTIMELY (right address, evicted
     // before use) -> attribute to the prefetch's IP so it gets a shallower (timelier) depth, not a volume drop.
-    if (!ip_untimely_.empty() && !pf_sdm_.empty() && (type == atype::LOAD || type == atype::RFO)) {
-      pf_samp_t& s = pf_sdm_[sdm_idx(block) & pf_sdm_mask_];
-      if (s.occ && s.watch && s.tag == static_cast<uint32_t>(block)) {
-        ip_bump(ip_untimely_, ip_ev_, s.iph);
+    if (!ev_watch_.empty() && (type == atype::LOAD || type == atype::RFO)) {
+      ev_watch_t& w = ev_watch_[sdm_idx(block) & ev_watch_mask_];
+      if (w.valid && w.tag == samp_tag(block)) {
+        const uint32_t sl = static_cast<uint32_t>(ip_slot(w.ip, true));
+        ip_bump(ip_untimely_, ip_ev_, sl);
         ++dbg_watch_hit_;
-        s.occ = false;
+        w.valid = false;
       }
     }
     // Demand-miss-rate EMA (the LLC-pressure half of the bandwidth-feedback index).
@@ -396,6 +409,10 @@ public:
     if (type == atype::LOAD || !P.train_demand_only) {
       if (!cache_hit || !P.access_map_miss_only)
         add_to_pagemap(block, false, ip);
+    }
+    {
+      const region_type* tr = regions_.find_key(region_of(block));
+      trig_ip_ = ip ? ip16(ip) : static_cast<uint16_t>(tr ? (static_cast<uint16_t>(tr->pc_pht) << 8) : 0);
     }
     if (type == atype::LOAD || !P.prefetch_demand_only)
       do_prefetch(block, ip);
@@ -843,12 +860,16 @@ private:
   // PC context for the pattern PHT: full-ip baseline (Idea A keeps this -- the BG predicts a raw region-accessing
   // PC whose ip_hash is exactly this, so the advanced lookahead context matches how positions were trained).
   // block-granular only under the (now unused) pc_ctx_block experiment.
-  uint8_t pc_ctx_hash(uint64_t ip) const
+  // The one hash of an IP: the top 16 bits of the multiplicative hash. The PHT's 8-bit PC context is its upper byte,
+  // and the sampling table, the per-IP table and the wide context all use the same 16 bits.
+  uint16_t ip16(uint64_t ip) const
   {
     if (P.use_berti_src_ip) ip &= 0x7fffffull; // match berti's 23-bit IP encoding so demand + berti-forwarded of the SAME load agree
-    return ip_hash(P.pc_ctx_block ? (ip >> 6) : ip);
+    if (P.pc_ctx_block) ip >>= 6;
+    return ip ? static_cast<uint16_t>((ip * 0x9E3779B97F4A7C15ull) >> 48) : 0;
   }
-  static uint32_t ip_hash_wide(uint64_t ip) { return ip ? static_cast<uint32_t>((ip * 0x9E3779B97F4A7C15ull) >> 40) & 0xFFFFu : 0; } // 16-bit
+  uint8_t pc_ctx_hash(uint64_t ip) const { return static_cast<uint8_t>(ip16(ip) >> 8); }
+  uint32_t ip_hash_wide(uint64_t ip) const { return ip16(ip); }
   // Pattern-PHT PC context source for a region: 16-bit pc_wide (pc_ctx_wide, ceiling probe) or 8-bit pc_pht (baseline).
   uint64_t region_pc_ctx(const region_type* r) const { return r ? (P.pc_ctx_wide ? static_cast<uint64_t>(r->pc_wide) : static_cast<uint64_t>(r->pc_pht)) : 0; }
   // DIAGNOSTIC: last-value predictor of the per-region PC sequence at 3 key widths -- isolates whether the low
@@ -947,7 +968,7 @@ private:
         r->access_map[off] = true;
         r->prefetch_map[off] = true;
         if (P.enable_am_bloom) am_insert(pn, off);
-        uint8_t iph = ip_hash(ip);
+        const int iph = ip_slot(ip16(ip), false);
         r->block_ip[off] = iph;
         // Per-region PC-sequence: DISCARD pc-less accesses (ip==0, e.g. berti prefetch) -- a 0 is a wildcard that
         // can't advance a real-PC sequence and would poison predictability. Only real-PC accesses train/measure.
@@ -965,10 +986,10 @@ private:
         }
         if (r->last_block < off) {
           r->momentum = r->momentum < 7 ? r->momentum + 1 : 7;
-          if ((P.ip_direction || P.neg_dir_pc) && ip_dir_[iph] < 63) ++ip_dir_[iph];   // per-IP direction: forward stride
+          if ((P.ip_direction || P.neg_dir_pc) && iph >= 0 && ip_dir_[iph] < 63) ++ip_dir_[iph];   // per-IP direction: forward stride
         } else {
           r->momentum = r->momentum > -8 ? r->momentum - 1 : -8;
-          if ((P.ip_direction || P.neg_dir_pc) && off < r->last_block && ip_dir_[iph] > -63) --ip_dir_[iph]; // backward stride
+          if ((P.ip_direction || P.neg_dir_pc) && off < r->last_block && iph >= 0 && ip_dir_[iph] > -63) --ip_dir_[iph]; // backward stride
         }
         // cold-start learning: the FIRST delta after a region's entry (2nd access), keyed by the ENTRY PC.
         if (P.enable_cold_start && P.cold_start_pc && r->since_last_scrape == 1)
@@ -1167,16 +1188,40 @@ private:
   // evicted-unused) credit that IP's ip_useful_/ip_useless_ (and, for the fall-through, that pattern's pat_val_).
   // ip_trickle_div then throttles a trigger IP whose sampled usefulness is low -- sppam's real accuracy loop.
   uint32_t ip_n_ = 4096, ip_mask_ = 0xFFFu; // per-IP throttle-table depth + index mask (set from P.ip_table_entries)
-  struct pf_samp_t { uint64_t pat = 0; uint16_t iph = 0; int8_t bit = -1; bool bwd = false; // bit = prediction_counter index (depth-0 e2e), -1 else; bwd = backward-scan prefetch
-                     uint32_t tag = 0; uint32_t stamp = 0; bool occ = false;
-                     bool watch = false; // evicted unused: kept until a demand re-reference (untimely) or its ttl
-                     bool spp = false;   // an SPP prefetch (per-IP and SPP feedback only, no pattern validation)
-                     uint16_t pfeat[6] = {0,0,0,0,0,0}; bool hasf = false; }; // perceptron feature indices captured at issue (prototype)
-  // THE prefetch sampling table: every per-IP and per-pattern outcome comes from here. Direct-mapped, pinned: a
-  // sample holds its slot until it resolves or outlives pv_sample_ttl (then it resolves useless).
+  uint32_t ip_ways_ = 0, ip_sets_ = 0, ip_set_bits_ = 0;   // tagged organization (ip_table_ways > 0)
+  std::vector<uint16_t> ip_tag_; std::vector<uint8_t> ip_valid_, ip_lru_;
+  uint64_t dbg_ip_alloc_ = 0, dbg_key_mismatch_ = 0;
+  // pat = trigger pattern + context bits (the PHT key below its PC bits); ip = the trigger's 16-bit IP hash (the PHT
+  // keyed with its upper byte; it also locates the per-IP entry); bit = prediction_counter index (depth-0 e2e), -1 else;
+  // bwd = backward scan;
+  // spp = an SPP prefetch (per-IP and SPP feedback only). tag = 16-bit block tag; stamp = 8-bit coarse issue time.
+  struct pf_samp_t { uint16_t pat = 0; uint16_t ip = 0; int8_t bit = -1; bool bwd = false; bool spp = false;
+                     uint16_t tag = 0; uint8_t stamp = 0; bool occ = false; };
+  // THE prefetch sampling table: every per-IP and per-pattern outcome comes from here. Direct-mapped and pinned: a
+  // sample holds its slot until its prefetch is used, merged into a demand miss, or evicted; a sample older than
+  // ip_track_timeout cycles is closed useless when a new sample needs its slot.
   std::vector<pf_samp_t> pf_sdm_;
   uint32_t pf_sdm_mask_ = 0;
   static uint64_t sdm_idx(uint64_t b) { return (b * 0x9E3779B97F4A7C15ull) >> 24; }
+  static uint16_t samp_tag(uint64_t b) { return static_cast<uint16_t>((b * 0x9E3779B97F4A7C15ull) >> 48); }
+  static constexpr unsigned kStampShift = 12;            // stamp unit: 4096 cycles (8 bits span ~1M cycles)
+  uint8_t stamp_now() const { return static_cast<uint8_t>(now_ >> kStampShift); }
+  bool samp_stale(const pf_samp_t& e) const
+  {
+    return static_cast<uint64_t>(static_cast<uint8_t>(stamp_now() - e.stamp)) > (P.ip_track_timeout >> kStampShift);
+  }
+  uint64_t samp_key(const pf_samp_t& e) const // the exact PHT key the sampled prefetch was predicted with
+  {
+    const unsigned lo = P.pattern_size + P.pattern_context_bits;
+    return static_cast<uint64_t>(e.pat) | (P.pattern_pc_bits ? (static_cast<uint64_t>(e.ip >> 8) & mask(P.pattern_pc_bits)) << lo : 0);
+  }
+  // Depth throttle: evicted-unused sampled prefetches (block tag -> PC); a later demand for the block = untimely.
+  struct ev_watch_t { uint16_t tag = 0; uint16_t ip = 0; bool valid = false; };
+  std::vector<ev_watch_t> ev_watch_;
+  uint32_t ev_watch_mask_ = 0;
+  uint64_t now_ = 0;                                     // real cycle, set by the module on every access/fill
+  uint16_t trig_ip_ = 0;                                 // 16-bit IP hash of the current trigger
+  uint32_t pv_div_cur_ = 16, pv_win_place_ = 0, pv_win_busy_ = 0; // sample rate (adaptive: matched to the table)
 
   // --- Perceptron prefetch filter (PROTOTYPE): one learned gate over all throttle signals ---
   // 0 PC,1 off(dropped),2 eng,3 dep,4 use,5 tim,6 conf,7 sig, AGGREGATE-HARM: 8 mshr,9 g-useless,10 g-untimely,
@@ -1610,20 +1655,23 @@ public:
   //  I_UPF  = fill latency saved  (fed at fill),  I_LAT = the real Eq4 service cost this pf imposes (fed at Eq4),
   //  I_POLL = pollution cost       (fed on a polluted re-miss). Never cumulative -> tracks recent phase.
   void perc_note_ip_upf(uint32_t iph, float upf) { // latency saved (cycles), capped to a sane DRAM max upstream
-    if (ip_pe_sum_.empty() || iph >= ip_pe_sum_.size()) return;
+    if (ip_pe_sum_.empty()) return;
+    iph &= ip_mask_;
     const float a = 1.0f / static_cast<float>(1u << P.perc_pe_ema_shift);
     ip_pe_sum_[iph] += (upf - ip_pe_sum_[iph]) * a;
     if (ip_pe_cnt_[iph] < 255) ++ip_pe_cnt_[iph];   // recent-activity warmth (decayed in ip_age_tick)
     dbg_upf_sum_ += upf; ++dbg_upf_n_; if (upf > dbg_upf_max_) dbg_upf_max_ = upf;
   }
   void perc_note_ip_lat(uint32_t iph, float lat) { // TRUE I_LAT = w*serv (~pe_serv_dram), NOT fill-latency-minus-base
-    if (ip_lat_sum_.empty() || iph >= ip_lat_sum_.size()) return;
+    if (ip_lat_sum_.empty()) return;
+    iph &= ip_mask_;
     const float a = 1.0f / static_cast<float>(1u << P.perc_pe_ema_shift);
     ip_lat_sum_[iph] += (lat - ip_lat_sum_[iph]) * a;
     dbg_lat_sum_ += lat; if (lat > dbg_lat_max_) dbg_lat_max_ = lat;
   }
   void perc_note_ip_poll(uint32_t iph, float poll) { // pollution charged to the polluting prefetch's IP (rolling EMA)
-    if (ip_poll_sum_.empty() || iph >= ip_poll_sum_.size()) return;
+    if (ip_poll_sum_.empty()) return;
+    iph &= ip_mask_;
     const float a = 1.0f / static_cast<float>(1u << P.perc_pe_ema_shift);
     ip_poll_sum_[iph] += (poll - ip_poll_sum_[iph]) * a;
     dbg_poll_sum_ += poll; ++dbg_poll_n_; if (poll > dbg_poll_max_) dbg_poll_max_ = poll; // audit: raw I_POLL cycles
@@ -1790,7 +1838,35 @@ private:
       rd_overfetch_[gi] += static_cast<uint64_t>(extra);
     }
   }
-  uint32_t iphash(uint64_t ip) const { return static_cast<uint32_t>((ip * 0x9E3779B97F4A7C15ull) >> 52) & ip_mask_; }
+  uint32_t iphash(uint64_t ip) const { return ip16(ip) & ip_mask_; } // perceptron prototype: direct index from ip16
+  // Slot of a 16-bit IP hash in the per-IP table. Direct-mapped: its low bits. Tagged: the set's way whose tag
+  // matches (LRU), allocating the LRU way (columns cleared) when alloc is set; -1 = not present.
+  int ip_slot(uint16_t h, bool alloc)
+  {
+    if (!ip_ways_) return static_cast<int>(h & ip_mask_);
+    const uint32_t set = h & (ip_sets_ - 1), tag = static_cast<uint32_t>(h) >> ip_set_bits_;
+    const uint32_t base = set * ip_ways_;
+    int hit = -1, victim = static_cast<int>(base);
+    for (uint32_t w = 0; w < ip_ways_; ++w) {
+      const uint32_t i = base + w;
+      if (ip_valid_[i] && ip_tag_[i] == tag) { hit = static_cast<int>(i); break; }
+      if (!ip_valid_[i] || (ip_valid_[victim] && ip_lru_[i] > ip_lru_[victim])) victim = static_cast<int>(i);
+    }
+    if (hit < 0) {
+      if (!alloc) return -1;
+      hit = victim; ip_clear(static_cast<uint32_t>(hit));
+      ip_tag_[hit] = static_cast<uint16_t>(tag); ip_valid_[hit] = 1; ++dbg_ip_alloc_;
+    }
+    for (uint32_t w = 0; w < ip_ways_; ++w) if (ip_lru_[base + w] < ip_lru_[hit]) ++ip_lru_[base + w];
+    ip_lru_[hit] = 0;
+    return hit;
+  }
+  void ip_clear(uint32_t i)
+  {
+    for (auto* v : {&ip_useful_, &ip_useless_, &ip_gate_ctr_, &ip_ev_, &ip_untimely_, &ip_bwd_useful_, &ip_bwd_useless_, &ip_llc_useful_, &ip_llc_useless_})
+      if (!v->empty()) (*v)[i] = 0;
+    ip_dir_[i] = 0;
+  }
   // Trickle divisor from the sampled per-IP usefulness (soft/hard bands, same as shipping ip_trickle_div).
   uint32_t ip_trickle_div(uint32_t iph) const
   {
@@ -1826,11 +1902,12 @@ public:
     const uint64_t u = ip_llc_useful_[iph], n = u + ip_llc_useless_[iph];
     return u * 100 < static_cast<uint64_t>(P.ip_llc_thresh) * n;
   }
-  void ip_llc_outcome(uint32_t iph, bool useful)
+  void ip_llc_outcome(uint16_t ip, bool useful)
   {
     if (ip_llc_useful_.empty()) return;
-    if (useful) ip_bump(ip_llc_useful_, ip_llc_useless_, iph & ip_mask_);
-    else ip_bump(ip_llc_useless_, ip_llc_useful_, iph & ip_mask_);
+    const uint32_t sl = static_cast<uint32_t>(ip_slot(ip, true));
+    if (useful) ip_bump(ip_llc_useful_, ip_llc_useless_, sl);
+    else ip_bump(ip_llc_useless_, ip_llc_useful_, sl);
   }
   // Per-IP volume gate for a prefetch from trigger bucket iph (true = issue). Untimely IPs are depth-capped instead.
   // With the LLC-aware throttle, a prefetch the gate would drop goes to the LLC only (llc_only) unless the IP's
@@ -1853,10 +1930,29 @@ public:
   {
     if (++c[iph] >= (1u << P.ip_ctr_bits)) { c[iph] >>= 1; partner[iph] >>= 1; }
   }
-  uint32_t ip_bucket(uint64_t ip) const { return iphash(ip); }
-  uint32_t ip_trickle_div_of(uint64_t ip) const { return ip_useful_.empty() ? 1 : ip_trickle_div(iphash(ip)); }
+  uint16_t trigger_ip() const { return trig_ip_; }       // the current trigger's 16-bit IP hash
+  // Per-IP gate for one prefetch of the current trigger (true = issue); an IP not in the table has no history.
+  bool trigger_gate(bool& llc_only)
+  {
+    llc_only = false;
+    const int sl = ip_slot(trig_ip_, false);
+    return sl < 0 || ip_gate(static_cast<uint32_t>(sl), llc_only);
+  }
+  uint32_t trickle_div_for_ip(uint64_t ip)
+  {
+    if (ip_useful_.empty()) return 1;
+    const int sl = ip_slot(ip16(ip), false);
+    return sl < 0 ? 1 : ip_trickle_div(static_cast<uint32_t>(sl));
+  }
+  uint32_t trigger_trickle_div()
+  {
+    if (ip_useful_.empty()) return 1;
+    const int sl = ip_slot(trig_ip_, false);
+    return sl < 0 ? 1 : ip_trickle_div(static_cast<uint32_t>(sl));
+  }
+  void set_now(uint64_t cycle) { now_ = cycle; }
   // THE sampling table also samples the separate SPP engine's prefetches (per-IP usefulness + SPP's feedback).
-  void sample_spp_prefetch(uint64_t block, uint64_t ip) { pf_sample_issue(block, 0, iphash(ip), -1, false, /*spp=*/true); }
+  void sample_spp_prefetch(uint64_t block) { pf_sample_issue(block, 0, trig_ip_, -1, false, /*spp=*/true); }
   void sample_demand_fill(uint64_t block) { pf_sample_promoted(block); }
 private:
   // Depth-throttle: an IP is UNTIMELY (right address, evicted before use) if a large fraction of its evicted-unused
@@ -1891,10 +1987,11 @@ private:
   {
     if (s.spp && sink_) sink_->on_spp_sample(block, useful);
     if (P.pattern_validate && !s.spp) {
-      auto& v = pat_val_[s.pat]; if (useful) ++v.u; else ++v.n;
+      const uint64_t key = samp_key(s);
+      auto& v = pat_val_[key]; if (useful) ++v.u; else ++v.n;
       // A proven-useless prediction is penalized toward silence (natural fall-through); a proven-useful one reinforced.
       if (P.pv_feed_confidence && s.bit >= 0) {
-        pattern_type* e = pattern_tables_.at(0).find_key(s.pat);
+        pattern_type* e = pattern_tables_.at(0).find_key(key);
         if (e != nullptr) {
           auto& pc = e->prediction_counter;
           std::size_t b = static_cast<std::size_t>(s.bit);
@@ -1906,64 +2003,69 @@ private:
       }
     }
     if (P.enable_ip_filter) {
+      const uint32_t sl = static_cast<uint32_t>(ip_slot(s.ip, true));
       // A backward-scan prefetch credits ONLY the backward counters (throttle the backward scan without
       // also throttling that IP's healthy forward volume).
       if (s.bwd) {
-        if (P.bwd_useful_gate) { if (useful) ip_bump(ip_bwd_useful_, ip_bwd_useless_, s.iph); else ip_bump(ip_bwd_useless_, ip_bwd_useful_, s.iph); } // gate-only tables
-      } else if (useful) ip_bump(ip_useful_, ip_useless_, s.iph);
+        if (P.bwd_useful_gate) { if (useful) ip_bump(ip_bwd_useful_, ip_bwd_useless_, sl); else ip_bump(ip_bwd_useless_, ip_bwd_useful_, sl); } // gate-only tables
+      } else if (useful) ip_bump(ip_useful_, ip_useless_, sl);
       else {
-        ip_bump(ip_useless_, ip_useful_, s.iph);
-        if (evicted && !ip_ev_.empty()) ip_bump(ip_ev_, ip_untimely_, s.iph);
+        ip_bump(ip_useless_, ip_useful_, sl);
+        if (evicted && !ev_watch_.empty()) {
+          ip_bump(ip_ev_, ip_untimely_, sl);
+          ev_watch_[sdm_idx(block) & ev_watch_mask_] = ev_watch_t{samp_tag(block), s.ip, true};
+        }
       }
       ip_age_tick();
     }
   }
-  void pf_sample_issue(uint64_t block, uint64_t pk, uint32_t iph, int bit, bool backward = false, bool spp = false)
+  void pf_sample_issue(uint64_t block, uint64_t pk, uint16_t ip, int bit, bool backward = false, bool spp = false)
   {
     if (pf_sdm_.empty()) return;
     pv_lfsr_ ^= pv_lfsr_ << 13; pv_lfsr_ ^= pv_lfsr_ >> 17; pv_lfsr_ ^= pv_lfsr_ << 5;
-    if (pv_lfsr_ % (P.ip_sample_div ? P.ip_sample_div : 1) != 0) return;
+    if (pv_lfsr_ % (pv_div_cur_ ? pv_div_cur_ : 1) != 0) return;
     pf_samp_t& slot = pf_sdm_[sdm_idx(block) & pf_sdm_mask_];
+    bool busy = false;
     if (slot.occ) {
-      const uint32_t age = static_cast<uint32_t>(cycle_) - slot.stamp;
-      if (slot.watch) {
-        if (!P.pv_watch_yield && age <= P.pv_watch_ttl) { ++dbg_samp_dropped_; return; } // the watch keeps its slot
-        ++dbg_watch_expired_;
-      } else {
-        if (age <= P.pv_sample_ttl) { ++dbg_samp_dropped_; return; } // pinned: the incumbent keeps its slot
-        apply_pf_resolution(slot, slot.tag, /*useful=*/false, /*evicted=*/false); // outlived its ttl unused
-        ++dbg_samp_timeout_;
+      if (samp_stale(slot)) { apply_pf_resolution(slot, block, /*useful=*/false, /*evicted=*/false); ++dbg_samp_timeout_; }
+      else busy = true;                                  // pinned: the in-flight incumbent keeps its slot
+    }
+    if (P.pv_adaptive_rate) {                            // match the sample rate to the table: hold the busy fraction in [lo, hi]%
+      ++pv_win_place_; if (busy) ++pv_win_busy_;
+      if (pv_win_place_ >= P.pv_rate_window) {
+        const uint32_t pct = 100u * pv_win_busy_ / pv_win_place_;
+        if (pct > P.pv_churn_hi && pv_div_cur_ < P.pv_div_max) pv_div_cur_ <<= 1;
+        else if (pct < P.pv_churn_lo && pv_div_cur_ > P.pv_div_min) pv_div_cur_ >>= 1;
+        pv_win_place_ = pv_win_busy_ = 0;
       }
     }
-    slot = pf_samp_t{};
-    slot.pat = pk; slot.iph = static_cast<uint16_t>(iph); slot.bit = static_cast<int8_t>(bit); slot.bwd = backward;
-    slot.tag = static_cast<uint32_t>(block); slot.stamp = static_cast<uint32_t>(cycle_); slot.occ = true; slot.spp = spp;
+    if (busy) { ++dbg_samp_dropped_; return; }
+    const unsigned lo = P.pattern_size + P.pattern_context_bits;
+    slot = pf_samp_t{static_cast<uint16_t>(pk & mask(lo)), ip, static_cast<int8_t>(bit), backward, spp, samp_tag(block), stamp_now(), true};
+    if (P.pattern_validate && !spp && samp_key(slot) != pk) ++dbg_key_mismatch_; // the stored fields must rebuild the PHT key
   }
-  // A sampled prefetch was used (useful) or evicted unused. An evicted one stays as a watch entry so a later demand
-  // for the block marks its IP untimely (right address, too early).
+  // A sampled prefetch was used (useful) or evicted unused (useless; it also enters the watch list).
   void pf_sample_resolve(uint64_t block, bool useful)
   {
     if (pf_sdm_.empty()) return;
     pf_samp_t& slot = pf_sdm_[sdm_idx(block) & pf_sdm_mask_];
-    if (!slot.occ || slot.watch || slot.tag != static_cast<uint32_t>(block)) return;
+    if (!slot.occ || slot.tag != samp_tag(block)) return;
     apply_pf_resolution(slot, block, useful, /*evicted=*/!useful);
     ++(useful ? dbg_samp_useful_ : dbg_samp_evicted_);
-    if (!useful && !ip_untimely_.empty()) { slot.watch = true; slot.stamp = static_cast<uint32_t>(cycle_); }
-    else slot.occ = false;
+    slot.occ = false;
   }
-  // A demand merged into a sampled prefetch's miss before it filled: the prefetch was used (late, but used). The cache
-  // never marks such a line as a used prefetch, so without this it would time out as useless.
+  // A demand merged into a sampled prefetch's miss before it filled: the prefetch was used (late, but used).
   void pf_sample_promoted(uint64_t block)
   {
     if (pf_sdm_.empty()) return;
     pf_samp_t& slot = pf_sdm_[sdm_idx(block) & pf_sdm_mask_];
-    if (!slot.occ || slot.watch || slot.tag != static_cast<uint32_t>(block)) return;
+    if (!slot.occ || slot.tag != samp_tag(block)) return;
     apply_pf_resolution(slot, block, /*useful=*/true, /*evicted=*/false);
     ++dbg_samp_promoted_;
     slot.occ = false;
   }
   uint64_t dbg_samp_useful_ = 0, dbg_samp_evicted_ = 0, dbg_samp_timeout_ = 0, dbg_samp_promoted_ = 0, dbg_samp_dropped_ = 0;
-  uint64_t dbg_watch_hit_ = 0, dbg_watch_expired_ = 0;
+  uint64_t dbg_watch_hit_ = 0;
   // Delta-PHT usefulness self-throttle state.
   double delta_add_ema_ = 1.0;      // EMA of ADDITIVE fraction (timely hit on a baseline-miss block)
   double delta_unused_ema_ = 0.0;   // EMA of UNUSED-evict fraction (pollution proxy)
@@ -2154,7 +2256,7 @@ private:
       if (P.neg_train_gated) {
         // PC mode: require the IP to STRONGLY stream backward (matches the fire gate) so forward streams'
         // transient backward steps never train the negative table. Momentum mode: any backward lean.
-        if (P.neg_dir_pc) train_bwd = (static_cast<int>(ip_dir_[ip_hash(ip)]) <= -P.ip_direction_min);
+        if (P.neg_dir_pc) { const int sl = ip_slot(ip16(ip), false); train_bwd = sl >= 0 && static_cast<int>(ip_dir_[sl]) <= -P.ip_direction_min; }
         else              train_bwd = (r->momentum < 0);
       }
       if (train_bwd)
@@ -2427,7 +2529,8 @@ private:
     const bool bg_la = P.bg_pc_lookahead && bg_next_ && !P.bg_no_advance;
     // per-IP dominant stride direction. Computed for ip_direction (forward-suppression) OR neg_dir_pc (backward
     // gate) -- decoupled so neg_dir_pc can gate the backward scan WITHOUT ip_direction's forward-suppression.
-    int ipd = (P.ip_direction || P.neg_dir_pc) ? ip_dir_[ip_hash(ip)] : 0;
+    const int trig_slot = ip_slot(trig_ip_, false);
+    int ipd = ((P.ip_direction || P.neg_dir_pc) && trig_slot >= 0) ? ip_dir_[trig_slot] : 0;
     uint64_t addr_region = region_of(addr); // region-entry granularity
     uint64_t addr_page = page_of(addr);      // 4 KB page (squash boundary)
     int pf_issued = 0;
@@ -2450,11 +2553,11 @@ private:
     trigger_llc_only_ = false;
     // The perceptron filter SUPERSEDES the ip-filter throttle (its counters stay live as perceptron features).
     if (P.enable_ip_filter && !P.enable_perceptron_filter && !ip_useful_.empty()) {
-      uint32_t tiph = iphash(ip);
-      if (P.ip_filter_depth_throttle && ip_is_untimely(tiph)) {
-        uint32_t div = ip_trickle_div(tiph); // reuse the bands: harsher band -> shallower cap
+      const int tiph = ip_slot(trig_ip_, false);       // an IP not in the table has no history: no throttle
+      if (tiph >= 0 && P.ip_filter_depth_throttle && ip_is_untimely(static_cast<uint32_t>(tiph))) {
+        uint32_t div = ip_trickle_div(static_cast<uint32_t>(tiph)); // reuse the bands: harsher band -> shallower cap
         ip_depth_cap = (div >= static_cast<uint32_t>(P.ip_filter_trickle_hard) ? P.ip_depth_min : P.ip_depth_mid);
-      } else if (!P.ip_gate_per_prefetch && !ip_gate(tiph, trigger_llc_only_)) { ++dbg_ip_throttled_; return; }
+      } else if (tiph >= 0 && !P.ip_gate_per_prefetch && !ip_gate(static_cast<uint32_t>(tiph), trigger_llc_only_)) { ++dbg_ip_throttled_; return; }
     }
     // Precise pattern validation: is THIS trigger's e2e pattern proven bad by sampling? If so, suppress e2e's
     // forward path and fall through to the walk. trig_pk = the trigger pattern key we sample every e2e prefetch to.
@@ -2718,7 +2821,7 @@ private:
           skip_dir = (momentum <= P.forward_momentum_min);
         else if (P.neg_online_train && P.neg_dir_pc)
           // fire backward only where the trigger IP STRONGLY streams backward AND (if enabled) backward has proven useful for it
-          skip_dir = (ipd > -P.ip_direction_min) || (P.bwd_useful_gate && bwd_is_bad(iphash(ip)));
+          skip_dir = (ipd > -P.ip_direction_min) || (P.bwd_useful_gate && trig_slot >= 0 && bwd_is_bad(static_cast<uint32_t>(trig_slot)));
         else
           skip_dir = (momentum >= P.backward_momentum_min);
         if (skip_dir)
@@ -2822,7 +2925,7 @@ private:
                       add_to_llc_pagemap(step);
                     if (!forward) ++dbg_bwd_issued_;
                     if (placed) // validate the TRIGGER pattern; bit is precise only for the forward depth-0 prediction; tag direction
-                      pf_sample_issue(step, trig_pk, iphash(ip), (forward && lookaheads == 0) ? (i - 1 - j) : -1, /*backward=*/!forward);
+                      pf_sample_issue(step, trig_pk, trig_ip_, (forward && lookaheads == 0) ? (i - 1 - j) : -1, /*backward=*/!forward);
                     ++pf_issued;
                     ++prefetches_issued;
                     if (forward && lookaheads < 16) ++dbg_la_iss_[lookaheads]; // per-depth lookahead issue count (accuracy probe)
@@ -3045,7 +3148,7 @@ private:
   uint32_t ip_gate_explore_ctr_ = 0;  // paces IP-gate exploration (never permanently gate an IP)
   std::function<uint64_t(uint64_t)> bg_next_;         // BG lookahead: predicted next-in-region PC hash (unset => off)
   std::function<void(uint64_t, uint64_t)> bg_train_;  // BG training: per-region (prev_pht -> cur_pht) on each access
-  std::array<int8_t, 256> ip_dir_{};  // per-IP (ip_hash) saturating stride-direction counter (replaces momentum)
+  std::vector<int8_t> ip_dir_;        // per-IP saturating stride-direction counter (a column of the per-IP table)
   uint64_t staging_drops_ = 0;        // demand allocations gated out of the region table
   bool region_just_created_ = false;  // cold-start: current access allocated a fresh region entry this operate
   std::vector<int8_t> cs_delta_;      // cold-start PC-keyed dominant startup delta

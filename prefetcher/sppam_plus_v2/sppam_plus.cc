@@ -54,8 +54,8 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   // or the params.h default). decltype picks each field's exact type.
   // Knobs of removed mechanisms (a second per-IP table, per-block IP tracking, other sampling-table policies) are
   // refused rather than silently ignored.
-  for (const char* gone : {"ip_filter_use_pe", "ip_filter_pe_veto", "ip_filter_use_pe_phase", "enable_ipf_duel", "evicted_unused_cap",
-                           "pv_adaptive_rate", "pv_sample_evict_div", "ip_filter_max_useful_loss"})
+  for (const char* gone : {"ip_filter_use_pe", "ip_filter_pe_veto", "ip_filter_use_pe_phase", "enable_ipf_duel",
+                           "pv_sample_evict_div", "ip_filter_max_useful_loss"})
     if (builder.has_parameter(gone))
       throw std::invalid_argument(std::string{"SPPAM_PLUS_V2: parameter '"} + gone + "' belongs to a removed mechanism");
   if (builder.has_parameter("pv_sample_directmap") && !builder.get_parameter<bool>("pv_sample_directmap", true, true))
@@ -89,7 +89,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(ip_filter_threshold_hard); CFG(ip_filter_trickle_hard);
   CFG(ip_filter_depth_throttle); CFG(ip_depth_mid); CFG(ip_depth_min); CFG(ip_untimely_thresh); CFG(ip_depth_hitrate_min); CFG(ip_depth_mlp_max);
   CFG(ip_sample_div); CFG(ip_track_timeout);
-  CFG(ip_table_entries); CFG(ip_ctr_bits); // DSE-sized IP-filter geometry
+  CFG(ip_table_entries); CFG(ip_table_ways); CFG(ip_ctr_bits); CFG(evicted_unused_cap);
   CFG(spp_usefulness_feedback); CFG(spp_per_sig_usefulness); CFG(spp_per_sig_prior);
   CFG(spp_lookahead); CFG(spp_threshold); CFG(spp_share_region_table);
   CFG(spp_ghr); CFG(spp_ghr_entries); CFG(spp_min_delta); CFG(spp_min_conf); CFG(spp_multi_high_throttle);
@@ -117,7 +117,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(instr_feed_data);
   CFG(instr_nextn); CFG(instr_packed_residency); CFG(instr_llc_depth);
   CFG(pattern_validate); CFG(pv_feed_confidence); CFG(pv_conf_penalty); CFG(pv_sample_div); CFG(pv_min_samples); CFG(pv_bad_pct); CFG(pv_sample_cap);
-  CFG(pv_sample_ttl); CFG(pv_watch_ttl); CFG(pv_watch_yield);
+  CFG(pv_adaptive_rate); CFG(pv_rate_window); CFG(pv_churn_hi); CFG(pv_churn_lo); CFG(pv_div_min); CFG(pv_div_max);
   // Perceptron prefetch filter (optional sub-in; OFF by default). Trained on the glue's REAL per-prefetch fill latency.
   CFG(enable_perceptron_filter); CFG(perc_pc_entries); CFG(perc_weight_max); CFG(perc_tau_keep); CFG(perc_theta_train);
   CFG(perc_explore_div); CFG(perc_label_pe); CFG(perc_pe_margin); CFG(perc_track_cap); CFG(perc_track_ttl); CFG(perc_pe_scale); CFG(perc_pe_step_max);
@@ -184,6 +184,7 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
                                               uint32_t metadata_in)
 {
   real_cycle_ = cache_->current_cycle(); // TRUE ChampSim cycle -- the fill-latency / pfht_ / pe-management clock (was NEVER assigned -> stuck at 0 -> all real-cycle timing broken)
+  pred_->set_now(real_cycle_);
   const uint64_t block = addr.to<uint64_t>() >> BLOCK_SHIFT;
   // Refresh the perceptron's aggregate MSHR/bandwidth-pressure feature before any gate (BG or data) runs this access.
   if (P.enable_perceptron_filter) {
@@ -252,7 +253,7 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
   const bool pf_used = useful_prefetch;
   sppam_fired_ = false; // reset per-trigger latch before the predictors run
   if (P.enable_ip_gate) // reuse the ip-filter's per-IP yield table as the sparse-page signal (no new state)
-    pred_->set_ip_gate(pred_->ip_trickle_div_of(cur_trigger_ip_) >= static_cast<uint32_t>(P.ip_gate_div_min));
+    pred_->set_ip_gate(pred_->trickle_div_for_ip(cur_trigger_ip_) >= static_cast<uint32_t>(P.ip_gate_div_min));
   // delta_additive drives the delta-PHT usefulness attribution only (delta_pht off by default => no-op).
   // The module has no no-prefetch baseline to compute "would have missed", so pass false.
   // Perceptron PE value on a useful hit = this prefetch's REAL fill latency (what a demand miss would have cost);
@@ -358,6 +359,7 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long /*set*/,
                                            uint32_t metadata_in)
 {
   real_cycle_ = cache_->current_cycle(); // TRUE ChampSim cycle for the fill-latency measurement (issue->fill)
+  pred_->set_now(real_cycle_);
   const uint64_t block = addr.to<uint64_t>() >> BLOCK_SHIFT;
   if (P.enable_perceptron_filter) pred_->perc_set_rc(real_cycle_); // keep the perceptron's real-cycle clock current for perc_fill_measure
   const bool pe_terms = P.enable_pe_management
@@ -508,7 +510,7 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
   // here instead. A redirected prefetch goes to the LLC only, once per block.
   bool redirected = false;
   if ((from_spp || P.ip_gate_per_prefetch) && P.enable_ip_filter) {
-    if (!pred_->ip_gate(pred_->ip_bucket(cur_trigger_ip_), redirected))
+    if (!pred_->trigger_gate(redirected))
       return false;
     if (redirected) fill_l2 = false;
   } else if (!from_spp) {
@@ -532,7 +534,7 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
       const bool stale = slot.valid && (real_cycle_ - slot.issue) > P.llc_track_timeout;
       if (stale) { pred_->ip_llc_outcome(slot.iph, false); ++dbg_llc_useless_; }
       if (!slot.valid || stale)
-        slot = llc_track{true, false, block, real_cycle_, static_cast<uint16_t>(pred_->ip_bucket(cur_trigger_ip_))};
+        slot = llc_track{true, false, block, real_cycle_, pred_->trigger_ip()};
     }
   } else if (!pfht_.empty() && (++pe_sample_ctr_ % P.pe_sample_div == 0)) {
     pf_track& slot = pfht_[block % pfht_.size()];
@@ -541,7 +543,7 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
       // sppam_b USELESS_ON_TIMEOUT: a stale in-flight entry sat unused past the timeout -> resolve it
       // USELESS (removing the under-sampling bias) before reusing its slot. A RECENT entry is pinned.
       if (stale && P.enable_sig_feedback) pred_->sig_feedback(slot.eng, slot.sig, 1); // timed-out unused -> useless
-      slot = pf_track{true, block, from_spp, real_cycle_, false, 0, static_cast<uint16_t>(pred_->ip_bucket(cur_trigger_ip_))};
+      slot = pf_track{true, block, from_spp, real_cycle_, false, 0, pred_->trigger_ip()};
       if (P.enable_sig_feedback) { slot.sig = pred_->fb_sig_; slot.eng = pred_->fb_eng_; slot.order = pred_->fb_order_; slot.pos = pred_->fb_pos_; } // record request's (engine,sig,order,offset)
     }
   }
@@ -553,7 +555,7 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
     pred_->shadow_fill(block);
   const bool enqueued = prefetch_line(block << BLOCK_SHIFT, fill_l2, gen_tag | (from_spp ? 1u : 0u)); // carry generation tag (diagnostics)
   if (enqueued && !fill_l2 && P.ip_llc_redirect) pred_->mark_llc(block); // LLC-only: dedupe later proposals of this block
-  if (enqueued && fill_l2 && from_spp && P.enable_ip_filter) pred_->sample_spp_prefetch(block, cur_trigger_ip_);
+  if (enqueued && fill_l2 && from_spp && P.enable_ip_filter) pred_->sample_spp_prefetch(block);
   if (enqueued) ++data_pf_issued_;               // instruction-activity gate: count data prefetch issues (denominator of the instr-pf fraction)
   // (Perceptron issue tracking is perc_note_issue -> perc_track_; the fill latency is fed later by the pfht_ fill
   //  hook via pred_->perc_note_fill(). No separate perc_sdm_ insert.)
