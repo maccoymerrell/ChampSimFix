@@ -159,7 +159,7 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
     return !(P.ip_depth_mlp_max > 0.0 && avg_upstream_occ() > P.ip_depth_mlp_max);
   }
   void on_spp_sample(uint64_t block, bool useful) override { if (spp_) spp_->reward(useful, block); }
-  bool miss_outstanding(uint64_t block) const override { return cache_->mshr_contains(champsim::address{block << 6}); }
+  bool request_pending(uint64_t block) const override { return cache_->request_pending(champsim::address{block << 6}); }
   void prefetcher_cache_evict(champsim::address evicted_addr, bool unused_prefetch) override;
 
   // ============ Set-dueling L2->LLC redirect throttle (P.enable_set_duel) ============

@@ -794,7 +794,17 @@ void CACHE::issue_translation(tag_lookup_type& q_entry)
 
 std::size_t CACHE::get_mshr_occupancy() const { return std::size(MSHR); }
 
-bool CACHE::mshr_contains(champsim::address addr) const
+bool CACHE::request_pending(champsim::address addr) const
+{
+  // The tag-check stages also hold the access currently being looked up, so only this cache's own prefetches count there.
+  const auto in = [m = matches_address(addr)](const auto& q) { return std::any_of(std::begin(q), std::end(q), m); };
+  const auto own_pf = [m = matches_address(addr)](const auto& q) {
+    return std::any_of(std::begin(q), std::end(q), [&](const auto& x) { return x.prefetch_from_this && m(x); });
+  };
+  return in(internal_PQ) || own_pf(untranslated_tag_check) || own_pf(inflight_tag_check) || in(MSHR) || in(inflight_fills);
+}
+
+bool CACHE::miss_outstanding(champsim::address addr) const
 {
   return std::any_of(std::begin(MSHR), std::end(MSHR), matches_address(addr))
          || std::any_of(std::begin(inflight_fills), std::end(inflight_fills), matches_address(addr));

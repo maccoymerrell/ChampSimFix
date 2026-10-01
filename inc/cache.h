@@ -283,7 +283,8 @@ public:
   // NOLINTEND
 
   [[nodiscard]] std::size_t get_mshr_occupancy() const;
-  [[nodiscard]] bool mshr_contains(champsim::address addr) const;
+  [[nodiscard]] bool request_pending(champsim::address addr) const;
+  [[nodiscard]] bool miss_outstanding(champsim::address addr) const;
   [[nodiscard]] std::size_t get_mshr_size() const;
   [[nodiscard]] double get_mshr_occupancy_ratio() const;
 
