@@ -106,7 +106,6 @@ struct params {
   // LLC-aware volume throttle: a prefetch the per-IP trickle would drop is placed in the LLC only instead,
   // unless that IP's sampled LLC usefulness is below ip_llc_thresh %. LLC-only prefetches are scored in their
   // own per-IP counters (an L2 miss on a sampled LLC-only block = LLC-useful; timeout = LLC-useless).
-  bool ip_gate_per_prefetch = false;       // per-IP volume gate on each data prefetch at issue (SPPAM and SPP) instead of per SPPAM trigger
   bool ip_llc_redirect = true;
   int ip_llc_thresh = 50;
   uint32_t ip_llc_min_samples = 8;          // LLC samples before an IP's LLC usefulness is trusted
@@ -120,13 +119,11 @@ struct params {
                                        // pollution-based (PE I_POLL), TODO. 100 = never disables.
   // IP-filter table geometry (DSE-swept). The historical 4096 x uint32 impl was a ~16x over-provision:
   // a coarse per-IP throttle needs far fewer buckets, and the counters saturate + decay (ip_filter_age_shift)
-  // so a byte suffices. The table is located by the 16-bit IP hash; every per-IP column (useful/useless/gate + optional
-  // ev/untimely + optional bwd + direction) is ip_table_entries x ip_ctr_bits.
-  uint32_t ip_table_entries = 4096;    // per-IP table entries (power of 2), located by the 16-bit IP hash
-  uint32_t ip_table_ways = 0;          // 0 = direct-mapped on the hash's low bits (untagged); W = W-way set-associative, tagged with the rest
-  uint32_t evicted_unused_cap = 128;   // depth-throttle watch list: evicted-unused sampled prefetches (block tag -> IP hash)
-  uint32_t watch_sample_div = 1;       // admit 1 in N evicted-unused samples to the watch list (rate matched to its size)
+  // so a byte suffices. iphash() masks to ip_table_entries; every per-IP array (useful/useless/gate + optional
+  // ev/untimely + optional bwd) is ip_table_entries x ip_ctr_bits.
+  uint32_t ip_table_entries = 4096;    // per-trigger-IP bucket count (power of 2)
   uint32_t ip_ctr_bits = 8;            // saturating width of each per-IP counter
+  uint32_t evicted_unused_cap = 2048;  // bound on the depth-throttle re-demand watch list (block->IP)
   uint32_t ip_sample_div = 4;          // sample 1/N issued prefetches into the block->IP attribution table
   uint64_t ip_track_timeout = 50000;   // cycles: a pinned in-flight sample older than this is stale ->
                                        // reclaimed and counted USELESS (sppam_b USELESS_ON_TIMEOUT), so
@@ -487,14 +484,19 @@ struct params {
   int pv_min_samples = 8;                // resolved samples for a pattern before it can be judged bad
   int pv_bad_pct = 40;                   // validated accuracy (%) below which a pattern is BAD (fall through)
   std::size_t pv_sample_cap = 8192;      // block->pattern sample table capacity (bounded)
-  // The sampling table is direct-mapped and pinned (the module refuses pv_sample_directmap=false and
-  // pv_sample_evict_div): an in-flight sample keeps its slot until it resolves or is older than ip_track_timeout.
+  // pf_sample_ replacement policy. false = the legacy unbounded map with clear-on-full (wipes ALL in-flight
+  // samples periodically -> a small table churns and loses most eviction resolutions). true = a FIXED
+  // direct-mapped table with PROBABILISTIC eviction: an in-flight incumbent survives ~pv_sample_evict_div
+  // collisions before a new sample can displace it, and is reclaimed once older than pv_sample_ttl ops. This
+  // keeps the residency time of a sample matched to the prefetch lifetime, so a much smaller table validates
+  // as well (the sampling rate is no longer out of sync with the table size).
   bool pv_sample_directmap = false;
+  uint32_t pv_sample_ttl = 4096;         // ops before an unresolved in-flight sample becomes reclaimable
   uint32_t pv_sample_evict_div = 4;      // on a collision, replace the incumbent only 1/N of the time
   // Adaptive sampling rate (directmap only). The sample table is a short-lived issue->resolve holding area;
   // with only ~64 active IPs and PERSISTENT decaying per-IP/pattern counters, we don't need many CONCURRENT
   // samples -- so we can shrink the table hard and SAMPLE LESS to match. This controller self-tunes
-  // the sample divisor to hold the fraction of samples that find their slot held by a live incumbent -- the "forced
+  // ip_sample_div to hold the rate at which live (unresolved) incumbents are displaced -- the "forced
   // eviction" churn -- inside [pv_churn_lo, pv_churn_hi]%: too much churn -> sample less (raise div), plenty
   // of headroom -> sample more (lower div). Decouples table size from prefetch volume.
   bool pv_adaptive_rate = false;
@@ -729,7 +731,6 @@ struct params {
   bool instr_feed_data = false;
   // v2 instruction refinements (DSE holistic-id/bg_residency findings; default OFF = B, C enables):
   int instr_nextn = 0;                 // sequential fallback: prefetch this many phys blocks ahead within the code page (next-2 ~= full SPPAM on the sequential residual)
-  uint32_t bg_inflight_entries = 64;   // in-flight branch-graph prefetches (direct-mapped block tags), to keep their fills out of the data maps
   bool instr_packed_residency = false; // branch graph shares SPPAM's PACKED code residency (4KiB-page/both-maps) instead of its own filter -> lower redundancy, zero extra state
   int instr_la_depth = 32;           // lookahead HARD ceiling; the confidence budget is the real limiter (see below)
   int instr_llc_depth = 99;          // BG multi-level placement: prefetches at walk depth >= this fill LLC (not L2) --
@@ -901,10 +902,10 @@ struct params {
   // shadow mirror) are deliberately excluded: they are measurement instruments, not proposed hardware.
   struct state_terms {
     uint64_t region = 0, staging = 0, pattern = 0, cpt = 0, llc = 0, misc = 0, spp = 0, mgmt = 0,
-             instr = 0, am = 0, ipt = 0, samp = 0, pv = 0, ip_dir = 0, cold = 0, dpht = 0, xpage = 0, rbloom = 0, rstage = 0, perc = 0;
+             instr = 0, am = 0, ipf = 0, ip_dir = 0, cold = 0, dpht = 0, xpage = 0, rbloom = 0, rstage = 0, perc = 0;
     uint64_t total() const
     {
-      return region + staging + pattern + cpt + llc + misc + spp + mgmt + instr + am + ipt + samp + pv + ip_dir
+      return region + staging + pattern + cpt + llc + misc + spp + mgmt + instr + am + ipf + ip_dir
            + cold + dpht + xpage + rbloom + rstage + perc;
     }
   };
@@ -993,17 +994,15 @@ struct params {
       // from the pfht_ SAMPLING table below -- that is the whole point of sampling. Only the per-source PE counters.
       mgmt += 2 * (32 + 32 + 32 + 32 + lg2(pe_throttle_div + 1)) + lg2(pe_phase);
     }
-    const uint64_t iph_b = lg2(ip_table_entries > 1 ? static_cast<uint64_t>(ip_table_entries) : 2);
-    // pfht_ (sampled outcomes with fill latency) + poll_ (pollution victims): only the PE-management, per-signature
-    // feedback and perceptron options allocate them.
-    if (enable_pe_management || enable_sig_feedback || enable_perceptron_filter) {
+    // pfht_ (sampled prefetch-outcome tracker) + poll_ (pollution victims): the sampling table the whole design leans
+    // on for PE + per-IP attribution. SHARED by PE-management and the ip-filter; allocated whenever either is on.
+    if (enable_pe_management || enable_ip_filter) {
+      const uint64_t iph_b = lg2(ip_table_entries > 1 ? static_cast<uint64_t>(ip_table_entries) : 2);
       mgmt += static_cast<uint64_t>(pfht_entries) * (1 + pfht_tag_bits + 1 + 16 + 1 + 17 + iph_b);  // pf_track: valid+tag+from_spp+issue+filled+lat+iph
+      if (ip_llc_redirect)                                                                          // llc_track: valid+in_l2+tag+coarse issue time+iph
+        mgmt += static_cast<uint64_t>(llc_sample_entries) * (1 + 1 + pfht_tag_bits + 16 + iph_b);
       mgmt += static_cast<uint64_t>(pfht_entries) * (1 + pfht_tag_bits + pfht_tag_bits + 1 + iph_b); // poll_track: valid+victim-tag+pf-tag+from_spp+iph
     }
-    if (enable_ip_filter && ip_llc_redirect)                            // llc_track: valid+in_l2+tag+coarse issue time+iph
-      mgmt += static_cast<uint64_t>(llc_sample_entries) * (1 + 1 + pfht_tag_bits + 16 + iph_b);
-    if (enable_ip_filter && ip_filter_depth_throttle)                   // depth-throttle gates: is-true-demand bit per MSHR entry
-      mgmt += 64 + 2 * 8 + 5 * 32;                                      // + in-flight counts + hit-rate and occupancy accumulators
     if (enable_bw_feedback) mgmt += 16 * 5 + 16;
     if (enable_bw_market) mgmt += 16;
     mgmt += 2 * 48;                                                      // shared: L_DRAM running mean + in-flight register
@@ -1016,7 +1015,6 @@ struct params {
       const uint64_t dirb = (instr_dir_bits > 0 && instr_dir_bits <= 8) ? instr_dir_bits : 2;
       const uint64_t per_edge = 16 + 1 + db + dirb; // tag16 + valid + signed delta target + bimodal dir counter (2b)
       t.instr = po2(instr_table_entries) * per_edge + po2(instr_xlate_entries) * (36 + 36);
-      t.instr += static_cast<uint64_t>(bg_inflight_entries) * (16 + 1); // in-flight BG prefetch tags (tag16 + valid)
       if (!instr_packed_residency)                                       // packed residency reuses SPPAM's maps -> no private filter
         t.instr += po2(instr_filter_entries) * 16;
     }
@@ -1025,39 +1023,31 @@ struct params {
     if (enable_am_bloom)
       t.am = bpr * (static_cast<uint64_t>(am_bloom_size) + lg2(am_bloom_clear_thresh) + lg2(am_bloom_size));
 
-    // ---- Per-IP table (one entry per IP: throttle counters + direction), THE sampling table, the evicted-unused watch
-    //      list, and the pattern-validation counters. IPs are 16-bit hashes everywhere.
+    // ---- IP-filter tables: per-IP throttle counters + sampled block->{pattern,IP} attribution + validation.
     {
       const uint64_t E = ip_table_entries ? ip_table_entries : 1;
-      const uint64_t samp_entry = 16 /*block tag*/ + 16 /*IP hash*/ + (pattern_validate ? pattern_size + pattern_context_bits : 0) /*pattern*/
-                                + lg2(pattern_size + 2) /*position*/ + 1 /*bwd*/ + 1 /*spp*/ + 8 /*stamp*/ + 1 /*occ*/;
-      uint64_t cols = 0;
+      const uint64_t iph_bits = lg2(E);
+      const uint64_t samp_entry = 16 /*block tag*/ + iph_bits + lg2(pattern_size + 2) /*position*/ + 1 /*bwd*/
+                                + (pv_sample_directmap ? (8 /*stamp*/ + 1 /*occ*/) : 0);
       if (enable_ip_filter) {
         uint64_t arrays = 3;                                            // useful + useless + gate_ctr
         if (ip_filter_depth_throttle) arrays += 2;                      // ev + untimely
         if (bwd_useful_gate) arrays += 2;                               // bwd_useful + bwd_useless
         if (ip_llc_redirect) arrays += 2;                               // llc_useful + llc_useless
-        cols += arrays * ip_ctr_bits;
+        t.ipf += arrays * E * ip_ctr_bits;
       }
-      if (ip_direction || neg_dir_pc) cols += 8;                        // stride-direction counter
-      if (cols && ip_table_ways) {                                      // tagged: the hash bits above the set index + LRU + valid
-        const uint64_t sets = E / ip_table_ways;
-        cols += (16 - lg2(sets)) + lg2(ip_table_ways) + 1;
-      }
-      t.ipt = E * cols;
-      if (enable_ip_filter || pattern_validate) {                       // THE sampling table (per-IP + per-pattern outcomes)
-        std::size_t n = 1; while (n < pv_sample_cap) n <<= 1;
-        t.samp = n * samp_entry;
-      }
-      if (enable_ip_filter && ip_filter_depth_throttle) {               // evicted-unused watch list (block tag -> IP hash)
-        std::size_t n = 1; while (n < evicted_unused_cap) n <<= 1;
-        t.samp += n * (16 + 16 + 1);
-      }
+      if (enable_ip_filter || pattern_validate)                         // pf_sample_ shared by filtering & validation
+        t.ipf += pv_sample_cap * samp_entry;
+      if (enable_ip_filter && ip_filter_depth_throttle)                 // evicted_unused_ re-demand watch list (block->IP)
+        t.ipf += evicted_unused_cap * (16 + iph_bits);
       if (pattern_validate) {                                           // pat_val_ (u,n) keyed by the pattern key
         const uint64_t pv_entries = (key_bits < 20) ? (uint64_t{1} << key_bits) : (uint64_t{1} << 20);
-        t.pv = pv_entries * (2 * 12);
+        t.ipf += pv_entries * (2 * 12);
       }
     }
+
+    // ---- Per-IP stride-direction table (fixed 256 x int8; feeds neg_dir_pc / ip_direction).
+    if (ip_direction || neg_dir_pc) t.ip_dir = 256 * 8;
 
     // ---- Cold-start PC-keyed delta table (delta + confidence).
     if (enable_cold_start && cold_start_pc) t.cold = cold_start_entries * (8 + 4);
@@ -1105,7 +1095,7 @@ struct params {
     auto add = [&](const char* n, uint64_t b) { if (b) s += " " + std::string(n) + "=" + kib(b); };
     add("region", t.region); add("staging", t.staging); add("pattern", t.pattern); add("cpt", t.cpt);
     add("llc", t.llc); add("misc", t.misc); add("spp", t.spp); add("mgmt", t.mgmt); add("instr", t.instr);
-    add("am", t.am); add("ipt", t.ipt); add("samp", t.samp); add("pv", t.pv); add("ip_dir", t.ip_dir); add("cold", t.cold); add("dpht", t.dpht);
+    add("am", t.am); add("ipf", t.ipf); add("ip_dir", t.ip_dir); add("cold", t.cold); add("dpht", t.dpht);
     add("xpage", t.xpage); add("rbloom", t.rbloom); add("rstage", t.rstage); add("perc", t.perc);
     return s;
   }
@@ -1120,14 +1110,14 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(enable_shadow_squash); SET(exact_shadow_test); SET(enable_hybrid_bidding); SET(bid_by_value); SET(bid_explore_div);
   SET(enable_resid_bloom); SET(resid_bloom_bits); SET(resid_bloom_k); SET(resid_bloom_clear);
   SET(enable_am_bloom); SET(am_bloom_size); SET(am_bloom_k); SET(am_bloom_clear_thresh); SET(am_bloom_clear_frac);
-  SET(ip_gate_per_prefetch); SET(ip_llc_redirect); SET(ip_llc_thresh); SET(ip_llc_min_samples); SET(ip_llc_probe_div); SET(llc_sample_entries); SET(llc_sample_div); SET(llc_track_timeout);
+  SET(ip_llc_redirect); SET(ip_llc_thresh); SET(ip_llc_min_samples); SET(ip_llc_probe_div); SET(llc_sample_entries); SET(llc_sample_div); SET(llc_track_timeout);
   SET(enable_ip_filter); SET(ip_filter_threshold); SET(ip_filter_min_samples); SET(ip_filter_trickle); SET(ip_filter_age_shift);
   SET(ip_filter_threshold_hard); SET(ip_filter_trickle_hard); SET(ip_filter_use_pe); SET(ip_pe_hard_frac);
   SET(ip_filter_pe_veto); SET(ip_pe_veto_frac);
   SET(ip_filter_use_pe_phase); SET(ip_pe_phase_soft); SET(ip_pe_phase_hard); SET(ip_pe_phase_margin);
   SET(ip_filter_depth_throttle); SET(ip_depth_mid); SET(ip_depth_min); SET(ip_untimely_thresh); SET(ip_depth_hitrate_min); SET(ip_depth_mlp_max);
   SET(ip_filter_max_useful_loss); SET(ip_sample_div); SET(ip_track_timeout);
-  SET(ip_table_entries); SET(ip_table_ways); SET(evicted_unused_cap); SET(watch_sample_div); SET(ip_ctr_bits);
+  SET(ip_table_entries); SET(ip_ctr_bits); SET(evicted_unused_cap);
   SET(enable_fallthrough); SET(fallthrough_explore_div);
   SET(enable_spp); SET(spp_st_entries); SET(spp_sig_bits); SET(spp_lookahead); SET(spp_threshold); SET(spp_share_region_table); SET(spp_usefulness_feedback);
   SET(spp_ghr); SET(spp_ghr_entries); SET(spp_min_delta); SET(spp_min_conf); SET(spp_multi_high_throttle);
@@ -1163,7 +1153,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(walk_accumulate); SET(walk_max_depth); SET(walk_thresh_base); SET(walk_thresh_slope); SET(walk_degree);
   SET(walk_thresh_cap); SET(walk_jump_relief); SET(walk_advance); SET(walk_usefulness_throttle); SET(walk_replace); SET(walk_fallthrough); SET(walk_ft_usefulness); SET(walk_setduel);
   SET(pattern_validate); SET(pv_sample_div); SET(pv_min_samples); SET(pv_bad_pct); SET(pv_sample_cap);
-  SET(pv_sample_directmap); SET(pv_sample_evict_div);
+  SET(pv_sample_directmap); SET(pv_sample_ttl); SET(pv_sample_evict_div);
   SET(pv_adaptive_rate); SET(pv_rate_window); SET(pv_churn_hi); SET(pv_churn_lo); SET(pv_div_min); SET(pv_div_max);
   SET(enable_perceptron_filter); SET(perc_pc_entries); SET(perc_weight_max); SET(perc_tau_keep);
   SET(perc_theta_train); SET(perc_explore_div); SET(perc_label_pe); SET(perc_pe_margin); SET(perc_track_cap); SET(perc_track_ttl); SET(perc_pe_scale); SET(perc_pe_step_max); SET(perc_feat_mask); SET(perc_pe_signonly); SET(perc_sig_entries); SET(perc_pe_norm); SET(perc_pe_cost); SET(perc_untimely_veto); SET(perc_load_gate); SET(perc_load_gate_thresh); SET(perc_instr_gate); SET(perc_instr_gate_pct); SET(perc_pc_encoding); SET(perc_pc_lobit); SET(perc_pc_dropmask); SET(perc_dump_weights); SET(perc_gate_instr); SET(perc_engine_split); SET(perc_profile);

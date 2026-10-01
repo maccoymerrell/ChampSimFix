@@ -34,11 +34,10 @@ struct prefetch_sink {
   virtual int sd_l2_limit() const { return 1 << 20; }
   // PE-gated ramp: net-useful AND DRAM-bound -> ramp aggression + spill dense tail to LLC.
   virtual bool pe_ramp_active() const { return false; }
-  // Cache-stress gate for the per-IP depth throttle: untimeliness only matters when the L2 is not thrashing
-  // and the program has little memory-level parallelism. Default open.
-  virtual bool depth_throttle_allowed() const { return true; }
-  // A sampled SPP prefetch resolved (used, or evicted/timed out unused): SPP's usefulness feedback.
-  virtual void on_spp_sample(uint64_t /*block*/, bool /*useful*/) {}
+  // Per-trigger-IP lookahead-depth cap: as an IP's usefulness degrades, prefetch SHALLOWER (untimely deep
+  // prefetches -> timely near ones) instead of dropping volume. Default no cap (large). Reads the current
+  // trigger IP held by the sink, so the predictor just min()s eff_depth against it.
+  virtual int ip_depth_cap() const { return 1 << 20; }
 };
 } // namespace sppam_dse
 
