@@ -51,7 +51,6 @@ struct stats_cache : public champsim::modules::cache_module {
   void impl_prefetcher_branch_operate(champsim::address, uint8_t, champsim::address) const override {}
   long invalidate_entry(champsim::address) override { return -1; }
   std::size_t get_mshr_occupancy() const override { return 0; }
-  bool mshr_contains(champsim::address) const override { return false; }
   std::size_t get_mshr_size() const override { return 0; }
   double get_mshr_occupancy_ratio() const override { return 0; }
   std::vector<std::size_t> get_rq_occupancy() const override { return {}; }

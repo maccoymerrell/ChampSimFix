@@ -49,11 +49,6 @@ struct params {
   // Shared shadow cache: squash a prefetch (from either engine) to a block already
   // resident in L2 (the prefetch map = L2 residency, cleared on eviction).
   bool enable_shadow_squash = true;
-  bool pv_stale_useless = false;   // a sample older than ip_track_timeout counts USELESS when its slot is needed (off: discarded, no outcome)
-  bool untimely_from_region = false; // untimely from region residency bits: an unused prefetch keeps its bit when evicted; a demand miss on a
-                                     // set bit (no miss outstanding) is untimely, a hit on a prefetched line or a merge is timely, both credited
-                                     // to the trigger IP that the consumer IP maps to (learned from used samples); replaces the watch list
-  bool diag_ip_truth = false;       // DIAGNOSTIC ONLY: exact per-IP prefetch outcomes printed beside the sampled per-IP table (unbounded; never on in evaluations, no effect on decisions)
   bool exact_shadow_test = false;   // TEST ONLY: route the residency filter through a leak-free fill/evict mirror (unbuildable state; measures the coverage lost to stale prefetch-map bits)
   // Hybrid residency filter: on region eviction, spill the region's still-resident blocks into a
   // rolling-clock 1-bit bloom, so residency of evicted (typically sparse/fragmented) regions is not
@@ -132,8 +127,9 @@ struct params {
   uint32_t evicted_unused_cap = 128;   // depth-throttle watch list: evicted-unused sampled prefetches (block tag -> IP hash)
   uint32_t ip_ctr_bits = 8;            // saturating width of each per-IP counter
   uint32_t ip_sample_div = 4;          // sample 1/N issued prefetches into the block->IP attribution table
-  uint64_t ip_track_timeout = 1000000; // cycles: a sample unresolved this long (no use, merge or eviction seen) is discarded when
-                                       // its slot is needed (with pv_stale_useless it counts useless instead)
+  uint64_t ip_track_timeout = 50000;   // cycles: a pinned in-flight sample older than this is stale ->
+                                       // reclaimed and counted USELESS (sppam_b USELESS_ON_TIMEOUT), so
+                                       // long-lived useless prefetches turn over instead of hogging slots
   bool enable_resid_bloom = false; // VALIDATED but OFF: cuts fragmented redundancy 35-40% (~5 KiB), but that
                                    // redundancy is BW-FREE (redundant pf hits L2, never reaches LLC/DRAM), so
                                    // no AMAT payoff, while the bloom's FP costs a little coverage -> net AMAT
@@ -1037,13 +1033,12 @@ struct params {
       uint64_t cols = 0;
       if (enable_ip_filter) {
         uint64_t arrays = 3;                                            // useful + useless + gate_ctr
-        if (ip_filter_depth_throttle) arrays += 2;                      // ev + untimely (region mode: timely + untimely)
+        if (ip_filter_depth_throttle) arrays += 2;                      // ev + untimely
         if (bwd_useful_gate) arrays += 2;                               // bwd_useful + bwd_useless
         if (ip_llc_redirect) arrays += 2;                               // llc_useful + llc_useless
         cols += arrays * ip_ctr_bits;
       }
       if (ip_direction || neg_dir_pc) cols += 8;                        // stride-direction counter
-      if (enable_ip_filter && ip_filter_depth_throttle && untimely_from_region) cols += 16 + 2; // consumer -> trigger IP hash + confidence
       if (cols && ip_table_ways) {                                      // tagged: the hash bits above the set index + LRU + valid
         const uint64_t sets = E / ip_table_ways;
         cols += (16 - lg2(sets)) + lg2(ip_table_ways) + 1;
@@ -1053,7 +1048,7 @@ struct params {
         std::size_t n = 1; while (n < pv_sample_cap) n <<= 1;
         t.samp = n * samp_entry;
       }
-      if (enable_ip_filter && ip_filter_depth_throttle && !untimely_from_region) { // evicted-unused watch list (block tag -> IP hash)
+      if (enable_ip_filter && ip_filter_depth_throttle) {               // evicted-unused watch list (block tag -> IP hash)
         std::size_t n = 1; while (n < evicted_unused_cap) n <<= 1;
         t.samp += n * (16 + 16 + 1);
       }
@@ -1131,7 +1126,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(ip_filter_use_pe_phase); SET(ip_pe_phase_soft); SET(ip_pe_phase_hard); SET(ip_pe_phase_margin);
   SET(ip_filter_depth_throttle); SET(ip_depth_mid); SET(ip_depth_min); SET(ip_untimely_thresh); SET(ip_depth_hitrate_min); SET(ip_depth_mlp_max);
   SET(ip_filter_max_useful_loss); SET(ip_sample_div); SET(ip_track_timeout);
-  SET(pv_stale_useless); SET(untimely_from_region); SET(diag_ip_truth); SET(ip_table_entries); SET(ip_table_ways); SET(evicted_unused_cap); SET(ip_ctr_bits);
+  SET(ip_table_entries); SET(ip_table_ways); SET(evicted_unused_cap); SET(ip_ctr_bits);
   SET(enable_fallthrough); SET(fallthrough_explore_div);
   SET(enable_spp); SET(spp_st_entries); SET(spp_sig_bits); SET(spp_lookahead); SET(spp_threshold); SET(spp_share_region_table); SET(spp_usefulness_feedback);
   SET(spp_ghr); SET(spp_ghr_entries); SET(spp_min_delta); SET(spp_min_conf); SET(spp_multi_high_throttle);

@@ -794,12 +794,6 @@ void CACHE::issue_translation(tag_lookup_type& q_entry)
 
 std::size_t CACHE::get_mshr_occupancy() const { return std::size(MSHR); }
 
-bool CACHE::mshr_contains(champsim::address addr) const
-{
-  return std::any_of(std::begin(MSHR), std::end(MSHR), matches_address(addr))
-         || std::any_of(std::begin(inflight_fills), std::end(inflight_fills), matches_address(addr));
-}
-
 std::vector<std::size_t> CACHE::get_rq_occupancy() const
 {
   std::vector<std::size_t> retval;
