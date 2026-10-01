@@ -73,6 +73,7 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
   bool evict_unused_pending_ = false; uint64_t evict_pending_block_ = 0;
   // resolutions by engine: [eng][0 useless, 1 useful]; merged; untimely / bad by engine; in-flight records lost
   uint64_t res_[4][2] = {}, res_merged_[4] = {}, res_untimely_[4] = {}, res_bad_[4] = {}, ifl_lost_ = 0;
+  uint64_t dbg_sfill_rec_ = 0, dbg_sfill_norec_ = 0, dbg_ifl_put_ = 0, dbg_ifl_hitdrop_ = 0; // sampled-set prefetch fills with / without a record; records parked; dropped on a hit
 
   int ss_row(uint64_t set) const {
     return champsim::msl::categorizer<long>(ss_rate_).get_sample_category(static_cast<long>(set)) == 0
@@ -87,7 +88,7 @@ struct sppam_plus : public champsim::modules::prefetcher, public sppam_dse::pref
     std::size_t i = ifl_.size();
     for (std::size_t k = 0; k < ifl_.size(); ++k) if (!ifl_[k].valid) { i = k; break; }
     if (i == ifl_.size()) { i = ifl_next_; ifl_next_ = (i + 1) % ifl_.size(); ++ifl_lost_; }
-    ifl_[i] = r; ifl_[i].valid = true; ifl_block_[i] = block;
+    ifl_[i] = r; ifl_[i].valid = true; ifl_block_[i] = block; ++dbg_ifl_put_;
   }
   bool ifl_take(uint64_t block, ss_rec& out) {
     for (std::size_t k = 0; k < ifl_.size(); ++k)

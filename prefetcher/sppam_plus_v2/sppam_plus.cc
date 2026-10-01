@@ -180,7 +180,7 @@ uint32_t sppam_plus::prefetcher_cache_operate(champsim::address addr, champsim::
   if (const int row = ss_row(block % P.l2_sets); row >= 0) {
     const uint16_t tag = ss_tag(block);
     if (useful_prefetch) { if (ss_rec* r = ss_find(row, tag)) { resolve(*r, true); r->valid = false; } }
-    if (cache_hit) { ss_rec dropped; ifl_take(block, dropped); } // an in-flight prefetch of a resident line is redundant
+    if (cache_hit) { ss_rec dropped; if (ifl_take(block, dropped)) ++dbg_ifl_hitdrop_; } // an in-flight prefetch of a resident line is redundant
     if (uf_rec* u = uf_find(row, tag)) { resolve_timeliness(u->iph, u->eng, true); u->valid = false; }
   }
   if (useful_prefetch && spp_) spp_->reward(true, block); // SPP's own block->signature filter attributes it, or ignores it
@@ -259,8 +259,8 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long set, lon
     ss_rec r;
     if (ifl_take(block, r)) {
       if (!prefetch) resolve(r, true, /*merged=*/true);
-      else { w = r; w.tag = ss_tag(block); }
-    }
+      else { w = r; w.tag = ss_tag(block); ++dbg_sfill_rec_; }
+    } else if (prefetch) ++dbg_sfill_norec_; // a prefetch fill in a sampled set we hold no record for (berti's, or a lost record)
   }
   if (evicted_addr.to<uint64_t>() != 0) {
     const uint64_t evb = evicted_addr.to<uint64_t>() >> BLOCK_SHIFT;
@@ -291,8 +291,6 @@ uint32_t sppam_plus::prefetcher_cache_fill(champsim::address addr, long set, lon
 bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, double /*benefit*/, uint32_t /*gen_tag*/,
                                 uint64_t pat_key, int pat_bit, bool backward, bool has_pat)
 {
-  if (!from_spp)
-    sppam_fired_ = true;
   // Redundancy squash: run EVERY prefetch (SPPAM and, critically, SPP -- which has no filter
   // of its own) through the shadow residency map before issue. A resident block needs
   // no prefetch; drop it before it is even requested.
@@ -300,6 +298,7 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
     int st = pred_->shadow_status(block);
     if (st == 2) {
       ++pf_squashed_redundant_;
+      if (!from_spp) sppam_fired_ = true; // SPPAM covered this trigger (its target is already resident)
       return false;
     }
     // Diagnostic: why did the filter pass? region missing vs bit clear.
@@ -330,6 +329,9 @@ bool sppam_plus::issue_prefetch(uint64_t block, bool fill_l2, bool from_spp, dou
       }
     }
   }
+  // SPPAM claimed this trigger only once a prefetch of its gets past the per-IP trickle: a trigger whose SPPAM
+  // prefetches were all trickled away falls through to SPP.
+  if (!from_spp) sppam_fired_ = true;
   // Set-duel: guard groups + graded follower throttle (redirect L2->LLC / drop). Final placement.
   if (!sd_decide(block, fill_l2))
     return false;
@@ -414,7 +416,8 @@ void sppam_plus::prefetcher_final_stats()
                s == 0 ? "SPPAM" : "SPP", u, ul, (u + ul) ? 100.0 * u / (u + ul) : 0.0, mg,
                (un + bad) ? 100.0 * un / (un + bad) : 0.0, (un + bad) ? 100.0 * bad / (un + bad) : 0.0, un, bad);
   }
-  fmt::print("[SPPAM+] samples: in-flight records lost={}\n", ifl_lost_);
+  fmt::print("[SPPAM+] samples: records parked={} lost={} dropped-on-hit={} | prefetch fills in sampled sets: with record={} without={}\n",
+             dbg_ifl_put_, ifl_lost_, dbg_ifl_hitdrop_, dbg_sfill_rec_, dbg_sfill_norec_);
   if (P.enable_ip_filter) {
     uint32_t live = 0, judged = 0, light = 0, harsh = 0, nun = 0, nbad = 0, tjudged = 0; uint32_t use_hist[16] = {};
     for (const ip_ent& e : ipt_) {
