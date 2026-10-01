@@ -89,7 +89,7 @@ sppam_plus::sppam_plus(champsim::modules::ModuleBuilder builder) : cache_(builde
   CFG(ip_filter_threshold_hard); CFG(ip_filter_trickle_hard);
   CFG(ip_filter_depth_throttle); CFG(ip_depth_mid); CFG(ip_depth_min); CFG(ip_untimely_thresh); CFG(ip_depth_hitrate_min); CFG(ip_depth_mlp_max);
   CFG(ip_sample_div); CFG(ip_track_timeout);
-  CFG(ip_table_entries); CFG(ip_table_ways); CFG(ip_ctr_bits); CFG(evicted_unused_cap);
+  CFG(ip_table_entries); CFG(ip_table_ways); CFG(ip_ctr_bits); CFG(evicted_unused_cap); CFG(watch_sample_div);
   CFG(spp_usefulness_feedback); CFG(spp_per_sig_usefulness); CFG(spp_per_sig_prior);
   CFG(spp_lookahead); CFG(spp_threshold); CFG(spp_share_region_table);
   CFG(spp_ghr); CFG(spp_ghr_entries); CFG(spp_min_delta); CFG(spp_min_conf); CFG(spp_multi_high_throttle);

@@ -2011,7 +2011,7 @@ private:
       } else if (useful) ip_bump(ip_useful_, ip_useless_, sl);
       else {
         ip_bump(ip_useless_, ip_useful_, sl);
-        if (evicted && !ev_watch_.empty()) {
+        if (evicted && !ev_watch_.empty() && (P.watch_sample_div <= 1 || ++watch_admit_ctr_ % P.watch_sample_div == 0)) {
           ip_bump(ip_ev_, ip_untimely_, sl);
           ev_watch_[sdm_idx(block) & ev_watch_mask_] = ev_watch_t{samp_tag(block), s.ip, true};
         }
@@ -2065,7 +2065,7 @@ private:
     slot.occ = false;
   }
   uint64_t dbg_samp_useful_ = 0, dbg_samp_evicted_ = 0, dbg_samp_timeout_ = 0, dbg_samp_promoted_ = 0, dbg_samp_dropped_ = 0;
-  uint64_t dbg_watch_hit_ = 0;
+  uint64_t dbg_watch_hit_ = 0, watch_admit_ctr_ = 0;
   // Delta-PHT usefulness self-throttle state.
   double delta_add_ema_ = 1.0;      // EMA of ADDITIVE fraction (timely hit on a baseline-miss block)
   double delta_unused_ema_ = 0.0;   // EMA of UNUSED-evict fraction (pollution proxy)

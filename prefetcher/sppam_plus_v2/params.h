@@ -125,6 +125,7 @@ struct params {
   uint32_t ip_table_entries = 4096;    // per-IP table entries (power of 2), located by the 16-bit IP hash
   uint32_t ip_table_ways = 0;          // 0 = direct-mapped on the hash's low bits (untagged); W = W-way set-associative, tagged with the rest
   uint32_t evicted_unused_cap = 128;   // depth-throttle watch list: evicted-unused sampled prefetches (block tag -> IP hash)
+  uint32_t watch_sample_div = 1;       // admit 1 in N evicted-unused samples to the watch list (rate matched to its size)
   uint32_t ip_ctr_bits = 8;            // saturating width of each per-IP counter
   uint32_t ip_sample_div = 4;          // sample 1/N issued prefetches into the block->IP attribution table
   uint64_t ip_track_timeout = 50000;   // cycles: a pinned in-flight sample older than this is stale ->
@@ -1126,7 +1127,7 @@ inline void apply_json(params& p, const nlohmann::json& j)
   SET(ip_filter_use_pe_phase); SET(ip_pe_phase_soft); SET(ip_pe_phase_hard); SET(ip_pe_phase_margin);
   SET(ip_filter_depth_throttle); SET(ip_depth_mid); SET(ip_depth_min); SET(ip_untimely_thresh); SET(ip_depth_hitrate_min); SET(ip_depth_mlp_max);
   SET(ip_filter_max_useful_loss); SET(ip_sample_div); SET(ip_track_timeout);
-  SET(ip_table_entries); SET(ip_table_ways); SET(evicted_unused_cap); SET(ip_ctr_bits);
+  SET(ip_table_entries); SET(ip_table_ways); SET(evicted_unused_cap); SET(watch_sample_div); SET(ip_ctr_bits);
   SET(enable_fallthrough); SET(fallthrough_explore_div);
   SET(enable_spp); SET(spp_st_entries); SET(spp_sig_bits); SET(spp_lookahead); SET(spp_threshold); SET(spp_share_region_table); SET(spp_usefulness_feedback);
   SET(spp_ghr); SET(spp_ghr_entries); SET(spp_min_delta); SET(spp_min_conf); SET(spp_multi_high_throttle);
