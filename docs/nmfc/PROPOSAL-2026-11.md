@@ -104,4 +104,4 @@ Two findings are worth stating as findings. First, the reacting-flow result move
 
 ## 8. Scale of the effort to date
 
-Roughly 250 commits across the simulator, its element library, the memory model, the compiler and the documents; two test suites of about 600 simulations each that pass at every configuration; six validated sampling points; four workloads; and a canon of 121 rejected alternatives recording what was tried and why it was set aside.
+Since the start of September 2026: about 510 commits across the simulator (378), its element library (42), the memory model (5) and the documents (89); a coherence suite of about 600 simulations and a unit and directed-test suite, both passing at every configuration; six validated sampling points; four workloads; and a canon of 121 rejected alternatives recording what was tried and why it was set aside.
